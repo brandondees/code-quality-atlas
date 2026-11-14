@@ -224,7 +224,12 @@ not shut it down, and a provider a review still holds is not replaced
 out from under it. A caller that has already opened the review span gets
 a lens span under it. A lens that runs on a worker thread has to be
 started with `submit_with_review_context`, which copies that span into
-the worker. The draft status line carries `trace_id` when a span was
+the worker. `agentic-review` opens the review span itself, around the
+picker and every lens, and sets `atlas.review_event` to the event the
+draft ends with, after the not-run lenses count. A lens that is never
+started (a halted review, or a queued lens past the deadline) still gets a
+lens span with `atlas.lens.state` `NOT RUN` and `atlas.lens.reason`.
+The draft status line carries `trace_id` when a span was
 recorded. `validate_export` runs at startup, so a bad endpoint or header
 stops the process before a review. The JSONL `--events` file is unchanged.
 
@@ -236,11 +241,12 @@ runs. The only header sent is
 `ATLAS_OTEL_HEADERS`.
 
 Spans do not change the parity gate. A review with export configured
-and a review with export off make the same draft.
+and a review with export off reach the same outcome; the status line may add `trace_id`.
 
 ## Live mode
 
 ```sh
+python -m atlas_reviewer agentic-review --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run
 python -m atlas_reviewer review --event event.json   # GitHub App + Sprites, offline provider
 python -m atlas_reviewer review --event event.json \
   --provider openrouter --allow-live-inference       # plus one capped OpenRouter review
@@ -350,7 +356,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_GITHUB_APP_PRIVATE_KEY` | controller → token minter | The App's PEM private key. Literal `\n` sequences are accepted for single-line env stores |
 | `ATLAS_GITHUB_INSTALLATION_ID` | controller → token minter | Installation ID of the App on the target repo's account, numeric |
 | `ATLAS_SPRITES_TOKEN` | controller → Sprites adapter | Sprites org token for the outside control-plane API |
-| `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most $5 |
+| `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most the configured ceiling |
 | `ATLAS_REVIEWER_STATE_DIR` | controller | Runner ledger and single-review lock (default `.atlas-reviewer-state/`, gitignored) |
 | `ATLAS_RESERVATION_USD` | agentic lens entry | Dollar reservation for one agentic review (default 5) |
 | `ATLAS_MAX_CALLS` | agentic lens entry | Model calls across every lens attempt (default 50) |
@@ -360,10 +366,12 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses a quarter of the endpoint context when the completion limit is larger than that quarter, and the completion limit otherwise. It may be set higher, up to that completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
+| `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
 | `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us`. One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
+| `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
@@ -964,7 +972,9 @@ D41 records the 2026-11-12 probe that did.
   positive and finite, and a per-lens limit no greater than its per-review
   limit. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
-  ledger work. `retries` is 1 and `pool_size` must be 1. The per-call
+  ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
+  1, and `agentic-review` uses 4 when neither `--pool-size` nor
+  `ATLAS_POOL_SIZE` is set. The per-call
   input cap is the pinned model's catalog context minus the output
   reserve, and the output cap is the model's completion limit. An
   override can tighten either and cannot exceed the model. The
@@ -977,6 +987,9 @@ D41 records the 2026-11-12 probe that did.
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
   The `review` command does not accept these flags and does not read the
   variables. The one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
+  On `agentic-review`, the picker's provider takes the smaller of those
+  ceilings and `max_calls` / `reservation_usd`, and the picker's calls and
+  dollars count toward the review's totals.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
@@ -1245,7 +1258,8 @@ offline only. Before another live review:
    anywhere in this repo. Find it on the App's installation settings page
    (the number in the URL) for the account that owns the test PR. The App
    must already be granted at least the read permissions listed above.
-3. **OpenRouter.** Create a key with a hard credit limit of at most $5 and
+3. **OpenRouter.** Create a key with a hard credit limit of at most $5 (or at
+   most `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD`, when raised) and
    set `ATLAS_OPENROUTER_API_KEY`.
 4. **A test PR.** Write an event file (`repo`, `pr_number`, `head_sha`)
    for a PR that has finished CI at that head SHA.

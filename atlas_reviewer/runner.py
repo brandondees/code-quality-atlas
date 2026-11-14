@@ -63,9 +63,11 @@ from an in-band marker each script prints.
 from __future__ import annotations
 
 import hashlib
+import random
 import re
 import secrets
 import threading
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -92,6 +94,7 @@ from atlas_reviewer.ports import (
     Clock,
     Json,
     NotFoundError,
+    RateLimitedError,
     RefusedError,
     RunnerLedger,
     SpritesApi,
@@ -398,6 +401,22 @@ def event_runner_name(event: PrEvent) -> str:
     key = f"{event.repo}\n{event.pr_number}\n{event.head_sha}".encode()
     digest = hashlib.sha256(key).hexdigest()[:8]
     return f"cqa-rev-pr{event.pr_number}-{event.head_sha[:12]}-{digest}"
+
+
+def lens_runner_name(event: PrEvent, lens: str) -> str:
+    """One Sprite name per lens of a commit. Parallel lenses would collide
+    on `event_runner_name` alone, and one lens's cleanup deletes by name,
+    so the suffix is 12 hex digits: a collision would delete a sibling's
+    Sprite. The whole name stays under a 63-character DNS label."""
+    extra = hashlib.sha256(lens.encode()).hexdigest()[:12]
+    return f"{event_runner_name(event)}-{extra}"
+
+
+_CREATE_BACKOFF_S = (1.0, 2.0, 4.0)
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 def decode_exec_output(raw: bytes) -> str:
@@ -1036,12 +1055,32 @@ def _stdin_roundtrip(run: _Run) -> str:
     return f"{verdict}: sent {sent} bytes, runner received {got}"
 
 
+def _create_with_backoff(run: _Run) -> None:
+    """Sprites answers HTTP 429 when several creates arrive together.
+    The #636 live run refused two of ten creates before anything existed,
+    so a 429 is waited out and tried again, with jitter so pooled lenses
+    do not retry in step, and only while the runner's deadline has time
+    left. Any other refusal is final."""
+    api, name, t = run.api, run.name, run.telemetry
+    waits = 0
+    while True:
+        try:
+            t.span("create", "create sprite", lambda: api.create(name))
+            return
+        except RateLimitedError:
+            if waits >= len(_CREATE_BACKOFF_S):
+                raise
+            _sleep(_CREATE_BACKOFF_S[waits] * random.uniform(0.5, 1.0))
+            run.deadline.check("create retry")
+            waits += 1
+
+
 def _provision(run: _Run) -> None:
     api, name, t = run.api, run.name, run.telemetry
     run.deadline.check("create")
     run.create.outcome = "unknown"
     try:
-        t.span("create", "create sprite", lambda: api.create(name))
+        _create_with_backoff(run)
     except (RefusedError, NotFoundError) as exc:
         run.create.outcome = "refused"
         raise CreateRefusedError(

@@ -57,8 +57,10 @@
   cap. `require_parameters` stays true.
 - `preflight()` must pass before any inference: it reads the key's own
   status (`GET /api/v1/key`) and refuses unless the key has a hard credit
-  limit of at most `KEY_LIMIT_MAX_USD`, with credit left. A key whose
-  `include_byok_in_limit` is false or absent is accepted.
+  limit of at most the configured ceiling (default `KEY_LIMIT_MAX_USD`),
+  with credit left. A key whose `include_byok_in_limit` is false or
+  absent is accepted. Raise the ceiling with `--key-ceiling-usd` or
+  `ATLAS_KEY_CEILING_USD` when the key's own limit is higher.
 - The public catalog entry is fetched once per provider for the review
   and reused, without the key. Every limit is checked in code before a
   request is sent;
@@ -620,6 +622,7 @@ class OpenRouterProvider:
         providers: Sequence[str] = PINNED_PROVIDERS,
         model_id: str = MODEL_ID,
         allow_safety_retention: bool = False,
+        key_ceiling: Decimal = KEY_LIMIT_MAX_USD,
     ) -> None:
         self._transport = transport
         self._key = api_key
@@ -628,6 +631,7 @@ class OpenRouterProvider:
         self._sleep = sleep
         self.budget = ReviewBudget(limits or CallLimits())
         self._key_status: KeyStatus | None = None
+        self.key_ceiling = key_ceiling
         self._loaded: tuple[ModelRoute, ModelTerms, SelectedEndpoints] | None = None
         self._route = ModelRoute(MODEL_ID, PINNED_PROVIDERS, False)
         self.name = f"openrouter:{MODEL_ID}"
@@ -654,10 +658,11 @@ class OpenRouterProvider:
 
     def preflight(self) -> KeyStatus:
         status = parse_key_status(self._get_json("/key", authed=True))
-        if status.limit > KEY_LIMIT_MAX_USD:
+        if status.limit > self.key_ceiling:
             raise PricingUnknownError(
                 f"the OpenRouter key's credit limit ${status.limit} is over the "
-                f"${KEY_LIMIT_MAX_USD} pilot ceiling"
+                f"${self.key_ceiling} pilot ceiling configured by "
+                "--key-ceiling-usd or ATLAS_KEY_CEILING_USD"
             )
         if status.limit_remaining <= 0:
             raise PricingUnknownError("the OpenRouter key has no credit remaining")

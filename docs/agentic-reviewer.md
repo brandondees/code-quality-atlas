@@ -300,7 +300,7 @@ the call.
 | Decision | Current state | Note |
 |---|---|---|
 | Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
-| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The reservation is $5 (D43), the same ceiling this preflight already requires. |
+| OpenRouter key hard limit for agentic runs | the preflight requires at most the key ceiling: $5 unless `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it (D44) | Must cover the agentic reservation. The reservation is $5 (D43), the same as the default ceiling. |
 | Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
@@ -309,7 +309,7 @@ the call.
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |
-| Lens worker pool size | 1; the only value phase 3 accepts | Above 1 only after a concurrency probe. The research note suggests at most 4. |
+| Lens worker pool size | 1 to 16; `agentic-review` defaults to 4, and `review_lens` stays at 1 (D44) | Set with `--pool-size` or `ATLAS_POOL_SIZE`. The concurrency probe and the research note's cap of 4 are not enforced. |
 | Retries per failed attestation | 1, recommended; the phase 3 default | Then escalate. A failed quote, a reply outside the finding contract and an abandoned attempt are retried the same way (D40). |
 | Pilot set and the bar for retiring one-shot | none | Which PRs, how many, and the precision, recall and coverage results agentic drafts must reach. |
 

@@ -3,6 +3,8 @@
 bridge (`LocalSprites`), a scripted model, verification and the draft. No
 model, Sprite or GitHub call is made."""
 
+import re
+import threading
 from dataclasses import replace
 from decimal import Decimal
 
@@ -21,10 +23,15 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.coordinator import (
+    HALTED_REASON,
+    LATE_REASON,
     LensResult,
     Verdict,
+    _blocks_coverage,
+    _still_unread,
     render_draft,
     review_lens,
+    review_lenses,
     status_line,
     synthesize,
 )
@@ -1138,6 +1145,14 @@ def lens_result(outcome, **kw):
     return LensResult(LENS, 1, DIGEST, outcome, attempts=1, **kw)
 
 
+def scoped(lens, paths, *, unread=(), attestation=Attestation.ATTESTED):
+    causes = frozenset({Cause.FILES_UNREAD}) if unread else frozenset()
+    outcome = AttemptOutcome(
+        attestation, causes, unread=tuple(unread), changed_files=len(paths)
+    )
+    return LensResult(lens, 1, DIGEST, outcome, attempts=1, scope=frozenset(paths))
+
+
 def checked(severity, *, attribution=Attribution.INTRODUCED, valence=Valence.DEFECT,
             verified=True, route=None):  # fmt: skip
     route = route or (
@@ -1240,3 +1255,468 @@ def test_findings_of_an_unattested_attempt_are_never_reported():
     result = synthesize([lens_result(misack)])
     assert result.findings == ()
     assert result.verdict is Verdict.APPROVE
+
+
+OTHER = "sweeping-for-security"
+OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
+_MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")
+
+
+def _acknowledge(request):
+    match = _MARKER.search(request.system)
+    assert match is not None
+    return final(lens=match.group(1), digest=match.group(2))
+
+
+def _lenses(
+    tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
+    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None, **kw,
+):  # fmt: skip
+    from .test_keepalive import TaskServer, socket_path
+
+    tasks = TaskServer(socket_path(tmp_path))
+    tasks.start()
+    sprites = sprites or LocalSprites()
+    pending = list(models or [])
+    lock = threading.Lock()
+
+    def model_for():
+        with lock:
+            return pending.pop(0)
+
+    try:
+        result = review_lenses(
+            EVENT,
+            names,
+            DIFF if diff is None else diff,
+            trees(),
+            library=StubLibrary({LENS: BODY, OTHER: OTHER_BODY}),
+            model=model,
+            limits=replace(LIMITS, pool_size=pool) if limits is None else limits,
+            ledger=ledger(tmp_path),
+            sprites=sprites,
+            runner_ledger=MemoryLedger(),
+            redactor=Redactor(),
+            clock=clock or FakeClock(),
+            nonce=lambda: "f00dfeedf00dfeed",
+            bridge_root=str(tmp_path / "bridge"),
+            task_socket=str(tasks.path),
+            model_for=model_for if models is not None else None,
+            picker_spend=picker_spend,
+            trace=trace,
+            **kw,
+        )
+    finally:
+        tasks.close()
+        assert tasks.tasks == {}, tasks.order
+    return result, sprites
+
+
+def test_unread_files_go_to_a_continuation_of_the_same_lens_and_can_approve(tmp_path):
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, sprites = _lenses(tmp_path, [LENS], model)
+    assert result.coverage_complete
+    assert [lens.lens for lens in result.lenses] == [LENS, LENS]
+    assert result.lenses[0].outcome.causes == {Cause.FILES_UNREAD}
+    assert result.lenses[1].state is LensState.CLEAN
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 2 and len(set(created)) == 2
+
+
+def test_a_continuation_that_makes_no_progress_stops(tmp_path):
+    result, sprites = _lenses(tmp_path, [LENS], ScriptedLensModel([final(), final()]))
+    assert not result.coverage_complete
+    assert len(result.lenses) == 2
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 2
+
+
+def test_a_file_one_lens_left_unread_is_not_covered_by_another_lens(tmp_path):
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "calc.py"})),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            _acknowledge,
+            final(text="not a contract reply"),
+            final(text="not a contract reply"),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS, OTHER], model)
+    first, other = result.lenses[:2]
+    assert first.outcome.unread == ("config/keys.py",)
+    assert other.state is LensState.CLEAN
+    assert not result.coverage_complete
+    assert result.unreviewed_paths == ("config/keys.py",)
+
+
+def test_a_file_unread_by_one_lens_is_covered_once_that_lens_reads_it():
+    skipped = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    other = scoped(OTHER, ["a.py", "b.py"])
+    assert _still_unread([skipped, other]) == ("b.py",)
+    rerun = scoped(LENS, ["b.py"])
+    assert _still_unread([skipped, other, rerun]) == ()
+
+
+def test_a_partial_with_no_cause_still_blocks_coverage():
+    unexplained = scoped(LENS, ["a.py"], attestation=Attestation.UNACKNOWLEDGED)
+    assert _blocks_coverage(unexplained)
+    only_unread = scoped(LENS, ["a.py"], unread=["a.py"])
+    assert not _blocks_coverage(only_unread)
+
+
+def test_a_byok_refusal_stops_the_lenses_that_have_not_started(tmp_path):
+    def refuse(request):
+        raise ByokRefusedError("refusing the review: byok")
+
+    sprites = LocalSprites()
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], ScriptedLensModel([refuse]), sprites=sprites
+    )
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 1
+    assert result.lenses[0].state is LensState.FAILED
+    assert result.lenses[1].outcome is None
+    assert result.lenses[1].reason == HALTED_REASON
+    assert not result.coverage_complete
+
+
+def test_a_failed_lens_blocks_approval_after_every_file_was_read(tmp_path):
+    bad = final(text="nope")
+    result, _ = _lenses(
+        tmp_path,
+        [LENS],
+        ScriptedLensModel([READ_ALL, bad, bad]),
+        limits=replace(LIMITS, retries=0),
+    )
+    assert not result.coverage_complete
+    assert result.lenses[0].outcome is not None
+    assert Cause.UNPARSED in result.lenses[0].outcome.causes
+
+
+def test_two_lenses_run_together_under_different_runner_names(tmp_path):
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, sprites = _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models)
+    assert result.coverage_complete
+    assert {lens.lens for lens in result.lenses} == {LENS, OTHER}
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(set(created)) == 2
+
+
+def _pair_models(first_reply):
+    return [
+        ScriptedLensModel([READ_ALL, first_reply]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+
+
+def test_a_pooled_review_appends_one_round_record_from_its_combined_verdict(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    models = _pair_models(final(finding()))
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=1, models=models, round_log=log
+    )
+    assert result.event is ReviewEvent.COMMENT
+    records = log.read().records
+    assert len(records) == 1
+    assert records[0].event == "COMMENT"
+    assert records[0].lens == f"{LENS}, {OTHER}"
+    assert any(
+        "rounds each item before summing" in line for line in records[0].findings
+    )
+
+
+def test_a_continuation_adds_no_round_record_of_its_own(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS], model, round_log=log)
+    assert len(result.lenses) == 2
+    records = log.read().records
+    assert [(record.lens, record.event) for record in records] == [(LENS, "APPROVE")]
+
+
+def test_a_pooled_review_reads_the_round_log_once_for_every_lens(tmp_path):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    class Counting(RoundLog):
+        reads = 0
+
+        def read(self):
+            Counting.reads += 1
+            return super().read()
+
+    log = Counting(tmp_path / "state" / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            "a" * 40,
+            LENS,
+            "COMMENT",
+            ("pooled-prior",),
+            False,
+        )
+    )
+    models = _pair_models(_acknowledge)
+    _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models, round_log=log)
+    assert Counting.reads == 1
+    for model in models:
+        assert "pooled-prior" in model.requests[0].messages[0].text
+
+
+def test_a_pooled_log_write_failure_is_on_the_review_and_its_status_line(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    class Broken(RoundLog):
+        def append(self, record):
+            raise OSError("disk full")
+
+    models = _pair_models(_acknowledge)
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        round_log=Broken(tmp_path / "state" / "rounds.jsonl"),
+    )  # fmt: skip
+    note = "the round log was not written: OSError: disk full"
+    assert result.round_log_note.startswith(note)
+    assert status(result)["round_log_note"] == note
+    assert result.event is ReviewEvent.APPROVE
+
+
+def test_a_caller_context_omission_blocks_a_pooled_approval_and_marks_the_record(
+    tmp_path,
+):
+    from atlas_reviewer.domain import Omission
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    omission = Omission("caller", "test budget", "pooled caller context was omitted")
+    models = _pair_models(_acknowledge)
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        round_log=log, context_omissions=(omission,),
+    )  # fmt: skip
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "pooled caller context was omitted" in render_draft(result, Redactor())
+    assert [record.context_partial for record in log.read().records] == [True]
+
+
+def test_a_lens_assigned_too_narrow_a_scope_does_not_cover_the_changed_files():
+    narrow = scoped(LENS, ["a.py"])
+    review = replace(synthesize([narrow]), changed=frozenset({"a.py", "b.py"}))
+    assert not review.coverage_complete
+    assert review.unreviewed_paths == ("b.py",)
+    assert replace(review, changed=frozenset({"a.py"})).coverage_complete
+
+
+def test_an_attested_reply_that_skipped_files_and_failed_a_quote_still_blocks():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        frozenset({Cause.FILES_UNREAD, Cause.QUOTES_FAILED}),
+        unread=("a.py",),
+        changed_files=1,
+    )
+    result = LensResult(LENS, 1, DIGEST, outcome, attempts=1, scope=frozenset({"a.py"}))
+    assert _blocks_coverage(result)
+
+
+def test_an_unverified_runner_delete_is_named_in_a_multi_lens_draft():
+    from atlas_reviewer.coordinator import _combined_runner
+    from atlas_reviewer.domain import RunnerReport
+
+    orphan = RunnerReport(
+        RunnerStatus.COMPLETED, CleanupStatus.DESTROY_UNVERIFIED, "cqa-rev-a", ""
+    )
+    gone = RunnerReport(
+        RunnerStatus.COMPLETED, CleanupStatus.DESTROYED_VERIFIED, "cqa-rev-b", ""
+    )
+    assert _combined_runner((orphan, gone)) is orphan
+    lens = scoped(LENS, ["a.py"])
+    review = replace(
+        synthesize([lens], runner=_combined_runner((orphan, gone))),
+        runners=(orphan, gone),
+    )
+    draft = render_draft(review, Redactor())
+    assert "cleanup destroy NOT verified" in draft
+    assert "Runner delete NOT verified for `cqa-rev-a`" in draft
+    assert "cqa-rev-b" not in draft
+    assert "attestation: attested" in draft
+
+
+def test_a_fatal_error_in_one_lens_stops_the_lenses_that_have_not_started(tmp_path):
+    def broken(request):
+        raise RuntimeError("an unexpected bug in the lens")
+
+    sprites = LocalSprites()
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        _lenses(tmp_path, [LENS, OTHER], ScriptedLensModel([broken]), sprites=sprites)
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    deleted = [call[1] for call in sprites.calls if call[0] == "delete"]
+    assert len(created) == 1
+    assert set(created) <= set(deleted)
+
+
+def test_a_sibling_lens_failure_still_deletes_every_runner(tmp_path):
+    started = threading.Event()
+
+    def broken(request):
+        assert started.wait(5)
+        raise RuntimeError("an unexpected bug in the lens")
+
+    def first_turn(request):
+        started.set()
+        return READ_ALL
+
+    models = [
+        ScriptedLensModel([broken]),
+        ScriptedLensModel([first_turn, _acknowledge]),
+    ]
+    sprites = LocalSprites()
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+                sprites=sprites)  # fmt: skip
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    deleted = [call[1] for call in sprites.calls if call[0] == "delete"]
+    assert len(set(created)) == 2
+    assert set(created) <= set(deleted)
+
+
+def _clean_pair():
+    return [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+
+
+def test_a_picked_lens_that_did_not_run_blocks_approval(tmp_path):
+    models = _clean_pair()
+    result, _ = _lenses(tmp_path, [LENS, OTHER], models[0], models=models)
+    assert result.coverage_complete and result.event is ReviewEvent.APPROVE
+    missing = replace(result, not_picked=(("made-up-lens", "no body.md"),))
+    assert not missing.coverage_complete
+    assert missing.event is ReviewEvent.COMMENT
+    assert "a picked lens did not run" in render_draft(missing, Redactor())
+
+
+def test_a_lens_queued_past_the_review_deadline_does_not_start(tmp_path, monkeypatch):
+    from atlas_reviewer import coordinator
+
+    clock = FakeClock()
+    real = coordinator.run_bridge
+
+    def then_late(*args, **kwargs):
+        report = real(*args, **kwargs)
+        clock.advance(LIMITS.review_wall_s + 1)
+        return report
+
+    monkeypatch.setattr(coordinator, "run_bridge", then_late)
+    models = _clean_pair()
+    result, sprites = _lenses(
+        tmp_path, [LENS, OTHER], models[0], models=models, clock=clock
+    )
+    assert [(r.lens, r.reason) for r in result.lenses if r.lens == OTHER] == [
+        (OTHER, LATE_REASON)
+    ]
+    assert models[1].requests == []
+    assert len([c for c in sprites.calls if c[0] == "create"]) == 1
+    assert not result.coverage_complete
+
+
+def test_a_queued_lens_runner_gets_only_the_review_time_left(tmp_path, monkeypatch):
+    from atlas_reviewer import coordinator
+
+    given = []
+    real = coordinator.run_bridge
+
+    def spy(*args, deadline_s, **kwargs):
+        given.append(deadline_s)
+        return real(*args, deadline_s=deadline_s, **kwargs)
+
+    monkeypatch.setattr(coordinator, "run_bridge", spy)
+    clock = FakeClock()
+
+    def slow(request):
+        clock.advance(100)
+        return READ_ALL
+
+    models = [
+        ScriptedLensModel([slow, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    _lenses(tmp_path, [LENS, OTHER], models[0], models=models, clock=clock)
+    assert given[:2] == [LIMITS.review_wall_s, LIMITS.review_wall_s - 100]
+
+
+def test_the_picker_calls_count_toward_the_review_spend(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    models = _clean_pair()
+    base, _ = _lenses(tmp_path / "a", [LENS, OTHER], models[0], models=models)
+    models = _clean_pair()
+    picked, _ = _lenses(
+        tmp_path / "b", [LENS, OTHER], models[0], models=models,
+        picker_spend=(1, Decimal("0.25")),
+    )  # fmt: skip
+    assert picked.model_calls == base.model_calls + 1
+    assert Decimal(picked.committed_usd) == Decimal(base.committed_usd) + Decimal(
+        "0.25"
+    )
+
+
+def test_a_picker_that_used_every_call_leaves_none_for_the_lenses(tmp_path):
+    model = ScriptedLensModel([READ_ALL, _acknowledge])
+    result, _ = _lenses(
+        tmp_path, [LENS], model, picker_spend=(LIMITS.max_calls, Decimal(0))
+    )
+    assert model.requests == []
+    assert result.model_calls == LIMITS.max_calls
+    assert not result.coverage_complete
+
+
+def test_the_continuation_rounds_stop_at_max_continuations(tmp_path, monkeypatch):
+    monkeypatch.setattr("atlas_reviewer.coordinator.MAX_CONTINUATIONS", 0)
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS], model)
+    assert [lens.lens for lens in result.lenses] == [LENS]
+    assert not result.coverage_complete
+
+
+def test_the_draft_names_the_picker_fallback_and_the_names_it_did_not_run():
+    review = replace(
+        synthesize([scoped(LENS, ["a.py"])]),
+        selection_note="Lens selection: the lens picker gave no usable lens list",
+        not_picked=(("made-up-lens", "no body.md in the bundle"),),
+    )
+    draft = render_draft(review, Redactor())
+    assert "## Lens selection" in draft
+    assert "gave no usable lens list" in draft
+    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in draft

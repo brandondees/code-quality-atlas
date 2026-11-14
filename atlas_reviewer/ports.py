@@ -48,6 +48,11 @@ class RefusedError(BoundaryError):
     request and did not act on it."""
 
 
+class RateLimitedError(RefusedError):
+    """The server answered HTTP 429: it refused for rate, not for the
+    request itself, so the same request may succeed later."""
+
+
 class ResponseTooLargeError(BoundaryError):
     """A download exceeded the byte cap the caller set for it."""
 

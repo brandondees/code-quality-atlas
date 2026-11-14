@@ -1111,8 +1111,8 @@ unmet in the current reviewer, so the gate fails closed. The plan is
 D45 recommends self-hosted Phoenix on Fly in org `personal` and does not
 provision it. The scorer and the reference rows are offline fixtures;
 nothing in this change calls a model or writes to GitHub. The hosting
-decision is D45. D44 is reserved for #646. #639 records D48 and #640
-records D46; neither is on main. A reference row's `metadata.run`
+decision is D45. D44 belongs to #646. D48 is #639's webhook receiver,
+already on main, and D46 is the open #640's. A reference row's `metadata.run`
 records `coordinator-verified` when the
 round says fan-out did not finish. That field is information and does
 not itself fail the gate. `--gate` also fails when any reference row has
@@ -1188,6 +1188,37 @@ README said it was fetched on every completion or turn, which was true
 before this cache. D41's sentence keeps the original design and notes
 the amendment. No live call was made.
 
+## 2026-11-12 — agentic reviews run every selected lens, and a lens's unread files can be assigned to it again
+
+`agentic-review` is the command that applies the agentic limits. The
+one-shot `review` command does not accept those flags and does not read
+the eight agentic `ATLAS_*` limit variables (it does read
+`ATLAS_KEY_CEILING_USD`), and it still uses the
+60,000-character lens budget, so a review-depth one-shot run still
+skips the picker. The agentic path calls the picker and runs the
+critical tier plus every ranked lens that has a body, up to the pool
+(1 to 16; 4 when the operator does not set it). Each lens has its own
+Sprite name. A Sprites HTTP 429 on create is waited out and tried
+again. A final reply outside the finding contract is quoted back once
+inside the attempt, with the rejected reply in the model's own turn.
+A lens's own unread files are handed to a continuation of that lens
+while a call and the review clock remain. Coverage is per lens, as D42
+approved: a read by another lens does not cover a file, and a file a
+lens still has not read cannot approve. The draft names any runner
+whose delete was not verified, and carries the picker's selection note
+and the picked names that did not run; a picked name that did not run
+blocks approval. A live run builds the picker's provider from the
+agentic limits, and the picker's calls and dollars count in the
+review's totals. The PR head is pinned to the event SHA before and
+after the diff fetch, the picker sees a redacted title, a lens queued
+past the review deadline is not started, and a halt is checked again
+after a call is priced. `auditing-documentation-health`
+keeps its repo shape; the change-review library reads its body from
+the audit bundle. The OpenRouter key ceiling stays $5 unless
+`--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it, and a refusal
+names that setting. D44 records it. Lenses still cannot run tests or
+mutants, read CI, or see commits.
+
 ## 2026-11-13 — round 2 on whole-PR review rounds
 
 The round log keeps another pull request's records out of this review,
@@ -1238,3 +1269,15 @@ routes (`anthropic/...`) therefore always send `cache_control`, with
 list stay. The usage line and the completion span record whether ZDR
 was required and whether `cache_control` was sent. No live call was
 made from this repo. D57. Amends D51. D52 is unchanged.
+
+## 2026-11-14 — round 4 on the per-lens continuation branch (#646)
+
+A review appends one round record, after the final synthesize, from the
+verdict over every lens and continuation. Each pooled lens and each
+continuation had appended its own one-lens record, so one review could
+store APPROVE and COMMENT side by side and spend the prior-round budget
+on repeats. The lock that serialized those writes is gone. The pooled
+path is tested for one record, one round-log read, the log-write note,
+and a caller omission. `agentic-review --model` has a test. #640 has
+merged since the 2026-11-12 entry above called it open, so D46 is on
+main. No live call was made. D44, D52.

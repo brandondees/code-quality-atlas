@@ -16,7 +16,12 @@ from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.interpreter import PYTHON_TAG
-from atlas_reviewer.ports import BoundaryError, RefusedError, StreamTimeoutError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    RateLimitedError,
+    RefusedError,
+    StreamTimeoutError,
+)
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     CLEANUP_BUDGET_S,
@@ -282,6 +287,106 @@ def test_a_refused_create_stops_with_nothing_to_clean_up():
         run(api, ledger)
     assert ops(api) == ["create"]
     assert ledger.pending() == ()
+
+
+def test_a_rate_limited_create_is_retried_and_then_runs(monkeypatch):
+    """Sprites HTTP 429 on #636 happened before a Sprite existed. A later
+    create of the same name succeeded, so a 429 is waited out."""
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Once(FakeSprites):
+        def create(self, name):
+            with self._lock:
+                first = not any(call[0] == "create" for call in self.calls)
+            if first:
+                self._record("create", name)
+                raise RateLimitedError("Sprites HTTP 429 for PUT")
+            super().create(name)
+
+    api = Once(rules=OK_RULES)
+    report = run(api, MemoryLedger()).report
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert ops(api)[:2] == ["create", "create"]
+    assert len(slept) == 1 and 0.5 <= slept[0] <= 1.0
+
+
+def test_a_create_that_stays_rate_limited_gives_up_after_three_waits(monkeypatch):
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Always(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT")
+
+    api = Always(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError, match="refused to create"):
+        run(api, MemoryLedger())
+    assert ops(api) == ["create"] * 4
+    assert len(slept) == 3
+
+
+def test_a_plain_refusal_on_a_retry_is_final(monkeypatch):
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class ThenRefused(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            if len(self.calls) == 1:
+                raise RateLimitedError("Sprites HTTP 429 for PUT")
+            raise RefusedError("Sprites HTTP 400 for PUT")
+
+    api = ThenRefused(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError, match="HTTP 400"):
+        run(api, MemoryLedger())
+    assert ops(api) == ["create", "create"]
+    assert len(slept) == 1
+
+
+def test_a_plain_refusal_whose_text_says_429_is_not_retried(monkeypatch):
+    """The retry is keyed on the `RateLimitedError` type the client raises
+    for a 429, not on the message text."""
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Worded(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RefusedError("Sprites HTTP 429 for PUT")
+
+    api = Worded(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError, match="HTTP 429"):
+        run(api, MemoryLedger())
+    assert ops(api) == ["create"]
+    assert slept == []
+
+
+def test_a_lens_runner_name_has_a_twelve_digit_suffix_and_fits_a_dns_label():
+    from atlas_reviewer.runner import event_runner_name, lens_runner_name
+
+    event = PrEvent("example-org/example-app", 4242, "a" * 40)
+    name = lens_runner_name(event, "sweeping-for-security:2")
+    base = event_runner_name(event)
+    suffix = name.removeprefix(base + "-")
+    assert len(suffix) == 12 and all(c in "0123456789abcdef" for c in suffix)
+    assert len(name) <= 63
+
+
+def test_a_rate_limit_wait_that_passes_the_deadline_starts_no_create(monkeypatch):
+    clock = FakeClock()
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", lambda s: clock.advance(60))
+
+    class Always(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT")
+
+    api = Always(rules=OK_RULES)
+    outcome = run(api, MemoryLedger(), clock=clock, deadline_s=30.0)
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert ops(api) == ["create"]
 
 
 def test_a_run_stopped_before_create_deletes_nothing_and_leaves_no_entry():

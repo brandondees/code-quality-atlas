@@ -1012,6 +1012,24 @@ def test_preflight_refuses_unless_the_key_has_a_hard_limit_of_at_most_five_dolla
     assert fake.requests[0][2]["Authorization"] == f"Bearer {KEY}"
 
 
+def test_a_raised_ceiling_accepts_that_key_and_names_the_setting_past_it():
+    accepted = OpenRouterProvider(
+        OpenRouterFake(key=reply(key_status(limit=25))),
+        KEY,
+        key_ceiling=Decimal(25),
+    ).preflight()
+    assert accepted.limit == Decimal(25)
+    with pytest.raises(PricingUnknownError, match=r"\$25.01 is over the \$25") as exc:
+        OpenRouterProvider(
+            OpenRouterFake(key=reply(key_status(limit=25.01))),
+            KEY,
+            key_ceiling=Decimal(25),
+        ).preflight()
+    text = str(exc.value)
+    assert "--key-ceiling-usd" in text
+    assert "ATLAS_KEY_CEILING_USD" in text
+
+
 def test_preflight_accepts_a_five_dollar_key():
     status = OpenRouterProvider(OpenRouterFake(), KEY).preflight()
     assert status == parse_key_status(key_status())

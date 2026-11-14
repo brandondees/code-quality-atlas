@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import argparse
 import io
 import json
 import os
@@ -6,11 +7,13 @@ import shutil
 import signal
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from atlas_reviewer import cli
+from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
@@ -115,7 +118,9 @@ def test_the_live_provider_uses_the_model_flag_and_one_provider(tmp_path):
         ]
     )
     env = {cli.ENV_OPENROUTER_KEY: KEY, "ATLAS_MODEL": MODEL_ID}
-    cli._select_provider(args, env, factory, Telemetry(FakeClock()))
+    cli._select_provider(
+        args, env, factory, Telemetry(FakeClock()), CallLimits(max_calls=3)
+    )
     assert held["provider"].model_id == alt
     assert held["provider"]._providers == ("deepinfra/fp8",)
     assert [url for _method, url, _headers, _body in fake.requests] == [f"{API}/key"]
@@ -135,7 +140,9 @@ def test_the_live_provider_uses_the_model_flag_and_one_provider(tmp_path):
         ]
     )
     with pytest.raises(BoundaryError, match="not an OpenRouter model id"):
-        cli._select_provider(refused, env, factory, Telemetry(FakeClock()))
+        cli._select_provider(
+            refused, env, factory, Telemetry(FakeClock()), CallLimits(max_calls=3)
+        )
 
 
 def test_allow_safety_retention_is_wired_from_the_flag(tmp_path):
@@ -165,7 +172,11 @@ def test_allow_safety_retention_is_wired_from_the_flag(tmp_path):
         ]
     )
     cli._select_provider(
-        args, {cli.ENV_OPENROUTER_KEY: KEY}, factory, Telemetry(FakeClock())
+        args,
+        {cli.ENV_OPENROUTER_KEY: KEY},
+        factory,
+        Telemetry(FakeClock()),
+        CallLimits(max_calls=3),
     )
     assert held["provider"]._route.allow_safety_retention is True
     assert held["provider"]._route.require_zdr is True
@@ -202,8 +213,24 @@ def test_no_require_zdr_is_wired_from_the_flag(tmp_path):
         {cli.ENV_OPENROUTER_KEY: KEY, "ATLAS_REQUIRE_ZDR": "true"},
         factory,
         Telemetry(FakeClock()),
+        CallLimits(max_calls=3),
     )
     assert held["provider"]._route.require_zdr is False
+
+
+def test_agentic_review_accepts_no_require_zdr(tmp_path):
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "agentic-review",
+            "--event",
+            EVENT,
+            "--dry-run",
+            "--no-require-zdr",
+        ]
+    )
+    assert args.no_require_zdr is True
 
 
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
@@ -1783,3 +1810,240 @@ def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     assert '"review_event": "COMMENT"' in first
     assert '"coverage_complete": false' in first
     assert "> **REVIEW INCOMPLETE -- not approvable.**" in out
+
+
+def test_agentic_review_help_says_the_command_applies_its_limits(capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["agentic-review", "--help"], env={})
+    assert raised.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())
+    assert "This command applies it." in text
+    assert "ATLAS_POOL_SIZE" in text
+    assert "ATLAS_KEY_CEILING_USD" in text
+
+
+def test_agentic_review_refuses_a_pool_outside_one_to_sixteen(tmp_path):
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--pool-size",
+        "0",
+    )
+    assert code == cli.EXIT_USAGE
+    assert "pool_size" in err
+
+
+def test_agentic_review_dry_run_writes_one_draft_without_credentials(tmp_path):
+    code, out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--depth",
+        "triage",
+        "--pool-size",
+        "1",
+    )
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "coverage_complete=false" in err
+    assert "lenses=" in err
+    assert "REVIEW INCOMPLETE" in out
+
+
+def _agentic_dry_run(tmp_path):
+    return run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", EVENT, "--depth", "review", "--pool-size", "1",
+    )  # fmt: skip
+
+
+def test_agentic_review_puts_the_picker_fallback_note_in_the_draft(tmp_path):
+    """The offline picker's reply is not a lens list, so selection falls
+    back to the critical tier. The draft says so."""
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "## Lens selection" in out
+    assert "the lens picker gave no usable lens list" in out
+
+
+def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
+    tmp_path, monkeypatch
+):
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["made-up-lens", "reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in out
+    assert "ranked 2 lens name(s), 1 with a body" in out
+    assert "review event: COMMENT; coverage_complete=false" in err
+    assert "not_run=1" in err
+
+
+@pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
+def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
+    from atlas_reviewer.cli import UsageError, _key_ceiling
+
+    args = argparse.Namespace(key_ceiling_usd=raw)
+    with pytest.raises(UsageError, match="positive number of dollars"):
+        _key_ceiling(args, {})
+    assert _key_ceiling(argparse.Namespace(key_ceiling_usd="12.5"), {}) == Decimal(
+        "12.5"
+    )
+
+
+def _fixture_copy(tmp_path, **pull_changes):
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    pull = json.loads((fixtures / "pull.json").read_text())
+    pull.update(pull_changes)
+    (fixtures / "pull.json").write_text(json.dumps(pull))
+    return fixtures
+
+
+def _agentic_on(tmp_path, fixtures, *extra):
+    return run_cli(
+        "--state-dir", str(tmp_path / "state"), "agentic-review", "--dry-run",
+        "--event", EVENT, "--fixtures", str(fixtures), "--pool-size", "1", *extra,
+    )  # fmt: skip
+
+
+def test_agentic_review_refuses_a_pr_whose_head_is_not_the_event_sha(tmp_path):
+    fixtures = _fixture_copy(tmp_path, head={"sha": "0" * 40, "ref": "moved"})
+    code, out, err = _agentic_on(tmp_path, fixtures, "--depth", "triage")
+    assert code == cli.EXIT_BOUNDARY
+    assert "the PR head is no longer the event SHA" in err
+    assert out == ""
+
+
+def test_agentic_review_refuses_a_head_that_moved_while_the_diff_was_fetched(
+    tmp_path, monkeypatch
+):
+    reads = []
+    real = FixtureGitHub.get_pull
+
+    def moving(self, repo, number):
+        pull = dict(real(self, repo, number))
+        reads.append(pull)
+        if len(reads) > 1:
+            pull["head"] = {"sha": "0" * 40, "ref": "moved"}
+        return pull
+
+    monkeypatch.setattr(FixtureGitHub, "get_pull", moving)
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_BOUNDARY
+    assert "the PR head moved while the diff was fetched" in err
+    assert out == ""
+
+
+def test_agentic_review_redacts_the_pr_title_before_the_picker(tmp_path, monkeypatch):
+    token = fake_token("ghp_")
+    fixtures = _fixture_copy(tmp_path, title=f"Rotate {token}")
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt.user)
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    _agentic_on(tmp_path, fixtures, "--depth", "review")
+    assert len(seen) == 1
+    assert "Rotate" in seen[0]
+    assert token not in seen[0]
+
+
+def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatch):
+    """A live run builds its provider from the agentic limits, not the
+    one-shot `--max-model-calls` it does not have, and the picker's call
+    counts in the review's model calls."""
+    from atlas_reviewer.budget import ReviewBudget
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    made = []
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            record = self.budget.reserve(Decimal("0.05"))
+            ReviewBudget.settle(record, "ok", Decimal("0.02"))
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    def factory(key, limits):
+        made.append(limits)
+        return Live(object(), key, limits=limits)
+
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=err,
+        sprites_factory=lambda env: cli._scripted_runner(FIXTURE / "runner-script.json"),
+        openrouter_factory=factory,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    assert made == [CallLimits(max_calls=2, budget_usd=Decimal("0.50"))]
+    assert "Model calls: 1; committed: $0.02." in out.getvalue()
+    assert "sk-or-v1-x" not in out.getvalue()
+
+
+def test_agentic_review_takes_the_model_and_provider_flags(tmp_path, monkeypatch):
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    alt = "deepseek/deepseek-v4.1-flash"
+    made = []
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    def factory(key, limits):
+        made.append(Live(object(), key, limits=limits))
+        return made[-1]
+
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50", "--model", alt, "--providers", "deepinfra/fp8"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x", "ATLAS_MODEL": "x/y"},
+        out=out, err=err,
+        sprites_factory=lambda env: cli._scripted_runner(FIXTURE / "runner-script.json"),
+        openrouter_factory=factory,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    assert [(p.model_id, p._providers) for p in made] == [(alt, ("deepinfra/fp8",))]
