@@ -915,7 +915,7 @@ def _repair(text: str, p: _Progress) -> str | None:
             f"{quote_untrusted(str(exc), scrub=str)}. "
             "The finding contract's closed values: severity is exactly one "
             "of blocker, major, minor or nit, never a level such as high, "
-            "medium or low. A per-finding \"lens\" key is accepted and "
+            'medium or low. A per-finding "lens" key is accepted and '
             "dropped. Prose before the reply is fine: the last fenced JSON "
             "object is the one read. "
             "Reply once with one JSON object that meets the finding contract. "
