@@ -263,12 +263,17 @@ def test_teardown_disables_the_webhook_before_it_sweeps():
             '"$APP" --signal SIGINT --timeout 120 --wait-timeout 120s'
         ),
         "do not sweep",
+        "exit 1",
         'python -m atlas_reviewer sweep --runner "$RUNNER" --force-live',
         'flyp apps destroy "$APP" --yes',
     )
     positions = [teardown.index(step) for step in steps]
     assert positions == sorted(positions)
     assert len(set(positions)) == len(positions)
+    stop_at = teardown.index(steps[1])
+    sweep_at = teardown.index(steps[4])
+    branch = teardown[stop_at:sweep_at]
+    assert branch.index("then") < branch.index("exit 1") < branch.index("\nfi\n")
     assert "sweep --event" not in teardown
     assert "cqa-rev-pr<PR>-<first 12 of the head SHA>" in teardown
     assert "Sprites console" in teardown
