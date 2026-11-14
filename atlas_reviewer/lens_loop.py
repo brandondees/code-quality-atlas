@@ -788,8 +788,8 @@ def _stopped(found: LimitHit) -> tuple[Cause, str, LimitHit]:
 
 def _refusal_cause(exc: BoundaryError) -> Cause:
     """A ZDR or pricing refusal the provider raised before any request
-    (#664) is its own cause, so a report and the parity gate can tell it
-    from a model failure. Any other boundary error stays `MODEL_ERROR`."""
+    (#664) is its own cause, so a report can tell it from a model failure.
+    Any other boundary error stays `MODEL_ERROR`."""
     if isinstance(exc, BudgetRefusedError | PricingUnknownError):
         return Cause.MODEL_REFUSED
     return Cause.MODEL_ERROR

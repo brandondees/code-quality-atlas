@@ -103,8 +103,8 @@ class Cause(StrEnum):
     ABANDONED = "the attempt never finished (the controller stopped mid-attempt)"
     MODEL_ERROR = "a model call failed"
     # Issue #664: a ZDR or pricing refusal the provider raised before any
-    # request is a policy refusal, not a model failure, so reports and the
-    # parity gate can tell them apart. Not retried, like a model error.
+    # request is a policy refusal, not a model failure, so a report can
+    # tell them apart. Not retried, like a model error.
     MODEL_REFUSED = "a model call was refused"
     TRANSPORT_ERROR = "a model call failed on the transport"
     INPUT_CAP = "the per-call input cap was reached"

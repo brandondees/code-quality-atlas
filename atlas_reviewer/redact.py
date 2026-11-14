@@ -14,17 +14,19 @@ accepts) is not filled by accident. That guards against mistakes, not
 deliberate bypass: `dataclasses.replace`, `copy` and the module's private
 token all get past it. The patterns are best-effort, not a guarantee: a
 secret in a format listed nowhere below still passes through, which is why
-the controller also scrubs the exact values of its own credentials, in
-their base64 and hex encodings too.
+the controller also scrubs the exact values of its own credentials, in the
+encodings a log may carry them in (base64, hex, percent and JSON escaping).
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import re
 from bisect import bisect_right
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from urllib.parse import quote
 
 _MINT = object()
 _MIN_KNOWN_SECRET_LEN = 8
@@ -49,15 +51,22 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("model-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}")),
     ("aws-key-id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
-    # The controller's Sprites credential, in the shape this repo's code
-    # gives it: the token is sent as one Bearer credential
-    # (`sprites_api.SpritesClient._headers`) and every carrier of
-    # `ATLAS_SPRITES_TOKEN`, fixtures included, holds
-    # `org/<org id>/<secret>`. Issue #663: without this pattern, a token
-    # the controller does not itself hold survived redaction.
+    # The controller's Sprites credential, in the shape the operator
+    # confirmed the deployed token has: four slash-separated segments,
+    # `<org slug>/<numeric org id>/<token id>/<secret>`, every segment
+    # `[A-Za-z0-9_-]` and only the second all digits, and the secret
+    # carrying at least one digit, which an ordinary four-segment path
+    # such as `repos/<id>/issues/comments` does not. The CLI docs'
+    # example `my-org/token-id/secret` shows the same shape without the
+    # numeric id. Issue #663; re-grounded in review round 1 of PR #687,
+    # which found the first draft's literal `org/` anchor matched no real
+    # token and flagged the `w3.org` XML-schema namespace instead.
     (
         "sprites-token",
-        re.compile(r"\borg/\d+/[A-Za-z0-9_-]{8,}"),
+        re.compile(
+            r"\b[A-Za-z0-9_-]{1,40}/\d{1,12}/[A-Za-z0-9_-]{1,40}/"
+            r"(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}"
+        ),
     ),
     (
         "jwt",
@@ -219,10 +228,12 @@ def detect_secrets(text: str) -> SecretScan:
 def _scrub_known(
     raw: str, known_secrets: Sequence[str], label: str = "controller-credential"
 ) -> tuple[str, int]:
-    """Every known value and its base64 and hex encodings (issue #663), so
-    a log that carries the credential encoded under the same label is
-    scrubbed too. Forms are replaced longest first, so a value that
-    contains another is not cut short by the shorter one."""
+    """Every known value and the encodings a log may carry it in (issue
+    #663; widened after review round 1 of PR #687), under the same label.
+    Forms are replaced longest first, so a value that contains another is
+    not cut short by the shorter one. The exact value stays the primary
+    defense; the encodings are defense in depth and best-effort, and the
+    limits `_encodings` names are not covered."""
     forms = [
         form
         for secret in known_secrets
@@ -237,13 +248,34 @@ def _scrub_known(
 
 
 def _encodings(secret: str) -> tuple[str, ...]:
-    """The value, its standard and URL-safe base64, and its hex. An
-    encoded form is never shorter than the value, so this adds no way for
-    a shorter string to match."""
-    raw = secret.encode("utf-8")
+    """The value, its standard and URL-safe base64 (padded and unpadded),
+    its lower- and upper-case hex, its percent-encoded form, and its JSON
+    string body with `/` escaped as `\\/` -- the forms a log, a URL or a
+    JSON line carries a value in. An encoded form is never shorter than
+    the value, so this adds no way for a shorter string to match. Bytes
+    re-encode with `surrogateescape`, so a value read from the environment
+    with undecodable bytes scrubs instead of crashing redaction. Not
+    covered: base64 of a blob that carries the value at a shifted 3-byte
+    alignment (`Bearer <secret>` encoded whole), a value split across
+    lines, and hex in mixed case; D59 states these limits."""
+    raw = secret.encode("utf-8", errors="surrogateescape")
     standard = base64.b64encode(raw).decode("ascii")
     urlsafe = base64.urlsafe_b64encode(raw).decode("ascii")
-    return (secret, standard, urlsafe, raw.hex())
+    forms = [
+        secret,
+        standard,
+        standard.rstrip("="),
+        urlsafe,
+        urlsafe.rstrip("="),
+        raw.hex(),
+        raw.hex().upper(),
+    ]
+    try:
+        forms.append(quote(secret, safe=""))
+    except UnicodeEncodeError:
+        pass  # a value with undecodable bytes has no percent-encoded form
+    forms.append(json.dumps(secret)[1:-1].replace("/", "\\/"))
+    return tuple(forms)
 
 
 def _assignments(text: str) -> tuple[str, int]:
