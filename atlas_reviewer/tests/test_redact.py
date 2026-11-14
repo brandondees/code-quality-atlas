@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import base64
+
 import pytest
 
 from atlas_reviewer.redact import (
@@ -67,6 +69,59 @@ def test_controller_credentials_are_scrubbed_by_exact_value():
     assert "plainsecretvalue" not in result.text
     assert "short" in result.text
     assert result.redaction_count == 1
+
+
+def test_a_sprites_token_shape_is_redacted_and_reported():
+    """Issue #663: no pattern covered the controller's Sprites token, so a
+    value the controller does not hold survived redaction. The shape is the
+    one every carrier of `ATLAS_SPRITES_TOKEN` in this repo uses
+    (`org/<org id>/<secret>`); the value here is synthetic."""
+    token = "org/12/" + fake_token("", 24)
+    result = redact(f"token {token} after")
+    assert token not in result.text
+    assert "[REDACTED:sprites-token]" in result.text
+    assert result.redaction_count >= 1
+    scan = detect_secrets(f"auth = {token}\n")
+    assert scan.hits == (SecretHit("sprites-token", 1),)
+    assert scan.values == (token,)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "w3.org/2000/svg",
+        "borg/1/abcdefgh",
+        "org/1/short",
+        "org/two/abcdefghij",
+    ],
+)
+def test_text_merely_shaped_like_a_sprites_token_survives(text):
+    assert redact(text).text == text
+
+
+def test_known_credentials_are_scrubbed_in_base64_and_hex():
+    """Issue #663: the known-value scrub was an exact substring replace, so
+    a log that carried the controller's credential base64- or hex-encoded
+    kept it. Every encoding of the value is scrubbed under the same
+    label."""
+    secret = "org/123/plainsecretvalue"
+    raw = secret.encode()
+    forms = {
+        "raw": secret,
+        "base64": base64.b64encode(raw).decode(),
+        "base64url": base64.urlsafe_b64encode(raw).decode(),
+        "hex": raw.hex(),
+    }
+    out = Redactor((secret,))(f"raw {secret} b64 {forms['base64']} hex {forms['hex']}")
+    assert out.text == (
+        "raw [REDACTED:controller-credential]"
+        " b64 [REDACTED:controller-credential]"
+        " hex [REDACTED:controller-credential]"
+    )
+    assert out.redaction_count == 3
+    flagged = Redactor(flagged=(secret,))(f"quoted b64 {forms['base64']}")
+    assert forms["base64"] not in flagged.text
+    assert flagged.redaction_count == 1
 
 
 def test_clean_text_is_untouched_and_truncation_is_marked():

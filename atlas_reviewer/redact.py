@@ -14,11 +14,13 @@ accepts) is not filled by accident. That guards against mistakes, not
 deliberate bypass: `dataclasses.replace`, `copy` and the module's private
 token all get past it. The patterns are best-effort, not a guarantee: a
 secret in a format listed nowhere below still passes through, which is why
-the controller also scrubs the exact values of its own credentials.
+the controller also scrubs the exact values of its own credentials, in
+their base64 and hex encodings too.
 """
 
 from __future__ import annotations
 
+import base64
 import re
 from bisect import bisect_right
 from collections.abc import Callable, Iterator, Sequence
@@ -47,6 +49,16 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("model-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}")),
     ("aws-key-id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    # The controller's Sprites credential, in the shape this repo's code
+    # gives it: the token is sent as one Bearer credential
+    # (`sprites_api.SpritesClient._headers`) and every carrier of
+    # `ATLAS_SPRITES_TOKEN`, fixtures included, holds
+    # `org/<org id>/<secret>`. Issue #663: without this pattern, a token
+    # the controller does not itself hold survived redaction.
+    (
+        "sprites-token",
+        re.compile(r"\borg/\d+/[A-Za-z0-9_-]{8,}"),
+    ),
     (
         "jwt",
         re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"),
@@ -207,16 +219,31 @@ def detect_secrets(text: str) -> SecretScan:
 def _scrub_known(
     raw: str, known_secrets: Sequence[str], label: str = "controller-credential"
 ) -> tuple[str, int]:
-    usable = sorted(
-        (s for s in known_secrets if len(s) >= _MIN_KNOWN_SECRET_LEN),
-        key=len,
-        reverse=True,
-    )
+    """Every known value and its base64 and hex encodings (issue #663), so
+    a log that carries the credential encoded under the same label is
+    scrubbed too. Forms are replaced longest first, so a value that
+    contains another is not cut short by the shorter one."""
+    forms = [
+        form
+        for secret in known_secrets
+        if len(secret) >= _MIN_KNOWN_SECRET_LEN
+        for form in _encodings(secret)
+    ]
     text, count = raw, 0
-    for secret in usable:
-        count += text.count(secret)
-        text = text.replace(secret, f"[REDACTED:{label}]")
+    for form in sorted(dict.fromkeys(forms), key=len, reverse=True):
+        count += text.count(form)
+        text = text.replace(form, f"[REDACTED:{label}]")
     return text, count
+
+
+def _encodings(secret: str) -> tuple[str, ...]:
+    """The value, its standard and URL-safe base64, and its hex. An
+    encoded form is never shorter than the value, so this adds no way for
+    a shorter string to match."""
+    raw = secret.encode("utf-8")
+    standard = base64.b64encode(raw).decode("ascii")
+    urlsafe = base64.urlsafe_b64encode(raw).decode("ascii")
+    return (secret, standard, urlsafe, raw.hex())
 
 
 def _assignments(text: str) -> tuple[str, int]:
