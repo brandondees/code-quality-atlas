@@ -1360,16 +1360,20 @@ constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
 ## 2026-11-14 — #663, #664: redaction hardening and pre-request refusal bookkeeping
 
-`redact` gains a `sprites-token` pattern (`org/<org id>/<secret>`, the
-shape every carrier of `ATLAS_SPRITES_TOKEN` here holds) and scrubs
-each known credential's base64 and hex encodings under the same
-label, so a token the controller does not hold, and a log that
-carries one encoded, no longer survive redaction (#663). The one-shot
-provider records a fail-closed transport failure of the ZDR-list or
-`/model` catalog GET in `budget.refusals`, which previously
-propagated unrecorded (#664). The agentic loop gives a ZDR or pricing
-refusal its own `MODEL_REFUSED` cause instead of `MODEL_ERROR` --
-still failing the lens, still not retried -- so the draft, the ledger
-and the parity gate can tell a policy refusal from a model failure
-(#664). Every change names a test that fails when it is reverted.
-D59.
+`redact` gains a `sprites-token` pattern in the shape the operator
+confirmed the deployed token has -- four slash-separated segments,
+`<org slug>/<numeric org id>/<token id>/<secret>`, only the second all
+digits, the secret at least eight characters and carrying a digit -- and
+scrubs each known credential's base64 (padded and unpadded), hex (both
+cases), percent-encoded and JSON-escaped forms under the same label, so a
+token the controller does not hold, and a log that carries one encoded,
+no longer survive redaction; a value with undecodable bytes from the
+environment scrubs instead of crashing (#663, round-1 review of #687).
+The one-shot provider records a fail-closed transport failure of the
+ZDR-list or `/model` catalog GET in `budget.refusals`, and the agentic
+adapter, which reaches `load_terms` directly, records the same failures
+itself (#664). The agentic loop gives a ZDR or pricing refusal its own
+`MODEL_REFUSED` cause instead of `MODEL_ERROR` -- still failing the lens,
+still not retried -- so the draft and the ledger name a policy refusal
+rather than a model failure (#664). Every change names a test that fails
+when it is reverted. D59.
