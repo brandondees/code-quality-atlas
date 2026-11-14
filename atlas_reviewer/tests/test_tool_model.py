@@ -954,6 +954,37 @@ def test_the_loop_refuses_an_unknown_tool_and_sends_the_fence_back(tmp_path):
     assert lens.provider.budget.calls == []
 
 
+def test_the_rejected_reply_reaches_the_next_request_as_an_assistant_turn(
+    tmp_path,
+):
+    """CodeRabbit 4569797401: the repair turn carries the rejected reply
+    itself, as an assistant turn the model can see, before the repair
+    instruction. The loop-level message list is asserted in
+    test_lens_loop; this pins the wire serialization through the adapter."""
+    usage = {"cost": "0.01", "is_byok": False}
+    done = final(finding())
+    lens, fake = model(
+        tool_response("diff_file", '{"path": "calc.py"}'),
+        tool_response("diff_file", '{"path": "config/keys.py"}'),
+        reply(completion("Looks fine to me!", usage=usage)),
+        reply(completion(done.text, usage=usage)),
+    )
+    outcome, _, _spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        limits=replace(LIMITS, reservation_usd=Decimal(5), lens_wall_s=600),
+    )
+    assert outcome.state is LensState.CLEAN
+    assert len(fake.chat_requests()) == 4
+    messages = json.loads(fake.chat_requests()[-1][3])["messages"]
+    rejected, repair = messages[-2], messages[-1]
+    assert rejected == {"role": "assistant", "content": "Looks fine to me!"}
+    assert repair["role"] == "user"
+    assert "The final reply was not accepted" in repair["content"]
+    assert "the reply is not one JSON object" in repair["content"]
+
+
 def test_the_loop_turn_cap_stops_the_adapter_at_one_request(tmp_path):
     lens, fake = model(
         tool_response("rm", "{}"),
