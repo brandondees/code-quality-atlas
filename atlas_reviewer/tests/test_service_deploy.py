@@ -110,8 +110,18 @@ def test_the_runbook_names_the_child_model_settings_outside_the_secret_file():
     for name in LIMIT_ENV.values():
         assert name not in d53
     reversibility = d53.split("**Reversibility.**", 1)[1].split("**Open:**", 1)[0]
-    assert "--runner" in reversibility
+    assert "sweep --runner NAME --force-live" in reversibility
     assert "--event" not in reversibility
+    d57 = decisions[decisions.index("- **D57") :].splitlines()[0]
+    update = d57.split("**Update (2026-11-14, D53):**", 1)[1]
+    assert "does not receive the agentic limit variables" in update
+    assert "never read `ATLAS_MAX_OUTPUT_TOKENS`" in update
+    assert (
+        "receives exactly `ATLAS_MODEL`, `ATLAS_PROVIDERS`, "
+        "`ATLAS_ALLOW_SAFETY_RETENTION`, `ATLAS_REQUIRE_ZDR`, and "
+        "`ATLAS_KEY_CEILING_USD`"
+    ) in update
+    assert "route and limit variables" not in update
     readme = (ROOT / "atlas_reviewer/README.md").read_text(encoding="utf-8")
     webhook = readme.split("## Webhook service", 1)[1].split("\n## ", 1)[0]
     webhook_flat = " ".join(webhook.split())
