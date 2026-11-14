@@ -21,8 +21,19 @@ verify leaves the lens partial or failed, never clean. A final
 reply is clean only when every changed file's diff was read in full: a
 `diff_file` chain from offset 0 through every truncated page. A changed
 file left unread makes the attempt partial (`FILES_UNREAD`), and that
-cause is not retried. The loop does not send the unread list back for
-another turn (D42).
+cause is not retried (an `UNPARSED` reply is still retried; D58 narrows
+D42). Before a final reply is accepted with files unread, the loop sends
+the unread list back once, fenced (D58). A model call that failed on the
+transport is a `TRANSPORT_ERROR` cause, retryable on its own -- the
+unread-file veto below still applies -- while a model error is not. A
+timed-out request is retried once as its own reserved, counted call, only
+while the clocks leave room for one more timeout. Once every changed diff
+is read, or once a tool call is
+repeated, one finalize-now nudge is injected (D58's detector), bounded by
+`no_progress_turns` and `duplicate_calls`. A final reply the harness has
+already judged is kept when the follow-up turn it earned can never run,
+and -- when it carried findings -- across the tool work the nudge asked
+for, until a newer final reply is judged.
 
 The five review limits have defaults Brandon set on 2026-11-11, for
 headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
@@ -42,7 +53,7 @@ import json
 import math
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
@@ -61,11 +72,18 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
+from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
 from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
 from atlas_reviewer.notes import quote_untrusted
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Clock
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    Clock,
+    TransportError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all
@@ -81,6 +99,11 @@ DEFAULT_MAX_CALLS = 50
 DEFAULT_MAX_TURNS = 50
 DEFAULT_LENS_WALL_S = 1200
 DEFAULT_REVIEW_WALL_S = 3600
+# The no-progress detector's thresholds (D58): after full diff coverage,
+# this many more turns without a final reply -- or this many identical
+# tool calls at any coverage -- inject one finalize nudge.
+DEFAULT_NO_PROGRESS_TURNS = 6
+DEFAULT_DUPLICATE_CALLS = 3
 
 # ------------------------------------------------------------------ limits
 
@@ -103,6 +126,8 @@ class Limits:
     review_wall_s: float
     retries: int
     pool_size: int
+    no_progress_turns: int
+    duplicate_calls: int
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -117,7 +142,10 @@ class AgenticLimits:
     defaults are Brandon's headroom (2026-11-11); pass a value to override
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
-    is one). The per-call token fields are None until the catalog is known:
+    is one). `no_progress_turns` and `duplicate_calls` are the no-progress
+    detector's thresholds (D58): turns past full diff coverage without a
+    final reply, and identical calls, before one finalize nudge is
+    injected. The per-call token fields are None until the catalog is known:
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -127,6 +155,8 @@ class AgenticLimits:
     review_wall_s: float | None = DEFAULT_REVIEW_WALL_S
     retries: int = RETRIES
     pool_size: int = POOL_SIZE
+    no_progress_turns: int | None = DEFAULT_NO_PROGRESS_TURNS
+    duplicate_calls: int | None = DEFAULT_DUPLICATE_CALLS
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -151,7 +181,7 @@ def _check_limits(limits: Limits) -> None:
         and limits.reservation_usd > 0
     ):
         raise ValueError("reservation_usd must be a positive Decimal")
-    for name in ("max_calls", "max_turns"):
+    for name in ("max_calls", "max_turns", "no_progress_turns", "duplicate_calls"):
         value = getattr(limits, name)
         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
             raise ValueError(f"{name} must be a positive integer")
@@ -190,14 +220,28 @@ def _check_limits(limits: Limits) -> None:
         raise ValueError("reasoning_max_tokens must be less than max_output_tokens")
 
 
-def default_reasoning_tokens(output: int) -> int:
-    """Half of `output`, so the reply has the other half.
+# The reasoning hint an open-weight model gets by default (D58). The
+# 2026-11-13 trials measured the open-weight candidates spending up to 96%
+# of each turn's completion tokens on reasoning at the half-output hint,
+# at 31-46 s a turn, until the lens clock ran out; 8,192 keeps a turn's
+# thinking bounded so the reply and the next tool call still fit.
+REASONING_HINT_CAP = 8_192
+
+
+def default_reasoning_tokens(output: int, model_id: str = "") -> int:
+    """Half of `output`, so the reply has the other half -- capped at
+    `REASONING_HINT_CAP` for every model outside `anthropic/`, the
+    open-weight and other-provider ids the trials measured looping on
+    reasoning. An override (`reasoning_max_tokens`) always wins.
 
     OpenRouter counts reasoning tokens against `max_tokens`. A hint one
     under the cap leaves one token for the tool call or the final reply,
     and that turn stops with `finish_reason=length`.
     """
-    return output // 2
+    half = output // 2
+    if model_id.startswith("anthropic/"):
+        return half
+    return min(half, REASONING_HINT_CAP)
 
 
 @dataclass(frozen=True)
@@ -240,7 +284,8 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     completion limit, unless that limit would leave less than three
     quarters of the context for input. The input cap is the context that
     cap leaves. The reasoning value defaults to half that output cap
-    (`default_reasoning_tokens`), so the reply has the other half.
+    (`default_reasoning_tokens`), capped at `REASONING_HINT_CAP` for a
+    model outside `anthropic/`, so the reply has the other half.
     OpenRouter counts reasoning tokens against `max_tokens`, and the
     reservation does not depend on the hint. An override may be larger
     than the quarter and may not exceed the model's context. The output
@@ -263,7 +308,7 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     if output < 2:
         raise LimitRefused(hit("max_output_tokens", output, "at least 2"))
     reasoning = (
-        default_reasoning_tokens(output)
+        default_reasoning_tokens(output, terms.model_id)
         if limits.reasoning_max_tokens is None
         else limits.reasoning_max_tokens
     )
@@ -428,11 +473,13 @@ When you are done, reply with exactly one JSON object and nothing else:
 the body markers>, "findings": [...]}. Each finding has the keys location,
 evidence, severity, valence, route, attribution, finding and fix, and
 optionally siblings, with the values the Finding contract below defines.
-Quote evidence exactly as the head file reads at the cited lines, or, for
-code the pull request removed, as the diff's removed lines read. Every quote
-is checked, and a finding whose quote is not found is not reported. With no
-findings, reply with "findings": []; that counts only if every changed
-file's diff was read in full, every page."""
+Severity is exactly one of blocker, major, minor or nit -- never a level
+such as high, medium or low. Quote evidence exactly as the head file reads
+at the cited lines, or, for code the pull request removed, as the diff's
+removed lines read. Every quote is checked, and a finding whose quote is
+not found is not reported. With no findings, reply with "findings": [];
+that counts only if every changed file's diff was read in full, every
+page."""
 
 
 def finding_contract(path: Path = SYNTHESIS) -> str:
@@ -470,13 +517,17 @@ def lens_system(
 
 def retry_reasons(outcome: AttemptOutcome) -> tuple[str, ...]:
     """Controller text only: the attestation, unless it merely says no
-    reply came, and each cause."""
+    reply came, each cause, and, for a reply that broke the finding
+    contract, the validator's own message."""
     stated = outcome.attestation not in (
         Attestation.ATTESTED,
         Attestation.UNACKNOWLEDGED,
     )
     head = (outcome.attestation.value,) if stated else ()
-    return (*head, *sorted(c.value for c in outcome.causes))
+    tail = sorted(c.value for c in outcome.causes)
+    if Cause.UNPARSED in outcome.causes and outcome.detail:
+        tail.append(outcome.detail)
+    return (*head, *tail)
 
 
 # ----------------------------------------------------------------- spend
@@ -608,6 +659,20 @@ class _Progress:
     secrets: list[BridgeSecret] = field(default_factory=list)
     pages: _DiffPages = field(default_factory=_DiffPages)
     repair_sent: bool = False
+    covered_at_turn: int | None = None
+    nudges: list[str] = field(default_factory=list)
+    unread_nudged: bool = False
+    stall_nudged: bool = False
+    # The last judged outcome whose follow-up turn was queued but not yet
+    # answered: any stop before that turn is placed returns it, whatever it
+    # carries (D58, review M1). Once the follow-up was placed and answered
+    # with tool work, the last finding-bearing judgment anywhere in the
+    # attempt is the evidence a later stop returns (review round 3, M-b;
+    # round 4, probes E and H: a finding-less hold and a repair refusal do
+    # not outlive their own turn).
+    held_outcome: AttemptOutcome | None = None
+    held_placed: bool = False
+    finding_hold: AttemptOutcome | None = None
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -616,6 +681,40 @@ class _Progress:
         unread = self.pages.unread(self.changed)
         if unread:
             self.causes.add(Cause.FILES_UNREAD)
+        held = self.held_outcome
+        self.held_outcome = None
+        if held is not None and not self.held_placed:
+            # The follow-up turn never ran: the newest judgment stands,
+            # with the stop's cause and the limit named.
+            both = (
+                f"{held.detail}; {detail}" if held.detail and detail else
+                (detail or held.detail)
+            )  # fmt: skip
+            return replace(
+                held,
+                causes=frozenset(held.causes) | frozenset(self.causes),
+                detail=both,
+                limit_hit=limit_hit,
+                nudges=tuple(self.nudges),
+            )
+        best = held if held is not None and held.findings else self.finding_hold
+        if best is not None and best.findings:
+            # The last verified reply stays the attempt's evidence across
+            # the tool work a follow-up asked for, with that work and the
+            # stop recorded on it.
+            both = (
+                f"{best.detail}; {detail}" if best.detail and detail else
+                (detail or best.detail)
+            )  # fmt: skip
+            return replace(
+                best,
+                causes=frozenset(best.causes) | frozenset(self.causes),
+                tools=tuple(self.tools),
+                turns=self.turns,
+                detail=both,
+                limit_hit=limit_hit,
+                nudges=tuple(self.nudges),
+            )
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
             frozenset(self.causes),
@@ -625,6 +724,7 @@ class _Progress:
             unread=unread,
             changed_files=len(self.changed),
             limit_hit=limit_hit,
+            nudges=tuple(self.nudges),
         )
 
 
@@ -678,10 +778,13 @@ def run_attempt(
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
     messages: list[Message] = [UserText(job.first_turn)]
     tools = tool_schemas()
+    reset_events()
     p = _Progress(
         changed=job.changed,
         secrets=[] if secrets is None else secrets,
     )
+    retry_request: TurnRequest | None = None
+    retried_request: TurnRequest | None = None
     while True:
         stopped = _time_up(
             p, clock, limits, review_deadline, review_started,
@@ -689,7 +792,16 @@ def run_attempt(
         )  # fmt: skip
         if stopped is not None:
             return stopped
-        request = TurnRequest(system, tuple(messages), tools)
+        if retry_request is None:
+            request = TurnRequest(system, tuple(messages), tools)
+        else:
+            # One retry of the request that just timed out (D58 item 5):
+            # the timed-out request keeps its full reservation as spent, it
+            # may still be billed, and the retry is its own reserved call
+            # against the shared budget, counted like any turn. The
+            # completion span names it.
+            request, retry_request = retry_request, None
+            note_timeout_retry()
         priced = _reserve_call(model, request, spend)
         if not isinstance(priced, Decimal):
             return p.cut(*priced)
@@ -706,10 +818,22 @@ def run_attempt(
             exc.turns = p.turns
             exc.tools = tuple(p.tools)
             raise
+        except TransportTimeoutError as first:
+            if not _retry_earned(
+                request, retried_request, model, clock, lens_deadline,
+                review_deadline,
+            ):  # fmt: skip
+                return p.cut(Cause.TRANSPORT_ERROR, str(first))
+            retried_request = request
+            retry_request = request
+            continue
+        except TransportError as exc:
+            return p.cut(Cause.TRANSPORT_ERROR, str(exc))
         except BoundaryError as exc:
             return p.cut(Cause.MODEL_ERROR, str(exc))
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
+        _mark_held_placed(p, reply)
         if isinstance(reply, FinalReply):
             done = _accept_or_repair(job, reply.text, p, messages)
             if done is not None:
@@ -722,6 +846,61 @@ def run_attempt(
             found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
             return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
+        _inject_stall_nudge(p, limits, messages)
+
+
+def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -> None:
+    """The no-progress detector (D58): after the tool results of a turn
+    that left the attempt stalled, inject one finalize nudge. One detector
+    nudge per attempt, from whichever trigger fires first; the ledger and
+    the completion span name it."""
+    if p.covered_at_turn is None and not p.pages.unread(p.changed):
+        p.covered_at_turn = p.turns
+    if p.stall_nudged:
+        return
+    trigger = _stall(p, limits)
+    if trigger is not None:
+        p.stall_nudged = True
+        p.nudges.append(trigger)
+        note_nudge(trigger)
+        messages.append(UserText(_finalize_nudge()))
+
+
+def _mark_held_placed(p: _Progress, reply: ModelTurn) -> None:
+    """The follow-up turn was placed and answered with tool work; only a
+    finding-bearing held outcome survives a later stop (review round 3,
+    M-b). A final reply is judged by `_accept_or_repair`, which resets the
+    hold itself."""
+    if not isinstance(reply, FinalReply) and p.held_outcome is not None:
+        p.held_placed = True
+
+
+def _retry_earned(
+    request: TurnRequest,
+    retried_request: TurnRequest | None,
+    model: LensModel,
+    clock: Clock,
+    lens_deadline: float,
+    review_deadline: float,
+) -> bool:
+    """Whether the timed-out request earns its one retry: it has not been
+    retried already, and one more full timeout fits the clocks that remain
+    (review M2; round 3, M-a gates it through the traced wrapper too)."""
+    return request is not retried_request and _room_for_one_more_timeout(
+        model, clock, lens_deadline, review_deadline
+    )
+
+
+def _room_for_one_more_timeout(
+    model: LensModel, clock: Clock, lens_deadline: float, review_deadline: float
+) -> bool:
+    """Whether one more full request timeout fits inside the clocks that
+    remain (review M2). A model that does not name its timeout -- a test
+    double -- is not gated."""
+    timeout_s = getattr(model, "timeout_s", None)
+    if timeout_s is None:
+        return True
+    return clock.monotonic() + timeout_s < min(lens_deadline, review_deadline)
 
 
 def _reserve_call(
@@ -734,6 +913,8 @@ def _reserve_call(
         worst = model.worst_case_usd(request)
     except LimitRefused as exc:
         return _stopped(exc.hit)
+    except TransportError as exc:
+        return Cause.TRANSPORT_ERROR, str(exc)
     except BoundaryError as exc:
         return Cause.MODEL_ERROR, str(exc)
     # The estimate can wait on the catalog while another lens halts.
@@ -800,16 +981,60 @@ def _reads_source(result: BridgeResult, changed: frozenset[str]) -> bool:
 def _accept_or_repair(
     job: LensJob, text: str, p: _Progress, messages: list[Message]
 ) -> AttemptOutcome | None:
+    """Judge a final reply. A reply outside the finding contract earns
+    D44's one repair turn; an accepted reply that leaves files unread
+    earns D58's one unread-list nudge; the outcome otherwise. Each turn
+    goes back into this conversation, and the next final reply is the one
+    that counts. While a queued turn goes unanswered, the judged outcome
+    is held on the progress, so a stop before it is placed keeps the
+    reply's findings (D58, review M1); a finding-bearing judgment is also
+    kept on its own, as the evidence a later stop returns across the tool
+    work any follow-up asked for, until this function judges a newer
+    reply (review round 3, M-b; round 4, probes E and H)."""
     repaired = _repair(text, p)
-    if repaired is None:
-        return _final(job, text, p)
-    messages += [AssistantText(text), UserText(repaired)]
-    return None
+    if repaired is not None:
+        before = set(p.causes)
+        p.held_outcome = _final(job, text, p)
+        p.held_placed = False
+        # D44's shape: a refused reply is not judged into this attempt's
+        # causes; its own judgment is held for a stop before the repair
+        # turn is placed.
+        p.causes.clear()
+        p.causes |= before
+        messages += [AssistantText(text), UserText(repaired)]
+        return None
+    before = set(p.causes)
+    outcome = _final(job, text, p)
+    if outcome.findings:
+        # The newest finding-bearing judgment is the evidence a later stop
+        # returns, across any follow-up turns (review round 4, probe E).
+        p.finding_hold = outcome
+    if not p.unread_nudged and outcome.unread:
+        # D58 reverses D42's no-nudge rule once: the unread list goes back
+        # before a final reply is accepted, so a triaging model can finish
+        # its coverage. The refused reply's causes are not this attempt's
+        # unless the nudged reply fails too.
+        p.causes.clear()
+        p.causes |= before
+        p.unread_nudged = True
+        p.nudges.append("unread-files")
+        note_nudge("unread-files")
+        p.held_outcome = outcome
+        p.held_placed = False
+        messages += [UserText(_unread_nudge(outcome.unread, job.nonce))]
+        return None
+    p.held_outcome = None
+    p.held_placed = False
+    return outcome
 
 
 def _repair(text: str, p: _Progress) -> str | None:
     """One chance to correct a reply outside the finding contract. The
-    validation error is quoted. A second failure is the lens's result."""
+    validation error is quoted, with the schema facts the 2026-11-13
+    trials showed models missing (D58): the four severity words, the
+    per-finding `lens` key that is accepted and dropped, and prose before
+    the JSON, whose last fenced object is the one read. A second failure
+    is the lens's result."""
     try:
         parse_reply(text)
     except ContractError as exc:
@@ -819,10 +1044,65 @@ def _repair(text: str, p: _Progress) -> str | None:
         return (
             "The final reply was not accepted. The validation error, quoted: "
             f"{quote_untrusted(str(exc), scrub=str)}. "
+            "The finding contract's closed values: severity is exactly one "
+            "of blocker, major, minor or nit, never a level such as high, "
+            'medium or low. A per-finding "lens" key is accepted and '
+            "dropped. Prose before the reply is fine: the last fenced JSON "
+            "object is the one read. "
             "Reply once with one JSON object that meets the finding contract. "
             "Do not call a tool."
         )
     return None
+
+
+def _unread_nudge(unread: tuple[str, ...], nonce: str) -> str:
+    """The one turn the unread list earns (D58). The paths are PR-chosen
+    strings, so they travel fenced as data; the instruction around them is
+    controller text."""
+    return (
+        "Your reply is not accepted as a final review: you have not read "
+        "the diff of every changed file. Read each one below with "
+        "diff_file, then reply again, or finalize now with what you have.\n"
+        + fence(UntrustedBlock("unread-files", RepoText("\n".join(unread))), nonce)
+    )
+
+
+def _finalize_nudge() -> str:
+    """The one turn the no-progress detector earns (D58): finalize now
+    with what you have."""
+    return (
+        "You have made no progress for several turns. Finalize now with "
+        "what you have: reply with exactly one JSON object, in the shape "
+        "the Finding contract defines, and nothing else."
+    )
+
+
+def _stall(p: _Progress, limits: Limits) -> str | None:
+    """The no-progress detector's trigger, or None. Three identical calls
+    are a stall at any coverage; otherwise the trigger is the configured
+    number of turns past full diff coverage without a final reply."""
+    if _repeated(p, limits.duplicate_calls):
+        return "duplicate-calls"
+    if (
+        p.covered_at_turn is not None
+        and p.turns - p.covered_at_turn >= limits.no_progress_turns
+    ):
+        return "no-progress"
+    return None
+
+
+def _repeated(p: _Progress, threshold: int) -> bool:
+    """Whether any one (tool, validated arguments) pair has been called
+    `threshold` times this attempt. The bridge canonicalizes arguments, so
+    identical calls have identical `args` text."""
+    counts: dict[tuple[str, str], int] = {}
+    for use in p.tools:
+        key = (use.tool, use.args)
+        count = counts.get(key, 0) + 1
+        if count >= threshold:
+            return True
+        counts[key] = count
+    return False
 
 
 def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
@@ -836,6 +1116,7 @@ def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
             turns=p.turns,
             unread=unread,
             changed_files=len(job.changed),
+            nudges=tuple(p.nudges),
             **kw,
         )
 

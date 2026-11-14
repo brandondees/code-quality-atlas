@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 
 import pytest
 
@@ -10,8 +11,10 @@ from atlas_reviewer.picker import (
     COMPREHENSIVE_LIMIT,
     CRITICAL_TIER,
     PICKER_PATH,
+    PR_HYGIENE,
     Depth,
     PickerOutputError,
+    body_states_verification,
     load_picker,
     parse_picks,
     picker_instructions,
@@ -44,6 +47,55 @@ def test_instructions_name_the_operator_depth_and_its_breadth():
     assert f"at most {COMPREHENSIVE_LIMIT} names" in picker_instructions(
         Depth.COMPREHENSIVE
     )
+
+
+def test_instructions_say_the_critical_tier_always_runs_and_extras_are_dropped():
+    """The 2026-11-13 trials: the picker spent 2-4 of its slots naming
+    critical-tier lenses the controller adds anyway, and one model
+    corrected an over-long list with a second JSON object, which the
+    parser refused. The instructions now say the tier does not spend the
+    slots and that extra names are dropped, not an error (D58)."""
+    text = picker_instructions(Depth.REVIEW)
+    assert "always runs before your picks" in text
+    assert "does not spend your" in text
+    for name in CRITICAL_TIER:
+        assert name in text
+    assert "the extra names are dropped, not an" in text
+    assert "do not correct yourself with a second list" in text
+
+
+def test_the_last_json_object_in_a_reply_is_parsed():
+    """The 2026-11-13 Sonnet #640 failure, verbatim in shape: a list of 9,
+    then prose, then the corrected list of 8. The last object is the
+    reply."""
+    reply_text = (
+        '{"lenses": ["a-b", "c-d", "e-f", "g-h", "i-j", "k-l", "m-n", "o-p", '
+        '"q-r"]} Wait, I must limit to 8 names. Corrected: '
+        '{"lenses": ["a-b", "c-d", "e-f", "g-h", "i-j", "k-l", "m-n", "o-p"]}'
+    )
+    assert parse_picks(reply_text) == (
+        "a-b",
+        "c-d",
+        "e-f",
+        "g-h",
+        "i-j",
+        "k-l",
+        "m-n",
+        "o-p",
+    )
+
+
+def test_a_bare_object_after_prose_is_parsed():
+    assert parse_picks("Picking for this change:\n" + picks("checking-restraint")) == (
+        "checking-restraint",
+    )
+
+
+def test_a_nested_object_does_not_win_over_its_parent():
+    """The scanner skips a decoded object's own braces, so prose after a
+    valid object cannot turn an interior fragment into the reply."""
+    nested = '{"lenses": ["checking-restraint"], "note": {"why": "small"}} extra'
+    assert parse_picks(nested) == ("checking-restraint",)
 
 
 def test_a_ranked_list_is_kept_in_order_without_duplicates():
@@ -181,6 +233,136 @@ def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
 
 def test_the_critical_tier_lenses_all_exist_in_the_bundle():
     assert set(CRITICAL_TIER) <= LensLibrary().names()
+
+
+def test_the_process_hygiene_lens_exists_in_the_bundle():
+    assert LensLibrary().body(PR_HYGIENE) is not None
+
+
+def test_a_body_stating_verification_results_adds_pr_hygiene_ahead_of_the_picks():
+    """D58's policy rule: a PR body that states test counts, coverage or CI
+    claims always gets the process-hygiene lens, ahead of the picks."""
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle("checking-restraint"),
+        scrub=str,
+        pr_text="Tests: 2105 passed, coverage 96.78%; CI run 43493645208 green.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [
+        *CRITICAL_TIER,
+        PR_HYGIENE,
+        "checking-restraint",
+    ]
+    assert chosen.choices[len(CRITICAL_TIER)].why == (
+        "the pull request body states verification results"
+    )
+
+
+def test_a_body_without_verification_results_adds_no_pr_hygiene():
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle("checking-restraint"),
+        scrub=str,
+        pr_text="Adds a rounding helper to the totals module.",
+    )
+    assert PR_HYGIENE not in [c.name for c in chosen.choices]
+
+
+def test_a_picker_ranked_pr_hygiene_is_not_duplicated():
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, "checking-restraint"),
+        small_bundle("checking-restraint", PR_HYGIENE),
+        scrub=str,
+        pr_text="All 12 tests passed.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert names[len(CRITICAL_TIER)] == PR_HYGIENE
+
+
+def test_a_ranked_pr_hygiene_survives_a_body_without_verification_results():
+    """Review M3: a pr-hygiene lens the picker ranked must not vanish when
+    the PR body states no verification results; it reaches the plan as an
+    ordinary pick, so a NOT RUN line names it."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, "checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="Adds a rounding helper to the totals module.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert names[-2:] == [PR_HYGIENE, "checking-restraint"]
+    assert chosen.choices[-2].why == "picker rank 1"
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    by = {u.name: u for u in plan.uses}
+    assert by[PR_HYGIENE].status is LensStatus.RUN
+    assert by[PR_HYGIENE].why == "picker rank 1"
+
+
+def test_an_agentic_pick_of_pr_hygiene_survives_a_quiet_body_too():
+    from atlas_reviewer.picker import select_agentic_lenses
+
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, "checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="Adds a rounding helper to the totals module.",
+    )
+    names = [c.name for c in selection.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert {u.name for u in plan.loaded} >= {PR_HYGIENE, "checking-restraint"}
+
+
+def test_the_fallback_paths_add_pr_hygiene_when_the_body_states_results():
+    for run in (None, lambda: "not json"):
+        chosen = select_lenses(
+            Depth.REVIEW,
+            run,
+            small_bundle("checking-restraint"),
+            scrub=str,
+            pr_text="Coverage is 94%.",
+        )
+        names = [c.name for c in chosen.choices]
+        assert names == [*CRITICAL_TIER, PR_HYGIENE]
+
+
+@pytest.mark.parametrize(
+    ("text", "states"),
+    [
+        ("2105 passed, 96.78% coverage", True),
+        ("CI run 43493645208 passed", True),
+        ("All checks are green.", True),
+        ("3 tests failed", True),
+        ("96.78% coverage across the suite", True),
+        ("Fixes the CI flake.", False),
+        ("Fixes the flaky CI test that was failing on main.", False),
+        ("CI was red on main due to a flake; this fixes it.", False),
+        ("Adds a rounding helper.", False),
+        ("Follows the existing module design.", False),
+        ("CI" + ",9," * 20_000, False),
+    ],
+)
+def test_verification_detection(text, states):
+    assert body_states_verification(text) is states
+
+
+def test_verification_detection_is_bounded_on_a_crafted_body():
+    """The digit-run patterns must not backtrack quadratically on untrusted
+    text: a body at GitHub's 65,536-character cap of digit-comma repeats
+    scans in well under a second."""
+    body = "9," * 40_000
+    start = time.monotonic()
+    assert body_states_verification(body) is False
+    assert time.monotonic() - start < 1.0
 
 
 def never():

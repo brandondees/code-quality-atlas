@@ -30,7 +30,7 @@ MAX_LINE = 10_000_000
 # The longest lens name in the suite is 44 characters.
 MAX_LENS_CHARS = 80
 DIGEST = re.compile(r"[0-9a-f]{64}")
-_FENCED = re.compile(r"\A```(?:json)?\n(.*)\n```\Z", re.DOTALL)
+_ANY_FENCE = re.compile(r"```[^\n]*\n(.*?)\n```", re.DOTALL)
 _RANGE = re.compile(r"(?P<path>.+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?")
 _DESIGN = re.compile(r"(?:boundary|component):\S.*")
 _REPLY_KEYS = frozenset({"lens", "body_sha256", "findings"})
@@ -44,6 +44,11 @@ _REQUIRED = (
     "fix",
 )
 _OPTIONAL = ("evidence", "siblings")
+# The Finding contract's per-finding `lens` field names the lens that raised
+# the finding. The reply's top-level `lens` already does that, so the parser
+# accepts the key and drops it rather than refusing the whole finding: the
+# contract text lists it, and a reply that follows that text must parse.
+_IGNORED = frozenset({"lens"})
 
 
 class ContractError(ValueError):
@@ -148,13 +153,15 @@ class LensReply:
 
 def parse_reply(text: str) -> LensReply:
     """The reply as one JSON object `{"lens", "body_sha256", "findings"}`,
-    optionally inside one ```json fence and nothing else."""
+    bare, or as the last fenced JSON object when prose surrounds it (the
+    whole reply inside one fence is that last block)."""
     stripped = text.strip()
-    fenced = _FENCED.fullmatch(stripped)
     try:
-        data = json.loads(fenced.group(1) if fenced else stripped)
+        data = json.loads(stripped)
     except json.JSONDecodeError:
-        raise ContractError("the reply is not one JSON object") from None
+        data = _last_fenced_object(stripped)
+        if data is _NO_OBJECT:
+            raise ContractError("the reply is not one JSON object") from None
     if not isinstance(data, dict) or set(data) != _REPLY_KEYS:
         raise ContractError(
             "the reply must be an object with exactly the keys "
@@ -178,6 +185,22 @@ def parse_reply(text: str) -> LensReply:
     )
 
 
+def _last_fenced_object(text: str) -> Any:
+    """The last ```-fenced block's JSON, or `_NO_OBJECT` when there is no
+    closed fence or its content does not parse. A model often writes prose
+    before the JSON it meant as the reply; the last block is that JSON."""
+    blocks = _ANY_FENCE.findall(text)
+    if not blocks:
+        return _NO_OBJECT
+    try:
+        return json.loads(blocks[-1])
+    except (json.JSONDecodeError, RecursionError):
+        return _NO_OBJECT
+
+
+_NO_OBJECT: Any = object()
+
+
 def _finding(index: int, raw: Any) -> Finding:
     try:
         return _parse_finding(raw)
@@ -188,7 +211,7 @@ def _finding(index: int, raw: Any) -> Finding:
 def _parse_finding(raw: Any) -> Finding:
     if not isinstance(raw, dict):
         raise ContractError("must be an object")
-    unknown = set(raw) - set(_REQUIRED) - set(_OPTIONAL)
+    unknown = set(raw) - set(_REQUIRED) - set(_OPTIONAL) - _IGNORED
     missing = [k for k in _REQUIRED if k not in raw]
     if unknown:
         raise ContractError(f"has keys outside the contract ({len(unknown)})")

@@ -216,7 +216,7 @@ def test_reading_one_of_five_changed_files_cannot_approve(tmp_path):
     read = tools(("diff_file", {"path": "src/app.py"}))
     result, model, _ = review(
         tmp_path,
-        [read, final()],
+        [read, final(), final()],
         the_diff=diff,
         the_trees=SourceTrees(
             source_tarball(base, TOP), source_tarball(head, TOP), OLD, HEAD
@@ -243,7 +243,9 @@ def test_reading_one_of_five_changed_files_cannot_approve(tmp_path):
     assert "4 changed files not read in full" in headline
     assert headline.index("auth/session.py") < headline.index("src/util.py")
     assert "src/app.py" not in headline
-    assert len(model.requests) == 2
+    # The first final reply is nudged for the unread diffs (D58); the
+    # repeated reply is the accepted one.
+    assert len(model.requests) == 3
 
 
 def test_a_hold_that_fails_to_create_does_not_run_the_lens(tmp_path):
@@ -272,7 +274,9 @@ def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
 
 
 def test_the_ledger_records_each_attempt_with_its_head_and_body(tmp_path):
-    review(tmp_path, [READ_DIFF, final(finding())])
+    # The first final reply leaves a file unread and is nudged (D58); the
+    # repeated reply is the accepted one.
+    review(tmp_path, [READ_DIFF, final(finding()), final(finding())])
     (attempt,) = ledger(tmp_path).attempts(KEY)
     assert attempt.number == 1
     assert attempt.outcome.attestation is Attestation.ATTESTED
@@ -373,7 +377,7 @@ def test_a_quote_of_removed_code_is_reported_as_removed_lines_with_its_siblings(
         route="implementer",
         siblings="none found in src/",
     )
-    result, _, _ = review(tmp_path, [READ_DIFF, final(removed)])
+    result, _, _ = review(tmp_path, [READ_DIFF, final(removed), final(removed)])
     draft = render_draft(result, Redactor())
     assert "pre-existing, removed lines]" in draft
     assert 'Siblings: `"none found in src/"`' in draft
@@ -1006,7 +1010,7 @@ def test_flagged_values_and_markup_from_the_model_never_reach_the_draft(tmp_path
         finding=f"token {TOKEN} is committed <!-- end -->",
         severity="blocker",
     )
-    result, _, _ = review(tmp_path, [READ_DIFF, final(loud)])
+    result, _, _ = review(tmp_path, [READ_DIFF, final(loud), final(loud)])
     draft = render_draft(result, Redactor())
     assert TOKEN not in draft
     assert "<!--" not in draft.split("\n", 1)[1]
@@ -1313,9 +1317,14 @@ def _lenses(
 
 
 def test_unread_files_go_to_a_continuation_of_the_same_lens_and_can_approve(tmp_path):
+    """The first final reply leaves keys.py unread and is nudged in its own
+    conversation (D58); the nudged reply ignores the nudge, so the attempt
+    ends partial and D44's continuation takes the unread files. The
+    continuation's own conversation reads them and approves its scope."""
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
+            final(),
             final(),
             tools(("diff_file", {"path": "config/keys.py"})),
             final(),
@@ -1325,6 +1334,7 @@ def test_unread_files_go_to_a_continuation_of_the_same_lens_and_can_approve(tmp_
     assert result.coverage_complete
     assert [lens.lens for lens in result.lenses] == [LENS, LENS]
     assert result.lenses[0].outcome.causes == {Cause.FILES_UNREAD}
+    assert result.lenses[0].outcome.nudges == ("unread-files",)
     assert result.lenses[1].state is LensState.CLEAN
     created = [call[1] for call in sprites.calls if call[0] == "create"]
     assert len(created) == 2 and len(set(created)) == 2
@@ -1339,9 +1349,13 @@ def test_a_continuation_that_makes_no_progress_stops(tmp_path):
 
 
 def test_a_file_one_lens_left_unread_is_not_covered_by_another_lens(tmp_path):
+    # The second entry pair's first final reply is nudged (D58) and the
+    # nudged reply ignores the nudge, so LENS's attempt still ends with
+    # keys.py unread and its continuation still fails its replies.
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
+            final(),
             final(),
             tools(("diff_file", {"path": "calc.py"})),
             tools(("diff_file", {"path": "config/keys.py"})),
@@ -1443,9 +1457,12 @@ def test_a_continuation_adds_no_round_record_of_its_own(tmp_path):
     from atlas_reviewer.rounds import RoundLog
 
     log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    # The nudged reply ignores the unread-list nudge (D58), so the attempt
+    # ends partial and the continuation runs in its own conversation.
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
+            final(),
             final(),
             tools(("diff_file", {"path": "config/keys.py"})),
             final(),
@@ -1697,9 +1714,12 @@ def test_a_picker_that_used_every_call_leaves_none_for_the_lenses(tmp_path):
 
 def test_the_continuation_rounds_stop_at_max_continuations(tmp_path, monkeypatch):
     monkeypatch.setattr("atlas_reviewer.coordinator.MAX_CONTINUATIONS", 0)
+    # The second final reply ignores the unread-list nudge (D58), so the
+    # attempt still ends with keys.py unread.
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
+            final(),
             final(),
             tools(("diff_file", {"path": "config/keys.py"})),
             final(),
@@ -1707,6 +1727,7 @@ def test_the_continuation_rounds_stop_at_max_continuations(tmp_path, monkeypatch
     )
     result, _ = _lenses(tmp_path, [LENS], model)
     assert [lens.lens for lens in result.lenses] == [LENS]
+    assert result.lenses[0].outcome.nudges == ("unread-files",)
     assert not result.coverage_complete
 
 

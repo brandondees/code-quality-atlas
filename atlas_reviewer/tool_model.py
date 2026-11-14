@@ -27,8 +27,9 @@ the one-shot 3 calls and $3).
 Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
 executes and returns that refusal, nonce-fenced, as the next tool
-result. This module does not execute a tool and does not retry a call:
-a retry would be a second billed request under one reservation.
+result. This module does not execute a tool and sends one request per
+turn: a read timeout raises `TransportTimeoutError`, and the loop owns
+the one retry, reserving it as its own call against the shared budget.
 """
 
 from __future__ import annotations
@@ -36,13 +37,14 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
 from atlas_reviewer.budget import (
+    InputTokenMeter,
     TokenBoundError,
     check_tokens,
-    input_token_bound,
     worst_case_usd,
 )
 from atlas_reviewer.call_facts import CallFacts, note_call
@@ -75,12 +77,28 @@ from atlas_reviewer.openrouter import (
     optional_parameters,
     provider_preferences,
 )
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    ResponseTooLargeError,
+    TransportError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.pricing import ModelTerms
 
 # Not a price. `Spend.settle` keeps the reservation when the cost is not
 # a finite Decimal greater than or equal to zero.
 UNPRICED = Decimal("Infinity")
+
+
+def _observed(exc: TokenBoundError, note: str) -> str:
+    """The refusal's observed value, with the bound's basis on the input
+    cap, where the bound is the meter's estimate rather than a model
+    response. The refusal travels to the draft and the ledger, so the
+    basis is what an operator reads there."""
+    if exc.limit != "max_input_tokens":
+        return str(exc.observed)
+    return f"{exc.observed} (bound from {note})"
 
 
 class OpenRouterLensModel:
@@ -96,6 +114,9 @@ class OpenRouterLensModel:
         # object when `per_call` is not the limits that review resolved.
         self.per_call = AgenticLimits().resolve() if per_call is None else per_call
         self._ready_for_turn: tuple[ModelTerms, bool, SelectedEndpoints] | None = None
+        self._meter = InputTokenMeter()
+        self._bound_note = ""
+        self._last_system: str | None = None
 
     @property
     def name(self) -> str:
@@ -105,6 +126,13 @@ class OpenRouterLensModel:
         """ZDR required, and whether `cache_control` is on the request."""
         return self.provider.routing()
 
+    @property
+    def bound_note(self) -> str:
+        """How the last worst-case input bound was computed: from the last
+        response's reported usage plus an estimate for the new messages, or
+        from bytes when there was no usable report. The trace records it."""
+        return self._bound_note
+
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         terms, counts_byok, selected = self._ready()
         # The loop prices the turn and then places it. The endpoint
@@ -113,15 +141,47 @@ class OpenRouterLensModel:
         self._ready_for_turn = (terms, counts_byok, selected)
         bounds = resolve_per_call(self.per_call, terms)
         payload = _payload(self.provider, request, terms, bounds, selected)
-        bound = input_token_bound(json.dumps(payload))
+        if request.system != self._last_system:
+            # A different system prompt is a different conversation (a
+            # retry attempt names the previous refusal; a continuation a
+            # new scope), so the last reported baseline prices content
+            # that is no longer there: reset to the byte bound.
+            self._meter.reset()
+        # The meter needs what the messages added since the last reported
+        # response weigh: the whole payload serialized, and the same
+        # serialization cut back to the messages that response already
+        # priced. `_payload` is deterministic, so the difference is exactly
+        # the new messages' bytes.
+        prefix = replace(
+            request, messages=request.messages[: self._meter.sent_messages]
+        )
+        bound, self._bound_note = self._meter.bound(
+            len(json.dumps(payload)),
+            len(json.dumps(_payload(self.provider, prefix, terms, bounds, selected))),
+            len(request.messages),
+        )
         try:
             check_tokens(bound, terms, bounds)
         except TokenBoundError as exc:
-            raise LimitRefused(hit(exc.limit, exc.configured, exc.observed)) from exc
+            raise LimitRefused(
+                hit(exc.limit, exc.configured, _observed(exc, self._bound_note))
+            ) from exc
         return worst_case_usd(bound, terms, bounds)
 
+    @property
+    def timeout_s(self) -> float:
+        """The per-request timeout this adapter sends with, for the loop's
+        retry gate (review M2): one more timeout must fit the clocks."""
+        return self.provider._timeout_s
+
     def turn(self, request: TurnRequest) -> ModelTurn:
-        """One request, no retry. The loop counts the call and settles the cost."""
+        """One request, no retry. A read timeout raises
+        `TransportTimeoutError`, and the loop owns the one retry: it
+        reserves the retry as its own call against the shared budget and
+        counts it, which a retry inside the adapter could not do. Any
+        other transport failure, and every failure after a response
+        arrived, is one request, no retry. The loop counts the call and
+        settles the cost."""
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok, selected = self._ready() if cached is None else cached
@@ -129,16 +189,12 @@ class OpenRouterLensModel:
         payload = _payload(self.provider, request, terms, bounds, selected)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
-        try:
-            resp = self.provider._transport.request(
-                "POST",
-                url,
-                self.provider._headers(authed=True, json_body=True),
-                body,
-                self.provider._timeout_s,
-            )
-        except BoundaryError as exc:
-            raise BoundaryError(f"OpenRouter transport error: {exc}") from exc
+        resp = self._send(
+            url,
+            self.provider._headers(authed=True, json_body=True),
+            body,
+            self.provider._timeout_s,
+        )
         if resp.status != 200:
             raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
         try:
@@ -151,9 +207,40 @@ class OpenRouterLensModel:
                     "could not be parsed, so is_byok could not be checked"
                 ) from None
             raise
+        usage = data.get("usage")
+        usage_obj = usage if isinstance(usage, dict) else {}
+        # The reported prompt tokens are the meter's next baseline, taken
+        # before any later check raises, so a refused turn still leaves the
+        # data behind for the retry attempt. The system prompt of that
+        # request is what the baseline priced.
+        self._meter.observe(_tokens(usage_obj, "prompt_tokens"), len(request.messages))
+        self._last_system = request.system
         return _turn(
-            data, terms, counts_byok, self.provider.model_id, bounds.max_output_tokens
+            data,
+            terms,
+            counts_byok,
+            self.provider.model_id,
+            bounds.max_output_tokens,
+            bounds.reasoning_max_tokens,
         )
+
+    def _send(
+        self, url: str, headers: Mapping[str, str], body: bytes, timeout_s: float
+    ) -> Any:
+        """The request, once. A timeout raises `TransportTimeoutError` for
+        the loop's retry; a failure before any response arrived is a
+        `TransportError`; a response that arrived but was too large is a
+        model-level error, not a transport one (review Minor 2)."""
+        try:
+            return self.provider._transport.request(
+                "POST", url, headers, body, timeout_s
+            )
+        except TransportTimeoutError:
+            raise
+        except ResponseTooLargeError as exc:
+            raise BoundaryError(f"OpenRouter response too large: {exc}") from exc
+        except BoundaryError as exc:
+            raise TransportError(f"OpenRouter transport error: {exc}") from exc
 
     def _ready(self) -> tuple[ModelTerms, bool, SelectedEndpoints]:
         if self.provider._key_status is None:
@@ -271,6 +358,7 @@ def _turn(
     counts_byok: bool,
     model_id: str,
     output_cap: int,
+    reasoning_hint: int | None = None,
 ) -> ModelTurn:
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
@@ -285,7 +373,9 @@ def _turn(
         raise BoundaryError(f"OpenRouter served {served!r}, not {model_id}")
     choice = _choice(data)
     finish = choice.get("finish_reason")
-    _remember(data, usage_obj, served, finish)
+    _remember(
+        data, usage_obj, served, finish, reasoning_hint=reasoning_hint
+    )  # fmt: skip
     if finish == "length":
         raise LimitRefused(hit("max_output_tokens", output_cap, "finish_reason=length"))
     message = choice.get("message")
@@ -307,7 +397,12 @@ def _turn(
 
 
 def _remember(
-    data: Mapping[str, Any], usage: Mapping[str, Any], served: object, finish: object
+    data: Mapping[str, Any],
+    usage: Mapping[str, Any],
+    served: object,
+    finish: object,
+    *,
+    reasoning_hint: int | None = None,
 ) -> None:
     """Stash token counts before a length stop raises, so the span still
     records them. A scripted model never calls this."""
@@ -339,6 +434,7 @@ def _remember(
             ),
             provider=provider,
             provider_endpoint=endpoint,
+            reasoning_hint=reasoning_hint,
         )
     )
 

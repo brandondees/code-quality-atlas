@@ -8,7 +8,7 @@ import pytest
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 from atlas_reviewer.bridge import BridgeResult, Status
-from atlas_reviewer.call_facts import CallFacts, note_call, take_call
+from atlas_reviewer.call_facts import CallFacts, note_call, note_nudge, take_call
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     FinalReply,
@@ -23,7 +23,11 @@ from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.redact import Redactor, redact
 from atlas_reviewer.tool_model import _turn
-from atlas_reviewer.tracing import export_plan, limit_label, memory_trace
+from atlas_reviewer.tracing import (
+    export_plan,
+    limit_label,
+    memory_trace,
+)
 
 from .agentic import LENS, READ_ALL, final, finding
 from .helpers import fake_token
@@ -162,6 +166,143 @@ def test_bodies_are_exported_only_when_asked_and_still_scrubbed():
     assert SECRET not in attrs["input.value"]
     assert SECRET not in attrs["output.value"]
     assert "[REDACTED:" in attrs["input.value"]
+
+
+def test_the_exporter_timeout_is_the_export_setting_not_the_flush_wait(monkeypatch):
+    """D58: at 1 s, every batch export to the busy Phoenix collector timed
+    out and dropped its spans on long reviews. The exporter's HTTP timeout
+    is raised; the flush wait stays at 1 s (its own test pins it)."""
+    import opentelemetry.exporter.otlp.proto.http.trace_exporter as exporter_mod
+
+    from atlas_reviewer import tracing
+
+    built: dict[str, object] = {}
+
+    class Exporter:
+        def __init__(self, *, endpoint, headers, timeout=None):
+            built["timeout"] = timeout
+
+        def shutdown(self) -> None:
+            return None
+
+    monkeypatch.setattr(exporter_mod, "OTLPSpanExporter", Exporter)
+    trace = tracing.trace_from_env(
+        {"ATLAS_OTEL_ENDPOINT": "https://phoenix.internal"}, scrub
+    )
+    try:
+        assert built["timeout"] == tracing._EXPORT_TIMEOUT_S
+        assert built["timeout"] > 1
+        assert tracing._FLUSH_MS <= 1000
+    finally:
+        trace.shutdown()
+
+
+def test_the_span_names_the_input_bound_the_hint_and_any_nudge():
+    """D58's diagnosability: the completion span records how the input
+    bound was computed, the reasoning hint the request carried, and which
+    harness-injected turn (when any) this completion answers."""
+    trace, exporter = memory_trace(scrub)
+    model = _Model(
+        FinalReply("done", Decimal("0.01")),
+        CallFacts(
+            "deepseek/deepseek-v4.1-flash",
+            11,
+            4,
+            2,
+            "stop",
+            None,
+            reasoning_hint=8192,
+        ),
+    )
+    model.bound_note = (
+        "usage 22914 + 4123 new bytes at 1 token per byte + overhead 64 = 27038"
+    )
+    try:
+        with trace.lens(LENS):
+            wrapper = trace.wrap_model(model)
+            ask = TurnRequest("system", (), ())
+            wrapper.worst_case_usd(ask)
+            note_nudge("no-progress")
+            wrapper.turn(ask)
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert attrs["atlas.input_bound"] == model.bound_note
+    assert attrs["atlas.reasoning_hint"] == 8192
+    assert attrs["atlas.nudge"] == "no-progress"
+
+
+def test_the_span_names_a_timeout_retry():
+    """Review M2: the completion that follows a timed-out request's one
+    retry names the retry on its span."""
+    from atlas_reviewer.call_facts import note_timeout_retry
+
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            wrapper = trace.wrap_model(_Model(FinalReply("done", Decimal("0.01"))))
+            ask = TurnRequest("system", (), ())
+            wrapper.worst_case_usd(ask)
+            note_timeout_retry()
+            wrapper.turn(ask)
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert attrs["atlas.timeout_retry"] == 1
+
+
+def test_the_flush_wait_is_bounded_not_the_sdk_ignored_timeout():
+    """Review Minor 6: SDK 1.45.2's `force_flush` ignores its timeout, so
+    the wait is bounded by a thread join here: `flush` returns in about
+    the 1 s join bound while a dead collector's export is still running,
+    and a synchronous force_flush call would block for the full stuck
+    wait instead (review round 3, m2 asserts the wait)."""
+    import threading
+    import time
+
+    trace, _exporter = memory_trace(scrub)
+    blocked = threading.Event()
+    released = threading.Event()
+
+    class Stuck:
+        def force_flush(self, timeout_millis=None):
+            blocked.set()
+            released.wait(5)
+
+    trace._processor = Stuck()
+    try:
+        start = time.monotonic()
+        trace.flush()
+        elapsed = time.monotonic() - start
+        assert blocked.is_set()
+        # flush returned while the flush thread is still blocked on the
+        # dead collector.
+        assert not released.is_set()
+        assert elapsed < 1.5
+    finally:
+        released.set()
+        trace._processor = None
+        trace.shutdown()
+
+
+def test_a_completion_without_a_nudge_records_no_nudge_attribute():
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            trace.wrap_model(_Model(FinalReply("done", Decimal("0.01")))).turn(
+                TurnRequest("system", (), ())
+            )
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert "atlas.nudge" not in attrs
+    assert "atlas.input_bound" not in attrs
 
 
 def test_a_length_stop_is_named_on_the_model_span():
@@ -595,6 +736,10 @@ def test_a_continuation_is_a_lens_span_under_the_same_review_span(tmp_path):
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            # The nudged reply ignores the unread-list nudge (D58), so the
+            # attempt ends partial and the continuation is a second lens
+            # span under the same review span.
             final(),
             tools(("diff_file", {"path": "config/keys.py"})),
             final(),

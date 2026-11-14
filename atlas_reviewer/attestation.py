@@ -102,6 +102,7 @@ class Cause(StrEnum):
     QUOTES_FAILED = "a finding's quote was not found at the head SHA"
     ABANDONED = "the attempt never finished (the controller stopped mid-attempt)"
     MODEL_ERROR = "a model call failed"
+    TRANSPORT_ERROR = "a model call failed on the transport"
     INPUT_CAP = "the per-call input cap was reached"
     OUTPUT_CAP = "the per-call output cap does not fit the model"
     REASONING_CAP = "the reasoning hint does not fit the output cap"
@@ -131,9 +132,13 @@ class LensState(StrEnum):
 _FAILED_ATTESTATIONS = frozenset(
     {Attestation.NOT_DELIVERED, Attestation.MISACKNOWLEDGED, Attestation.UNRECORDED}
 )
-_FAILING = frozenset({Cause.UNPARSED, Cause.ABANDONED, Cause.MODEL_ERROR})
+_FAILING = frozenset(
+    {Cause.UNPARSED, Cause.ABANDONED, Cause.MODEL_ERROR, Cause.TRANSPORT_ERROR}
+)
 _RETRYABLE_ATTESTATIONS = _FAILED_ATTESTATIONS
-_RETRYABLE = frozenset({Cause.UNPARSED, Cause.QUOTES_FAILED, Cause.ABANDONED})
+_RETRYABLE = frozenset(
+    {Cause.UNPARSED, Cause.QUOTES_FAILED, Cause.ABANDONED, Cause.TRANSPORT_ERROR}
+)
 
 
 # --------------------------------------------------------------- outcomes
@@ -179,6 +184,10 @@ class AttemptOutcome:
     changed_files: int | None = None
     # None when the attempt was not stopped by a configured limit.
     limit_hit: LimitHit | None = None
+    # The harness-injected turns this attempt answered, in order:
+    # `unread-files`, `no-progress`, `duplicate-calls` (D58). Controller
+    # labels, not model text.
+    nudges: tuple[str, ...] = ()
 
     @property
     def state(self) -> LensState:
@@ -190,7 +199,10 @@ class AttemptOutcome:
 
     @property
     def retryable(self) -> bool:
-        if Cause.FILES_UNREAD in self.causes:
+        if Cause.FILES_UNREAD in self.causes and Cause.UNPARSED not in self.causes:
+            # D42, narrowed by D58: an unread file vetoes a retry, but a
+            # reply that also broke the finding contract is retried, since
+            # the parse refusal is what threw the reply away.
             return False
         return bool(
             self.attestation in _RETRYABLE_ATTESTATIONS or self.causes & _RETRYABLE
@@ -399,6 +411,7 @@ def _outcome_json(
         "unread": [scrub(path) for path in outcome.unread],
         "changed_files": outcome.changed_files,
         "limit": _limit_json(outcome.limit_hit, scrub),
+        "nudges": [scrub(nudge) for nudge in outcome.nudges],
     }
 
 
@@ -437,6 +450,9 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         raise TypeError("changed_files must be an integer")
     if isinstance(changed, int) and changed < 0:
         raise TypeError("changed_files must be an integer")
+    nudges = data.get("nudges", [])
+    if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
+        raise TypeError("nudges must be a list of strings")
     return AttemptOutcome(
         Attestation[data["attestation"]],
         frozenset(Cause[c] for c in data["causes"]),
@@ -447,6 +463,7 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         tuple(unread),
         changed,
         _limit_from(data.get("limit")),
+        tuple(nudges),
     )
 
 

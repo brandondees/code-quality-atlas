@@ -14,11 +14,18 @@ from atlas_reviewer.http import (
     safe_url,
 )
 from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
-from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    StreamTimeoutError,
+    TransportTimeoutError,
+)
 
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/stall":
+            # Accepted, then silent: the client's read times out.
+            time.sleep(1)
         routes = {
             "/ok": (200, {}, b"hello"),
             "/missing": (404, {}, b"nope"),
@@ -55,6 +62,14 @@ def test_transport_returns_success_and_error_responses(server):
     t = _transport()
     assert t.request("GET", f"{server}/ok", {}, None, 5).body == b"hello"
     assert t.request("GET", f"{server}/missing", {}, None, 5).status == 404
+
+
+def test_a_read_timeout_is_a_transport_timeout(server):
+    """D58 item 8's trigger: a read that never completes raises the
+    `TransportTimeoutError` subclass, which is what the adapter retries
+    once and what makes the attempt-level error retryable."""
+    with pytest.raises(TransportTimeoutError, match="timed out"):
+        _transport().request("GET", f"{server}/stall", {}, None, 0.3)
 
 
 def test_transport_never_follows_redirects(server):

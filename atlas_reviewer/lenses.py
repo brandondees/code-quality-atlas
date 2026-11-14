@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: MIT
 """Load the chosen review lenses' bodies. Pure apart from reading the repo's
-own skill bundle.
+own skill bundles.
 
 The model has no file tools, so naming a lens in a prompt is not running it:
-the controller reads each chosen lens's `body.md` and inlines it. A lens is
+the controller reads each chosen lens's `body.md` and inlines it. The bodies
+come from the reviewing-a-change bundle, and a lens the picker names that
+only another collapsed entrypoint ships (a decision or audit lens) is read
+from that entrypoint. A lens is
 inlined whole or not at all -- a cut lens is not doing the job it was
 written for -- so a body that does not fit the remaining size budget is
 NOT RUN, and a smaller lens after it can still fit. Which lenses ran and
@@ -96,7 +99,9 @@ class LensLibrary:
         """The lens body in this bundle, or, for the change-review bundle,
         in another collapsed entrypoint. A repo-shaped lens such as
         `auditing-documentation-health` is generated under the audit
-        entrypoint, and the picker can still name it on a diff."""
+        entrypoint, and the picker can still name it on a diff;
+        `reviewing-decision-lifecycle` ships only under the
+        reviewing-a-decision entrypoint (D58)."""
         found = _read_body(self._lenses, name)
         if found is not None or self._root != BUNDLE_ROOT:
             return found

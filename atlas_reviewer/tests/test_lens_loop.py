@@ -20,6 +20,7 @@ from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     CONTRACT_HEADING,
+    INSTRUCTIONS,
     SYNTHESIS,
     AgenticLimits,
     AssistantCalls,
@@ -28,15 +29,22 @@ from atlas_reviewer.lens_loop import (
     LimitsUnsetError,
     Spend,
     ToolResults,
+    UserText,
     _DiffPages,
     _Progress,
     _time_up,
     finding_contract,
     lens_system,
+    retry_reasons,
     run_attempt,
     tool_schemas,
 )
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    TransportError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
@@ -351,7 +359,11 @@ def test_a_bundle_without_the_contract_section_is_refused(tmp_path):
 def test_the_model_gets_the_whole_body_and_the_whole_contract_however_long(tmp_path):
     long_body = BODY + "".join(f"- rule {i}: check it\n" for i in range(20_000))
     digest = body_digest(long_body)
-    script = [READ_DIFF, final(digest=digest)]
+    # The first final reply leaves a file unread, so the unread-list nudge
+    # (D58) spends the third turn; the repeated final reply is the accepted
+    # one. The assertions are about the system prompt, which every
+    # request carries unchanged.
+    script = [READ_DIFF, final(digest=digest), final(digest=digest)]
     outcome, model, _ = attempt(tmp_path, script, the_job=job(long_body, digest))
     system = model.requests[0].system
     assert long_body in system
@@ -392,6 +404,383 @@ def test_a_retry_states_why_and_injects_the_body_whole_again(tmp_path):
     assert BODY in system
 
 
+def test_the_retry_reasons_carry_the_validators_message():
+    previous = AttemptOutcome(
+        Attestation.UNACKNOWLEDGED,
+        frozenset({Cause.UNPARSED}),
+        detail="finding 1: severity must be one of blocker, major, minor, nit",
+    )
+    reasons = retry_reasons(previous)
+    assert "the reply did not meet the finding contract" in reasons
+    assert "finding 1: severity must be one of blocker, major, minor, nit" in reasons
+
+
+def test_the_instructions_state_the_severity_words():
+    """The 2026-11-13 trials: the lens prompt never named the four severity
+    words, and models answered with the common high/medium/low scale, which
+    the contract refuses. INSTRUCTIONS names them (D58)."""
+    assert "blocker, major, minor or nit" in INSTRUCTIONS
+    assert "never a level" in INSTRUCTIONS
+
+
+def test_a_contract_refusal_earns_one_repair_turn_and_the_next_reply_counts(
+    tmp_path,
+):
+    """The 2026-11-13 trials: the severity the validator refused came back
+    only as a cause name, and Haiku failed the same enum twice. D44's
+    repair turn quotes the validation error, and D58's schema facts tell
+    the model the severity words; the rejected reply travels as
+    AssistantText and the repaired reply counts."""
+    bad = final(finding(severity="medium"))
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, final()])
+    assert outcome.attestation is Attestation.ATTESTED
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ()
+    assert outcome.turns == 3
+    assert model.requests[2].messages[-2] == AssistantText(bad.text)
+    repair = model.requests[2].messages[-1]
+    assert isinstance(repair, UserText)
+    assert "finding 1: severity must be one of blocker, major, minor, nit" in (
+        repair.text
+    )
+    assert "blocker, major, minor or nit" in repair.text
+    assert "never a level such as high, medium or low" in repair.text
+
+
+def test_an_unread_final_reply_is_nudged_once_and_the_next_reply_counts(tmp_path):
+    """D58 reverses D42's no-nudge rule once: the unread list goes back
+    before a final reply is accepted, so a triaging model can finish its
+    coverage."""
+    outcome, model, _ = attempt(
+        tmp_path, [READ_DIFF, final(), READ_ALL, final(finding())]
+    )
+    assert outcome.state is LensState.CLEAN
+    assert outcome.unread == ()
+    assert outcome.nudges == ("unread-files",)
+    nudge = model.requests[2].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "config/keys.py" in nudge.text
+    assert f'<untrusted-data id="{NONCE}" label="unread-files">' in nudge.text
+
+
+def test_the_unread_nudge_is_sent_once(tmp_path):
+    outcome, model, _ = attempt(tmp_path, [READ_DIFF, final(), final()])
+    assert Cause.FILES_UNREAD in outcome.causes
+    assert outcome.state is LensState.PARTIAL
+    assert not outcome.retryable
+    assert len(model.requests) == 3
+    assert outcome.nudges == ("unread-files",)
+
+
+def test_a_valid_reply_survives_a_follow_up_that_never_runs(tmp_path):
+    """Review M1: the nudge is queued after a parsed, quote-verified reply;
+    if the follow-up turn can never run -- here the turn cap -- the judged
+    outcome stands with its findings, and the stop is named. On the
+    pre-fix head this probe returned 0 findings."""
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [READ_DIFF, final(finding())],
+        limits=replace(LIMITS, max_turns=2),
+    )
+    assert outcome.state is LensState.PARTIAL
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.nudges == ("unread-files",)
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert outcome.unread == ("config/keys.py",)
+
+
+def test_a_reply_is_kept_when_the_model_obeys_the_nudge_then_hits_the_cap(
+    tmp_path,
+):
+    """Review round 3, M-b probe A: the model obeys the unread nudge by
+    reading the missing file, and the turn cap lands before it can reply
+    again. The verified finding survives, with the read recorded."""
+    outcome, model, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("diff_file", {"path": "config/keys.py"})),
+        ],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.turns == 3
+    # The post-nudge read is part of the recorded work.
+    assert [t.tool for t in outcome.tools] == ["diff_file", "diff_file"]
+    assert any("config/keys.py" in t.args for t in outcome.tools)
+    assert len(model.requests) == 3
+
+
+def test_a_reply_is_kept_when_the_model_answers_the_nudge_without_reading(
+    tmp_path,
+):
+    """Review round 3, M-b probe B: the model answers the nudge with tool
+    work that does not close the gap, and the cap lands. The finding
+    still survives."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [READ_DIFF, final(finding()), READ_DIFF],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+
+
+def test_a_finding_less_hold_dies_with_its_answered_turn(tmp_path):
+    """Review round 4, Minor 1, probe H: a finding-less hold (a no-findings
+    reply nudged for unread files) does not outlive its own answered turn
+    -- once the model reads the missing file and the cap lands, the causes
+    are exactly the stop's."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+        ],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    assert outcome.findings == ()
+    assert outcome.causes == {Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+
+
+def test_a_verified_finding_survives_a_repair_turn_answered_with_tool_work(
+    tmp_path,
+):
+    """Review round 4, Minor 2, probe E: a verified finding-bearing reply
+    is nudged, the model reads, then sends a garbage reply (a repair turn
+    is placed), the repair is answered with tool work, and the cap lands.
+    The verified finding survives; on the pre-fix head this probe gave 0
+    findings."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("read_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+            READ_DIFF,
+        ],
+        limits=replace(LIMITS, max_turns=5, max_calls=10),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.attestation is Attestation.ATTESTED
+
+
+def test_a_repair_turn_that_never_runs_reports_the_refusal(tmp_path):
+    """Review round 4, probe D, unchanged: a garbage reply whose repair
+    turn is never placed (the cap lands first) reports the refusal itself
+    -- 0 findings, the repair's UNPARSED with the cap, retryable. The
+    nudge-obeying read closed the coverage gap first."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=4, max_calls=10),
+    )
+    assert outcome.findings == ()
+    assert outcome.causes == {Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+
+
+def test_a_repair_refusal_followed_by_tool_work_loses_unparsed(tmp_path):
+    """Review round 4, probe I, unchanged: a repair refusal that is
+    answered with tool work loses UNPARSED on a later cap, exactly as
+    D44 on main behaves. Here no finding-bearing reply ever existed."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(),
+            final(text="no schema here"),
+            READ_DIFF,
+        ],
+        limits=replace(LIMITS, max_turns=4, max_calls=10),
+    )
+    assert outcome.findings == ()
+    assert Cause.UNPARSED not in outcome.causes
+    assert Cause.TURN_CAP in outcome.causes
+    assert not outcome.retryable
+
+
+def test_a_repair_held_reply_keeps_its_unparsed_cause_when_the_turn_never_runs(
+    tmp_path,
+):
+    """Review M1's second effect: a contract refusal whose repair turn can
+    never run keeps `UNPARSED`, so the attempt stays retryable instead of
+    reading as a plain partial."""
+    bad = final(text="no schema here")
+    outcome, _, _ = attempt(
+        tmp_path,
+        [READ_ALL, bad],
+        limits=replace(LIMITS, max_turns=2),
+    )
+    assert outcome.causes == {Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+    assert "the reply is not one JSON object" in outcome.detail
+    assert "max_turns" in outcome.detail
+
+
+def _stall_script(coverage, greps):
+    read = READ_ALL if coverage else READ_DIFF
+    return [
+        read,
+        *(tools(("grep", {"pattern": f"needle-{i}"})) for i in range(greps)),
+        final(),
+    ]
+
+
+def _duplicate_script(calls):
+    same = tools(("grep", {"pattern": "same"}))
+    return [READ_DIFF, *([same] * calls), final()]
+
+
+def test_no_progress_is_nudged_after_the_configured_turns(tmp_path):
+    """D58's no-progress detector: once every changed diff is read, six
+    more turns without a final reply inject one finalize nudge."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    outcome, model, _ = attempt(tmp_path, _stall_script(True, 6), limits=limits)
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ("no-progress",)
+    nudge = model.requests[-1].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "Finalize now with what you have" in nudge.text
+    # The nudge turn follows the last tool results in the conversation.
+    kinds = [type(m).__name__ for m in model.requests[-1].messages]
+    assert kinds[-2:] == ["ToolResults", "UserText"]
+
+
+def test_five_turns_past_coverage_are_not_nudged(tmp_path):
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    outcome, model, _ = attempt(tmp_path, _stall_script(True, 5), limits=limits)
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ()
+    assert not any(
+        isinstance(m, UserText) and "Finalize now" in m.text
+        for request in model.requests
+        for m in request.messages[1:]
+    )
+
+
+def test_three_identical_calls_are_nudged_even_before_coverage(tmp_path):
+    """The duplicate guard fires at any coverage: three identical bridge
+    calls are a stall, and the same finalize nudge goes out. Here the
+    coverage is incomplete, so the nudged reply that still skips the file
+    earns the unread-list nudge too, and the attempt ends partial."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    same = tools(("grep", {"pattern": "same"}))
+    script = [READ_DIFF, *([same] * 3), final(), final()]
+    outcome, model, _ = attempt(tmp_path, script, limits=limits)
+    assert Cause.FILES_UNREAD in outcome.causes
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.nudges == ("duplicate-calls", "unread-files")
+    stall = model.requests[4].messages[-1]
+    assert isinstance(stall, UserText)
+    assert "Finalize now with what you have" in stall.text
+
+
+def test_two_identical_calls_earn_the_unread_nudge_instead(tmp_path):
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    outcome, _, _ = attempt(tmp_path, _duplicate_script(2), limits=limits)
+    assert outcome.nudges == ("unread-files",)
+
+
+def test_a_transport_failure_is_a_retryable_transport_error(tmp_path):
+    """D58: a model call that failed on the transport is its own cause,
+    distinct from a model error (a response the provider produced), and
+    retryable on its own. An unread file still vetoes the retry (D42,
+    narrowed only for UNPARSED)."""
+    outcome, _, _ = attempt(
+        tmp_path, [TransportError("POST https://openrouter.ai failed: timed out")]
+    )
+    assert outcome.causes == {Cause.TRANSPORT_ERROR, Cause.FILES_UNREAD}
+    assert outcome.state is LensState.FAILED
+    assert not outcome.retryable
+    assert "timed out" in outcome.detail
+
+
+def test_a_transport_error_alone_is_a_retryable_outcome():
+    """A transport error without the unread-file veto (no tool call was
+    made here) is the ledger's retryable cause; a model error stays
+    non-retryable (test_a_failed_model_call_fails_the_lens_and_is_not_retried)."""
+    outcome = AttemptOutcome(
+        Attestation.UNACKNOWLEDGED, frozenset({Cause.TRANSPORT_ERROR})
+    )
+    assert outcome.retryable
+
+
+def test_the_timeout_retry_gate_sees_the_traced_model_timeout(tmp_path):
+    """Review round 3, M-a: every production lens model is wrapped by the
+    tracing wrapper, and the wrapper must forward the per-request timeout
+    the retry's clock gate reads. Through the wrapper, a retry whose
+    timeout cannot fit the clocks is skipped: one request, not two."""
+    from atlas_reviewer.tracing import memory_trace
+
+    from .test_tool_model import model as adapter_model
+
+    lens, fake = adapter_model(TransportTimeoutError("POST timed out"))
+    assert lens.timeout_s == 300.0
+    trace, _exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(lens)
+        assert wrapped.timeout_s == 300.0
+        clock = FakeClock()
+        clock.advance(350)
+        outcome, _, _ = attempt(
+            tmp_path,
+            [],
+            model=wrapped,
+            clock=clock,
+            spend=Spend(replace(LIMITS, reservation_usd=Decimal(5)).resolve()),
+        )
+    finally:
+        trace.shutdown()
+    assert len(fake.chat_requests()) == 1
+    assert Cause.TRANSPORT_ERROR in outcome.causes
+
+
+def test_the_attempt_itself_resets_a_stale_nudge_marker(tmp_path):
+    """Review round 3, m3: the reset must be production's (`run_attempt`),
+    not only the test fixture's. A marker noted after the fixture's own
+    pre-test reset must not reach any completion span."""
+    from atlas_reviewer.call_facts import note_nudge
+    from atlas_reviewer.tracing import memory_trace
+
+    note_nudge("unread-files")
+    trace, exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(ScriptedLensModel([READ_ALL, final(finding())]))
+        outcome, _, _ = attempt(tmp_path, [], model=wrapped)
+    finally:
+        trace.shutdown()
+    assert outcome.state is LensState.CLEAN
+    spans = [
+        span for span in exporter.get_finished_spans() if span.name == "completion"
+    ]
+    assert spans
+    for span in spans:
+        assert "atlas.nudge" not in dict(span.attributes or {})
+
+
 # -------------------------------------------------------------- outcomes
 
 
@@ -426,7 +815,9 @@ def test_a_head_read_does_not_replace_the_diff(tmp_path):
         ("read_file", {"path": "calc.py"}),
         ("read_file", {"path": "config/keys.py"}),
     )
-    outcome, _, _ = attempt(tmp_path, [read, final()])
+    # The first final reply is nudged for the unread diffs (D58); the
+    # repeated reply is the accepted one.
+    outcome, _, _ = attempt(tmp_path, [read, final(), final()])
     assert outcome.causes == {Cause.FILES_UNREAD}
     assert set(outcome.unread) == set(CHANGED)
     assert outcome.state is LensState.PARTIAL
@@ -446,7 +837,7 @@ def test_a_truncated_page_that_does_not_advance_leaves_the_file_unread(next_offs
 
 def test_a_page_that_does_not_start_at_zero_leaves_the_file_unread(tmp_path):
     skipped = tools(("diff_file", {"path": "calc.py", "offset": 40}))
-    outcome, _, _ = attempt(tmp_path, [skipped, final()])
+    outcome, _, _ = attempt(tmp_path, [skipped, final(), final()])
     assert "calc.py" in outcome.unread
     assert outcome.state is LensState.PARTIAL
 
@@ -455,12 +846,14 @@ def test_one_page_of_a_cut_diff_leaves_the_file_unread(tmp_path):
     from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
 
     limits = {**DEFAULT_LIMITS, "diff_file": ToolLimits(80, 10)}
-    outcome, model, _ = attempt(tmp_path, [READ_ALL, final()], tool_limits=limits)
+    outcome, model, _ = attempt(
+        tmp_path, [READ_ALL, final(), final(), final()], tool_limits=limits
+    )
     assert "calc.py" in outcome.unread
     assert Cause.FILES_UNREAD in outcome.causes
     assert outcome.state is LensState.PARTIAL
     assert not outcome.retryable
-    assert len(model.requests) == 2
+    assert len(model.requests) == 3
 
 
 def test_following_every_diff_page_reads_the_file(tmp_path):
@@ -497,15 +890,17 @@ def test_following_every_diff_page_reads_the_file(tmp_path):
 @pytest.mark.parametrize(
     "script",
     [
-        [final()],
-        [tools(("read_file", {"path": "docs/notes.md"})), final()],
-        [tools(("read_file", {"path": "calc.py", "rev": "BASE"})), final()],
-        [tools(("diff_stat", {})), final()],
-        [tools(("diff_file", {"path": "missing.py"})), final()],
+        [final(), final()],
+        [tools(("read_file", {"path": "docs/notes.md"})), final(), final()],
+        [tools(("read_file", {"path": "calc.py", "rev": "BASE"})), final(), final()],
+        [tools(("diff_stat", {})), final(), final()],
+        [tools(("diff_file", {"path": "missing.py"})), final(), final()],
     ],
     ids=["nothing", "unchanged-file", "base-side", "stat-only", "failed-read"],
 )
 def test_no_findings_without_reading_the_change_is_partial(tmp_path, script):
+    # Each first final reply is nudged for the unread diffs (D58); the
+    # repeated reply is the accepted one.
     outcome, _, _ = attempt(tmp_path, script)
     assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
     assert outcome.state is LensState.PARTIAL
@@ -522,6 +917,8 @@ def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path
 
 
 def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
+    """D44's repair turn, carrying D58's schema facts: the severity words,
+    the dropped per-finding `lens` key, and prose before the JSON."""
     bad = final(text="Looks fine to me!")
     outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, bad])
     assert outcome.attestation is Attestation.UNACKNOWLEDGED
@@ -532,6 +929,10 @@ def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
     repair = model.requests[2].messages[-1].text
     assert "the reply is not one JSON object" in repair
     assert "quoted" in repair
+    assert "blocker, major, minor or nit" in repair
+    assert "never a level such as high, medium or low" in repair
+    assert '"lens"' in repair
+    assert "last fenced JSON object" in repair
     assert model.requests[2].messages[-2] == AssistantText("Looks fine to me!")
     assert len(model.requests) == 3
     assert Cause.UNPARSED in outcome.causes
@@ -643,27 +1044,27 @@ def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
 
 
 def test_a_zero_cost_is_a_cost_and_settles_at_zero(tmp_path):
-    model = ScriptedLensModel([replace(READ_DIFF, cost_usd=Decimal(0)), final()])
+    model = ScriptedLensModel([replace(READ_ALL, cost_usd=Decimal(0)), final()])
     _, _, spend = attempt(tmp_path, [], model=model)
     assert spend.committed_usd == COST
 
 
 def test_an_infinite_cost_settles_at_the_worst_case(tmp_path):
     model = ScriptedLensModel(
-        [replace(READ_DIFF, cost_usd=Decimal("Infinity")), final()]
+        [replace(READ_ALL, cost_usd=Decimal("Infinity")), final()]
     )
     _, _, spend = attempt(tmp_path, [], model=model)
     assert spend.committed_usd == model.worst_usd + COST
 
 
 def test_a_cost_that_is_not_a_cost_settles_at_the_worst_case(tmp_path):
-    model = ScriptedLensModel([replace(READ_DIFF, cost_usd=Decimal(-1)), final()])
+    model = ScriptedLensModel([replace(READ_ALL, cost_usd=Decimal(-1)), final()])
     _, _, spend = attempt(tmp_path, [], model=model)
     assert spend.committed_usd == model.worst_usd + COST
 
 
 def test_a_cost_over_the_worst_case_is_committed_as_reported(tmp_path):
-    model = ScriptedLensModel([replace(READ_DIFF, cost_usd=Decimal("0.50")), final()])
+    model = ScriptedLensModel([replace(READ_ALL, cost_usd=Decimal("0.50")), final()])
     _, _, spend = attempt(tmp_path, [], model=model)
     assert spend.committed_usd == Decimal("0.50") + COST
 
@@ -823,8 +1224,10 @@ def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):
 
 def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     two = tools(("diff_file", {"path": "calc.py"}), ("read_file", {"path": "calc.py"}))
+    # The first final reply is nudged for the unread diff (D58); the
+    # repeated reply is the accepted one.
     outcome, _, _ = attempt(
-        tmp_path, [two, final()], session_limits=SessionLimits(max_calls=1)
+        tmp_path, [two, final(), final()], session_limits=SessionLimits(max_calls=1)
     )
     assert outcome.causes == {Cause.TOOL_GAP, Cause.FILES_UNREAD}
     assert [t.status for t in outcome.tools] == ["OK", "OVER_SESSION_LIMIT"]

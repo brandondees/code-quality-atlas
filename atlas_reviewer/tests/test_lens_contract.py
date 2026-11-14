@@ -69,6 +69,70 @@ def test_a_reply_may_sit_in_one_json_fence_and_say_no_findings():
     assert parsed.findings == ()
 
 
+def test_a_reply_whose_last_fenced_block_is_one_json_object_parses():
+    """The 2026-11-13 trials lost four replies to prose before the fence
+    (`lens_contract.py`'s `_FENCED` required the whole reply to be the
+    fence). The last fenced block is the reply the model meant."""
+    text = (
+        "I read every changed file's diff in full. Only calc.py has a "
+        "defect.\n\n```json\n" + reply(finding()) + "\n```"
+    )
+    parsed = parse_reply(text)
+    assert parsed.lens == "sweeping-for-security"
+    (f,) = parsed.findings
+    assert f.severity is Severity.MAJOR
+
+
+def test_a_fence_in_the_prose_does_not_eat_the_json_fence():
+    """A ```python block in the prose must not make its closing fence act
+    as the JSON fence's opener; the last closed block is still the reply."""
+    text = (
+        "The diff shows:\n\n```python\nx = 1\n```\n\nFinal answer:\n\n"
+        "```json\n" + reply(finding()) + "\n```"
+    )
+    (f,) = parse_reply(text).findings
+    assert f.severity is Severity.MAJOR
+
+
+@pytest.mark.parametrize(
+    "tag",
+    ["python3", "c++", "ts ", "json5"],
+)
+def test_a_fence_info_string_with_digits_or_symbols_pairs_correctly(tag):
+    """Review round 3, m5: info strings with digits, symbols or a trailing
+    space must pair as blocks, not turn their closing fence into the next
+    opener."""
+    text = (
+        f"Context:\n\n```{tag}\nx = 1\n```\n\nFinal answer:\n\n"
+        "```json\n" + reply(finding()) + "\n```"
+    )
+    (f,) = parse_reply(text).findings
+    assert f.severity is Severity.MAJOR
+
+
+def test_a_whole_reply_in_a_tagged_fence_parses():
+    parsed = parse_reply(f"```ts \n{reply(finding())}\n```")
+    assert parsed.findings
+
+
+def test_a_fence_that_does_not_hold_the_contract_is_still_refused_whole():
+    text = 'Here is my review:\n\n```json\n{"findings": []}\n```'
+    with pytest.raises(ContractError, match="exactly the keys"):
+        parse_reply(text)
+    with pytest.raises(ContractError, match="not one JSON object"):
+        parse_reply("prose\n\n```json\nnot json\n```")
+
+
+def test_a_per_finding_lens_key_is_accepted_and_ignored():
+    """The Finding contract lists `lens` among the per-finding fields, and
+    the 2026-11-13 trials lost five replies that filled it in. The reply's
+    top-level `lens` is the one that counts; a per-finding `lens` is
+    accepted and dropped, not a refusal."""
+    (f,) = parse_reply(reply(finding(lens="sweeping-for-security"))).findings
+    assert f.severity is Severity.MAJOR
+    assert not hasattr(f, "lens")
+
+
 def test_the_closed_sets_ignore_case_as_the_contract_capitalises_them():
     (f,) = parse_reply(reply(finding(severity="Blocker", route="ENG"))).findings
     assert f.severity is Severity.BLOCKER
