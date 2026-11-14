@@ -1248,3 +1248,15 @@ that does not fit no longer hides a current-head record written
 earlier. A truncated superseded record does not block a new head. The
 round-log arguments stay on the nested trace path. No live call was
 made. D52.
+
+## 2026-11-14 — round 4 on the per-lens continuation branch (#646)
+
+A review appends one round record, after the final synthesize, from the
+verdict over every lens and continuation. Each pooled lens and each
+continuation had appended its own one-lens record, so one review could
+store APPROVE and COMMENT side by side and spend the prior-round budget
+on repeats. The lock that serialized those writes is gone. The pooled
+path is tested for one record, one round-log read, the log-write note,
+and a caller omission. `agentic-review --model` has a test. #640 has
+merged since the 2026-11-12 entry above called it open, so D46 is on
+main. No live call was made. D44, D52.
