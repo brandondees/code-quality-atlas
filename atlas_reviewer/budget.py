@@ -115,6 +115,19 @@ def prompt_token_room(
 
 
 def check_tokens(input_tokens: int, terms: ModelTerms, limits: TokenLimits) -> None:
+    if (
+        terms.max_prompt_tokens is not None
+        and terms.max_prompt_tokens < limits.max_input_tokens
+        and input_tokens > terms.max_prompt_tokens
+    ):
+        who = f" (set by {terms.prompt_limit_tags})" if terms.prompt_limit_tags else ""
+        raise TokenBoundError(
+            f"prompt bound {input_tokens} tokens exceeds the pinned endpoint's "
+            f"{terms.max_prompt_tokens}-token max_prompt_tokens{who}",
+            limit="max_prompt_tokens",
+            configured=terms.max_prompt_tokens,
+            observed=input_tokens,
+        )
     if input_tokens > limits.max_input_tokens:
         raise TokenBoundError(
             f"prompt bound {input_tokens} tokens exceeds the "
