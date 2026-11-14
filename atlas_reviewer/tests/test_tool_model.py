@@ -269,9 +269,9 @@ def _terms_and_bounds(lens: OpenRouterLensModel):
 def test_the_input_bound_comes_from_the_reported_usage_plus_new_messages():
     """D58: the byte bound overcounted tokens about 2.8x on the trial
     calls. After a response reports `prompt_tokens`, the next turn's bound
-    is that count plus the new messages' bytes at one token per byte."""
-    from atlas_reviewer.budget import estimated_input_tokens
-
+    is that count plus the new messages' bytes at one token per byte --
+    asserted here against an independent literal, not the function under
+    test (review round 3, m1)."""
     usage = {"prompt_tokens": 1000, "completion_tokens": 5, "is_byok": False}
     lens, _fake = model(reply(completion("done", usage=usage)))
     first = request()
@@ -287,11 +287,11 @@ def test_the_input_bound_comes_from_the_reported_usage_plus_new_messages():
             )
         )
     )
-    expected = estimated_input_tokens(1000, whole - prefix)
+    expected = 1000 + (whole - prefix) + 64
     assert lens.worst_case_usd(second) == worst_case_usd(
         expected, *_terms_and_bounds(lens)
     )
-    assert "usage 1000 +" in lens.bound_note
+    assert f"usage 1000 + {whole - prefix} new bytes" in lens.bound_note
     # The new messages are one short user turn: the estimate is far below
     # what a whole-payload byte bound would have said.
     assert expected < whole + 64
@@ -336,6 +336,11 @@ def test_an_unreadable_usage_count_falls_back_to_the_byte_bound():
     ask = request()
     lens.worst_case_usd(ask)
     lens.turn(ask)
+    # The note must be recomputed after the turn: `bound_note` is set by
+    # the worst-case call that preceded it, and a stale note would pass
+    # for any `prompt_tokens` value the meter accepted (review round 3,
+    # m7).
+    lens.worst_case_usd(ask)
     assert "no reported usage yet" in lens.bound_note
     # The bound the note names is the whole payload's byte bound.
     assert (
@@ -352,6 +357,7 @@ def test_a_zero_reported_count_falls_back_to_the_byte_bound():
     ask = request()
     lens.worst_case_usd(ask)
     lens.turn(ask)
+    lens.worst_case_usd(ask)
     assert "no reported usage yet" in lens.bound_note
     assert (
         f"bytes {len(json.dumps(_payload_of(lens, ask)))} + overhead 64"

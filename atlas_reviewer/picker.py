@@ -74,8 +74,7 @@ _VERIFICATION_PATTERNS = (
     re.compile(r"\b\d[\d,.]{0,15}\s*%\s*(?:\w+\s+){0,3}coverage\b", re.IGNORECASE),
     re.compile(r"\bcoverage\s+(?:is\s+)?\d[\d,.]{0,15}", re.IGNORECASE),
     re.compile(
-        r"\bCI\b[^.\n]{0,80}\b(?:pass(?:ed|ing)?|fail(?:ed|ing)?|green|red|"
-        r"succeeded|successful)\b",
+        r"\bCI\b[^.\n]{0,80}\b(?:pass(?:ed|ing)?|green|succeeded|successful)\b",
         re.IGNORECASE,
     ),
     re.compile(

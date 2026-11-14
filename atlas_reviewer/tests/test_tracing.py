@@ -257,9 +257,12 @@ def test_the_span_names_a_timeout_retry():
 
 def test_the_flush_wait_is_bounded_not_the_sdk_ignored_timeout():
     """Review Minor 6: SDK 1.45.2's `force_flush` ignores its timeout, so
-    the wait is bounded by a thread join here: `flush` returns while a
-    dead collector's export is still running, instead of blocking on it."""
+    the wait is bounded by a thread join here: `flush` returns in about
+    the 1 s join bound while a dead collector's export is still running,
+    and a synchronous force_flush call would block for the full stuck
+    wait instead (review round 3, m2 asserts the wait)."""
     import threading
+    import time
 
     trace, _exporter = memory_trace(scrub)
     blocked = threading.Event()
@@ -272,11 +275,14 @@ def test_the_flush_wait_is_bounded_not_the_sdk_ignored_timeout():
 
     trace._processor = Stuck()
     try:
+        start = time.monotonic()
         trace.flush()
+        elapsed = time.monotonic() - start
+        assert blocked.is_set()
         # flush returned while the flush thread is still blocked on the
         # dead collector.
-        assert blocked.is_set()
         assert not released.is_set()
+        assert elapsed < 1.5
     finally:
         released.set()
         trace._processor = None

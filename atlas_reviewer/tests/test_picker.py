@@ -344,6 +344,8 @@ def test_the_fallback_paths_add_pr_hygiene_when_the_body_states_results():
         ("3 tests failed", True),
         ("96.78% coverage across the suite", True),
         ("Fixes the CI flake.", False),
+        ("Fixes the flaky CI test that was failing on main.", False),
+        ("CI was red on main due to a flake; this fixes it.", False),
         ("Adds a rounding helper.", False),
         ("Follows the existing module design.", False),
         ("CI" + ",9," * 20_000, False),
