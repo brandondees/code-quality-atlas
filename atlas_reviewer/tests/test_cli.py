@@ -1956,3 +1956,42 @@ def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatc
     assert made == [CallLimits(max_calls=2, budget_usd=Decimal("0.50"))]
     assert "Model calls: 1; committed: $0.02." in out.getvalue()
     assert "sk-or-v1-x" not in out.getvalue()
+
+
+def test_agentic_review_takes_the_model_and_provider_flags(tmp_path, monkeypatch):
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    alt = "deepseek/deepseek-v4.1-flash"
+    made = []
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    def factory(key, limits):
+        made.append(Live(object(), key, limits=limits))
+        return made[-1]
+
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50", "--model", alt, "--providers", "deepinfra/fp8"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x", "ATLAS_MODEL": "x/y"},
+        out=out, err=err,
+        sprites_factory=lambda env: cli._scripted_runner(FIXTURE / "runner-script.json"),
+        openrouter_factory=factory,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    assert [(p.model_id, p._providers) for p in made] == [(alt, ("deepinfra/fp8",))]
