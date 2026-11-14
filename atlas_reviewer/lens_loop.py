@@ -89,7 +89,7 @@ class LimitsUnsetError(ValueError):
     """A limit was cleared to unset, so the run is refused."""
 
 
-# None on these three means "derive from the catalog at the call".
+# None on these three means "derive from the endpoint terms at the call".
 # None on the five review limits means unset, which `resolve` refuses.
 _DERIVED = frozenset({"max_input_tokens", "max_output_tokens", "reasoning_max_tokens"})
 
@@ -117,7 +117,7 @@ class AgenticLimits:
     defaults are Brandon's headroom (2026-11-11); pass a value to override
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
-    is one). The per-call token fields are None until the catalog is known:
+    is one). The per-call token fields are None until the endpoint terms are known:
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -202,7 +202,7 @@ def default_reasoning_tokens(output: int) -> int:
 
 @dataclass(frozen=True)
 class ResolvedCall:
-    """The per-call bounds for one request, after the catalog is known."""
+    """The per-call bounds for one request, after the endpoint terms are known."""
 
     max_input_tokens: int
     max_output_tokens: int
@@ -218,8 +218,8 @@ def default_output_tokens(context_length: int, max_completion_tokens: int) -> in
     above the completion limit). Otherwise the default is the completion
     limit itself. On a 262,144-token context the quarter is 65,536
     output tokens, which leaves 196,608 for input. On a 1,000,000-token
-    context whose completion limit is already 64,000, the default stays
-    64,000. `ATLAS_MAX_OUTPUT_TOKENS` can set a larger cap, up to the
+    context whose completion limit is already 128,000, Sonnet 5.5's
+    limit, the default stays 128,000. `ATLAS_MAX_OUTPUT_TOKENS` can set a larger cap, up to the
     completion limit, as long as one input token remains.
     """
     quarter = context_length // 4
@@ -258,6 +258,7 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
                 "max_output_tokens",
                 output,
                 terms.max_completion_tokens,
+                bound_by=terms.completion_limit_tags,
             )
         )
     if output < 2:
@@ -269,19 +270,33 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     )
     if reasoning < 1 or reasoning >= output:
         raise LimitRefused(hit("reasoning_max_tokens", reasoning, f"1..{output - 1}"))
-    room = terms.context_length - output
-    if room < 1:
+    context_room = terms.context_length - output
+    if context_room < 1:
         raise LimitRefused(
-            hit("context_length", terms.context_length, f"output reserve {output}")
+            hit(
+                "context_length",
+                terms.context_length,
+                f"output reserve {output}",
+                bound_by=terms.context_limit_tags,
+            )
         )
+    room = context_room
+    if terms.max_prompt_tokens is not None:
+        room = min(room, terms.max_prompt_tokens)
+    prompt_binds = (
+        terms.max_prompt_tokens is not None and terms.max_prompt_tokens < context_room
+    )
     if limits.max_input_tokens is None:
         input_cap = room
-    elif limits.max_input_tokens > terms.context_length:
-        raise LimitRefused(
-            hit("max_input_tokens", limits.max_input_tokens, terms.context_length)
-        )
     elif limits.max_input_tokens > room:
-        raise LimitRefused(hit("max_input_tokens", limits.max_input_tokens, room))
+        raise LimitRefused(
+            hit(
+                "max_prompt_tokens" if prompt_binds else "max_input_tokens",
+                limits.max_input_tokens,
+                room,
+                bound_by=terms.prompt_limit_tags if prompt_binds else "",
+            )
+        )
     else:
         input_cap = limits.max_input_tokens
     return ResolvedCall(input_cap, output, reasoning)
@@ -640,6 +655,7 @@ _LIMIT_CAUSES = {
     "reasoning_max_tokens": Cause.REASONING_CAP,
     "context_length": Cause.CONTEXT,
     "max_completion_tokens": Cause.CONTEXT,
+    "max_prompt_tokens": Cause.CONTEXT,
 }
 
 

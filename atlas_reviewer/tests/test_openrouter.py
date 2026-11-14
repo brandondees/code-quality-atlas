@@ -117,6 +117,8 @@ def with_terms(row, **changes):
     }
     filled.update(row)
     filled.update(changes)
+    if "max_prompt_tokens" not in filled:
+        filled["max_prompt_tokens"] = None
     tag = filled.get("tag")
     if isinstance(tag, str) and "provider_name" not in filled:
         filled["provider_name"] = display_name(tag)
@@ -149,6 +151,9 @@ def zdr_payload(
             "pricing": price,
             "context_length": context_length,
             "max_completion_tokens": max_completion_tokens,
+            # Present and null on the live ZDR list (2026-11-14): 1,071 of
+            # 1,108 rows, including every default Sonnet pin.
+            "max_prompt_tokens": None,
         }
         for tag in providers
     ]
@@ -1625,7 +1630,7 @@ def test_zdr_stays_on_by_default_and_can_be_turned_off():
     assert sent["provider"]["max_price"] == {"prompt": 3.0, "completion": 15.0}
     urls = [url for _m, url, _h, _b in off.requests]
     assert f"{API}/models/{MODEL_ID}/endpoints" in urls
-    assert f"{API}/endpoints/zdr" not in urls
+    assert f"{API}/endpoints/zdr" in urls
     assert "zdr required: false" in relaxed.usage_lines()[0]
     assert "cache_control: true" in relaxed.usage_lines()[0]
 
@@ -1642,3 +1647,303 @@ def test_a_display_name_next_to_a_different_tag_is_still_selected():
     adapter.complete(SMALL)
     sent = json.loads(fake.chat_requests()[0][3])
     assert sent["provider"]["only"] == ["amazon-bedrock"]
+
+
+def test_a_row_with_no_tag_is_not_selected_by_its_display_name():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    del payload["data"][0]["tag"]
+    payload["data"][0]["provider_name"] = "amazon-bedrock"
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="no ZDR row"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_an_endpoint_override_raises_max_price_the_reservation_and_the_fallback():
+    rows = zdr_payload(
+        providers=("amazon-bedrock",),
+        pricing={
+            "prompt": "0.000001",
+            "completion": "0.000002",
+            "input_cache_write": None,
+            "overrides": [
+                {
+                    "prompt": "0.000005",
+                    "completion": "0.000010",
+                    "min_prompt_tokens": 100_000,
+                }
+            ],
+        },
+    )
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
+    fake = OpenRouterFake(reply(completion(usage=usage)), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    terms, _selected = adapter.load_terms()
+    assert (terms.prompt_rate, terms.completion_rate) == (
+        Decimal("0.000005"),
+        Decimal("0.000010"),
+    )
+    assert worst_case_usd(1000, terms, CallLimits()) == Decimal("0.245")
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["max_price"] == {"prompt": 5.0, "completion": 10.0}
+    assert adapter.budget.calls[0].actual_usd == Decimal("0.006")
+    assert "max_price prompt 5.0 completion 10.0" in adapter.usage_lines()[0]
+    assert "amazon-bedrock" in adapter.usage_lines()[0]
+
+
+def test_zdr_off_still_refuses_a_safety_retention_tag_unless_opted_in():
+    model = "google/gemini-3.8-flash"
+    listed = catalog()
+    listed["data"]["id"] = model
+    endpoints = {
+        "data": {
+            "id": model,
+            "endpoints": [
+                {
+                    "tag": "google-vertex/global",
+                    "provider_name": "Google",
+                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "context_length": 1_000_000,
+                    "max_completion_tokens": 64_000,
+                    "supported_parameters": ["max_tokens"],
+                }
+            ],
+        }
+    }
+    marked = zdr_payload(
+        model, ("google-vertex/global",), safety=True, parameters=["max_tokens"]
+    )
+
+    def opened(zdr_reply):
+        return OpenRouterFake(
+            reply(completion(model=model)),
+            model=reply(listed),
+            zdr=zdr_reply,
+            endpoints=reply(endpoints),
+        )
+
+    blocked = opened(reply(marked))
+    adapter = OpenRouterProvider(blocked, KEY)
+    adapter.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+        )
+    )
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="Safety Retention"):
+        adapter.complete(SMALL)
+    assert blocked.chat_requests() == []
+
+    allowed_fake = opened(reply(marked))
+    allowed = OpenRouterProvider(allowed_fake, KEY)
+    allowed.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+            allow_safety_retention=True,
+        )
+    )
+    allowed.preflight()
+    assert allowed.complete(SMALL) == "review text"
+    sent = json.loads(allowed_fake.chat_requests()[0][3])
+    assert "zdr" not in sent["provider"]
+    assert sent["provider"]["data_collection"] == "deny"
+    assert sent["provider"]["only"] == ["google-vertex/global"]
+
+    unread = opened(reply({}, status=500))
+    refused = OpenRouterProvider(unread, KEY)
+    refused.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+        )
+    )
+    refused.preflight()
+    with pytest.raises(PricingUnknownError, match="HTTP 500"):
+        refused.complete(SMALL)
+    assert unread.chat_requests() == []
+
+
+def test_the_one_shot_path_refuses_a_prompt_over_the_row_prompt_ceiling():
+    rows = zdr_payload(providers=("amazon-bedrock",))
+    rows["data"][0]["max_prompt_tokens"] = 1
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="max_prompt_tokens") as raised:
+        adapter.complete(SMALL)
+    assert "amazon-bedrock" in str(raised.value)
+    assert fake.chat_requests() == []
+
+
+def test_a_malformed_override_names_the_endpoint_row():
+    rows = zdr_payload(providers=("amazon-bedrock",), pricing={"overrides": "nope"})
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(PricingUnknownError, match=r"endpoint row 0 \(amazon-bedrock\)"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def _sonnet_live_row(tag, provider_name, *, regional=False):
+    """One public Sonnet 5.5 endpoint row, read 2026-11-14.
+
+    `max_prompt_tokens` is present and null. Pricing has no `overrides`
+    key. `google-vertex/us` and `google-vertex/europe` are the regional
+    rates from that read (2.2e-6 / 1.1e-5). Bedrock and
+    `google-vertex/global` are 2e-6 / 1e-5. The test does not call
+    OpenRouter.
+    """
+    pricing = (
+        {
+            "prompt": "0.0000022",
+            "completion": "0.000011",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.00000275",
+            "input_cache_write_1h": "0.0000044",
+        }
+        if regional
+        else {
+            "prompt": "0.000002",
+            "completion": "0.00001",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025",
+            "input_cache_write_1h": "0.000004",
+        }
+    )
+    return {
+        "model_id": MODEL_ID,
+        "tag": tag,
+        "provider_name": provider_name,
+        "safety_retention": False,
+        "context_length": 1_000_000,
+        "max_completion_tokens": 128_000,
+        "max_prompt_tokens": None,
+        "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "tools",
+        ],
+        "pricing": pricing,
+    }
+
+
+def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
+    from atlas_reviewer.lens_loop import AgenticLimits, resolve_per_call
+    from atlas_reviewer.tool_model import OpenRouterLensModel
+
+    from .test_tool_model import request
+
+    rows = [
+        _sonnet_live_row(tag, name, regional=regional)
+        for tag, name, regional in (
+            ("amazon-bedrock", "Amazon Bedrock", False),
+            ("google-vertex/europe", "Google", True),
+            ("google-vertex/global", "Google", False),
+            ("google-vertex/us", "Google", True),
+        )
+    ]
+    assert all(row["max_prompt_tokens"] is None for row in rows)
+    fake = OpenRouterFake(
+        reply(completion()), reply(completion()), zdr=reply({"data": rows})
+    )
+    adapter = provider(fake)
+    assert adapter.complete(SMALL) == "review text"
+    terms, _selected = adapter.load_terms()
+    assert terms.max_prompt_tokens is None
+    assert (terms.context_length, terms.max_completion_tokens) == (1_000_000, 128_000)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["max_price"] == {"prompt": 2.2, "completion": 11.0}
+    call = resolve_per_call(AgenticLimits().resolve(), terms)
+    assert call.max_output_tokens == 128_000
+    assert call.max_input_tokens == 1_000_000 - 128_000
+    lens = OpenRouterLensModel(adapter)
+    lens.per_call = AgenticLimits().resolve()
+    lens.turn(request())
+    assert len(fake.chat_requests()) == 2
+
+    # The same null rows, selected from the full endpoint list.
+    off = OpenRouterFake(
+        reply(completion()),
+        zdr=reply({"data": rows}),
+        endpoints=reply({"data": {"id": MODEL_ID, "endpoints": rows}}),
+    )
+    relaxed = OpenRouterProvider(off, KEY)
+    relaxed.configure(model_route({}, require_zdr=False))
+    relaxed.preflight()
+    assert relaxed.complete(SMALL) == "review text"
+    off_terms, _off_selected = relaxed.load_terms()
+    assert off_terms.max_prompt_tokens is None
+    assert "zdr" not in json.loads(off.chat_requests()[0][3])["provider"]
+
+
+def test_a_null_prompt_ceiling_does_not_erase_a_tighter_row():
+    """One null ceiling next to 500 and 800. The ceiling is 500.
+
+    Live shape: phi-4's deepinfra/bf16 at 4,096 beside a flex row at
+    null, and gpt-6.1-terra's azure ceiling beside null regional rows.
+    """
+
+    def row(tag, cap):
+        return with_terms(
+            {
+                "model_id": MODEL_ID,
+                "tag": tag,
+                "safety_retention": False,
+                "supported_parameters": ["max_tokens"],
+                "max_prompt_tokens": cap,
+            }
+        )
+
+    payload = {
+        "data": [
+            row("deepinfra/bf16/flex", None),
+            row("deepinfra/bf16", 500),
+            row("deepinfra", 800),
+        ]
+    }
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(
+        fake,
+        KEY,
+        providers=("deepinfra/bf16/flex", "deepinfra/bf16", "deepinfra"),
+    )
+    adapter.preflight()
+    adapter.complete(SMALL)
+    terms, _selected = adapter.load_terms()
+    assert terms.max_prompt_tokens == 500
+    assert terms.prompt_limit_tags == "deepinfra/bf16"
+
+
+@pytest.mark.parametrize("bad", [0, "x"])
+def test_a_bad_max_prompt_tokens_is_still_refused(bad):
+    rows = zdr_payload(providers=("amazon-bedrock",))
+    rows["data"][0]["max_prompt_tokens"] = bad
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(PricingUnknownError, match="max_prompt_tokens"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_d57_says_zdr_off_reads_both_lists():
+    text = (
+        Path(__file__).resolve().parents[2] / "docs" / "open-questions.md"
+    ).read_text(encoding="utf-8")
+    assert (
+        "reads both `GET /api/v1/models/{id}/endpoints` and `GET /api/v1/endpoints/zdr`"
+    ) in text
