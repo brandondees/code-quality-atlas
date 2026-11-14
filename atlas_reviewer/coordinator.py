@@ -219,8 +219,9 @@ class AgenticReview:
         coverage, so it blocks approval too. Context that was left out of
         the first turn, or a prior-round record for this pull request
         and this head that did not fit, is the same kind of gap: the
-        review cannot approve on a partial picture of this head. A
-        superseded round, and a line that names another pull request
+        review cannot approve on a partial picture of this head. So is a
+        finding dropped for an unknown severity, which could have been a
+        Blocker. A superseded round, and a line that names another pull request
         or no pull request, are not that gap."""
         if _lens_gap(self):
             return False
@@ -1312,6 +1313,8 @@ def _lens_gap(review: AgenticReview) -> str:
         return "partial context"
     if review.not_picked:
         return "a picked lens did not run"
+    if _dropped_notes(review):
+        return "a finding was dropped"
     if not review.lenses:
         return "no lens selected"
     if _unread_paths(review):

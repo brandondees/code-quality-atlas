@@ -431,9 +431,12 @@ optionally siblings, with the values the Finding contract below defines.
 severity is exactly one of "blocker", "major", "minor" or "nit"; valence is
 "defect" or "improvement"; attribution is "introduced" or "pre-existing";
 route is one of "eng", "implementer", "product", "design", "legal" or
-"leadership". A finding with any other value is dropped. Quote evidence exactly as the head file reads at the cited lines, or, for
-code the pull request removed, as the diff's removed lines read. Every quote
-is checked, and a finding whose quote is not found is not reported. With no
+"leadership". A finding whose severity cannot be read as one of those four
+names is dropped, and the review cannot approve. Any other value outside the
+contract sends the whole reply back. Quote evidence exactly as the head
+file reads at the cited lines, or, for code the pull request removed, as
+the diff's removed lines read. Every quote is checked, and a finding whose
+quote is not found is not reported. With no
 findings, reply with "findings": []; that counts only if every changed
 file's diff was read in full, every page."""
 

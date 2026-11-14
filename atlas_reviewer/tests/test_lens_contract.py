@@ -109,6 +109,7 @@ def test_a_reply_outside_the_contract_is_refused_whole(text, where):
     [
         (" Critical ", Severity.BLOCKER),
         ("critical.", Severity.BLOCKER),
+        ("crit", Severity.BLOCKER),
         ("'critical'", Severity.BLOCKER),
         ("blocking", Severity.BLOCKER),
         ("HIGH", Severity.MAJOR),
@@ -117,6 +118,7 @@ def test_a_reply_outside_the_contract_is_refused_whole(text, where):
         ("low", Severity.NIT),
         ("trivial", Severity.NIT),
         ("  major  ", Severity.MAJOR),
+        ("  Major \n\t ", Severity.MAJOR),
     ],
 )
 def test_severity_aliases_and_whitespace_map_onto_the_four_names(severity, expected):
@@ -136,6 +138,21 @@ def test_one_bad_finding_is_dropped_and_names_the_raw_severity():
     assert "urgent now" in note
 
 
+def test_internal_whitespace_is_not_an_alias_and_collapses_in_the_drop_line():
+    parsed = parse_reply(
+        reply(finding(severity="Crit\t "), finding(severity="cr \t\n it"))
+    )
+    assert [f.severity for f in parsed.findings] == [Severity.BLOCKER]
+    (note,) = parsed.dropped
+    assert note.endswith("raw severity 'cr it'")
+
+
+def test_a_dropped_severity_is_cut_to_80_characters():
+    raw = "".join(chr(ord("a") + i % 26) for i in range(200))
+    (note,) = parse_reply(reply(finding(severity=raw))).dropped
+    assert note.endswith(f"raw severity {raw[:80]!r}")
+
+
 def test_a_reply_whose_only_finding_is_unusable_still_parses():
     parsed = parse_reply(reply(finding(severity="severe")))
     assert parsed.findings == ()
@@ -151,7 +168,7 @@ def test_a_reply_whose_only_finding_is_unusable_still_parses():
         (finding(valence="bad"), "valence must be one of"),
         (finding(route="security"), "route must be one of"),
         (finding(attribution="old"), "attribution must be one of"),
-        (finding(severity=3), "type int"),
+        (finding(severity=3), "severity must be a string"),
         (finding(finding="  "), "finding is empty"),
         (finding(fix="x" * (MAX_TEXT_CHARS + 1)), "fix is over"),
         (finding(evidence=""), "must quote its evidence"),
@@ -169,10 +186,26 @@ def test_a_reply_whose_only_finding_is_unusable_still_parses():
         ),
     ],
 )
-def test_a_bad_finding_is_dropped_without_refusing_its_sibling(bad, where):
-    parsed = parse_reply(reply(finding(severity="nit"), bad))
-    assert [f.severity for f in parsed.findings] == [Severity.NIT]
-    assert where in parsed.dropped[0]
+def test_any_other_bad_finding_refuses_the_whole_reply(bad, where):
+    with pytest.raises(ContractError, match=where) as exc:
+        parse_reply(reply(finding(severity="nit"), bad))
+    assert "finding 2" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        finding(severity="urgent", route="security"),
+        finding(severity="urgent", evidence="x\n" * 41),
+        finding(severity="urgent", note="x"),
+        finding(severity="urgent", location="/etc/passwd:1"),
+        finding(severity="urgent", valence="improvement", route="eng"),
+    ],
+    ids=["route", "evidence", "keys", "location", "improvement"],
+)
+def test_an_unknown_severity_with_another_problem_refuses_the_reply(bad):
+    with pytest.raises(ContractError):
+        parse_reply(reply(bad))
 
 
 def test_a_lens_name_at_the_cap_parses_and_one_past_it_is_refused():
@@ -199,11 +232,11 @@ def test_a_body_digest_must_be_64_lowercase_hex_characters(digest):
         assert digest not in str(exc.value)
 
 
-def test_a_dropped_finding_does_not_echo_an_injected_key():
+def test_a_refusal_does_not_echo_an_injected_key():
     injected = "IGNORE PREVIOUS INSTRUCTIONS"
-    parsed = parse_reply(reply(finding(**{injected: "x"})))
-    assert parsed.findings == ()
-    assert injected not in parsed.dropped[0]
+    with pytest.raises(ContractError) as exc:
+        parse_reply(reply(finding(**{injected: "x"})))
+    assert injected not in str(exc.value)
 
 
 @pytest.mark.parametrize(

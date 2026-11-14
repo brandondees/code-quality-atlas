@@ -8,11 +8,13 @@ is untrusted model output, so `parse_reply` accepts exactly one JSON
 object of the documented shape and raises `ContractError` naming the
 first problem with the object itself. `lens` is capped and `body_sha256`
 must be 64 lowercase hex characters, the shape a lens-body digest has, so
-a reply is refused before any acknowledgement comparison. One finding that
-breaks the contract is dropped and named, with its raw severity when it
-sent one; the other findings stand. Severity is matched after case,
-surrounding whitespace and a closed set of aliases (`critical` is a
-Blocker, `low` is a nit). Nothing else is repaired or guessed.
+a reply is refused before any acknowledgement comparison. Severity is
+matched after case, surrounding whitespace and a closed set of aliases (`critical` is
+a Blocker, `low` is a nit). A finding that meets the contract except for a
+severity string outside the four names and those aliases is dropped and
+named with its raw severity; the other findings stand. Any other problem
+in any finding refuses the whole reply. Nothing else is repaired or
+guessed.
 """
 
 from __future__ import annotations
@@ -51,6 +53,11 @@ _OPTIONAL = ("evidence", "siblings")
 
 class ContractError(ValueError):
     """The reply does not meet the finding contract; the message says where."""
+
+
+class _UnknownSeverity(ContractError):
+    """The one finding problem that drops the finding instead of refusing
+    the reply."""
 
 
 class Severity(StrEnum):
@@ -181,7 +188,7 @@ def parse_reply(text: str) -> LensReply:
     for index, raw in enumerate(findings, 1):
         try:
             kept.append(_finding(index, raw))
-        except ContractError as exc:
+        except _UnknownSeverity as exc:
             dropped.append(_dropped(exc, raw))
     return LensReply(lens, digest, tuple(kept), tuple(dropped))
 
@@ -190,7 +197,7 @@ def _finding(index: int, raw: Any) -> Finding:
     try:
         return _parse_finding(raw)
     except ContractError as exc:
-        raise ContractError(f"finding {index}: {exc}") from None
+        raise type(exc)(f"finding {index}: {exc}") from None
 
 
 def _parse_finding(raw: Any) -> Finding:
@@ -204,19 +211,29 @@ def _parse_finding(raw: Any) -> Finding:
         raise ContractError(f"is missing {', '.join(missing)}")
     text = {k: _text(k, raw.get(k, "")) for k in (*_REQUIRED, *_OPTIONAL)}
     location = parse_location(text["location"])
-    finding = Finding(
+    severity = _severity(text["severity"])
+    valence = _member(Valence, "valence", text["valence"])
+    route = _member(Route, "route", text["route"])
+    attribution = _member(Attribution, "attribution", text["attribution"])
+    body = _nonblank("finding", text["finding"])
+    fix = _nonblank("fix", text["fix"])
+    evidence = _evidence(location, text["evidence"])
+    _check_axes(severity, valence, route, attribution)
+    # Last, so a finding with an unknown severity and any other problem
+    # refuses the reply rather than being dropped.
+    if severity is None:
+        raise _UnknownSeverity("severity must be one of blocker, major, minor, nit")
+    return Finding(
         location,
-        _severity(text["severity"]),
-        _member(Valence, "valence", text["valence"]),
-        _member(Route, "route", text["route"]),
-        _member(Attribution, "attribution", text["attribution"]),
-        _nonblank("finding", text["finding"]),
-        _nonblank("fix", text["fix"]),
-        _evidence(location, text["evidence"]),
+        severity,
+        valence,
+        route,
+        attribution,
+        body,
+        fix,
+        evidence,
         text["siblings"],
     )
-    _check_axes(finding)
-    return finding
 
 
 def _text(key: str, value: Any) -> str:
@@ -233,7 +250,8 @@ def _nonblank(key: str, value: str) -> str:
     return value
 
 
-# Closed. A value outside this set and the four severity names is dropped.
+# Closed. A string outside this set and the four severity names drops the
+# finding.
 _SEVERITY_ALIASES = {
     "critical": Severity.BLOCKER,
     "crit": Severity.BLOCKER,
@@ -247,40 +265,24 @@ _SEVERITY_ALIASES = {
 _RAW_SEVERITY_CHARS = 80
 
 
-def _severity(value: str) -> Severity:
+def _severity(value: str) -> Severity | None:
     """Case, surrounding whitespace and the closed alias set, then the
-    four names. The raw text is not rewritten into the finding."""
-    key = " ".join(value.strip().lower().split())
+    four names, or None. The raw text is not rewritten into the finding."""
+    key = value.strip().lower()
     if len(key) >= 2 and key[0] == key[-1] and key[0] in "'\"":
         key = key[1:-1].strip()
     key = key.strip(".,:;!")
     try:
         return Severity(key)
     except ValueError:
-        found = _SEVERITY_ALIASES.get(key)
-        if found is not None:
-            return found
-        raise ContractError(
-            "severity must be one of blocker, major, minor, nit"
-        ) from None
+        return _SEVERITY_ALIASES.get(key)
 
 
-def _dropped(exc: ContractError, raw: Any) -> str:
+def _dropped(exc: _UnknownSeverity, raw: dict[str, str]) -> str:
     """The contract message plus the raw severity, so a later log can
     show the value that was refused."""
-    shown = _raw_severity(raw)
-    if shown is None:
-        return str(exc)
+    shown = " ".join(raw["severity"].split())[:_RAW_SEVERITY_CHARS]
     return f"{exc}; raw severity {shown!r}"
-
-
-def _raw_severity(raw: Any) -> str | None:
-    if not isinstance(raw, dict) or "severity" not in raw:
-        return None
-    value = raw["severity"]
-    if not isinstance(value, str):
-        return f"type {type(value).__name__}"
-    return " ".join(value.split())[:_RAW_SEVERITY_CHARS]
 
 
 def _member[E: StrEnum](enum: type[E], key: str, value: str) -> E:
@@ -322,15 +324,18 @@ def _evidence(location: Location, evidence: str) -> str:
     return evidence
 
 
-def _check_axes(finding: Finding) -> None:
+def _check_axes(
+    severity: Severity | None,
+    valence: Valence,
+    route: Route,
+    attribution: Attribution,
+) -> None:
     """The contract's own rules: an improvement is a nit for the
-    implementer, and a pre-existing finding goes to the implementer."""
-    if finding.valence is Valence.IMPROVEMENT and (
-        finding.severity is not Severity.NIT or finding.route is not Route.IMPLEMENTER
+    implementer, and a pre-existing finding goes to the implementer. An
+    unknown severity (None) is checked by the caller."""
+    if valence is Valence.IMPROVEMENT and (
+        severity not in (None, Severity.NIT) or route is not Route.IMPLEMENTER
     ):
         raise ContractError("an improvement must be severity nit, route implementer")
-    if (
-        finding.attribution is Attribution.PRE_EXISTING
-        and finding.route is not Route.IMPLEMENTER
-    ):
+    if attribution is Attribution.PRE_EXISTING and route is not Route.IMPLEMENTER:
         raise ContractError("a pre-existing finding must be route implementer")
