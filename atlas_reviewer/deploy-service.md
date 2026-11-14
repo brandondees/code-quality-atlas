@@ -201,9 +201,17 @@ create a Sprite the sweep already missed. In the App's webhook settings,
 turn the webhook off, or unsubscribe **Pull requests**.
 
 Stop the Machine only after that, and let it drain. The stop below sends
-SIGINT and waits 120 seconds, matching `kill_timeout`. Fly SIGKILLs the
-process when `kill_timeout` ends. The command waits that long so the
-client does not give up while the child is still destroying its Sprite.
+SIGINT. `--timeout 120` is the number of seconds Fly waits before
+SIGKILL, the same number as `kill_timeout`. It does not make flyctl
+wait. Without `--wait-timeout`, flyctl returns when the stop API
+accepts the request, and the Machine can still be running. A sweep
+then can meet a review that is still creating a Sprite.
+`--wait-timeout 120s` is what blocks until the Machine's state is
+`stopped`. If that wait expires, flyctl exits with an error that the
+machine did not stop within the wait timeout, and the script below
+does not sweep. Check `flyp machine status <id> --app "$APP"` and run
+the same stop again. Sweep only after a stop that includes
+`--wait-timeout` exits 0.
 
 A plain `python -m atlas_reviewer sweep` reads `runners.ledger` in its
 state directory. The service does not write `/data/runners.ledger`. Each
@@ -225,7 +233,11 @@ Sprite is still billable. Run that name again. Destroy the app only after
 those lines say verified absent.
 
 ```sh
-flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120
+if ! flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120 --wait-timeout 120s
+then
+  echo "atlas-reviewer: the Machine did not reach stopped; do not sweep" >&2
+  exit 1
+fi
 
 python -m atlas_reviewer sweep --runner "$RUNNER" --force-live
 

@@ -258,7 +258,11 @@ def test_teardown_disables_the_webhook_before_it_sweeps():
     teardown = RUNBOOK.split("## Tear down", 1)[1]
     steps = (
         "Disable the GitHub App webhook",
-        'flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120',
+        (
+            "flyp machine stop <id> --app "
+            '"$APP" --signal SIGINT --timeout 120 --wait-timeout 120s'
+        ),
+        "do not sweep",
         'python -m atlas_reviewer sweep --runner "$RUNNER" --force-live',
         'flyp apps destroy "$APP" --yes',
     )
@@ -270,6 +274,11 @@ def test_teardown_disables_the_webhook_before_it_sweeps():
     assert "Sprites console" in teardown
     assert "runner named" in teardown
     assert "/data/service.jsonl" in teardown
+    assert "The command waits that long" not in teardown
+    one_off = (ROOT / "atlas_reviewer/deploy-fly.md").read_text(encoding="utf-8")
+    assert "The review child receives these names" not in one_off
+    assert "webhook service's review child" in one_off
+    assert "one-off Machine is the review process itself" in one_off
 
 
 def test_the_kill_timeout_covers_sprite_cleanup():
