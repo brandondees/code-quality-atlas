@@ -1039,8 +1039,12 @@ D41 records the 2026-11-12 probe that did.
 - **Checking the reply.** The reply must meet the finding contract
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
   checked against the head file at the cited lines. The cited span is the
-  quote's own line count, so a wider range does not verify. A removed line
-  of that file still verifies (`quotes.py`).
+  quote's own line count, so a wider range does not verify. A quote of
+  whole lines (8 or more non-space characters) may also match within two
+  lines of the citation, and the finding's location then names the lines
+  that hold it; whitespace inside a line is collapsed. A removed line of
+  that file still verifies, and so does a quote from an unchanged file the
+  lens read at HEAD (D47; `quotes.py`).
 - **Partial results.** No findings counts as clean only after every
   changed file's diff was read in full: a `diff_file` chain from offset
   0 through every truncated page (D42). A HEAD `read_file` does not
