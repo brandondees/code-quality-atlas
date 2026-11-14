@@ -14,7 +14,7 @@ from atlas_reviewer.lenses import (
     plan_agentic_lenses,
     plan_lenses,
 )
-from atlas_reviewer.picker import CRITICAL_TIER, Depth, select_lenses
+from atlas_reviewer.picker import CRITICAL_TIER, LENS_NAME, Depth, select_lenses
 
 from .helpers import StubLibrary
 
@@ -222,35 +222,71 @@ def test_a_blank_body_is_no_body(tmp_path, text):
     assert LensLibrary(tmp_path).body("empty") is None
 
 
-# Named by the picker and not themselves review lenses with a finding body.
+# Cited by the picker skill and not themselves review lenses with a body.
+# `choosing-review-lenses` is the skill's own name. The skill never cites
+# it as a lens, so an entry for it would check nothing.
 _NOT_A_REVIEW_LENS = frozenset(
     {
-        "choosing-review-lenses",
         "synthesizing-review-findings",
         "grounding-review-in-tool-output",
     }
 )
-_BACKTICK_NAME = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)+)`")
+_REPO = Path(__file__).resolve().parents[2]
+_TOKEN = re.compile(rf"\A`?({LENS_NAME.pattern})`?\Z")
+
+
+def _skill_directories() -> set[str]:
+    return {path.name for path in (_REPO / "skills").iterdir() if path.is_dir()}
+
+
+def _cited_picker_names(text: str) -> set[str]:
+    """Names the picker's own `LENS_NAME` accepts.
+
+    A backtick span counts, including a single word. So does a bare token
+    in a route's Run cell or a catalog bullet, which is where the skill
+    names a lens. A single-word backtick outside those places is prose
+    (`acknowledge`, `minor`), not a lens."""
+    quoted = set(re.findall(rf"`({LENS_NAME.pattern})`", text))
+    named: set[str] = set()
+    chunk = text[text.index("## Routes") :]
+    for line in chunk.splitlines():
+        if line.startswith("- "):
+            head = line[2:].split("—", 1)[0].strip()
+            match = _TOKEN.match(head.split()[0] if head else "")
+            if match:
+                named.add(match.group(1))
+        elif line.startswith("| ") and not line.startswith("|---"):
+            cells = line.split("|")
+            if len(cells) < 3:
+                continue
+            for piece in cells[2].split("—", 1)[0].split(","):
+                match = _TOKEN.match(piece.strip())
+                if match:
+                    named.add(match.group(1))
+    prose = {name for name in quoted if "-" not in name and name not in named}
+    return (quoted - prose) | named
 
 
 def test_every_lens_the_picker_names_has_a_body():
-    text = Path("skills/choosing-review-lenses/SKILL.md").read_text()
-    cited = set(_BACKTICK_NAME.findall(text))
-    directories = {path.name for path in Path("skills").iterdir() if path.is_dir()}
+    text = (_REPO / "skills/choosing-review-lenses/SKILL.md").read_text()
+    directories = _skill_directories()
+    cited = _cited_picker_names(text)
     assert sorted(cited - directories) == []
+    library = LensLibrary()
+    for name in _NOT_A_REVIEW_LENS:
+        assert name in directories
+        assert name in cited
+        assert library.body(name) is None
     pickable = sorted((cited & directories) - _NOT_A_REVIEW_LENS)
     assert "auditing-infrastructure-as-code" in pickable
-    library = LensLibrary()
     missing = [name for name in pickable if library.body(name) is None]
     assert missing == []
 
 
 def test_every_lens_a_route_can_run_has_a_body():
-    from pathlib import Path
-
     from tooling.manifest import load_manifest
 
-    manifest = load_manifest(str(Path("skills/manifest.yaml")))
+    manifest = load_manifest(str(_REPO / "skills/manifest.yaml"))
     assert manifest.router is not None
     library = LensLibrary()
     missing = sorted(
