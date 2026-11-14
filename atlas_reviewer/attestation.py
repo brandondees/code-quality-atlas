@@ -179,6 +179,8 @@ class AttemptOutcome:
     changed_files: int | None = None
     # None when the attempt was not stopped by a configured limit.
     limit_hit: LimitHit | None = None
+    # Findings left out of the reply, each naming the raw severity.
+    dropped: tuple[str, ...] = ()
 
     @property
     def state(self) -> LensState:
@@ -399,6 +401,7 @@ def _outcome_json(
         "unread": [scrub(path) for path in outcome.unread],
         "changed_files": outcome.changed_files,
         "limit": _limit_json(outcome.limit_hit, scrub),
+        "dropped": [scrub(note) for note in outcome.dropped],
     }
 
 
@@ -447,7 +450,16 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         tuple(unread),
         changed,
         _limit_from(data.get("limit")),
+        _dropped_from(data.get("dropped", ())),
     )
+
+
+def _dropped_from(data: object) -> tuple[str, ...]:
+    if isinstance(data, tuple):
+        data = list(data)
+    if not isinstance(data, list) or not all(isinstance(note, str) for note in data):
+        raise TypeError("dropped must be a list of strings")
+    return tuple(data)
 
 
 def _limit_json(

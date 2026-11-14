@@ -370,6 +370,7 @@ def test_an_unattested_attempt_read_back_through_the_ledger_is_never_clean(tmp_p
         "problem",
         "detail",
         "args",
+        "dropped",
     ],
 )
 def test_every_text_field_is_scrubbed_before_it_reaches_the_file(tmp_path, field):
@@ -379,6 +380,7 @@ def test_every_text_field_is_scrubbed_before_it_reaches_the_file(tmp_path, field
     problem = ""
     detail = ""
     args = '{"offset": 0, "path": "calc.py"}'
+    dropped: tuple[str, ...] = ()
     if field == "finding":
         found = replace(found, finding=f"leaks {flagged}")
     elif field == "fix":
@@ -395,6 +397,8 @@ def test_every_text_field_is_scrubbed_before_it_reaches_the_file(tmp_path, field
         detail = f"saw {flagged}"
     elif field == "args":
         args = f'{{"path": "{flagged}"}}'
+    elif field == "dropped":
+        dropped = (f"raw severity {flagged!r}",)
     checked = (
         CheckedFinding(found, source)
         if source is not None
@@ -408,6 +412,7 @@ def test_every_text_field_is_scrubbed_before_it_reaches_the_file(tmp_path, field
             findings=(checked,),
             tools=(ToolUse("diff_file", args, "ok"),),
             detail=detail,
+            dropped=dropped,
         ),
         scrub=lambda text: text.replace(flagged, "[flagged]"),
     )
