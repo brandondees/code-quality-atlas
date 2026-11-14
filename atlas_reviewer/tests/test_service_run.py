@@ -2,6 +2,7 @@
 """The service runs the existing review command and reads its draft."""
 
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -9,10 +10,12 @@ from pathlib import Path
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.service_run import (
     APP_KEY_ENV,
+    CLEANUP_WAIT_S,
     READ_TOKEN_ENV,
     WEBHOOK_SECRET_ENV,
     ReviewRun,
     RunConfig,
+    _stop,
     child_env,
     make_runner,
     review_argv,
@@ -56,6 +59,12 @@ def test_the_run_directory_names_the_repository():
     assert path.name.startswith("alice-widgets-7-")
 
 
+def test_the_child_does_not_receive_root_as_home():
+    env = child_env({"HOME": "/root", "PATH": "/usr/bin"})
+    assert env["HOME"] == "/home/atlas"
+    assert "/root" not in env.values()
+
+
 def test_the_child_receives_only_the_allowlist():
     env = child_env(
         {
@@ -77,25 +86,121 @@ def test_the_child_receives_only_the_allowlist():
     }
 
 
-def test_the_child_receives_the_route_settings_and_not_other_secrets():
-    env = child_env(
-        {
-            WEBHOOK_SECRET_ENV: "s" * 16,
-            APP_KEY_ENV: "pem-secret-value",
-            "ATLAS_REQUIRE_ZDR": "false",
-            "ATLAS_MAX_OUTPUT_TOKENS": "65536",
-            "ATLAS_MODEL": "z-ai/glm-5.3",
-            "FLY_API_TOKEN": "fly-token-value",
-            "PATH": "/usr/bin",
-        },
-        token="ghs_read",
+def test_the_child_process_starts_without_the_app_key(tmp_path):
+    seen: dict[str, dict[str, str]] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    parent = {
+        APP_KEY_ENV: "pem-secret-value",
+        "ATLAS_OPENROUTER_API_KEY": "sk-or-secret",
+        "ATLAS_SPRITES_TOKEN": "sprite-secret",
+        WEBHOOK_SECRET_ENV: "webhook-secret-value",
+        "FLY_API_TOKEN": "fly-token-value",
+    }
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path),
+        parent,
+        popen=popen,
+        read_token=lambda _env, _event: ("ghs_read", ""),
     )
-    assert env["ATLAS_REQUIRE_ZDR"] == "false"
-    assert env["ATLAS_MAX_OUTPUT_TOKENS"] == "65536"
-    assert env["ATLAS_MODEL"] == "z-ai/glm-5.3"
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    child = seen["env"]
+    assert APP_KEY_ENV not in child
+    assert "pem-secret-value" not in child.values()
+    assert WEBHOOK_SECRET_ENV not in child
+    assert child["ATLAS_OPENROUTER_API_KEY"] == "sk-or-secret"
+    assert child["ATLAS_SPRITES_TOKEN"] == "sprite-secret"
+    assert child[READ_TOKEN_ENV] == "ghs_read"
+    assert "FLY_API_TOKEN" not in child
+
+
+def test_the_child_receives_the_route_settings_and_not_the_limit_variables():
+    from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
+    from atlas_reviewer.openrouter import (
+        ENV_ALLOW_SAFETY_RETENTION,
+        ENV_KEY_CEILING_USD,
+        ENV_MODEL,
+        ENV_PROVIDERS,
+        ENV_REQUIRE_ZDR,
+    )
+
+    parent = {
+        ENV_MODEL: "z-ai/glm-5.3",
+        ENV_PROVIDERS: "amazon-bedrock",
+        ENV_ALLOW_SAFETY_RETENTION: "true",
+        ENV_REQUIRE_ZDR: "false",
+        ENV_KEY_CEILING_USD: "4",
+        "ATLAS_MAX_CALLS": "4",
+        "ATLAS_MAX_TURNS": "4",
+        "ATLAS_MAX_INPUT_TOKENS": "8000",
+        "ATLAS_MAX_OUTPUT_TOKENS": "65536",
+        "ATLAS_REASONING_MAX_TOKENS": "1000",
+        "ATLAS_RESERVATION_USD": "1",
+        "ATLAS_LENS_WALL_S": "60",
+        "ATLAS_REVIEW_WALL_S": "120",
+        "ATLAS_NOT_A_CHILD_SETTING": "dropped",
+        "FLY_API_TOKEN": "fly-token-value",
+        APP_KEY_ENV: "pem-secret-value",
+        WEBHOOK_SECRET_ENV: "s" * 16,
+        "PATH": "/usr/bin",
+    }
+    env = child_env(parent, token="ghs_read")
+    assert env[ENV_MODEL] == "z-ai/glm-5.3"
+    assert env[ENV_PROVIDERS] == "amazon-bedrock"
+    assert env[ENV_ALLOW_SAFETY_RETENTION] == "true"
+    assert env[ENV_REQUIRE_ZDR] == "false"
+    assert env[ENV_KEY_CEILING_USD] == "4"
+    for name in LIMIT_ENV.values():
+        assert name not in env
+    assert "ATLAS_MAX_OUTPUT_TOKENS" not in env
+    assert "ATLAS_NOT_A_CHILD_SETTING" not in env
     assert "FLY_API_TOKEN" not in env
     assert APP_KEY_ENV not in env
     assert WEBHOOK_SECRET_ENV not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env[READ_TOKEN_ENV] == "ghs_read"
+
+
+def test_a_stop_waits_out_sprite_cleanup_before_sigkill():
+    import inspect
+
+    from atlas_reviewer.runner import CLEANUP_BUDGET_S
+    from atlas_reviewer.sprites_api import SpritesClient
+
+    window = inspect.signature(SpritesClient.__init__).parameters["timeout_s"].default
+    assert CLEANUP_WAIT_S >= CLEANUP_BUDGET_S + window
+
+    class Proc:
+        def __init__(self) -> None:
+            self.killed = False
+            self.waits: list[float] = []
+            self._done = False
+
+        def poll(self) -> int | None:
+            return 0 if self._done else None
+
+        def send_signal(self, _sig: int) -> None:
+            return None
+
+        def wait(self, timeout: float) -> int:
+            self.waits.append(timeout)
+            if not self._done and timeout < CLEANUP_BUDGET_S + window:
+                raise subprocess.TimeoutExpired("review", timeout)
+            self._done = True
+            return 0
+
+        def kill(self) -> None:
+            self.killed = True
+            self._done = True
+
+    proc = Proc()
+    _stop(proc)  # type: ignore[arg-type]
+    assert proc.killed is False
+    assert proc.waits[0] >= CLEANUP_BUDGET_S + window
 
 
 def test_the_child_does_not_receive_the_app_private_key():

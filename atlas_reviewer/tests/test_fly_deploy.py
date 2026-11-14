@@ -95,10 +95,16 @@ def test_image_is_pinned_python_312_slim_installed_with_hashes_as_non_root():
     assert "useradd --create-home --uid 10001 --shell /bin/false atlas" in args_of(
         "RUN"
     )
-    assert args_of("USER") == ["atlas"]
     keywords = [kw for kw, _ in INSTRUCTIONS]
-    last_run = max(i for i, kw in enumerate(keywords) if kw == "RUN")
-    assert keywords.index("USER") > last_run
+    assert "USER" not in keywords
+    entry = (ROOT / "atlas_reviewer" / "docker-entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "/usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups "
+        "--inh-caps=-all --no-new-privs --bounding-set=-all --ambient-caps=-all"
+    ) in " ".join(entry.split())
+    assert "HOME=/home/atlas" in " ".join(args_of("ENV"))
     assert args_of("ENTRYPOINT") == ['["/usr/local/bin/atlas-reviewer"]']
     for keyword in ("EXPOSE", "ARG", "VOLUME", "HEALTHCHECK", "ADD"):
         assert keyword not in keywords
@@ -143,8 +149,9 @@ def test_entrypoint_does_not_print_the_environment():
     code = "\n".join(
         line for line in ENTRYPOINT.splitlines() if not line.lstrip().startswith("#")
     )
+    # `--bounding-set` is a setpriv flag, not the `set` builtin.
     assert not re.search(
-        r"\b(?:printenv|env|export|set)\b", code.replace("set -eu", "")
+        r"(?<!-)\b(?:printenv|env|export|set)\b", code.replace("set -eu", "")
     )
     assert '$@" >' not in code
     subprocess.run(["sh", "-n", str(ENTRYPOINT_PATH)], check=True)

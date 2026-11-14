@@ -27,7 +27,7 @@ is then `registry.fly.io/<name>:<label>`. `fly apps create` and
 
 | File | Role |
 | --- | --- |
-| [`Dockerfile`](../Dockerfile) | `python:3.12.16-slim-bookworm` pinned by manifest-list digest, `pip install --require-hashes --only-binary=:all: -r requirements.txt`, user `atlas` (uid 10001) |
+| [`Dockerfile`](../Dockerfile) | `python:3.12.16-slim-bookworm` pinned by manifest-list digest, `pip install --require-hashes --only-binary=:all: -r requirements.txt`. The image starts as root so the entrypoint can chown the state directory, then `setpriv` continues as user `atlas` (uid 10001) |
 | [`fly.toml`](../fly.toml) | App name, primary region, and Dockerfile. No HTTP service, no `services` table, no process group |
 | [`docker-entrypoint.sh`](docker-entrypoint.sh) | Writes the event file, runs `python -m atlas_reviewer`, and with `ATLAS_HOLD_SECONDS` set keeps the Machine up after the CLI exits |
 | [`.dockerignore`](../.dockerignore) | Keeps the build context to the files the image copies, and keeps `.env`, `*.env`, `secrets.env`, and `*.pem` out of it |
@@ -139,8 +139,12 @@ caching does not depend on that switch: Anthropic-family routes send
 cap is a quarter of the selected endpoints' context when their
 completion limit is larger than that quarter, and the completion limit
 otherwise. `ATLAS_MODEL` and `ATLAS_PROVIDERS` select the model and the
-`provider.only` pin. The review child receives these names. It does not
-receive the webhook secret or the App private key.
+`provider.only` pin. The webhook service's review child, the
+`python -m atlas_reviewer review` process, receives `ATLAS_MODEL`,
+`ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, `ATLAS_REQUIRE_ZDR`,
+and `ATLAS_KEY_CEILING_USD`. It does not receive
+`ATLAS_MAX_OUTPUT_TOKENS`, the webhook secret, or the App private key.
+The one-off Machine is the review process itself, not that child.
 
 The installation still asks for `contents`, `checks`, `actions`, and
 `pull_requests` read. The review does not gain a GitHub write from being

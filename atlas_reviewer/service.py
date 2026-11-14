@@ -30,6 +30,7 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
     SIGNATURE_HEADER,
@@ -40,6 +41,7 @@ from atlas_reviewer.service_admit import (
 )
 from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
 from atlas_reviewer.service_run import (
+    CLEANUP_WAIT_S,
     WEBHOOK_SECRET_ENV,
     ReviewReport,
     ReviewRun,
@@ -240,9 +242,10 @@ class Worker:
             thread.start()
             self._threads.append(thread)
 
-    def stop(self, timeout: float = 30.0) -> None:
+    def stop(self, timeout: float = CLEANUP_WAIT_S) -> None:
         """Cancel an in-flight review so its child can delete the Sprite,
-        then wait for the workers. ``timeout`` is per worker thread."""
+        then wait for the workers. ``timeout`` is per worker thread, and
+        the default is the child's Sprite cleanup wait."""
         self._stop.set()
         self._board.cancel_active()
         self._board.wake()
@@ -341,6 +344,11 @@ class Worker:
         )
 
     def _execute(self, job: Job) -> None:
+        self._telemetry.record(
+            "service",
+            "runner named",
+            {**_fields(job.event), "runner": event_runner_name(job.event)},
+        )
         try:
             run = self._runner(job.event, job.cancel)
         except Exception as exc:  # noqa: BLE001 -- a review bug must not post
