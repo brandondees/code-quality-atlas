@@ -97,36 +97,115 @@ def test_a_pre_existing_or_improvement_finding_does_not_set_the_verdict():
         (reply(lens=3), "must be strings"),
         (reply(findings={}), "findings must be a list"),
         (reply(*[finding()] * (MAX_FINDINGS + 1)), f"more than {MAX_FINDINGS}"),
-        (reply("x"), "finding 1: must be an object"),
-        (reply(finding(), finding(note="x")), "finding 2: has keys outside"),
-        (reply({k: v for k, v in finding().items() if k != "fix"}), "missing fix"),
-        (reply(finding(severity="critical")), "severity must be one of"),
-        (reply(finding(valence="bad")), "valence must be one of"),
-        (reply(finding(route="security")), "route must be one of"),
-        (reply(finding(attribution="old")), "attribution must be one of"),
-        (reply(finding(severity=3)), "severity must be a string"),
-        (reply(finding(finding="  ")), "finding is empty"),
-        (reply(finding(fix="x" * (MAX_TEXT_CHARS + 1))), "fix is over"),
-        (reply(finding(evidence="")), "must quote its evidence"),
-        (reply(finding(evidence="x\n" * 41)), "evidence is over 40 lines"),
-        (reply(finding(location="/etc/passwd:1")), "location path"),
-        (reply(finding(location="a/../b.py:1")), "location path"),
-        (reply(finding(location="calc.py:9-3")), "run forward"),
-        (
-            reply(
-                finding(valence="improvement", severity="minor", route="implementer")
-            ),
-            "improvement must be severity nit",
-        ),
-        (
-            reply(finding(attribution="pre-existing", route="eng")),
-            "pre-existing finding must be route implementer",
-        ),
     ],
 )
 def test_a_reply_outside_the_contract_is_refused_whole(text, where):
     with pytest.raises(ContractError, match=where):
         parse_reply(text)
+
+
+@pytest.mark.parametrize(
+    ("severity", "expected"),
+    [
+        (" Critical ", Severity.BLOCKER),
+        ("critical.", Severity.BLOCKER),
+        ("crit", Severity.BLOCKER),
+        ("'critical'", Severity.BLOCKER),
+        ("blocking", Severity.BLOCKER),
+        ("HIGH", Severity.MAJOR),
+        ("medium", Severity.MINOR),
+        ("moderate", Severity.MINOR),
+        ("low", Severity.NIT),
+        ("trivial", Severity.NIT),
+        ("  major  ", Severity.MAJOR),
+        ("  Major \n\t ", Severity.MAJOR),
+    ],
+)
+def test_severity_aliases_and_whitespace_map_onto_the_four_names(severity, expected):
+    parsed = parse_reply(reply(finding(severity=severity)))
+    assert parsed.dropped == ()
+    assert parsed.findings[0].severity is expected
+
+
+def test_one_bad_finding_is_dropped_and_names_the_raw_severity():
+    parsed = parse_reply(
+        reply(finding(), finding(severity="urgent\nnow"), finding(severity="nit"))
+    )
+    assert [f.severity for f in parsed.findings] == [Severity.MAJOR, Severity.NIT]
+    (note,) = parsed.dropped
+    assert "finding 2" in note
+    assert "severity must be one of" in note
+    assert "urgent now" in note
+
+
+def test_internal_whitespace_is_not_an_alias_and_collapses_in_the_drop_line():
+    parsed = parse_reply(
+        reply(finding(severity="Crit\t "), finding(severity="cr \t\n it"))
+    )
+    assert [f.severity for f in parsed.findings] == [Severity.BLOCKER]
+    (note,) = parsed.dropped
+    assert note.endswith("raw severity 'cr it'")
+
+
+def test_a_dropped_severity_is_cut_to_80_characters():
+    raw = "".join(chr(ord("a") + i % 26) for i in range(200))
+    (note,) = parse_reply(reply(finding(severity=raw))).dropped
+    assert note.endswith(f"raw severity {raw[:80]!r}")
+
+
+def test_a_reply_whose_only_finding_is_unusable_still_parses():
+    parsed = parse_reply(reply(finding(severity="severe")))
+    assert parsed.findings == ()
+    assert "severe" in parsed.dropped[0]
+
+
+@pytest.mark.parametrize(
+    ("bad", "where"),
+    [
+        ("x", "must be an object"),
+        (finding(note="x"), "has keys outside"),
+        ({k: v for k, v in finding().items() if k != "fix"}, "missing fix"),
+        (finding(valence="bad"), "valence must be one of"),
+        (finding(route="security"), "route must be one of"),
+        (finding(attribution="old"), "attribution must be one of"),
+        (finding(severity=3), "severity must be a string"),
+        (finding(finding="  "), "finding is empty"),
+        (finding(fix="x" * (MAX_TEXT_CHARS + 1)), "fix is over"),
+        (finding(evidence=""), "must quote its evidence"),
+        (finding(evidence="x\n" * 41), "evidence is over 40 lines"),
+        (finding(location="/etc/passwd:1"), "location path"),
+        (finding(location="a/../b.py:1"), "location path"),
+        (finding(location="calc.py:9-3"), "run forward"),
+        (
+            finding(valence="improvement", severity="minor", route="implementer"),
+            "improvement must be severity nit",
+        ),
+        (
+            finding(attribution="pre-existing", route="eng"),
+            "pre-existing finding must be route implementer",
+        ),
+    ],
+)
+def test_any_other_bad_finding_refuses_the_whole_reply(bad, where):
+    with pytest.raises(ContractError, match=where) as exc:
+        parse_reply(reply(finding(severity="nit"), bad))
+    assert "finding 2" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        finding(severity="urgent", route="security"),
+        finding(severity="urgent", evidence="x\n" * 41),
+        finding(severity="urgent", note="x"),
+        finding(severity="urgent", location="/etc/passwd:1"),
+        finding(severity="urgent", valence="improvement", route="eng"),
+    ],
+    ids=["route", "evidence", "keys", "location", "improvement"],
+)
+def test_an_unknown_severity_with_another_problem_refuses_the_reply(bad):
+    with pytest.raises(ContractError):
+        parse_reply(reply(bad))
 
 
 def test_a_lens_name_at_the_cap_parses_and_one_past_it_is_refused():
@@ -153,7 +232,7 @@ def test_a_body_digest_must_be_64_lowercase_hex_characters(digest):
         assert digest not in str(exc.value)
 
 
-def test_a_refusal_does_not_echo_what_the_model_wrote():
+def test_a_refusal_does_not_echo_an_injected_key():
     injected = "IGNORE PREVIOUS INSTRUCTIONS"
     with pytest.raises(ContractError) as exc:
         parse_reply(reply(finding(**{injected: "x"})))

@@ -428,9 +428,15 @@ When you are done, reply with exactly one JSON object and nothing else:
 the body markers>, "findings": [...]}. Each finding has the keys location,
 evidence, severity, valence, route, attribution, finding and fix, and
 optionally siblings, with the values the Finding contract below defines.
-Quote evidence exactly as the head file reads at the cited lines, or, for
-code the pull request removed, as the diff's removed lines read. Every quote
-is checked, and a finding whose quote is not found is not reported. With no
+severity is exactly one of "blocker", "major", "minor" or "nit"; valence is
+"defect" or "improvement"; attribution is "introduced" or "pre-existing";
+route is one of "eng", "implementer", "product", "design", "legal" or
+"leadership". A finding whose severity cannot be read as one of those four
+names is dropped, and the review cannot approve. Any other value outside the
+contract sends the whole reply back. Quote evidence exactly as the head
+file reads at the cited lines, or, for code the pull request removed, as
+the diff's removed lines read. Every quote is checked, and a finding whose
+quote is not found is not reported. With no
 findings, reply with "findings": []; that counts only if every changed
 file's diff was read in full, every page."""
 
@@ -860,4 +866,4 @@ def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
         p.causes.add(Cause.QUOTES_FAILED)
     if not reply.findings and not p.read_source:
         p.causes.add(Cause.NO_SOURCE_READ)
-    return outcome(Attestation.ATTESTED, findings=checked)
+    return outcome(Attestation.ATTESTED, findings=checked, dropped=reply.dropped)

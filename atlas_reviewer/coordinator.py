@@ -219,8 +219,9 @@ class AgenticReview:
         coverage, so it blocks approval too. Context that was left out of
         the first turn, or a prior-round record for this pull request
         and this head that did not fit, is the same kind of gap: the
-        review cannot approve on a partial picture of this head. A
-        superseded round, and a line that names another pull request
+        review cannot approve on a partial picture of this head. So is a
+        finding dropped for an unknown severity, which could have been a
+        Blocker. A superseded round, and a line that names another pull request
         or no pull request, are not that gap."""
         if _lens_gap(self):
             return False
@@ -1142,18 +1143,24 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
     def scrub(text: str) -> str:
         return scrubber(text).text
 
-    lines = [status_line(review), "", _headline(review, scrub), ""]
+    lines = [status_line(review), "", _headline(review, scrub)]
     if review.selection_note or review.not_picked:
-        lines += ["## Lens selection", ""]
+        lines += ["", "## Lens selection"]
         if review.selection_note:
-            lines += [scrub(review.selection_note), ""]
-        lines += [
-            f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
-            for name, why in review.not_picked
-        ]
+            lines += ["", scrub(review.selection_note)]
         if review.not_picked:
             lines.append("")
-    lines += ["## Findings (verified quotes only)", ""]
+            lines += [
+                f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
+                for name, why in review.not_picked
+            ]
+    dropped = _dropped_notes(review)
+    if dropped:
+        lines += ["", "## Dropped findings (left out of this review)", ""]
+        lines += [
+            "- " + quote_untrusted(note, QUOTED_CHARS, scrub=scrub) for note in dropped
+        ]
+    lines += ["", "## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
     ]
@@ -1306,6 +1313,8 @@ def _lens_gap(review: AgenticReview) -> str:
         return "partial context"
     if review.not_picked:
         return "a picked lens did not run"
+    if _dropped_notes(review):
+        return "a finding was dropped"
     if not review.lenses:
         return "no lens selected"
     if _unread_paths(review):
@@ -1417,6 +1426,17 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append("escalated: the retry also failed")
     if r.retry_pending:
         parts.append("its retry did not run before the review ended")
+    if o.dropped:
+        parts.append(f"{len(o.dropped)} finding(s) dropped")
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
     return f"{head}; " + "; ".join(parts)
+
+
+def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:
+    return tuple(
+        note
+        for result in review.lenses
+        if result.outcome is not None
+        for note in result.outcome.dropped
+    )
