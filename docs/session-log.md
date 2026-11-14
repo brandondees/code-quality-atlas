@@ -1262,6 +1262,16 @@ severity scrubbed, quoted and cut to 80 characters, under its own
 heading, and a drop blocks approval. Any other problem in a finding
 still sends the whole reply back once, then `UNPARSED`. D54 records it.
 
+## 2026-11-12 — a whole-line quote may sit two lines off its citation
+
+The quote check was rejecting a finding the owner read as a real
+exit-code Major. The quote text is not in the comments on #639, #640
+or #642. Comparison now collapses internal whitespace, and a quote of
+whole lines may match within two lines of the citation. That match is
+tagged in the draft. A short fragment, such as `}`, still has to be
+the cited line. A quote from a file the pull request does not change
+now verifies when the lens read that file at HEAD. D47 records it.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come

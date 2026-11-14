@@ -1104,6 +1104,50 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
     assert TOKEN not in draft
 
 
+def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
+    drifted = CheckedFinding(checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR)
+    result = synthesize([lens_result(clean(drifted))])
+    draft = render_draft(result, Redactor())
+    assert "head within 2 lines of the citation" in draft
+    assert result.event is ReviewEvent.COMMENT
+
+
+@pytest.mark.parametrize(
+    ("severity", "verdict", "event"),
+    [
+        ("blocker", Verdict.BLOCK, ReviewEvent.REQUEST_CHANGES),
+        ("major", Verdict.APPROVE_WITH_CHANGES, ReviewEvent.COMMENT),
+    ],
+)
+def test_an_introduced_finding_in_an_unchanged_file_read_at_head_sets_the_verdict(
+    tmp_path, severity, verdict, event
+):
+    """D47: a pull request can break a caller in a file it does not touch."""
+    request = READ_ALL.calls[0].__class__
+    read = READ_ALL.__class__(
+        (
+            *READ_ALL.calls,
+            request("read_file", {"path": "docs/notes.md", "rev": "HEAD"}),
+        ),
+        READ_ALL.cost_usd,
+    )
+    notes = finding(
+        location="docs/notes.md:1", evidence="rounding notes", severity=severity
+    )
+    result, _, _ = review(tmp_path, [read, final(notes)])
+    (verified,) = result.verified
+    assert verified.source == QuoteSource.HEAD.value
+    assert str(verified.finding.location) == "docs/notes.md:1"
+    assert result.verdict is verdict
+    assert result.event is event
+
+
+def test_a_drifted_major_finding_stays_a_comment():
+    drifted = CheckedFinding(checked(Severity.MAJOR).finding, QuoteSource.HEAD_NEAR)
+    result = synthesize([lens_result(clean(drifted))])
+    assert result.event is ReviewEvent.COMMENT
+
+
 def test_an_unverified_findings_problem_text_is_scrubbed_in_the_draft():
     opaque = "zq-problem-7c1f9a"
     bad = CheckedFinding(
