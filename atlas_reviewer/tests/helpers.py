@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 import io
 import json
-import subprocess
 import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -15,9 +14,13 @@ from atlas_reviewer.domain import (
     SourceKind,
     ToolInfo,
 )
-from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.lenses import LensLibrary
+
+# Re-exported, not used here: the whole test suite imports LocalSprites from
+# this module, and the dry run uses the same class
+# (`atlas_reviewer.local_runner`).
+from atlas_reviewer.local_runner import LocalSprites  # noqa: F401
 from atlas_reviewer.redact import redact
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample-pr"
@@ -140,18 +143,3 @@ def small_bundle(*extra: str, chars: int = 100) -> StubLibrary:
     from atlas_reviewer.picker import CRITICAL_TIER
 
     return StubLibrary({n: n[0] * chars for n in (*CRITICAL_TIER, *extra)})
-
-
-class LocalSprites(FakeSprites):
-    """Runs the exec wrapper's argv here and answers with its stdout as
-    one stdout frame, the shape the live exec stream has."""
-
-    def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
-        self._record("exec", name, argv[-1])
-        self._get(name)
-        self.argv_seen.append(tuple(argv))
-        self.timeouts_seen.append(timeout_s)
-        done = subprocess.run(
-            list(argv), input=stdin, capture_output=True, timeout=60, check=False
-        )
-        return b"\x01" + done.stdout
