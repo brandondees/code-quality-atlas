@@ -1249,6 +1249,27 @@ earlier. A truncated superseded record does not block a new head. The
 round-log arguments stay on the nested trace path. No live call was
 made. D52.
 
+## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
+
+`max_price`, the reservation, the context and the completion limit come
+from the endpoint rows the route selects. The highest row price is the
+cap. The smallest row context and completion limit are the bounds. The
+catalog is still read once, to confirm the model id, and its headline
+price is not the cap. The unset agentic output cap is a quarter of that
+context when the completion limit would leave less input than that, and
+the completion limit otherwise. `ATLAS_MAX_OUTPUT_TOKENS` overrides it.
+`ATLAS_REQUIRE_ZDR` defaults to on. `false` or `--no-require-zdr` drops
+`zdr: true` and selects from the model endpoint list. That switch is
+flexibility. It is not how caching comes back: OpenRouter lists
+`cache_control` on no endpoint, and a ZDR Bedrock Sonnet endpoint still
+honors the breakpoint when the request sends it. Anthropic-family
+routes (`anthropic/...`) therefore always send `cache_control`, with
+`require_parameters` still true. Other models keep D51's intersection.
+`data_collection: deny`, `allow_fallbacks: false` and the pinned `only`
+list stay. The usage line and the completion span record whether ZDR
+was required and whether `cache_control` was sent. No live call was
+made from this repo. D57. Amends D51. D52 is unchanged.
+
 ## 2026-11-14 — round 4 on the per-lens continuation branch (#646)
 
 A review appends one round record, after the final synthesize, from the

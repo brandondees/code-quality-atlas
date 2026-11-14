@@ -232,6 +232,7 @@ def _select_provider(
                 model=args.model,
                 providers=args.providers,
                 allow_safety_retention=args.allow_safety_retention,
+                require_zdr=False if args.no_require_zdr else None,
             )
         )
     telemetry.span("model preflight", "key status", provider.preflight)
@@ -1292,6 +1293,16 @@ def _model_args(parser: argparse.ArgumentParser) -> None:
             "stays on pure zero-data-retention endpoints."
         ),
     )
+    parser.add_argument(
+        "--no-require-zdr",
+        action="store_true",
+        help=(
+            "do not require zero-data-retention endpoints (env "
+            "ATLAS_REQUIRE_ZDR=false). Off by default, so zdr stays true. "
+            "data_collection deny, allow_fallbacks false, and provider.only "
+            "stay. The flag wins over a true environment variable."
+        ),
+    )
 
 
 def _key_ceiling_arg(parser: argparse.ArgumentParser) -> None:
@@ -1324,7 +1335,7 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
         (
             "--max-output-tokens",
             "max_output_tokens",
-            "per-call output cap; default is the model's completion limit",
+            "per-call output cap; unset uses a quarter of the endpoint context when the completion limit is larger, otherwise that limit",
         ),
         (
             "--reasoning-max-tokens",

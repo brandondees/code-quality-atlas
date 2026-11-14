@@ -23,8 +23,8 @@ SETTINGS: dict[str, str] = {
     "max_input_tokens": "--max-input-tokens or ATLAS_MAX_INPUT_TOKENS",
     "max_output_tokens": "--max-output-tokens or ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "--reasoning-max-tokens or ATLAS_REASONING_MAX_TOKENS",
-    "context_length": "the pinned model's catalog context_length",
-    "max_completion_tokens": "the pinned model's catalog max_completion_tokens",
+    "context_length": "the pinned endpoints' context_length",
+    "max_completion_tokens": "the pinned endpoints' max_completion_tokens",
 }
 
 

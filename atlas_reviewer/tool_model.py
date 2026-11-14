@@ -4,14 +4,15 @@
 One `LensModel` turn is one Chat Completions request. It sends the same
 pinned provider document as the one-shot adapter (`only`, no fallbacks,
 `require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
-server tools). `cache_control` and `reasoning` are added only when every
-selected ZDR endpoint lists that name in `supported_parameters`. The lens loop
+server tools). `reasoning` is added only when every selected endpoint
+lists it in `supported_parameters`. `cache_control` is sent on every
+Anthropic-family route even when no endpoint lists it (D57). The lens loop
 reserves the worst case and settles `_actual_cost` (BYOK upstream
 included) through its own spend tracker. A turn with no readable cost
-but usable token counts is priced from the catalog: prompt tokens at
-the highest of the prompt and cache-write rates, or, when the response
-reports cache read or write counts, with those counts at the catalog's
-cache rates (a missing read rate uses the prompt rate, and a missing
+but usable token counts is priced from the selected endpoints: prompt
+tokens at the highest of the prompt and cache-write rates, or, when the
+response reports cache read or write counts, with those counts at the
+endpoints' cache rates (a missing read rate uses the prompt rate, and a missing
 write rate uses the reservation's input rate). A model with a reasoning
 rate and a response that reports no reasoning-token count stays
 unpriced. That missing-cost case is a non-finite
@@ -89,10 +90,10 @@ class OpenRouterLensModel:
         self, provider: OpenRouterProvider, per_call: Limits | None = None
     ) -> None:
         self.provider = provider
-        # None derives the per-call bounds from the catalog. The one-shot
-        # CallLimits on the provider stay the D25 ceilings and are not the
-        # agentic input cap. `review_lens` refuses this object when
-        # `per_call` is not the limits that review resolved.
+        # None derives the per-call bounds from the selected endpoints.
+        # The one-shot CallLimits on the provider stay the D25 ceilings
+        # and are not the agentic input cap. `review_lens` refuses this
+        # object when `per_call` is not the limits that review resolved.
         self.per_call = AgenticLimits().resolve() if per_call is None else per_call
         self._ready_for_turn: tuple[ModelTerms, bool, SelectedEndpoints] | None = None
 
@@ -100,11 +101,15 @@ class OpenRouterLensModel:
     def name(self) -> str:
         return self.provider.name
 
+    def routing(self) -> tuple[bool, bool] | None:
+        """ZDR required, and whether `cache_control` is on the request."""
+        return self.provider.routing()
+
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         terms, counts_byok, selected = self._ready()
-        # The loop prices the turn and then places it. The catalog and the
-        # ZDR snapshot are loaded once for this provider and reused for
-        # later turns in the review.
+        # The loop prices the turn and then places it. The endpoint
+        # snapshot is loaded once for this provider and reused for later
+        # turns in the review.
         self._ready_for_turn = (terms, counts_byok, selected)
         bounds = resolve_per_call(self.per_call, terms)
         payload = _payload(self.provider, request, terms, bounds, selected)
@@ -175,9 +180,17 @@ def _payload(
         # not list max_tokens. The reservation prices this cap.
         "max_tokens": limits.max_output_tokens,
         "stream": False,
-        "provider": provider_preferences(selected.providers, terms),
+        "provider": provider_preferences(
+            selected.providers, terms, require_zdr=selected.require_zdr
+        ),
     }
-    payload.update(optional_parameters(selected.supported, limits.reasoning_max_tokens))
+    payload.update(
+        optional_parameters(
+            selected.supported,
+            limits.reasoning_max_tokens,
+            model_id=provider.model_id,
+        )
+    )
     return payload
 
 

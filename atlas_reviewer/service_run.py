@@ -60,6 +60,20 @@ _CHILD_ALLOWED = frozenset(
         "ATLAS_OPENROUTER_API_KEY",
         "ATLAS_SPRITES_TOKEN",
         READ_TOKEN_ENV,
+        # Not secrets. The review child is the process that calls the model,
+        # so the route and the per-call caps have to travel with it (D57).
+        "ATLAS_MODEL",
+        "ATLAS_PROVIDERS",
+        "ATLAS_ALLOW_SAFETY_RETENTION",
+        "ATLAS_REQUIRE_ZDR",
+        "ATLAS_MAX_OUTPUT_TOKENS",
+        "ATLAS_MAX_INPUT_TOKENS",
+        "ATLAS_REASONING_MAX_TOKENS",
+        "ATLAS_RESERVATION_USD",
+        "ATLAS_MAX_CALLS",
+        "ATLAS_MAX_TURNS",
+        "ATLAS_LENS_WALL_S",
+        "ATLAS_REVIEW_WALL_S",
     }
 )
 # The parent stops the child after this long even if the child is still

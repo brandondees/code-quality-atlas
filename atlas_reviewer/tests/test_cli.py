@@ -179,6 +179,58 @@ def test_allow_safety_retention_is_wired_from_the_flag(tmp_path):
         CallLimits(max_calls=3),
     )
     assert held["provider"]._route.allow_safety_retention is True
+    assert held["provider"]._route.require_zdr is True
+
+
+def test_no_require_zdr_is_wired_from_the_flag(tmp_path):
+    from atlas_reviewer.openrouter import OpenRouterProvider
+    from atlas_reviewer.telemetry import Telemetry
+
+    from .test_openrouter import KEY, OpenRouterFake
+
+    held = {}
+
+    def factory(key, limits):
+        provider = OpenRouterProvider(OpenRouterFake(), key, limits=limits)
+        held["provider"] = provider
+        return provider
+
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "openrouter",
+            "--allow-live-inference",
+            "--no-require-zdr",
+        ]
+    )
+    cli._select_provider(
+        args,
+        {cli.ENV_OPENROUTER_KEY: KEY, "ATLAS_REQUIRE_ZDR": "true"},
+        factory,
+        Telemetry(FakeClock()),
+        CallLimits(max_calls=3),
+    )
+    assert held["provider"]._route.require_zdr is False
+
+
+def test_agentic_review_accepts_no_require_zdr(tmp_path):
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "agentic-review",
+            "--event",
+            EVENT,
+            "--dry-run",
+            "--no-require-zdr",
+        ]
+    )
+    assert args.no_require_zdr is True
 
 
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):

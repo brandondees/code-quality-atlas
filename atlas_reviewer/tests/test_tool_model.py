@@ -32,10 +32,10 @@ from .test_openrouter import (
     KEY,
     MODEL_ID,
     OpenRouterFake,
-    catalog,
     completion,
     key_status,
     reply,
+    zdr_payload,
 )
 
 SYSTEM = "You are one lens. Read the change with the tools."
@@ -46,10 +46,14 @@ def request(*messages, tools=None) -> TurnRequest:
     return TurnRequest(SYSTEM, history, tools if tools is not None else tool_schemas())
 
 
-def model(*chat, key=None, limits=None, catalog_reply=None):
+def model(*chat, key=None, limits=None, catalog_reply=None, zdr=None, route=None):
     extra = {} if catalog_reply is None else {"model": catalog_reply}
+    if zdr is not None:
+        extra["zdr"] = zdr
     fake = OpenRouterFake(*chat, key=key, **extra)
     provider = OpenRouterProvider(fake, KEY, limits=limits)
+    if route is not None:
+        provider.configure(route)
     return OpenRouterLensModel(provider), fake
 
 
@@ -117,7 +121,7 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     assert body["provider"]["allow_fallbacks"] is False
     assert body["model"] == MODEL_ID
     assert body["stream"] is False
-    assert "cache_control" not in body
+    assert body["cache_control"] == {"type": "ephemeral"}
     assert "cache_control" not in body["provider"]
     assert "plugins" not in body
     assert [tool["function"]["name"] for tool in body["tools"]] == [
@@ -142,7 +146,7 @@ def test_the_tool_request_omits_parameters_the_endpoint_does_not_list():
     bare.turn(request())
     body = sent(fake)
     assert "reasoning" not in body
-    assert "cache_control" not in body
+    assert body["cache_control"] == {"type": "ephemeral"}
     assert body["provider"]["require_parameters"] is True
     assert body["provider"]["zdr"] is True
     assert body["provider"]["data_collection"] == "deny"
@@ -214,7 +218,7 @@ def test_a_reported_cost_settles_and_an_invalid_one_stays_at_the_worst_case():
 def test_token_counts_without_a_cost_are_priced_from_the_catalog():
     usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
     lens, _fake = model(reply(completion("done", usage=usage)))
-    # 1000 x 0.000006 + 100 x 0.0000225, the highest catalog rates.
+    # 1000 x 0.000006 + 100 x 0.0000225, the highest selected-endpoint rates.
     assert lens.turn(request()).cost_usd == Decimal("0.00825")
 
 
@@ -222,7 +226,7 @@ def test_a_missing_cost_with_no_cache_counts_uses_the_reservation_input_rate():
     usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_write": "0.00001"})),
     )
     # The write rate is above the prompt rate, so every prompt token is
     # charged at that reservation rate when the response names no cache split.
@@ -239,7 +243,7 @@ def test_an_empty_cache_detail_object_still_uses_the_reservation_input_rate():
     }
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_write": "0.00001"})),
     )
     assert lens.turn(request()).cost_usd == Decimal("0.01225")
 
@@ -253,7 +257,7 @@ def test_cache_tokens_without_a_cost_use_the_catalog_cache_rates():
     }
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_read="0.000001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_read": "0.000001"})),
     )
     # 100 x 0.000006 + 800 x 0.000001 + 100 x 0.00000375 + 100 x 0.0000225.
     assert lens.turn(request()).cost_usd == Decimal("0.004025")
@@ -275,7 +279,7 @@ def test_a_missing_write_count_prices_the_rest_at_the_reservation_input_rate(
     }
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_write": "0.00001"})),
     )
     # The write count is absent, so the uncached tokens may include writes
     # at 0.00001. The reads (if any) are at the prompt rate, 0.000006.
@@ -291,7 +295,7 @@ def test_cache_reads_past_the_prompt_with_no_write_count_keep_the_reservation():
     }
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_write": "0.00001"})),
     )
     spend = Spend(AgenticLimits().resolve())
     ask = request()
@@ -332,7 +336,7 @@ def test_an_unreadable_cache_count_keeps_the_reservation(details):
     }
     lens, _fake = model(
         reply(completion("done", usage=usage)),
-        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+        zdr=reply(zdr_payload(pricing={"input_cache_write": "0.00001"})),
     )
     spend = Spend(AgenticLimits().resolve())
     ask = request()

@@ -209,22 +209,46 @@ class ResolvedCall:
     reasoning_max_tokens: int
 
 
+def default_output_tokens(context_length: int, max_completion_tokens: int) -> int:
+    """Output tokens to reserve when no cap was configured.
+
+    A review turn needs the diff, the lens, and tool results in the
+    input. When the endpoint's completion limit is larger than a quarter
+    of its context, the default is that quarter (at least 2, and never
+    above the completion limit). Otherwise the default is the completion
+    limit itself. On a 262,144-token context the quarter is 65,536
+    output tokens, which leaves 196,608 for input. On a 1,000,000-token
+    context whose completion limit is already 64,000, the default stays
+    64,000. `ATLAS_MAX_OUTPUT_TOKENS` can set a larger cap, up to the
+    completion limit, as long as one input token remains.
+    """
+    quarter = context_length // 4
+    if max_completion_tokens > quarter:
+        cap = max(quarter, 2)
+    else:
+        cap = max_completion_tokens
+    if cap > max_completion_tokens:
+        return max_completion_tokens
+    return cap
+
+
 def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     """The per-call bounds for this model.
 
     Hard caps exist to stop a runaway call, not to make a review shallow.
-    With no override, the output cap is the model's own completion limit
-    and the input cap is the context that cap leaves. The reasoning value
-    defaults to half that output cap (`default_reasoning_tokens`), so the
-    reply has the other half. OpenRouter counts reasoning tokens against
-    `max_tokens`, and the reservation does not depend on the hint. An
-    override may tighten a bound. It may not exceed the model's context,
-    and the output override may not exceed the model's completion limit.
-    An unknown context never reaches here: `parse_model_terms` has
-    already refused it.
+    With no override, the output cap is `default_output_tokens`: the
+    completion limit, unless that limit would leave less than three
+    quarters of the context for input. The input cap is the context that
+    cap leaves. The reasoning value defaults to half that output cap
+    (`default_reasoning_tokens`), so the reply has the other half.
+    OpenRouter counts reasoning tokens against `max_tokens`, and the
+    reservation does not depend on the hint. An override may be larger
+    than the quarter and may not exceed the model's context. The output
+    override may not exceed the model's completion limit. An unknown
+    context never reaches here: the endpoint rows have already refused it.
     """
     output = (
-        terms.max_completion_tokens
+        default_output_tokens(terms.context_length, terms.max_completion_tokens)
         if limits.max_output_tokens is None
         else limits.max_output_tokens
     )
