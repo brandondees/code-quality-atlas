@@ -1262,16 +1262,6 @@ severity scrubbed, quoted and cut to 80 characters, under its own
 heading, and a drop blocks approval. Any other problem in a finding
 still sends the whole reply back once, then `UNPARSED`. D54 records it.
 
-## 2026-11-12 — a verified Major requests changes
-
-The agentic coordinator was requesting changes only for a Blocker, so
-verified Majors on the #639, #640 and #642 runs came out as
-`COMMENT`. A verified introduced Major or Blocker is now
-`REQUEST_CHANGES`. A Minor stays `COMMENT`. Nits, and a review with no
-verdict-setting finding, still approve. D55 records that
-`synthesis.md`, `templates/REVIEW.md` and the PR-review runbook still
-describe a Blocker as what requests changes on the human-posted review.
-
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come
@@ -1321,3 +1311,16 @@ it is sent, and a bad tier names that row. A null `max_prompt_tokens`
 is no ceiling: the live ZDR list and the Sonnet endpoint rows carry
 the key as null. With ZDR off both the model endpoint list and the
 ZDR list are read. No live call is made from the tests. D57.
+
+## 2026-11-14 — a verified Major stays a comment
+
+Brandon kept Majors as `COMMENT` in agentic reviews. A verified
+introduced Blocker is `REQUEST_CHANGES`. A verified introduced Major
+or Minor is approve-with-changes and `COMMENT`. Nits, and a review
+with no verdict-setting finding, still approve.
+`skills/synthesizing-review-findings/SKILL.md` says a single Blocker
+is enough to block. `templates/REVIEW.md` calls that Blocker-only
+GitHub state a deliberate choice, and offers
+`unresolved_findings: block` with `unresolved_threshold: Major` for a
+repo that wants Majors to hold the review. The agentic coordinator
+does not read that file. D55.
