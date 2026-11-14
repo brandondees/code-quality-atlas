@@ -138,6 +138,34 @@ def test_a_second_scenario_in_one_state_directory_gets_its_own_verdict(tmp_path)
     assert not calls.startswith("Model calls: 0;")
 
 
+def test_a_read_back_that_is_not_deny_all_fails_the_dry_run(tmp_path, monkeypatch):
+    """The egress read-back must refuse a policy that is not deny-all, on
+    the dry-run path too: a tampered read-back ends the review incomplete
+    with the refusal quoted, never a completed review."""
+    tampered = LocalSprites(policy_read_back={"rules": []})
+    monkeypatch.setattr(cli, "LocalSprites", lambda: tampered)
+    code, _out, err = run_dry_run(tmp_path, "--out", str(tmp_path / "draft.md"))
+    assert code == cli.EXIT_INCOMPLETE, err
+    draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
+    assert "REVIEW INCOMPLETE -- not approvable." in draft
+    assert "network policy read-back is not deny-all" in draft
+
+
+def test_a_verified_major_is_a_comment_with_a_verified_removed_line(tmp_path):
+    """D55: a verified introduced Major or Minor is approve-with-changes
+    (COMMENT), and a quote of a removed line verifies as `removed lines`."""
+    code, out, err = run_dry_run(tmp_path, "--lens-script", scenario("comment"))
+    assert code == cli.EXIT_OK, err
+    status = status_line(out)
+    assert status["review_event"] == "COMMENT"
+    assert status["proposed_event"] == "COMMENT"
+    assert status["coverage_complete"] is True
+    assert status["verified_findings"] == 2
+    assert "**Review event: COMMENT.** Verdict: approve with changes." in out
+    assert "[major, defect, route: eng, introduced]" in out
+    assert "[minor, defect, route: eng, introduced, removed lines]" in out
+
+
 def test_a_coverage_gap_is_not_approvable_and_names_the_unread_file(tmp_path):
     code, out, err = run_dry_run(tmp_path, "--lens-script", scenario("gap"))
     assert code == cli.EXIT_INCOMPLETE, err
