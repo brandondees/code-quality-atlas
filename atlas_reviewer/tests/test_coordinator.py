@@ -1444,10 +1444,11 @@ def test_a_pooled_review_appends_one_round_record_from_its_combined_verdict(tmp_
     result, _ = _lenses(
         tmp_path, [LENS, OTHER], models[0], pool=1, models=models, round_log=log
     )
-    assert result.event is ReviewEvent.COMMENT
+    # An introduced Major requests changes (D55). The record carries that event.
+    assert result.event is ReviewEvent.REQUEST_CHANGES
     records = log.read().records
     assert len(records) == 1
-    assert records[0].event == "COMMENT"
+    assert records[0].event == "REQUEST_CHANGES"
     assert records[0].lens == f"{LENS}, {OTHER}"
     assert any(
         "rounds each item before summing" in line for line in records[0].findings
