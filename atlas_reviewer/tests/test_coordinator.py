@@ -1255,14 +1255,18 @@ def clean(*findings):
         ((checked(Severity.MAJOR),), Verdict.BLOCK, ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.NIT), checked(Severity.BLOCKER)), Verdict.BLOCK,
          ReviewEvent.REQUEST_CHANGES),
+        ((checked(Severity.MINOR), checked(Severity.MAJOR)), Verdict.BLOCK,
+         ReviewEvent.REQUEST_CHANGES),
+        ((checked(Severity.MINOR), checked(Severity.BLOCKER)), Verdict.BLOCK,
+         ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.BLOCKER, route=Route.LEGAL),), Verdict.BLOCK,
          ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.BLOCKER, attribution=Attribution.PRE_EXISTING),),
          Verdict.APPROVE, ReviewEvent.APPROVE),
         ((checked(Severity.BLOCKER, verified=False),), Verdict.APPROVE, ReviewEvent.APPROVE),
     ],
-    ids=["none", "nit", "minor", "major", "blocker", "routed-blocker", "pre-existing",
-         "unverified"],
+    ids=["none", "nit", "minor", "major", "blocker", "minor-and-major",
+         "minor-and-blocker", "routed-blocker", "pre-existing", "unverified"],
 )  # fmt: skip
 def test_the_verdict_follows_only_verified_introduced_defects(findings, verdict, event):
     result = synthesize([lens_result(clean(*findings))])
