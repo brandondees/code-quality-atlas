@@ -1,16 +1,24 @@
 # SPDX-License-Identifier: MIT
 """`LocalTasks`: the Tasks API a dry run's keepalive hold talks to, on a
-unix socket in this process. `LocalSprites` itself is exercised by the
-bridge, lens-loop, keepalive and end-to-end suites; this file pins the
-socket server's own behavior."""
+unix socket in this process; and `LocalSprites`' exec contract — the
+budget, the timeout's failure shape, and the process group the kill
+covers. The bridge, lens-loop, keepalive and end-to-end suites exercise
+both through the whole review."""
 
+import shlex
 import socket
 import time
+from pathlib import Path
 
+import pytest
+
+from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.domain import RunnerStatus
+from atlas_reviewer.fakes import MemoryLedger
 from atlas_reviewer.keepalive import SocketTaskClient
 from atlas_reviewer.local_runner import LocalSprites, LocalTasks
-from atlas_reviewer.ports import BoundaryError
-from atlas_reviewer.runner import exec_argv
+from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
+from atlas_reviewer.runner import exec_argv, run_session
 
 
 def client(tmp_path):
@@ -80,20 +88,83 @@ def test_an_exec_finishing_inside_its_budget_answers():
         api.delete("cqa-rev-test-abc")
 
 
-def test_an_exec_that_outlives_its_budget_is_a_boundary_error_not_a_crash():
+def test_an_exec_that_outlives_its_budget_raises_a_stream_timeout():
     """The budget is the subprocess's own timeout, so a hung script ends at
     its budget with the failure a live runner reports, and the review
-    fails closed instead of dying on an uncaught `TimeoutExpired`."""
+    fails closed instead of dying on an uncaught `TimeoutExpired`. The
+    bytes that arrived before the budget are on the error, as they are on
+    a live runner."""
     api = LocalSprites()
     api.create("cqa-rev-test-abc")
     try:
         started = time.monotonic()
-        try:
-            api.exec("cqa-rev-test-abc", exec_argv("exec sleep 5", 0), b"", 1)
-        except BoundaryError as exc:
-            assert "did not finish within its 1s budget" in str(exc)
-        else:
-            raise AssertionError("the over-budget exec was answered")
+        with pytest.raises(StreamTimeoutError) as raised:
+            api.exec(
+                "cqa-rev-test-abc",
+                exec_argv("echo atlas-partial; exec sleep 5", 0),
+                b"",
+                1,
+            )
+        assert raised.value.first_byte is False
+        assert b"atlas-partial" in raised.value.received
+        assert "did not finish within its 1s budget" in str(raised.value)
         assert time.monotonic() - started < 10
     finally:
         api.delete("cqa-rev-test-abc")
+
+
+def test_a_local_timeout_reports_the_stage_and_purpose_like_a_live_runner():
+    """`_send` rewrites a `StreamTimeoutError`'s message with the stage and
+    purpose, and the runner fails closed on it. A plain `BoundaryError`
+    would keep the local text, so this fails if the local timeout stops
+    being the live runner's failure."""
+    api = LocalSprites()
+    ledger = MemoryLedger()
+
+    def body(session):
+        return session.exec("probe", "echo atlas-partial; exec sleep 5", budget_s=1)
+
+    report = run_session(
+        api, ledger, body, name="cqa-rev-test-abc",
+        deadline_s=30, clock=SystemClock(),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.FAILED
+    assert "session stage, probe:" in report.note
+    assert "output stopped before the exit marker" in report.note
+    assert "did not finish within its 1s budget" in report.note
+    assert api.live_names() == ()
+    assert report.status is RunnerStatus.FAILED
+    assert "session stage, probe:" in report.note
+    assert "output stopped before the exit marker" in report.note
+    assert "did not finish within its 1s budget" in report.note
+
+
+def test_a_timeout_kills_the_whole_process_group(tmp_path):
+    """`communicate` kills only the direct child; the exec runs in its own
+    process group so a grandchild of `sh` cannot outlive the budget. The
+    script's `sleep` is a grandchild, not an `exec` replacement."""
+    pidfile = tmp_path / "orphan.pid"
+    script = f"sleep 5 & echo $! > {shlex.quote(str(pidfile))}; wait"
+    api = LocalSprites()
+    api.create("cqa-rev-test-abc")
+    try:
+        with pytest.raises(StreamTimeoutError):
+            api.exec("cqa-rev-test-abc", exec_argv(script, 0), b"", 1)
+        pid = int(pidfile.read_text().strip())
+        deadline = time.monotonic() + 2
+        while _alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not _alive(pid), f"grandchild {pid} outlived the budget"
+    finally:
+        api.delete("cqa-rev-test-abc")
+
+
+def _alive(pid: int) -> bool:
+    """A live process in /proc: gone when the entry is, and a zombie counts
+    as gone, since its parent has been reaped or is about to."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        return False
+    state = stat.rpartition(")")[2].lstrip()[:1]
+    return state != "Z"

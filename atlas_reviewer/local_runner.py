@@ -20,6 +20,8 @@ directory and closes it when the review ends.
 from __future__ import annotations
 
 import json
+import os
+import signal
 import socket
 import subprocess
 import threading
@@ -27,15 +29,16 @@ from pathlib import Path
 from typing import Self
 
 from atlas_reviewer.fakes import FakeSprites
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 
 
 class LocalSprites(FakeSprites):
     """Runs the exec wrapper's argv here and answers with its stdout as
     one stdout frame, the shape the live exec stream has. The exec's
-    budget is honored as the subprocess's own timeout; a command that
-    outlives it is a `BoundaryError`, the same failure a live runner
-    reports, not a crash."""
+    budget is honored as the subprocess's own timeout, in its own process
+    group so no grandchild outlives it; a command that outlives the budget
+    raises `StreamTimeoutError`, the same failure a live runner reports,
+    not a crash."""
 
     def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
         self._record("exec", name, argv[-1])
@@ -43,18 +46,37 @@ class LocalSprites(FakeSprites):
         self.argv_seen.append(tuple(argv))
         self.timeouts_seen.append(timeout_s)
         try:
-            done = subprocess.run(
+            proc = subprocess.Popen(
                 list(argv),
-                input=stdin,
-                capture_output=True,
-                timeout=timeout_s,
-                check=False,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
             )
+        except OSError as exc:
+            raise BoundaryError(f"local exec could not start: {exc}") from exc
+        try:
+            stdout, _stderr = proc.communicate(stdin, timeout=timeout_s)
         except subprocess.TimeoutExpired as exc:
-            raise BoundaryError(
-                f"local exec did not finish within its {timeout_s}s budget"
+            _kill_process_group(proc)
+            received = exc.stdout or b""
+            raise StreamTimeoutError(
+                f"local exec did not finish within its {timeout_s}s budget",
+                received=received,
+                first_byte=False,
             ) from exc
-        return b"\x01" + done.stdout
+        return b"\x01" + stdout
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the exec's whole process group and reap it. `communicate` left
+    the direct child alive; `start_new_session` made it its group's
+    leader, so a grandchild `sh` left behind cannot outlive the budget."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.communicate()
 
 
 class LocalTasks:
