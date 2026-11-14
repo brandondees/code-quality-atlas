@@ -119,8 +119,11 @@ python -m atlas_reviewer review --event atlas_reviewer/fixtures/sample-pr/event.
 `--dry-run` wires a fixture directory as GitHub, the in-memory fake as the
 Sprites runner, and the offline provider, which calls no model, so the
 draft reports the diff as NOT REVIEWED and its lenses as planned, not run.
-No model reviewed any file, so a dry run always exits 4, review incomplete
-(see Review event and the coverage gate). CI runs this same command. Useful flags:
+No model reviewed any file, so this command's dry run always exits 4,
+review incomplete (see Review event and the coverage gate). CI runs this
+same command. The `agentic-review` dry run is a different path — it runs
+the lenses end to end through a scripted reviewer, and can exit 0, 4 or 5
+(see "The agentic dry run reaches and runs the lenses" below). Useful flags:
 
 - `--out draft.md` writes the draft to a file. A missing directory, an
   unwritable path or a dangling symlink is refused (exit 2) before the
@@ -151,6 +154,71 @@ No model reviewed any file, so a dry run always exits 4, review incomplete
   One exec shape).
 
 Tests: `python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer`.
+
+## The agentic dry run reaches and runs the lenses
+
+```sh
+python -m atlas_reviewer --state-dir .atlas-reviewer-state agentic-review \
+  --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run
+```
+
+`agentic-review --dry-run` is the offline end-to-end path for an
+entry-point change: the lens loop, the tool bridge, the quote checks, the
+attestation ledger, the synthesis, the verdict, the draft and the exit
+code all run as real code, with nothing to stub by hand. What the wiring
+substitutes:
+
+- GitHub is the fixture directory (`FixtureGitHub`), as in the one-shot
+  dry run.
+- The runner lifecycle is `LocalSprites`
+  (`atlas_reviewer/local_runner.py`): every exec — bridge staging under
+  real git, the `diff_file` and `read_file` tool calls, the task hold —
+  runs as a local subprocess under the same `env -i` wrapper. There is no
+  network client in the wiring, and the deny-all egress policy is set and
+  read back through the fake the same way a live run enforces it; a
+  dry run that skipped that hook would not be a dry run of the review.
+- The keepalive hold talks to `LocalTasks`, a unix-socket Tasks API under
+  the state directory, so a lens hold is created, held and deleted for
+  real.
+- The model is a scripted reviewer (`atlas_reviewer/lens_script.py`),
+  driven by a JSON **lens script**. Its reading behavior is fixed — the
+  order the lens instructions themselves ask for, every changed file's
+  diff page by page, then a HEAD `read_file` of every file a finding
+  cites — and what varies is data in the script: which findings each lens
+  reports, and which changed files no lens ever reads (`unread`), for a
+  coverage-gap scenario. Each finding entry is validated by the real
+  finding-contract parser when the script is loaded, so a malformed
+  scenario is refused before a run; an unknown severity loads, because
+  dropping it is a scenario (D54).
+
+The default lens script is the fixture's
+`atlas_reviewer/fixtures/sample-pr/scenarios/blocker.json`: one verified
+introduced Blocker, so the shipped dry run exits 5 with a complete,
+approving-coverage review that requests changes, and the draft carries
+the finding, the committed-secrets section for the fixture's own planted
+key (values scrubbed), and the attested lens table. One scenario per
+verdict class ships beside it: `approve.json` (no findings, exit 0),
+`comment.json` (a verified Major and a verified removed-line Minor,
+COMMENT, exit 0), `gap.json` (`settings.ini` never read, exit 4 with the
+file named), and `drop.json` (a finding whose severity matches nothing,
+dropped and named, exit 4). A new scenario is a new JSON file in that
+directory passed with `--lens-script`, not new code.
+
+The dry run's attestation ledger is a per-run file under a temporary
+directory in the state directory, so re-running or editing a scenario
+replays from scratch instead of reusing an attempt settled for the same
+head and lens body. The runners.ledger and the review lock behave as
+live. `--lens-script` is refused without `--dry-run`: a canned reply can
+never stand in for a live model. Nothing is read from the environment;
+the run works with an empty one, and its test runs the shipped command as
+a subprocess with exactly that. A dry run can exit 0, 4 or 5 by the same
+table as a live review; the one-shot `review --dry-run` is unchanged and
+still always exits 4, because its offline provider reviews no file.
+
+CI runs this path through `test_dry_run_end_to_end.py`, which drives the
+real CLI entry for each scenario and asserts the draft's event, the
+coverage gate and the exit code, plus one telemetry read-back proving the
+egress policy was verified.
 
 ## Score a recorded review
 
@@ -1188,6 +1256,8 @@ D41 records the 2026-11-12 probe that did.
 | `providers.py` | `OfflineProvider` (the default) | no |
 | `github_api.py`, `github_auth.py`, `sprites_api.py`, `openrouter.py`, `http.py` | live adapters | network |
 | `github_fixture.py`, `fakes.py`, `ledger.py`, `clock.py` | offline adapters, local state | local files |
+| `local_runner.py` | the dry-run runner: `LocalSprites` runs each exec's wrapper locally (the same class the bridge and lens-loop tests use) and `LocalTasks` answers the keepalive hold on a unix socket | subprocesses, a local socket |
+| `lens_script.py` | the dry-run lens script: the scripted reviewer's fixed reading behavior and the JSON scenarios the fixture ships | reads the script file |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
 | `service_admit.py` | webhook signature, event and allowlist admission | no |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |

@@ -1334,3 +1334,27 @@ GitHub state a deliberate choice, and offers
 `unresolved_findings: block` with `unresolved_threshold: Major` for a
 repo that wants Majors to hold the review. The agentic coordinator
 does not read that file. D55.
+
+## 2026-11-14 — the agentic dry run runs the lenses end to end (D59)
+
+The shipped `agentic-review --dry-run` never reached a lens: its runner
+was the one-shot's rules-only fake, which has no trusted-git step, so
+bridge staging failed and every lens was NOT RUN, and its model never
+called a tool. The offline pieces the tests already trust moved into the
+package: `LocalSprites` (each exec's wrapper run locally, moved out of
+the test helpers so there is one implementation), `LocalTasks` (the
+Tasks API on a unix socket under the state directory, so the keepalive
+hold runs for real), and a scripted reviewer (`lens_script.py`) driven
+by a JSON lens script — fixed reading behavior (every changed file's
+diff page by page, then the head files a finding cites), data-only
+variation (findings per lens, validated by the real finding-contract
+parser at load; `unread` for a coverage-gap scenario), and a
+`--lens-script` flag that is refused outside a dry run. The shipped
+fixture gains a merge-base tree (`source-1a2b3c4/`) and scenarios for
+each verdict class under D55: a verified Blocker (the default, exit 5),
+a Major plus a removed-line Minor (COMMENT, exit 0), an approve (exit
+0), a coverage gap (exit 4), and a dropped finding (exit 4). The dry
+run's attestation ledger is per run, so editing a scenario replays from
+scratch. Nothing is read from the environment and no network client is
+constructed; the deny-all read-back is asserted from the telemetry in
+the end-to-end suite. The one-shot `review --dry-run` is unchanged.
