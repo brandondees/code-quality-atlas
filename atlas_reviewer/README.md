@@ -370,7 +370,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us`. One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
-| `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
+| `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement and still refuses a tag the ZDR list marks Safety Retention unless the opt-in is on. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
@@ -432,15 +432,16 @@ named: `amazon-bedrock`, `google-vertex/global`, `google-vertex/us`,
 and `google-vertex/europe`. `ATLAS_PROVIDERS` or `--providers` replaces
 that list, and one slug is a valid pin. Before a completion the adapter
 reads `GET /api/v1/endpoints/zdr` without the key when ZDR is required,
-and `GET /api/v1/models/{author}/{slug}/endpoints` when it is not.
-A slug is sent only when every row for this model and that exact tag
-has `safety_retention: false`, and every child tag (`<slug>/...`) on
-the list for this model does too. A child that is Safety Retention
-refuses the parent, because `provider.only` of the parent can expand
-to it. A slug with no exact row is refused, and the error names child
-tags when the list has them: `deepinfra` is not a tag, `deepinfra/fp8`
-is. Safety Retention (for example Gemini on Vertex) needs
-`ATLAS_ALLOW_SAFETY_RETENTION=true` or `--allow-safety-retention`.
+and both that list and `GET /api/v1/models/{author}/{slug}/endpoints`
+when it is not. The full endpoint list has no `safety_retention`
+field, so the ZDR list is what marks a tag. A tag the list marks
+`safety_retention: true` is refused unless the opt-in is on, in either
+mode. An unreadable ZDR list refuses the call. A child that is Safety
+Retention refuses the parent, because `provider.only` of the parent
+can expand to it. A slug with no exact row is refused, and the error
+names child tags when the list has them: `deepinfra` is not a tag,
+`deepinfra/fp8` is. Safety Retention (for example Gemini on Vertex)
+needs `ATLAS_ALLOW_SAFETY_RETENTION=true` or `--allow-safety-retention`.
 `reasoning` is sent only when every eligible row lists it in
 `supported_parameters`. `cache_control` is sent on every Anthropic-family
 route (`anthropic/...`) even when no row lists it. OpenRouter does not
@@ -454,9 +455,13 @@ otherwise. `ATLAS_MAX_OUTPUT_TOKENS` or `--max-output-tokens` overrides
 it and may be higher than that quarter, up to the completion limit.
 The one-shot path keeps its `CallLimits` cap. `max_price` and the
 reservation use the highest prompt and completion rates on the selected
-rows, and the smallest context and completion limit. The catalog
-headline is not those numbers. The provider reads the catalog and the
-endpoint list once and reuses them for later completions in that review.
+rows, including each row's `pricing.overrides`, and the smallest
+context and completion limit. A row's `max_prompt_tokens`, when set,
+caps the input as well. The catalog headline is not those numbers. The
+provider reads the catalog and the endpoint list once and reuses them
+for later completions in that review. The usage line and the completion
+span name the selected tags, the minimum context, the minimum
+completion limit, and the `max_price` rates.
 The usage line and the completion span record whether ZDR was required
 and whether `cache_control` was sent. Before any
 inference, `preflight()` reads

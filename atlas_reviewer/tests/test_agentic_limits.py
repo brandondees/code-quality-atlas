@@ -401,8 +401,9 @@ def test_the_default_output_cap_leaves_input_room_when_completion_fills_the_cont
     lens.turn(request())
     assert sent(fake)["max_tokens"] == 65_536
     assert default_output_tokens(262_144, 235_929) == 65_536
-    # Sonnet's 64_000 completion on a 1_000_000 context stays 64_000.
-    assert default_output_tokens(1_000_000, 64_000) == 64_000
+    # Sonnet 5.5's completion limit is 128_000 on a 1_000_000 context,
+    # which is under a quarter, so the default stays 128_000.
+    assert default_output_tokens(1_000_000, 128_000) == 128_000
 
     lens.per_call = replace(AgenticLimits().resolve(), max_output_tokens=100_000)
     lens.turn(request())
@@ -454,3 +455,72 @@ def test_a_run_records_whether_zdr_was_required_and_whether_caching_was_enabled(
     assert body["provider"]["data_collection"] == "deny"
     assert "zdr required: false" in off.provider.usage_lines()[0]
     assert "cache_control: true" in off.provider.usage_lines()[0]
+    assert span.attributes["atlas.endpoint_tags"]
+    assert span.attributes["atlas.context_length"] == "1000000"
+    assert span.attributes["atlas.max_completion_tokens"] == "64000"
+    assert span.attributes["atlas.max_price_prompt"] == "6.0"
+    assert "endpoints:" in lens.provider.usage_lines()[0]
+
+
+def test_the_smaller_pinned_context_and_completion_limit_bound_the_call():
+    from atlas_reviewer.openrouter import model_route
+
+    from .test_openrouter import with_terms
+
+    wide = with_terms(
+        {
+            "model_id": MODEL_ID,
+            "tag": "deepinfra/fp8",
+            "safety_retention": False,
+            "supported_parameters": ["max_tokens"],
+            "context_length": 32_768,
+            "max_completion_tokens": 16_384,
+        }
+    )
+    tight = with_terms(
+        {
+            "model_id": MODEL_ID,
+            "tag": "deepinfra/fp4",
+            "safety_retention": False,
+            "supported_parameters": ["max_tokens"],
+            "context_length": 16_384,
+            "max_completion_tokens": 8_192,
+        }
+    )
+    lens, fake = model(reply(completion("ok")), zdr=reply({"data": [wide, tight]}))
+    lens.provider.configure(model_route({}, providers="deepinfra/fp8,deepinfra/fp4"))
+    lens.turn(request())
+    assert sent(fake)["max_tokens"] == 4_096
+    terms, _selected = lens.provider.load_terms()
+    call = resolve_per_call(AgenticLimits().resolve(), terms)
+    assert call.max_output_tokens == 4_096
+    assert call.max_input_tokens == 16_384 - 4_096
+    assert terms.context_limit_tags == "deepinfra/fp4"
+    assert terms.completion_limit_tags == "deepinfra/fp4"
+    with pytest.raises(LimitRefused, match="set by deepinfra/fp4") as raised:
+        resolve_per_call(
+            replace(AgenticLimits().resolve(), max_output_tokens=10_000), terms
+        )
+    assert raised.value.hit.setting.endswith("(set by deepinfra/fp4)")
+
+
+def test_max_prompt_tokens_caps_the_input_when_a_row_sets_it():
+    from atlas_reviewer.openrouter import model_route
+
+    from .test_openrouter import zdr_payload
+
+    rows = zdr_payload(
+        providers=("amazon-bedrock",),
+        context_length=100_000,
+        max_completion_tokens=1_000,
+    )
+    rows["data"][0]["max_prompt_tokens"] = 500
+    lens, _fake = model(reply(completion("ok")), zdr=reply(rows))
+    lens.provider.configure(model_route({}, providers="amazon-bedrock"))
+    terms, _selected = lens.provider.load_terms()
+    # The completion limit is 1_000, under a quarter of 100_000, so the
+    # output cap stays 1_000. Context would leave 99_000 input tokens.
+    call = resolve_per_call(AgenticLimits().resolve(), terms)
+    assert call.max_output_tokens == 1_000
+    assert call.max_input_tokens == 500
+    assert terms.prompt_limit_tags == "amazon-bedrock"

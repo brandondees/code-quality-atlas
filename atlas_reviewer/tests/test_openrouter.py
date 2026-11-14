@@ -1625,7 +1625,7 @@ def test_zdr_stays_on_by_default_and_can_be_turned_off():
     assert sent["provider"]["max_price"] == {"prompt": 3.0, "completion": 15.0}
     urls = [url for _m, url, _h, _b in off.requests]
     assert f"{API}/models/{MODEL_ID}/endpoints" in urls
-    assert f"{API}/endpoints/zdr" not in urls
+    assert f"{API}/endpoints/zdr" in urls
     assert "zdr required: false" in relaxed.usage_lines()[0]
     assert "cache_control: true" in relaxed.usage_lines()[0]
 
@@ -1642,3 +1642,129 @@ def test_a_display_name_next_to_a_different_tag_is_still_selected():
     adapter.complete(SMALL)
     sent = json.loads(fake.chat_requests()[0][3])
     assert sent["provider"]["only"] == ["amazon-bedrock"]
+
+
+def test_a_row_with_no_tag_is_not_selected_by_its_display_name():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    del payload["data"][0]["tag"]
+    payload["data"][0]["provider_name"] = "amazon-bedrock"
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="no ZDR row"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_an_endpoint_override_raises_max_price_the_reservation_and_the_fallback():
+    rows = zdr_payload(
+        providers=("amazon-bedrock",),
+        pricing={
+            "prompt": "0.000001",
+            "completion": "0.000002",
+            "input_cache_write": None,
+            "overrides": [
+                {
+                    "prompt": "0.000005",
+                    "completion": "0.000010",
+                    "min_prompt_tokens": 100_000,
+                }
+            ],
+        },
+    )
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
+    fake = OpenRouterFake(reply(completion(usage=usage)), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    terms, _selected = adapter.load_terms()
+    assert (terms.prompt_rate, terms.completion_rate) == (
+        Decimal("0.000005"),
+        Decimal("0.000010"),
+    )
+    assert worst_case_usd(1000, terms, CallLimits()) == Decimal("0.245")
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["max_price"] == {"prompt": 5.0, "completion": 10.0}
+    assert adapter.budget.calls[0].actual_usd == Decimal("0.006")
+    assert "max_price prompt 5.0 completion 10.0" in adapter.usage_lines()[0]
+    assert "amazon-bedrock" in adapter.usage_lines()[0]
+
+
+def test_zdr_off_still_refuses_a_safety_retention_tag_unless_opted_in():
+    model = "google/gemini-3.8-flash"
+    listed = catalog()
+    listed["data"]["id"] = model
+    endpoints = {
+        "data": {
+            "id": model,
+            "endpoints": [
+                {
+                    "tag": "google-vertex/global",
+                    "provider_name": "Google",
+                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "context_length": 1_000_000,
+                    "max_completion_tokens": 64_000,
+                    "supported_parameters": ["max_tokens"],
+                }
+            ],
+        }
+    }
+    marked = zdr_payload(
+        model, ("google-vertex/global",), safety=True, parameters=["max_tokens"]
+    )
+
+    def opened(zdr_reply):
+        return OpenRouterFake(
+            reply(completion(model=model)),
+            model=reply(listed),
+            zdr=zdr_reply,
+            endpoints=reply(endpoints),
+        )
+
+    blocked = opened(reply(marked))
+    adapter = OpenRouterProvider(blocked, KEY)
+    adapter.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+        )
+    )
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="Safety Retention"):
+        adapter.complete(SMALL)
+    assert blocked.chat_requests() == []
+
+    allowed_fake = opened(reply(marked))
+    allowed = OpenRouterProvider(allowed_fake, KEY)
+    allowed.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+            allow_safety_retention=True,
+        )
+    )
+    allowed.preflight()
+    assert allowed.complete(SMALL) == "review text"
+    sent = json.loads(allowed_fake.chat_requests()[0][3])
+    assert "zdr" not in sent["provider"]
+    assert sent["provider"]["data_collection"] == "deny"
+    assert sent["provider"]["only"] == ["google-vertex/global"]
+
+    unread = opened(reply({}, status=500))
+    refused = OpenRouterProvider(unread, KEY)
+    refused.configure(
+        model_route(
+            {},
+            model=model,
+            providers="google-vertex/global",
+            require_zdr=False,
+        )
+    )
+    refused.preflight()
+    with pytest.raises(PricingUnknownError, match="HTTP 500"):
+        refused.complete(SMALL)
+    assert unread.chat_requests() == []

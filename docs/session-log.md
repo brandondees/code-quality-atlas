@@ -1281,3 +1281,16 @@ path is tested for one record, one round-log read, the log-write note,
 and a caller omission. `agentic-review --model` has a test. #640 has
 merged since the 2026-11-12 entry above called it open, so D46 is on
 main. No live call was made. D44, D52.
+
+## 2026-11-14 — endpoint tiers and Safety Retention with ZDR off
+
+A selected row's `pricing.overrides` count toward `max_price`, the
+reservation and the fallback settlement. The base price alone was
+short of a long-context tier. With the ZDR requirement off, a tag the
+ZDR list marks Safety Retention is still refused unless the opt-in is
+on, and an unreadable ZDR list refuses the call. The smallest context
+and completion limit are the ones the request uses, and a row's
+`max_prompt_tokens` caps the input when the row sets it. The usage
+line and the completion span name the selected tags and those limits.
+Sonnet 5.5's completion limit in the worked example is 128,000. No
+live call was made. D57.

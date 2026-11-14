@@ -3,8 +3,9 @@
 
 One `LensModel` turn is one Chat Completions request. It sends the same
 pinned provider document as the one-shot adapter (`only`, no fallbacks,
-`require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
-server tools). `reasoning` is added only when every selected endpoint
+`require_parameters`, `data_collection: deny`, no plugins and no
+server tools). `zdr` is sent only when the route requires it.
+`reasoning` is added only when every selected endpoint
 lists it in `supported_parameters`. `cache_control` is sent on every
 Anthropic-family route even when no endpoint lists it (D57). The lens loop
 reserves the worst case and settles `_actual_cost` (BYOK upstream
@@ -105,6 +106,10 @@ class OpenRouterLensModel:
         """ZDR required, and whether `cache_control` is on the request."""
         return self.provider.routing()
 
+    def diagnosis(self) -> dict[str, str] | None:
+        """Selected tags and the terms those rows set."""
+        return self.provider.diagnosis()
+
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         terms, counts_byok, selected = self._ready()
         # The loop prices the turn and then places it. The endpoint
@@ -117,7 +122,14 @@ class OpenRouterLensModel:
         try:
             check_tokens(bound, terms, bounds)
         except TokenBoundError as exc:
-            raise LimitRefused(hit(exc.limit, exc.configured, exc.observed)) from exc
+            bound_by = ""
+            if exc.limit == "context_length":
+                bound_by = terms.context_limit_tags
+            elif exc.limit == "max_output_tokens":
+                bound_by = terms.completion_limit_tags
+            raise LimitRefused(
+                hit(exc.limit, exc.configured, exc.observed, bound_by=bound_by)
+            ) from exc
         return worst_case_usd(bound, terms, bounds)
 
     def turn(self, request: TurnRequest) -> ModelTurn:

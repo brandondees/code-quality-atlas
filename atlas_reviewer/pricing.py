@@ -56,6 +56,14 @@ class ModelTerms:
     # takes the higher of the prompt rate and any cache-write rate.
     cache_read_rate: Decimal | None = None
     cache_write_rate: Decimal | None = None
+    # Smallest max_prompt_tokens among selected rows that set one.
+    # None when no selected row sets it.
+    max_prompt_tokens: int | None = None
+    # Tags of the rows that set the minimum context, completion limit,
+    # or prompt ceiling. Empty when the terms did not come from rows.
+    context_limit_tags: str = ""
+    completion_limit_tags: str = ""
+    prompt_limit_tags: str = ""
 
 
 @dataclass(frozen=True)
