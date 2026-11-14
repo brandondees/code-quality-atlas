@@ -545,11 +545,12 @@ def terms_from_endpoints(
     including that row's `pricing.overrides`, so `max_price` and the
     reservation cover a long-context tier as well as the base. Context
     and the completion limit are the smallest, so a tighter endpoint
-    cannot be asked for more than it serves.     `max_prompt_tokens`, when a row sets a positive integer, is the
-    smallest such ceiling. A null is the same as a missing key: that
-    row adds no prompt ceiling. A selected row with no
-    pricing object, a zero required rate, or a missing limit refuses
-    the call. Catalog headline numbers are not read here.
+    cannot be asked for more than it serves. `max_prompt_tokens`, when
+    a row sets a positive integer, is the smallest such ceiling. A null
+    is the same as a missing key: that row adds no prompt ceiling. A
+    selected row with no pricing object, a zero required rate, or a
+    missing limit refuses the call. Catalog headline numbers are not
+    read here.
     """
     if not rows:
         raise PricingUnknownError("no endpoint rows to price")

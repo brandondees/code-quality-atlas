@@ -1797,12 +1797,32 @@ def test_a_malformed_override_names_the_endpoint_row():
     assert fake.chat_requests() == []
 
 
-def _sonnet_live_row(tag, provider_name):
+def _sonnet_live_row(tag, provider_name, *, regional=False):
     """One public Sonnet 5.5 endpoint row, read 2026-11-14.
 
     `max_prompt_tokens` is present and null. Pricing has no `overrides`
-    key. The numbers are that read, not a live call from the test.
+    key. `google-vertex/us` and `google-vertex/europe` are the regional
+    rates from that read (2.2e-6 / 1.1e-5). Bedrock and
+    `google-vertex/global` are 2e-6 / 1e-5. The test does not call
+    OpenRouter.
     """
+    pricing = (
+        {
+            "prompt": "0.0000022",
+            "completion": "0.000011",
+            "input_cache_read": "0.00000011",
+            "input_cache_write": "0.00000275",
+            "input_cache_write_1h": "0.0000044",
+        }
+        if regional
+        else {
+            "prompt": "0.000002",
+            "completion": "0.00001",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025",
+            "input_cache_write_1h": "0.000004",
+        }
+    )
     return {
         "model_id": MODEL_ID,
         "tag": tag,
@@ -1817,13 +1837,7 @@ def _sonnet_live_row(tag, provider_name):
             "max_tokens",
             "tools",
         ],
-        "pricing": {
-            "prompt": "0.000002",
-            "completion": "0.00001",
-            "input_cache_read": "0.0000001",
-            "input_cache_write": "0.0000025",
-            "input_cache_write_1h": "0.000004",
-        },
+        "pricing": pricing,
     }
 
 
@@ -1834,12 +1848,12 @@ def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
     from .test_tool_model import request
 
     rows = [
-        _sonnet_live_row(tag, name)
-        for tag, name in (
-            ("amazon-bedrock", "Amazon Bedrock"),
-            ("google-vertex/europe", "Google"),
-            ("google-vertex/global", "Google"),
-            ("google-vertex/us", "Google"),
+        _sonnet_live_row(tag, name, regional=regional)
+        for tag, name, regional in (
+            ("amazon-bedrock", "Amazon Bedrock", False),
+            ("google-vertex/europe", "Google", True),
+            ("google-vertex/global", "Google", False),
+            ("google-vertex/us", "Google", True),
         )
     ]
     assert all(row["max_prompt_tokens"] is None for row in rows)
@@ -1852,7 +1866,7 @@ def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
     assert terms.max_prompt_tokens is None
     assert (terms.context_length, terms.max_completion_tokens) == (1_000_000, 128_000)
     sent = json.loads(fake.chat_requests()[0][3])
-    assert sent["provider"]["max_price"] == {"prompt": 2.0, "completion": 10.0}
+    assert sent["provider"]["max_price"] == {"prompt": 2.2, "completion": 11.0}
     call = resolve_per_call(AgenticLimits().resolve(), terms)
     assert call.max_output_tokens == 128_000
     assert call.max_input_tokens == 1_000_000 - 128_000
@@ -1860,6 +1874,58 @@ def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
     lens.per_call = AgenticLimits().resolve()
     lens.turn(request())
     assert len(fake.chat_requests()) == 2
+
+    # The same null rows, selected from the full endpoint list.
+    off = OpenRouterFake(
+        reply(completion()),
+        zdr=reply({"data": rows}),
+        endpoints=reply({"data": {"id": MODEL_ID, "endpoints": rows}}),
+    )
+    relaxed = OpenRouterProvider(off, KEY)
+    relaxed.configure(model_route({}, require_zdr=False))
+    relaxed.preflight()
+    assert relaxed.complete(SMALL) == "review text"
+    off_terms, _off_selected = relaxed.load_terms()
+    assert off_terms.max_prompt_tokens is None
+    assert "zdr" not in json.loads(off.chat_requests()[0][3])["provider"]
+
+
+def test_a_null_prompt_ceiling_does_not_erase_a_tighter_row():
+    """One null ceiling next to 500 and 800. The ceiling is 500.
+
+    Live shape: phi-4's deepinfra/bf16 at 4,096 beside a flex row at
+    null, and gpt-6.1-terra's azure ceiling beside null regional rows.
+    """
+
+    def row(tag, cap):
+        return with_terms(
+            {
+                "model_id": MODEL_ID,
+                "tag": tag,
+                "safety_retention": False,
+                "supported_parameters": ["max_tokens"],
+                "max_prompt_tokens": cap,
+            }
+        )
+
+    payload = {
+        "data": [
+            row("deepinfra/bf16/flex", None),
+            row("deepinfra/bf16", 500),
+            row("deepinfra", 800),
+        ]
+    }
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(
+        fake,
+        KEY,
+        providers=("deepinfra/bf16/flex", "deepinfra/bf16", "deepinfra"),
+    )
+    adapter.preflight()
+    adapter.complete(SMALL)
+    terms, _selected = adapter.load_terms()
+    assert terms.max_prompt_tokens == 500
+    assert terms.prompt_limit_tags == "deepinfra/bf16"
 
 
 @pytest.mark.parametrize("bad", [0, "x"])
