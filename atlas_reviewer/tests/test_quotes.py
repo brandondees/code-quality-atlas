@@ -107,7 +107,6 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
 @pytest.mark.parametrize(
     ("start", "end", "evidence"),
     [
-        (1, 1, "return sum(round(x, 2) for x in xs)"),
         (4, 7, "return sum(round(x, 2) for x in xs)"),
         (1, 3, "sum("),
         (4, 7, "if not xs:\n    return total(xs) / len(xs)"),
@@ -116,6 +115,74 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
     ],
 )
 def test_a_quote_not_at_the_cited_range_is_not_verified(start, end, evidence):
+    assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
+
+
+def test_a_head_file_outside_the_diff_can_be_added_once_read():
+    tarball = source_tarball(HEAD_FILES, "t")
+    narrow = read_sources(tarball, DIFF, ["calc.py"])
+    wide = quotes.with_head_files(narrow, tarball, ["src/new_name.py", "calc.py"])
+    assert set(wide.head) == {"calc.py", "src/new_name.py"}
+    assert wide.removed == narrow.removed
+    assert quotes.with_head_files(narrow, b"", ["src/new_name.py"]) is narrow
+    assert (
+        quotes.with_head_files(narrow, b"not a tarball", ["src/new_name.py"]) is narrow
+    )
+    unreadable = read_sources(b"not a tarball", DIFF, ["calc.py"])
+    assert quotes.with_head_files(unreadable, tarball, ["calc.py"]) is unreadable
+
+
+def test_internal_whitespace_does_not_reject_the_cited_line():
+    evidence = "return  sum(round(x, 2)  for x in xs)"
+    result = check(LineRange("calc.py", 2, 2), evidence)
+    assert result == Verified(result.finding, QuoteSource.HEAD)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "evidence"),
+    [
+        (1, 1, "return sum(round(x, 2) for x in xs)"),
+        (4, 4, "return sum(round(x, 2) for x in xs)"),
+        (6, 7, "if not xs:\n    return 0"),
+    ],
+)
+def test_a_whole_line_quote_within_two_lines_is_verified_as_drifted(
+    start, end, evidence
+):
+    result = check(LineRange("calc.py", start, end), evidence)
+    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+
+
+def test_a_drifted_quote_takes_the_location_of_the_matched_lines():
+    result = check(LineRange("calc.py", 4, 4), "return sum(round(x, 2) for x in xs)")
+    assert result.finding.location == LineRange("calc.py", 2, 2)
+
+
+def test_a_quote_of_a_removed_line_is_tagged_removed_even_near_the_citation():
+    head = source_tarball({"calc.py": b"def total(xs):\n    return sum(xs)\n"}, "t")
+    diff = (
+        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n def total(xs):\n-    return sum(xs)\n"
+        "+    return sum(round(xs))\n"
+    )
+    sources = read_sources(head, diff, ["calc.py"])
+    result = check_quote(
+        finding(LineRange("calc.py", 1, 1), "    return sum(xs)"), sources
+    )
+    assert result.source is QuoteSource.REMOVED
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "evidence"),
+    [
+        (6, 6, "return sum(round(x, 2) for x in xs)"),
+        (1, 1, "}"),
+        (7, 7, "}"),
+        (5, 5, "return sum(round(x, 2) for x in xs)"),
+        (1, 1, "round(x, 2) for x"),
+    ],
+)
+def test_a_short_fragment_or_a_far_line_is_not_treated_as_drift(start, end, evidence):
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
