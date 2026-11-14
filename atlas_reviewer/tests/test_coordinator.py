@@ -1270,7 +1270,7 @@ def _acknowledge(request):
 
 def _lenses(
     tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
-    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None,
+    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None, **kw,
 ):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
@@ -1304,6 +1304,7 @@ def _lenses(
             model_for=model_for if models is not None else None,
             picker_spend=picker_spend,
             trace=trace,
+            **kw,
         )
     finally:
         tasks.close()
@@ -1411,6 +1412,115 @@ def test_two_lenses_run_together_under_different_runner_names(tmp_path):
     assert {lens.lens for lens in result.lenses} == {LENS, OTHER}
     created = [call[1] for call in sprites.calls if call[0] == "create"]
     assert len(set(created)) == 2
+
+
+def _pair_models(first_reply):
+    return [
+        ScriptedLensModel([READ_ALL, first_reply]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+
+
+def test_a_pooled_review_appends_one_round_record_from_its_combined_verdict(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    models = _pair_models(final(finding()))
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=1, models=models, round_log=log
+    )
+    assert result.event is ReviewEvent.COMMENT
+    records = log.read().records
+    assert len(records) == 1
+    assert records[0].event == "COMMENT"
+    assert records[0].lens == f"{LENS}, {OTHER}"
+    assert any(
+        "rounds each item before summing" in line for line in records[0].findings
+    )
+
+
+def test_a_continuation_adds_no_round_record_of_its_own(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS], model, round_log=log)
+    assert len(result.lenses) == 2
+    records = log.read().records
+    assert [(record.lens, record.event) for record in records] == [(LENS, "APPROVE")]
+
+
+def test_a_pooled_review_reads_the_round_log_once_for_every_lens(tmp_path):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    class Counting(RoundLog):
+        reads = 0
+
+        def read(self):
+            Counting.reads += 1
+            return super().read()
+
+    log = Counting(tmp_path / "state" / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            "a" * 40,
+            LENS,
+            "COMMENT",
+            ("pooled-prior",),
+            False,
+        )
+    )
+    models = _pair_models(_acknowledge)
+    _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models, round_log=log)
+    assert Counting.reads == 1
+    for model in models:
+        assert "pooled-prior" in model.requests[0].messages[0].text
+
+
+def test_a_pooled_log_write_failure_is_on_the_review_and_its_status_line(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    class Broken(RoundLog):
+        def append(self, record):
+            raise OSError("disk full")
+
+    models = _pair_models(_acknowledge)
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        round_log=Broken(tmp_path / "state" / "rounds.jsonl"),
+    )  # fmt: skip
+    note = "the round log was not written: OSError: disk full"
+    assert result.round_log_note.startswith(note)
+    assert status(result)["round_log_note"] == note
+    assert result.event is ReviewEvent.APPROVE
+
+
+def test_a_caller_context_omission_blocks_a_pooled_approval_and_marks_the_record(
+    tmp_path,
+):
+    from atlas_reviewer.domain import Omission
+    from atlas_reviewer.rounds import RoundLog
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    omission = Omission("caller", "test budget", "pooled caller context was omitted")
+    models = _pair_models(_acknowledge)
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        round_log=log, context_omissions=(omission,),
+    )  # fmt: skip
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "pooled caller context was omitted" in render_draft(result, Redactor())
+    assert [record.context_partial for record in log.read().records] == [True]
 
 
 def test_a_lens_assigned_too_narrow_a_scope_does_not_cover_the_changed_files():

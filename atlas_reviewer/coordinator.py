@@ -41,7 +41,6 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -120,7 +119,6 @@ from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 QUOTED_CHARS = 600
 EVIDENCE_CHARS = 1_200
 NONCE_BYTES = 8
-_ROUND_LOG_LOCK = threading.Lock()
 # Continuation rounds per review. Each round re-runs the lenses that still
 # have unread files; a round that does not shrink the gap ends it earlier.
 MAX_CONTINUATIONS = 4
@@ -415,8 +413,6 @@ def review_lens(
             redactor=redactor,
             clock=clock,
             context=blocks,
-            context_omissions=omissions,
-            round_log=round_log,
             telemetry=telemetry,
             nonce=nonce,
             bridge_root=bridge_root,
@@ -433,7 +429,7 @@ def review_lens(
             context_omissions=omissions,
             other_pull_requests=other_pull_requests,
         )
-        return replace(single, round_log_note=ran.log_note)
+        return _record_round(round_log, event, single, redactor)
 
     return _traced_review(event, trace, redactor, one)
 
@@ -575,8 +571,6 @@ def _review_lenses(
             redactor=redactor,
             clock=clock,
             context=blocks,
-            context_omissions=omissions,
-            round_log=round_log,
             telemetry=telemetry,
             nonce=nonce,
             bridge_root=f"{bridge_root}-{index}",
@@ -638,12 +632,8 @@ def _review_lenses(
         context_omissions=omissions,
         other_pull_requests=other_pull_requests,
     )
-    log_notes = tuple(dict.fromkeys(ran.log_note for ran in runs if ran.log_note))
-    return replace(
-        review,
-        changed=changed,
-        runners=reports,
-        round_log_note=" ".join(log_notes),
+    return _record_round(
+        round_log, event, replace(review, changed=changed, runners=reports), redactor
     )
 
 
@@ -719,7 +709,6 @@ class _LensRun:
     report: RunnerReport | None
     spend: Spend
     flagged: tuple[str, ...]
-    log_note: str = ""
 
 
 def _combined_runner(reports: Sequence[RunnerReport]) -> RunnerReport | None:
@@ -751,8 +740,6 @@ def _review_one(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
-    context_omissions: Sequence[Omission],
-    round_log: RoundLog | None,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -854,24 +841,7 @@ def _review_one(
     )
     secrets = list(session.secrets)
     flagged = tuple(diff_secrets.values) + tuple(session.flagged())
-    log_note = ""
-    if round_log is not None:
-        record_review = synthesize(
-            [result],
-            secrets,
-            report,
-            spend,
-            flagged,
-            context_omissions=context_omissions,
-        )
-        try:
-            with _ROUND_LOG_LOCK:
-                round_log.append(_round_record(event, lens, record_review, scrub))
-        except OSError as exc:
-            log_note = (
-                f"the round log was not written: {_log_write_cause(exc)}. Detail: {exc}"
-            )
-    return _LensRun(result, secrets, report, spend, flagged, log_note=log_note)
+    return _LensRun(result, secrets, report, spend, flagged)
 
 
 def _attempts(
@@ -1003,6 +973,30 @@ def _review_context(
         blocks = [*prior, *blocks]
         omissions.extend(prior_omissions)
     return tuple(blocks), tuple(omissions), dropped_other
+
+
+def _record_round(
+    round_log: RoundLog | None,
+    event: PrEvent,
+    review: AgenticReview,
+    redactor: Redactor,
+) -> AgenticReview:
+    """Append the one record for this finished review (D52), from the
+    synthesized verdict over every lens and continuation."""
+    if round_log is None:
+        return review
+    scrubber = Redactor(
+        redactor.known_secrets, redactor.sources, (*redactor.flagged, *review.flagged)
+    )
+    lens = ", ".join(dict.fromkeys(result.lens for result in review.lenses))
+    try:
+        round_log.append(
+            _round_record(event, lens, review, lambda text: scrubber(text).text)
+        )
+    except OSError as exc:
+        note = f"the round log was not written: {_log_write_cause(exc)}. Detail: {exc}"
+        return replace(review, round_log_note=note)
+    return review
 
 
 def _round_record(
