@@ -369,6 +369,19 @@ def test_the_system_prompt_states_the_nonce_fence_rule(tmp_path):
     assert f'close with </untrusted-data id="{NONCE}">' in system
 
 
+def test_the_system_prompt_lists_every_allowed_severity(tmp_path):
+    _, model, _ = attempt(tmp_path, [READ_DIFF, final()])
+    system = model.requests[0].system
+    assert 'severity is exactly one of "blocker", "major", "minor" or "nit"' in system
+    flat = " ".join(system.split())
+    assert (
+        "A finding whose severity cannot be read as one of those four names is "
+        "dropped, and the review cannot approve." in flat
+    )
+    assert "Any other value outside the contract sends the whole reply back." in flat
+    assert "A finding with any other value is dropped" not in flat
+
+
 def test_a_body_not_delivered_whole_fails_before_any_model_call(tmp_path):
     def cut(lens, body, contract, retry_of, *, nonce):
         return lens_system(
@@ -510,6 +523,27 @@ def test_no_findings_without_reading_the_change_is_partial(tmp_path, script):
     assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
     assert outcome.state is LensState.PARTIAL
     assert not outcome.retryable
+
+
+@pytest.mark.parametrize(
+    ("reads", "causes"),
+    [
+        ([], {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}),
+        ([tools(("diff_stat", {}))], {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}),
+        ([READ_ALL], set()),
+    ],
+    ids=["nothing", "stat-only", "read-all"],
+)
+def test_a_reply_whose_every_finding_is_dropped_is_held_like_an_empty_one(
+    tmp_path, reads, causes
+):
+    dropped, _, _ = attempt(tmp_path / "d", [*reads, final(finding(severity="urgent"))])
+    empty, _, _ = attempt(tmp_path / "e", [*reads, final()])
+    assert dropped.findings == ()
+    assert dropped.causes == empty.causes == causes
+    assert dropped.state is empty.state
+    assert len(dropped.dropped) == 1
+    assert empty.dropped == ()
 
 
 def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path):
