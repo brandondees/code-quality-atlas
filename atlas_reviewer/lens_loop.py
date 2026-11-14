@@ -1066,8 +1066,11 @@ def _repair(text: str, p: _Progress) -> str | None:
             "The final reply was not accepted. The validation error, quoted: "
             f"{quote_untrusted(str(exc), scrub=str)}. "
             "The finding contract's closed values: severity is exactly one "
-            "of blocker, major, minor or nit, never a level such as high, "
-            'medium or low. A per-finding "lens" key is accepted and '
+            "of blocker, major, minor or nit; a severity outside those four "
+            "names and their aliases (critical, crit and blocking are "
+            "blocker; high is major; medium and moderate are minor; low and "
+            "trivial are nit) drops that finding, and the review cannot "
+            'approve. A per-finding "lens" key is accepted and '
             "dropped. Prose before the reply is fine: the last fenced JSON "
             "object is the one read. "
             "Reply once with one JSON object that meets the finding contract. "

@@ -431,20 +431,22 @@ def test_the_retry_reasons_carry_the_validators_message():
 def test_the_instructions_state_the_severity_words():
     """The 2026-11-13 trials: the lens prompt never named the four severity
     words, and models answered with the common high/medium/low scale, which
-    the contract refuses. INSTRUCTIONS names them (D58)."""
-    assert "blocker, major, minor or nit" in INSTRUCTIONS
-    assert "never a level" in INSTRUCTIONS
+    the contract refused. INSTRUCTIONS names them (D58); D54 completes the
+    rule: an unreadable severity drops the finding and blocks approval."""
+    assert '"blocker", "major", "minor" or "nit"' in INSTRUCTIONS
+    assert "is dropped, and the review cannot approve" in INSTRUCTIONS
 
 
 def test_a_contract_refusal_earns_one_repair_turn_and_the_next_reply_counts(
     tmp_path,
 ):
-    """The 2026-11-13 trials: the severity the validator refused came back
-    only as a cause name, and Haiku failed the same enum twice. D44's
-    repair turn quotes the validation error, and D58's schema facts tell
-    the model the severity words; the rejected reply travels as
-    AssistantText and the repaired reply counts."""
-    bad = final(finding(severity="medium"))
+    """The 2026-11-13 trials: the validator's refusal came back only as a
+    cause name, and Haiku failed the same enum twice. D44's repair turn
+    quotes the validation error, and D58's schema facts tell the model the
+    closed values; the rejected reply travels as AssistantText and the
+    repaired reply counts. (D54 later made an unreadable severity a drop,
+    not a refusal, so the refusal here is an unknown key.)"""
+    bad = final(finding(bogus_key="injected"))
     outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, final()])
     assert outcome.attestation is Attestation.ATTESTED
     assert outcome.state is LensState.CLEAN
@@ -453,11 +455,9 @@ def test_a_contract_refusal_earns_one_repair_turn_and_the_next_reply_counts(
     assert model.requests[2].messages[-2] == AssistantText(bad.text)
     repair = model.requests[2].messages[-1]
     assert isinstance(repair, UserText)
-    assert "finding 1: severity must be one of blocker, major, minor, nit" in (
-        repair.text
-    )
+    assert "finding 1: has keys outside the contract (1)" in repair.text
     assert "blocker, major, minor or nit" in repair.text
-    assert "never a level such as high, medium or low" in repair.text
+    assert "drops that finding, and the review cannot approve" in repair.text
 
 
 def test_an_unread_final_reply_is_nudged_once_and_the_next_reply_counts(tmp_path):
@@ -932,8 +932,16 @@ def test_no_findings_without_reading_the_change_is_partial(tmp_path, script):
 def test_a_reply_whose_every_finding_is_dropped_is_held_like_an_empty_one(
     tmp_path, reads, causes
 ):
-    dropped, _, _ = attempt(tmp_path / "d", [*reads, final(finding(severity="urgent"))])
-    empty, _, _ = attempt(tmp_path / "e", [*reads, final()])
+    """D54: a reply whose every finding is dropped is treated exactly like
+    an empty one. The unread-list nudge (D58) fires on the unread variants
+    before a final reply is accepted, so each variant answers it with a
+    second reply of the same kind, and the accepted reply's judgment is
+    the one compared."""
+    dropped, _, _ = attempt(
+        tmp_path / "d",
+        [*reads, final(finding(severity="urgent")), final(finding(severity="urgent"))],
+    )
+    empty, _, _ = attempt(tmp_path / "e", [*reads, final(), final()])
     assert dropped.findings == ()
     assert dropped.causes == empty.causes == causes
     assert dropped.state is empty.state
@@ -964,7 +972,7 @@ def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
     assert "the reply is not one JSON object" in repair
     assert "quoted" in repair
     assert "blocker, major, minor or nit" in repair
-    assert "never a level such as high, medium or low" in repair
+    assert "drops that finding, and the review cannot" in repair
     assert '"lens"' in repair
     assert "last fenced JSON object" in repair
     assert model.requests[2].messages[-2] == AssistantText("Looks fine to me!")
