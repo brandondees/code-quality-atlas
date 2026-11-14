@@ -431,6 +431,19 @@ def _lens_script(args: argparse.Namespace, fixtures: Path) -> LensScript | None:
         raise UsageError(str(exc)) from exc
 
 
+def _attestation_ledger_path(
+    args: argparse.Namespace, env: Mapping[str, str], scratch: str | None
+) -> Path:
+    """A dry run's ledger is a per-run file inside its scratch directory,
+    so re-running or editing a scenario replays from scratch instead of
+    reusing an attempt settled for the same head and lens body. A live
+    review's ledger persists in the state directory, so a settled attempt
+    survives a crash and a retry resumes its count."""
+    if scratch is None:
+        return _state_dir(args, env) / "attestation.ledger"
+    return Path(scratch) / "attestation.ledger"
+
+
 class _FixedToken:
     """A token the parent already minted. It cannot mint another.
 
@@ -631,6 +644,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         github: FixtureGitHub | GitHubClient
         task_socket = SOCKET_PATH
         bridge_root = BRIDGE_ROOT
+        scratch: str | None = None
         if args.dry_run:
             fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
             if not fixtures.is_dir():
@@ -735,7 +749,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     else (0, Decimal(0))
                 )
                 ledger = AttemptLedger(
-                    _state_dir(args, env) / "attestation.ledger", clock
+                    _attestation_ledger_path(args, env, scratch), clock
                 )
                 review = review_lenses(
                     event,

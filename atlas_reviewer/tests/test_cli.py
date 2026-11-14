@@ -1990,6 +1990,48 @@ def test_agentic_review_redacts_the_pr_title_before_the_picker(tmp_path, monkeyp
     assert token not in seen[0]
 
 
+def test_a_live_review_keeps_its_ledger_in_the_state_directory(tmp_path, monkeypatch):
+    """Pinned against the dry run's per-run ledger: a live review's
+    attestation ledger is still `<state dir>/attestation.ledger`."""
+    from atlas_reviewer.attestation import AttemptLedger
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    paths = []
+
+    class SpyLedger(AttemptLedger):
+        def __init__(self, path, clock):
+            paths.append(path)
+            super().__init__(path, clock)
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "AttemptLedger", SpyLedger)
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=err,
+        sprites_factory=scripted_sprites,
+        openrouter_factory=lambda key, limits: Live(object(), key, limits=limits),
+    )  # fmt: skip
+    assert paths, err.getvalue()
+    assert paths == [tmp_path / "attestation.ledger"]
+
+
 def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatch):
     """A live run builds its provider from the agentic limits, not the
     one-shot `--max-model-calls` it does not have, and the picker's call

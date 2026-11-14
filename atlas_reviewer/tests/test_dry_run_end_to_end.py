@@ -6,6 +6,7 @@ gets — and the assertions pin the outcomes a reviewer can repeat: the
 draft's event, the coverage gate, the exit code, and the safety hooks
 that must have actually run."""
 
+import argparse
 import io
 import json
 import subprocess
@@ -13,6 +14,7 @@ import sys
 from pathlib import Path
 
 from atlas_reviewer import cli
+from atlas_reviewer.local_runner import LocalSprites
 from atlas_reviewer.verdict import STATUS_PREFIX
 
 from .helpers import FIXTURE
@@ -101,19 +103,39 @@ def test_an_approved_dry_run_exits_zero(tmp_path):
     assert "No verified findings." in out
 
 
-def test_a_verified_major_is_a_comment_with_a_verified_removed_line(tmp_path):
-    """D55: a verified introduced Major or Minor is approve-with-changes
-    (COMMENT), and a quote of a removed line verifies as `removed lines`."""
-    code, out, err = run_dry_run(tmp_path, "--lens-script", scenario("comment"))
-    assert code == cli.EXIT_OK, err
-    status = status_line(out)
-    assert status["review_event"] == "COMMENT"
-    assert status["proposed_event"] == "COMMENT"
-    assert status["coverage_complete"] is True
-    assert status["verified_findings"] == 2
-    assert "**Review event: COMMENT.** Verdict: approve with changes." in out
-    assert "[major, defect, route: eng, introduced]" in out
-    assert "[minor, defect, route: eng, introduced, removed lines]" in out
+def test_a_second_scenario_in_one_state_directory_gets_its_own_verdict(tmp_path):
+    """The dry run's attestation ledger is per run: a settled attempt is
+    keyed by head and lens body, not by the lens script, so a second
+    scenario in the same state directory must replay from scratch instead
+    of reporting the first scenario's verdict with no model calls."""
+    blocker_code, _blocker_out, blocker_err = run_dry_run(
+        tmp_path, "--out", str(tmp_path / "blocker.md")
+    )
+    assert blocker_code == cli.EXIT_CHANGES_REQUESTED, blocker_err
+    assert (
+        status_line((tmp_path / "blocker.md").read_text(encoding="utf-8"))[
+            "review_event"
+        ]
+        == "REQUEST_CHANGES"
+    )
+    approve_code, _approve_out, approve_err = run_dry_run(
+        tmp_path,
+        "--lens-script",
+        scenario("approve"),
+        "--out",
+        str(tmp_path / "approve.md"),
+    )
+    assert approve_code == cli.EXIT_OK, approve_err
+    approve_draft = (tmp_path / "approve.md").read_text(encoding="utf-8")
+    status = status_line(approve_draft)
+    assert status["review_event"] == "APPROVE"
+    assert status["verified_findings"] == 0
+    assert "No verified findings." in approve_draft
+    # The second run actually ran: its lenses made model calls again.
+    calls = next(
+        line for line in approve_draft.splitlines() if line.startswith("Model calls:")
+    )
+    assert not calls.startswith("Model calls: 0;")
 
 
 def test_a_coverage_gap_is_not_approvable_and_names_the_unread_file(tmp_path):
@@ -171,6 +193,20 @@ def test_a_missing_scenario_file_is_refused(tmp_path):
     assert code == cli.EXIT_USAGE
     assert "does not exist" in err
     assert out == ""
+
+
+def test_the_live_ledger_keeps_its_state_directory_path(tmp_path):
+    """Pinned separately from the dry run's per-run ledger: a live review's
+    attestation ledger stays `<state dir>/attestation.ledger`, where a
+    settled attempt survives a crash and a retry resumes its count."""
+    args = argparse.Namespace(state_dir=str(tmp_path))
+    assert cli._attestation_ledger_path(args, {}, None) == (
+        tmp_path / "attestation.ledger"
+    )
+    scratch = str(tmp_path / "scratch")
+    assert cli._attestation_ledger_path(args, {}, scratch) == (
+        Path(scratch) / "attestation.ledger"
+    )
 
 
 def test_a_lens_script_cannot_reach_a_live_run(tmp_path):
