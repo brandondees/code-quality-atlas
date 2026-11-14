@@ -170,8 +170,8 @@ def test_a_clean_lens_gives_complete_coverage_and_its_verdict(tmp_path):
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 1, False)
     assert result.coverage_complete
-    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
-    assert result.event is ReviewEvent.COMMENT
+    assert result.verdict is Verdict.BLOCK
+    assert result.event is ReviewEvent.REQUEST_CHANGES
     assert result.runner.cleanup is CleanupStatus.DESTROYED_VERIFIED
     assert [f.id for f in result.verified] == ["L1-F1"]
     assert status(result)["coverage_complete"] is True
@@ -390,7 +390,8 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
     assert [f.id for f in result.verified] == ["L1-F1"]
     assert [f.id for f in result.unverified] == ["L1-F2"]
-    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.verdict is Verdict.BLOCK
+    assert result.event is ReviewEvent.REQUEST_CHANGES
     draft = render_draft(result, Redactor())
     assert "## Not verified (not reported as findings)" in draft
 
@@ -1251,7 +1252,7 @@ def clean(*findings):
         ((), Verdict.APPROVE, ReviewEvent.APPROVE),
         ((checked(Severity.NIT),), Verdict.APPROVE, ReviewEvent.APPROVE),
         ((checked(Severity.MINOR),), Verdict.APPROVE_WITH_CHANGES, ReviewEvent.COMMENT),
-        ((checked(Severity.MAJOR),), Verdict.APPROVE_WITH_CHANGES, ReviewEvent.COMMENT),
+        ((checked(Severity.MAJOR),), Verdict.BLOCK, ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.NIT), checked(Severity.BLOCKER)), Verdict.BLOCK,
          ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.BLOCKER, route=Route.LEGAL),), Verdict.BLOCK,
@@ -1501,10 +1502,11 @@ def test_a_pooled_review_appends_one_round_record_from_its_combined_verdict(tmp_
     result, _ = _lenses(
         tmp_path, [LENS, OTHER], models[0], pool=1, models=models, round_log=log
     )
-    assert result.event is ReviewEvent.COMMENT
+    # An introduced Major requests changes (D55). The record carries that event.
+    assert result.event is ReviewEvent.REQUEST_CHANGES
     records = log.read().records
     assert len(records) == 1
-    assert records[0].event == "COMMENT"
+    assert records[0].event == "REQUEST_CHANGES"
     assert records[0].lens == f"{LENS}, {OTHER}"
     assert any(
         "rounds each item before summing" in line for line in records[0].findings

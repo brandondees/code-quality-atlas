@@ -1262,6 +1262,16 @@ severity scrubbed, quoted and cut to 80 characters, under its own
 heading, and a drop blocks approval. Any other problem in a finding
 still sends the whole reply back once, then `UNPARSED`. D54 records it.
 
+## 2026-11-12 — a verified Major requests changes
+
+The agentic coordinator was requesting changes only for a Blocker, so
+verified Majors on the #639, #640 and #642 runs came out as
+`COMMENT`. A verified introduced Major or Blocker is now
+`REQUEST_CHANGES`. A Minor stays `COMMENT`. Nits, and a review with no
+verdict-setting finding, still approve. D55 records that
+`synthesis.md`, `templates/REVIEW.md` and the PR-review runbook still
+describe a Blocker as what requests changes on the human-posted review.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come
