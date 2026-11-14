@@ -56,7 +56,7 @@ _HUNK_START = "@@ "
 
 class QuoteSource(StrEnum):
     HEAD = "head"
-    HEAD_NEAR = f"head, within {QUOTE_DRIFT} lines of the citation"
+    HEAD_NEAR = f"head within {QUOTE_DRIFT} lines of the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
 

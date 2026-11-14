@@ -180,10 +180,57 @@ def test_a_quote_of_a_removed_line_is_tagged_removed_even_near_the_citation():
         (7, 7, "}"),
         (5, 5, "return sum(round(x, 2) for x in xs)"),
         (1, 1, "round(x, 2) for x"),
+        (4, 4, "return 0"),
+        (8, 8, "return 0"),
+        (1, 1, "return total(xs) / len(xs)"),
     ],
 )
 def test_a_short_fragment_or_a_far_line_is_not_treated_as_drift(start, end, evidence):
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
+
+
+def test_a_quote_of_exactly_the_minimum_length_can_drift(tmp_path):
+    """`xy = 12345` is 8 non-space characters, so it drifts; `xy = 1234` is 7."""
+    files = {"m.py": b"a = 1\nb = 2\nxy = 12345\nxy = 1234\n"}
+    found = read_sources(source_tarball(files, "t"), "", ["m.py"])
+    at_floor = check_quote(finding(LineRange("m.py", 1, 1), "xy = 12345"), found)
+    assert at_floor.source is QuoteSource.HEAD_NEAR
+    assert at_floor.finding.location == LineRange("m.py", 3, 3)
+    below = check_quote(finding(LineRange("m.py", 2, 2), "xy = 1234"), found)
+    assert isinstance(below, Unverified)
+
+
+def test_a_line_range_with_a_start_below_one_is_refused():
+    with pytest.raises(ValueError, match="start"):
+        LineRange("calc.py", 0, 1)
+    with pytest.raises(ValueError, match="start"):
+        LineRange("calc.py", -1, 1)
+
+
+def test_a_doubled_space_on_the_head_side_does_not_reject_a_quote():
+    files = {"m.py": b"a = 1\nreturn  total(xs)   /  len(xs)\nb = 2\n"}
+    found = read_sources(source_tarball(files, "t"), "", ["m.py"])
+    exact = check_quote(
+        finding(LineRange("m.py", 2, 2), "return total(xs) / len(xs)"), found
+    )
+    assert exact.source is QuoteSource.HEAD
+    drifted = check_quote(
+        finding(LineRange("m.py", 3, 3), "return total(xs) / len(xs)"), found
+    )
+    assert drifted.source is QuoteSource.HEAD_NEAR
+
+
+def test_a_doubled_space_on_a_removed_line_does_not_reject_a_quote():
+    head = source_tarball({"m.py": b"a = 1\n"}, "t")
+    diff = (
+        "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n"
+        "@@ -1,2 +1 @@\n a = 1\n-return  total(xs)   /  len(xs)\n"
+    )
+    found = read_sources(head, diff, ["m.py"])
+    result = check_quote(
+        finding(LineRange("m.py", 1, 1), "return total(xs) / len(xs)"), found
+    )
+    assert result.source is QuoteSource.REMOVED
 
 
 def test_a_quote_that_sits_outside_its_cited_lines_is_not_verified():

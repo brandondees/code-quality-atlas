@@ -104,6 +104,12 @@ class LineRange:
     start: int
     end: int
 
+    def __post_init__(self) -> None:
+        if self.start < 1:
+            raise ValueError(
+                f"a line range starts at line 1 or later, not {self.start}"
+            )
+
     def __str__(self) -> str:
         span = str(self.start) if self.end == self.start else f"{self.start}-{self.end}"
         return f"{self.path}:{span}"
