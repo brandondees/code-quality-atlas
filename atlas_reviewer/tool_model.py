@@ -92,14 +92,16 @@ from atlas_reviewer.pricing import ModelTerms
 UNPRICED = Decimal("Infinity")
 
 
-def _observed(
-    exc: TokenBoundError, note: str, *, effective_limit: str | None = None
-) -> str:
+def _observed(exc: TokenBoundError, note: str) -> str:
     """The refusal's observed value, with the bound's basis on the input
     cap, where the bound is the meter's estimate rather than a model
     response. The refusal travels to the draft and the ledger, so the
-    basis is what an operator reads there."""
-    if (effective_limit or exc.limit) not in ("max_input_tokens", "max_prompt_tokens"):
+    basis is what an operator reads there. `exc.limit` is the
+    `check_tokens` name ("max_input_tokens" for the meter's bound); the
+    adapter may relabel the refusal to "max_prompt_tokens" afterwards, so
+    this function reads `exc.limit` and both names count as the input
+    cap."""
+    if exc.limit not in ("max_input_tokens", "max_prompt_tokens"):
         return str(exc.observed)
     return f"{exc.observed} (bound from {note})"
 
@@ -191,7 +193,7 @@ class OpenRouterLensModel:
                 hit(
                     limit,
                     exc.configured,
-                    _observed(exc, self._bound_note, effective_limit=limit),
+                    _observed(exc, self._bound_note),
                     bound_by=bound_by,
                 )
             ) from exc

@@ -577,6 +577,9 @@ def test_max_prompt_tokens_caps_the_input_when_a_row_sets_it():
         lens.worst_case_usd(request())
     assert "amazon-bedrock" in raised.value.hit.setting
     assert "ATLAS_MAX_INPUT_TOKENS" not in raised.value.hit.setting
+    # Review round 10, Minor 1: the meter's basis travels on the renamed
+    # input-cap refusal too.
+    assert "(bound from " in raised.value.hit.observed
     lens.per_call = replace(AgenticLimits().resolve(), max_input_tokens=8)
     with pytest.raises(LimitRefused, match="max_input_tokens") as flagged:
         lens.worst_case_usd(request())

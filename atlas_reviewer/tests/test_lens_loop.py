@@ -32,6 +32,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     _DiffPages,
     _Progress,
+    _repair,
     _time_up,
     finding_contract,
     lens_system,
@@ -458,6 +459,25 @@ def test_a_contract_refusal_earns_one_repair_turn_and_the_next_reply_counts(
     assert "finding 1: has keys outside the contract (1)" in repair.text
     assert "blocker, major, minor or nit" in repair.text
     assert "drops that finding, and the review cannot approve" in repair.text
+
+
+def test_a_repair_message_names_every_alias_from_the_table():
+    """Review round 10, Minor 2: the repair message's alias sentence is
+    built from `lens_contract._SEVERITY_ALIASES`, so the text and the
+    table cannot drift; this test derives each "aliases are severity"
+    pair from the table and asserts it appears in the message a repair
+    turn sends."""
+    from atlas_reviewer.lens_contract import _SEVERITY_ALIASES
+
+    p = _Progress()
+    message = _repair("no schema here", p)
+    assert message is not None
+    by_severity: dict[str, list[str]] = {}
+    for alias, severity in _SEVERITY_ALIASES.items():
+        by_severity.setdefault(severity.value, []).append(alias)
+    for severity, aliases in by_severity.items():
+        verb = "are" if len(aliases) > 1 else "is"
+        assert f"{', '.join(aliases)} {verb} {severity}" in message
 
 
 def test_an_unread_final_reply_is_nudged_once_and_the_next_reply_counts(tmp_path):

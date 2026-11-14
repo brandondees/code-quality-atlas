@@ -73,7 +73,11 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
-from atlas_reviewer.lens_contract import ContractError, parse_reply
+from atlas_reviewer.lens_contract import (
+    _SEVERITY_ALIASES,
+    ContractError,
+    parse_reply,
+)
 from atlas_reviewer.lenses import BUNDLE_ROOT
 from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
 from atlas_reviewer.notes import quote_untrusted
@@ -1049,6 +1053,19 @@ def _accept_or_repair(
     return outcome
 
 
+def _alias_sentence() -> str:
+    """The severity aliases as model-facing text, built from
+    `lens_contract._SEVERITY_ALIASES` so the sentence and the table cannot
+    drift apart (review round 10, Minor 2)."""
+    by_severity: dict[str, list[str]] = {}
+    for alias, severity in _SEVERITY_ALIASES.items():
+        by_severity.setdefault(severity.value, []).append(alias)
+    return "; ".join(
+        f"{', '.join(aliases)} {'are' if len(aliases) > 1 else 'is'} {severity}"
+        for severity, aliases in by_severity.items()
+    )
+
+
 def _repair(text: str, p: _Progress) -> str | None:
     """One chance to correct a reply outside the finding contract. The
     validation error is quoted, with the schema facts the 2026-11-13
@@ -1067,9 +1084,8 @@ def _repair(text: str, p: _Progress) -> str | None:
             f"{quote_untrusted(str(exc), scrub=str)}. "
             "The finding contract's closed values: severity is exactly one "
             "of blocker, major, minor or nit; a severity outside those four "
-            "names and their aliases (critical, crit and blocking are "
-            "blocker; high is major; medium and moderate are minor; low and "
-            "trivial are nit) drops that finding, and the review cannot "
+            f"names and their aliases ({_alias_sentence()}) drops that "
+            "finding, and the review cannot "
             'approve. A per-finding "lens" key is accepted and '
             "dropped. Prose before the reply is fine: the last fenced JSON "
             "object is the one read. "
