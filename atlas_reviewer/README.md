@@ -74,9 +74,15 @@ posted.
 The review itself is the existing `review` command, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
 so a bad value cannot start an unbounded pool, not a cost cap). The child
-process receives only an allowlist: the OpenRouter key, the Sprites token,
-a read-only installation token, and the process basics. It does not receive
-the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
+process receives only an allowlist: the OpenRouter key, because it calls
+the model, the Sprites token, because it creates and destroys the Sprite,
+a read-only installation token, `ATLAS_MODEL`, `ATLAS_PROVIDERS`,
+`ATLAS_ALLOW_SAFETY_RETENTION`, `ATLAS_REQUIRE_ZDR`,
+`ATLAS_KEY_CEILING_USD`, and the process basics. It does not receive the
+agentic limit variables. This child is the one-shot `review` command, so
+D25's ceilings apply: 3 calls, $3, and 200,000 input tokens.
+It does not receive the webhook secret, the App private key, or a Fly API
+token. Exit 0, 4 and 5 are finished
 reviews and are posted. Any other exit posts nothing; the failure is a
 telemetry event.
 
@@ -96,8 +102,10 @@ has to grant that permission or the post fails and nothing is published.
 `ATLAS_SERVICE_PROVIDER` defaults to `openrouter`, and the process refuses
 to start until `ATLAS_ALLOW_LIVE_INFERENCE=1` is set, so a booted service
 does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
-is the explicit no-model setting. The deploy shape for this process is a
-separate Fly app; the one-off `fly.toml` above is unchanged.
+is the explicit no-model setting. The deploy shape is a second Fly app,
+[`fly.service.toml`](../fly.service.toml), always on, in org `personal`.
+The one-off `fly.toml` above is unchanged. Commands:
+[`deploy-service.md`](deploy-service.md). D53.
 
 ## Run it offline (no credentials)
 
@@ -381,8 +389,8 @@ accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
 `ATLAS_REQUIRE_ZDR` are not credentials either. The live OpenRouter
 path reads them; a dry run does not. The webhook review child receives
-those route variables and the agentic limit variables. It does not
-receive the webhook secret or the App private key. The redactor also scrubs the exact
+those route variables and `ATLAS_KEY_CEILING_USD`. It does not receive
+the agentic limit variables, the webhook secret, or the App private key. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the

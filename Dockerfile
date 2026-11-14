@@ -10,6 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/opt/atlas \
+    HOME=/home/atlas \
     ATLAS_REVIEWER_STATE_DIR=/home/atlas/.atlas-reviewer-state
 
 RUN useradd --create-home --uid 10001 --shell /bin/false atlas
@@ -28,7 +29,8 @@ COPY skills/choosing-review-lenses/SKILL.md /opt/atlas/skills/choosing-review-le
 COPY atlas_reviewer/docker-entrypoint.sh /usr/local/bin/atlas-reviewer
 RUN chmod 755 /usr/local/bin/atlas-reviewer
 
-USER atlas
+# Root only long enough for the entrypoint to chown the state volume.
+# The entrypoint then continues as uid 10001.
 WORKDIR /home/atlas
 
 ENTRYPOINT ["/usr/local/bin/atlas-reviewer"]

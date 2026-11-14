@@ -87,7 +87,12 @@ from atlas_reviewer.ledger import (
 )
 from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
 from atlas_reviewer.lenses import LensLibrary, LensStatus
-from atlas_reviewer.openrouter import KEY_LIMIT_MAX_USD, OpenRouterProvider, model_route
+from atlas_reviewer.openrouter import (
+    ENV_KEY_CEILING_USD,
+    KEY_LIMIT_MAX_USD,
+    OpenRouterProvider,
+    model_route,
+)
 from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_lenses
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -774,7 +779,7 @@ def _key_ceiling(args: argparse.Namespace, env: Mapping[str, str]) -> Decimal:
             "of dollars, or omit it to keep the $5.00 pilot ceiling"
         )
     if raw is None:
-        raw = env.get("ATLAS_KEY_CEILING_USD")
+        raw = env.get(ENV_KEY_CEILING_USD)
     if raw is None or raw == "":
         return KEY_LIMIT_MAX_USD
     try:

@@ -148,6 +148,7 @@ ENV_MODEL = "ATLAS_MODEL"
 ENV_PROVIDERS = "ATLAS_PROVIDERS"
 ENV_ALLOW_SAFETY_RETENTION = "ATLAS_ALLOW_SAFETY_RETENTION"
 ENV_REQUIRE_ZDR = "ATLAS_REQUIRE_ZDR"
+ENV_KEY_CEILING_USD = "ATLAS_KEY_CEILING_USD"
 # Slugs named by the 2026-11-07 public-list check and the routing docs.
 # Not an inventory of every Bedrock region: those were reported, not named.
 # This is the default pin, not a closed set of slugs a request may name.
