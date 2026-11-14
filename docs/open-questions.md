@@ -2,6 +2,13 @@
 
 ## Decisions made
 
+*The log is append-only: an entry's text, once written, changes only by
+appending an **Update** or **Correction** paragraph to it, never by editing in
+place — the rule is CI-enforced by
+[`tests/test_decision_updates_are_appended.py`](../tests/test_decision_updates_are_appended.py)
+against the base branch. (D25, D26 and D33 were edited in place before the rule
+existed; their history predates it.)*
+
 - **D1 — Project framing.** Build a *standalone, first-principles* skill suite for code review & maintenance. Existing skills/tools are prior art, not constraints. *(2026-06-08)*
 - **D2 — Scope.** Maximal: intrinsic code properties **plus** all cross-cutting concerns. *(2026-06-08)*
 - **D3 — Sequence.** Map first, then design the skill suite. Research/reference-gathering happens against the map before any skill design. *(2026-06-08)*
