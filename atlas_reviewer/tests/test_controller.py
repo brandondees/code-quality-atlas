@@ -1832,6 +1832,39 @@ def test_a_lens_selection_error_is_scrubbed_before_it_is_quoted(value):
     _assert_quoted_scrub(chosen.note, value)
 
 
+def test_the_pull_body_stating_verification_results_reaches_the_selection():
+    """D58's policy rule, wired: the controller passes the pull body to
+    `select_lenses`, and a body that claims test results adds the
+    process-hygiene lens even when the picker itself fails."""
+    from dataclasses import replace
+
+    from atlas_reviewer.committed_secrets import scan_diff
+    from atlas_reviewer.controller import _Fetched, _select_lenses
+    from atlas_reviewer.evidence import PullInfo
+    from atlas_reviewer.picker import PR_HYGIENE
+    from atlas_reviewer.redact import redact
+    from atlas_reviewer.telemetry import Telemetry
+
+    class Boom:
+        def pick(self, request):
+            raise BoundaryError("HTTP 529")
+
+    deps = replace(Setup(lenses=ROOMY).deps, harness=Boom())
+    diff = _Fetched("diff --git a/a.py b/a.py\n", ("a.py",), scan_diff(""), 1, 1)
+
+    def select(body_text):
+        pull = PullInfo(HEAD, "ref", redact("title"), redact(body_text), ())
+        return _select_lenses(
+            EVENT, pull, diff, deps,
+            ReviewConfig(model_calls=2), Telemetry(FakeClock()), scrub=str,
+        )  # fmt: skip
+
+    claiming = select("Tests: 2105 passed; coverage 96.78%.")
+    assert PR_HYGIENE in [c.name for c in claiming.choices]
+    quiet = select("Adds a rounding helper to the totals module.")
+    assert PR_HYGIENE not in [c.name for c in quiet.choices]
+
+
 @pytest.mark.parametrize("value", MARKUP_VALUES)
 def test_a_flagged_lens_picker_error_is_scrubbed_in_the_draft(value):
     """`run_review` forwards its own flagged scrub into `_select_lenses`,

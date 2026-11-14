@@ -26,6 +26,25 @@ def test_every_critical_tier_lens_has_a_body_in_the_bundle():
     assert all(LensLibrary().body(n) for n in CRITICAL_TIER)
 
 
+def test_the_decision_bundles_lenses_are_loadable():
+    """D58: `reviewing-decision-lifecycle` ships only in the
+    reviewing-a-decision entrypoint; the 2026-11-13 trials picked it and
+    three runs dropped it silently. D44's library reads a lens from any
+    collapsed entrypoint, which covers it."""
+    library = LensLibrary()
+    body = library.body("reviewing-decision-lifecycle")
+    assert body is not None and body.strip()
+
+
+def test_a_picked_decision_bundle_lens_runs_whole():
+    library = LensLibrary()
+    plan = plan_lenses(library, [choice("reviewing-decision-lifecycle")])
+    (use,) = plan.uses
+    assert use.status is LensStatus.RUN
+    (loaded,) = plan.loaded
+    assert loaded.text == library.body("reviewing-decision-lifecycle")
+
+
 def choice(name, why="picker rank 1"):
     return LensChoice(name, why)
 
