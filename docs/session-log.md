@@ -1358,3 +1358,18 @@ run's attestation ledger is per run, so editing a scenario replays from
 scratch. Nothing is read from the environment and no network client is
 constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
+## 2026-11-14 — #663, #664: redaction hardening and pre-request refusal bookkeeping
+
+`redact` gains a `sprites-token` pattern (`org/<org id>/<secret>`, the
+shape every carrier of `ATLAS_SPRITES_TOKEN` here holds) and scrubs
+each known credential's base64 and hex encodings under the same
+label, so a token the controller does not hold, and a log that
+carries one encoded, no longer survive redaction (#663). The one-shot
+provider records a fail-closed transport failure of the ZDR-list or
+`/model` catalog GET in `budget.refusals`, which previously
+propagated unrecorded (#664). The agentic loop gives a ZDR or pricing
+refusal its own `MODEL_REFUSED` cause instead of `MODEL_ERROR` --
+still failing the lens, still not retried -- so the draft, the ledger
+and the parity gate can tell a policy refusal from a model failure
+(#664). Every change names a test that fails when it is reverted.
+D59.
