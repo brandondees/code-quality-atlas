@@ -402,6 +402,14 @@ class _TracedModel:
     def name(self) -> str:
         return self._model.name
 
+    @property
+    def timeout_s(self) -> Any:
+        """The wrapped model's per-request timeout, when it names one, for
+        the loop's retry gate. Every production lens model is wrapped, so
+        the gate must see the timeout through this wrapper, not around it
+        (review round 3, M-a)."""
+        return getattr(self._model, "timeout_s", None)
+
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         amount = self._model.worst_case_usd(request)
         self._reservation = (

@@ -31,7 +31,9 @@ while the clocks leave room for one more timeout. Once every changed diff
 is read, or once a tool call is
 repeated, one finalize-now nudge is injected (D58's detector), bounded by
 `no_progress_turns` and `duplicate_calls`. A final reply the harness has
-already judged is kept when the follow-up turn it earned can never run.
+already judged is kept when the follow-up turn it earned can never run,
+and -- when it carried findings -- across the tool work the nudge asked
+for, until a newer final reply is judged.
 
 The five review limits have defaults Brandon set on 2026-11-11, for
 headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
@@ -663,8 +665,12 @@ class _Progress:
     stall_nudged: bool = False
     # The last judged outcome whose follow-up turn was queued but not yet
     # answered. Any stop before that turn is placed returns it, so a valid
-    # reply's findings are never thrown away (D58, review M1).
+    # reply's findings are never thrown away (D58, review M1); once the
+    # follow-up was placed and answered with tool work, only a
+    # finding-bearing held outcome survives a later stop (review round 3,
+    # M-b).
     held_outcome: AttemptOutcome | None = None
+    held_placed: bool = False
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -675,11 +681,10 @@ class _Progress:
             self.causes.add(Cause.FILES_UNREAD)
         held = self.held_outcome
         self.held_outcome = None
-        if held is not None:
-            # The follow-up turn never ran: the reply the harness already
-            # judged stands, with the stop's cause and the limit named.
-            # A repair-held reply keeps its UNPARSED cause; an unread-held
-            # reply keeps its checked findings and FILES_UNREAD.
+        if held is not None and (not self.held_placed or held.findings):
+            # The judged reply stays the attempt's evidence: before its
+            # follow-up turn ran, whatever the stop; after it, until a
+            # newer final reply replaces it, when it carried findings.
             both = (
                 f"{held.detail}; {detail}" if held.detail and detail else
                 (detail or held.detail)
@@ -687,6 +692,8 @@ class _Progress:
             return replace(
                 held,
                 causes=frozenset(held.causes) | frozenset(self.causes),
+                tools=tuple(self.tools),
+                turns=self.turns,
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
@@ -795,9 +802,10 @@ def run_attempt(
             exc.tools = tuple(p.tools)
             raise
         except TransportTimeoutError as first:
-            if request is retried_request or not _room_for_one_more_timeout(
-                model, clock, lens_deadline, review_deadline
-            ):
+            if not _retry_earned(
+                request, retried_request, model, clock, lens_deadline,
+                review_deadline,
+            ):  # fmt: skip
                 return p.cut(Cause.TRANSPORT_ERROR, str(first))
             retried_request = request
             retry_request = request
@@ -808,7 +816,7 @@ def run_attempt(
             return p.cut(Cause.MODEL_ERROR, str(exc))
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
-        p.held_outcome = None
+        _mark_held_placed(p, reply)
         if isinstance(reply, FinalReply):
             done = _accept_or_repair(job, reply.text, p, messages)
             if done is not None:
@@ -839,6 +847,31 @@ def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -
         p.nudges.append(trigger)
         note_nudge(trigger)
         messages.append(UserText(_finalize_nudge()))
+
+
+def _mark_held_placed(p: _Progress, reply: ModelTurn) -> None:
+    """The follow-up turn was placed and answered with tool work; only a
+    finding-bearing held outcome survives a later stop (review round 3,
+    M-b). A final reply is judged by `_accept_or_repair`, which resets the
+    hold itself."""
+    if not isinstance(reply, FinalReply) and p.held_outcome is not None:
+        p.held_placed = True
+
+
+def _retry_earned(
+    request: TurnRequest,
+    retried_request: TurnRequest | None,
+    model: LensModel,
+    clock: Clock,
+    lens_deadline: float,
+    review_deadline: float,
+) -> bool:
+    """Whether the timed-out request earns its one retry: it has not been
+    retried already, and one more full timeout fits the clocks that remain
+    (review M2; round 3, M-a gates it through the traced wrapper too)."""
+    return request is not retried_request and _room_for_one_more_timeout(
+        model, clock, lens_deadline, review_deadline
+    )
 
 
 def _room_for_one_more_timeout(
@@ -937,11 +970,14 @@ def _accept_or_repair(
     goes back into this conversation, and the next final reply is the one
     that counts. While a queued turn goes unanswered, the judged outcome
     is held on the progress, so a stop before it is placed keeps the
-    reply's findings (D58, review M1)."""
+    reply's findings (D58, review M1); the hold survives the tool work
+    the nudge asked for, until this function judges a newer reply (review
+    round 3, M-b)."""
     repaired = _repair(text, p)
     if repaired is not None:
         before = set(p.causes)
         p.held_outcome = _final(job, text, p)
+        p.held_placed = False
         # D44's shape: a refused reply is not judged into this attempt's
         # causes; its own judgment is held for a stop before the repair
         # turn is placed.
@@ -962,9 +998,11 @@ def _accept_or_repair(
         p.nudges.append("unread-files")
         note_nudge("unread-files")
         p.held_outcome = outcome
+        p.held_placed = False
         messages += [UserText(_unread_nudge(outcome.unread, job.nonce))]
         return None
     p.held_outcome = None
+    p.held_placed = False
     return outcome
 
 

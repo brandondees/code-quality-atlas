@@ -30,8 +30,8 @@ MAX_LINE = 10_000_000
 # The longest lens name in the suite is 44 characters.
 MAX_LENS_CHARS = 80
 DIGEST = re.compile(r"[0-9a-f]{64}")
-_FENCED = re.compile(r"\A```(?:json)?\n(.*)\n```\Z", re.DOTALL)
-_ANY_FENCE = re.compile(r"```[a-z]*\n(.*?)\n```", re.DOTALL)
+_FENCED = re.compile(r"\A```[^\n]*\n(.*)\n```\Z", re.DOTALL)
+_ANY_FENCE = re.compile(r"```[^\n]*\n(.*?)\n```", re.DOTALL)
 _RANGE = re.compile(r"(?P<path>.+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?")
 _DESIGN = re.compile(r"(?:boundary|component):\S.*")
 _REPLY_KEYS = frozenset({"lens", "body_sha256", "findings"})

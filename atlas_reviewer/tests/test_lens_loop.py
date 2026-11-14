@@ -43,6 +43,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
     TransportError,
+    TransportTimeoutError,
 )
 from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.quotes import QuoteSource, read_sources
@@ -491,6 +492,49 @@ def test_a_valid_reply_survives_a_follow_up_that_never_runs(tmp_path):
     assert outcome.unread == ("config/keys.py",)
 
 
+def test_a_reply_is_kept_when_the_model_obeys_the_nudge_then_hits_the_cap(
+    tmp_path,
+):
+    """Review round 3, M-b probe A: the model obeys the unread nudge by
+    reading the missing file, and the turn cap lands before it can reply
+    again. The verified finding survives, with the read recorded."""
+    outcome, model, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("diff_file", {"path": "config/keys.py"})),
+        ],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.turns == 3
+    # The post-nudge read is part of the recorded work.
+    assert [t.tool for t in outcome.tools] == ["diff_file", "diff_file"]
+    assert any("config/keys.py" in t.args for t in outcome.tools)
+    assert len(model.requests) == 3
+
+
+def test_a_reply_is_kept_when_the_model_answers_the_nudge_without_reading(
+    tmp_path,
+):
+    """Review round 3, M-b probe B: the model answers the nudge with tool
+    work that does not close the gap, and the cap lands. The finding
+    still survives."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [READ_DIFF, final(finding()), READ_DIFF],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+
+
 def test_a_repair_held_reply_keeps_its_unparsed_cause_when_the_turn_never_runs(
     tmp_path,
 ):
@@ -596,6 +640,59 @@ def test_a_transport_error_alone_is_a_retryable_outcome():
         Attestation.UNACKNOWLEDGED, frozenset({Cause.TRANSPORT_ERROR})
     )
     assert outcome.retryable
+
+
+def test_the_timeout_retry_gate_sees_the_traced_model_timeout(tmp_path):
+    """Review round 3, M-a: every production lens model is wrapped by the
+    tracing wrapper, and the wrapper must forward the per-request timeout
+    the retry's clock gate reads. Through the wrapper, a retry whose
+    timeout cannot fit the clocks is skipped: one request, not two."""
+    from atlas_reviewer.tracing import memory_trace
+
+    from .test_tool_model import model as adapter_model
+
+    lens, fake = adapter_model(TransportTimeoutError("POST timed out"))
+    assert lens.timeout_s == 300.0
+    trace, _exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(lens)
+        assert wrapped.timeout_s == 300.0
+        clock = FakeClock()
+        clock.advance(350)
+        outcome, _, _ = attempt(
+            tmp_path,
+            [],
+            model=wrapped,
+            clock=clock,
+            spend=Spend(replace(LIMITS, reservation_usd=Decimal(5)).resolve()),
+        )
+    finally:
+        trace.shutdown()
+    assert len(fake.chat_requests()) == 1
+    assert Cause.TRANSPORT_ERROR in outcome.causes
+
+
+def test_the_attempt_itself_resets_a_stale_nudge_marker(tmp_path):
+    """Review round 3, m3: the reset must be production's (`run_attempt`),
+    not only the test fixture's. A marker noted after the fixture's own
+    pre-test reset must not reach any completion span."""
+    from atlas_reviewer.call_facts import note_nudge
+    from atlas_reviewer.tracing import memory_trace
+
+    note_nudge("unread-files")
+    trace, exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(ScriptedLensModel([READ_ALL, final(finding())]))
+        outcome, _, _ = attempt(tmp_path, [], model=wrapped)
+    finally:
+        trace.shutdown()
+    assert outcome.state is LensState.CLEAN
+    spans = [
+        span for span in exporter.get_finished_spans() if span.name == "completion"
+    ]
+    assert spans
+    for span in spans:
+        assert "atlas.nudge" not in dict(span.attributes or {})
 
 
 # -------------------------------------------------------------- outcomes

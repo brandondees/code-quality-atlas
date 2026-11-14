@@ -94,6 +94,27 @@ def test_a_fence_in_the_prose_does_not_eat_the_json_fence():
     assert f.severity is Severity.MAJOR
 
 
+@pytest.mark.parametrize(
+    "tag",
+    ["python3", "c++", "ts ", "json5"],
+)
+def test_a_fence_info_string_with_digits_or_symbols_pairs_correctly(tag):
+    """Review round 3, m5: info strings with digits, symbols or a trailing
+    space must pair as blocks, not turn their closing fence into the next
+    opener."""
+    text = (
+        f"Context:\n\n```{tag}\nx = 1\n```\n\nFinal answer:\n\n"
+        "```json\n" + reply(finding()) + "\n```"
+    )
+    (f,) = parse_reply(text).findings
+    assert f.severity is Severity.MAJOR
+
+
+def test_a_whole_reply_in_a_tagged_fence_parses():
+    parsed = parse_reply(f"```ts \n{reply(finding())}\n```")
+    assert parsed.findings
+
+
 def test_a_fence_that_does_not_hold_the_contract_is_still_refused_whole():
     text = 'Here is my review:\n\n```json\n{"findings": []}\n```'
     with pytest.raises(ContractError, match="exactly the keys"):
