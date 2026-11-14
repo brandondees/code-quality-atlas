@@ -16,7 +16,9 @@ wall clock, the output cap when the model stops at it, a model call
 that still fails after its retries (`call_retries`, one by default,
 each after a short backoff), or the runner's deadline. A retried call
 reserves and settles like any other call, and the failed call's
-reservation stays committed. A final reply outside the finding
+reservation stays committed. A call the reservation cannot cover at its
+full output cap is sent with the largest cap it can cover, when that is
+at least `min_output_tokens` (D50). A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
 second such reply is the attempt's result. Anything but a final reply
 that meets the contract, acknowledges the body and whose quotes all
@@ -46,7 +48,7 @@ import math
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
@@ -88,6 +90,7 @@ DEFAULT_REVIEW_WALL_S = 3600
 DEFAULT_CALL_RETRIES = 1
 MAX_CALL_RETRIES = 3
 CALL_RETRY_BACKOFF_S = 2.0
+DEFAULT_MIN_OUTPUT_TOKENS = 16_000
 
 # ------------------------------------------------------------------ limits
 
@@ -111,6 +114,7 @@ class Limits:
     retries: int
     pool_size: int
     call_retries: int = DEFAULT_CALL_RETRIES
+    min_output_tokens: int = DEFAULT_MIN_OUTPUT_TOKENS
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -126,7 +130,9 @@ class AgenticLimits:
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
     is one). `call_retries` is how many times a failed model call is sent
-    again within one turn (0 to 3; the default is one). The per-call token fields are None until the catalog is known:
+    again within one turn (0 to 3; the default is one).
+    `min_output_tokens` is the smallest output cap a call may be fitted
+    to when the reservation cannot cover its full cap (2 or more). The per-call token fields are None until the catalog is known:
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -137,6 +143,7 @@ class AgenticLimits:
     retries: int = RETRIES
     pool_size: int = POOL_SIZE
     call_retries: int = DEFAULT_CALL_RETRIES
+    min_output_tokens: int = DEFAULT_MIN_OUTPUT_TOKENS
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -152,6 +159,27 @@ class AgenticLimits:
         resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
         _check_limits(resolved)
         return resolved
+
+
+def _check_counts(limits: Limits) -> None:
+    if (
+        isinstance(limits.pool_size, bool)
+        or not isinstance(limits.pool_size, int)
+        or not 1 <= limits.pool_size <= 16
+    ):
+        raise ValueError("pool_size must be an integer from 1 to 16")
+    if isinstance(limits.call_retries, bool) or limits.call_retries not in range(
+        MAX_CALL_RETRIES + 1
+    ):
+        raise ValueError(
+            f"call_retries must be an integer from 0 to {MAX_CALL_RETRIES}"
+        )
+    if (
+        isinstance(limits.min_output_tokens, bool)
+        or not isinstance(limits.min_output_tokens, int)
+        or limits.min_output_tokens < 2
+    ):
+        raise ValueError("min_output_tokens must be an integer of at least 2")
 
 
 def _check_limits(limits: Limits) -> None:
@@ -180,18 +208,7 @@ def _check_limits(limits: Limits) -> None:
         raise ValueError("lens_wall_s must be no greater than review_wall_s")
     if isinstance(limits.retries, bool) or limits.retries not in range(2):
         raise ValueError("retries must be 0 or 1")
-    if (
-        isinstance(limits.pool_size, bool)
-        or not isinstance(limits.pool_size, int)
-        or not 1 <= limits.pool_size <= 16
-    ):
-        raise ValueError("pool_size must be an integer from 1 to 16")
-    if isinstance(limits.call_retries, bool) or limits.call_retries not in range(
-        MAX_CALL_RETRIES + 1
-    ):
-        raise ValueError(
-            f"call_retries must be an integer from 0 to {MAX_CALL_RETRIES}"
-        )
+    _check_counts(limits)
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:
@@ -354,6 +371,8 @@ class TurnRequest:
     system: str
     messages: tuple[Message, ...]
     tools: tuple[ToolSchema, ...]
+    # A tighter output cap for this call only; None keeps the resolved one.
+    max_output_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -374,11 +393,16 @@ ModelTurn = ToolCalls | FinalReply
 class LensModel(Protocol):
     """One model turn with tools. `worst_case_usd` is what the turn could
     cost at most, reserved before it is sent; `turn` raises `BoundaryError`
-    when the call fails."""
+    when the call fails. `output_tokens_within` is the largest output cap
+    whose worst case for the request fits a dollar amount."""
 
     name: str
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal: ...
+
+    def output_tokens_within(
+        self, request: TurnRequest, budget_usd: Decimal
+    ) -> int: ...
 
     def turn(self, request: TurnRequest) -> ModelTurn: ...
 
@@ -548,6 +572,10 @@ class Spend:
         self.committed_usd += worst_usd
         return None
 
+    def left(self) -> Decimal:
+        with self._lock:
+            return self.limits.reservation_usd - self.committed_usd
+
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
         with self._lock:
             if _valid_cost(actual_usd):
@@ -686,10 +714,20 @@ def _place_turn(
     """One model call: price it, reserve that, send it, settle it. A str
     is a failed call the loop may retry. Its reservation stays committed,
     since the provider may still have billed it."""
-    priced = _reserve_call(model, request, spend)
+    priced = _price_call(model, request, spend)
     if not isinstance(priced, Decimal):
         return p.cut(*priced)
     worst = priced
+    refused = spend.reserve(worst)
+    fitted = ""
+    if refused is not None and refused.limit == "reservation_usd":
+        fit = _fit_to_reservation(request, model, spend, refused)
+        if isinstance(fit, LimitHit):
+            return p.cut(*_stopped(fit))
+        request, worst, refused = fit
+        fitted = f" (output cap fitted to {request.max_output_tokens} tokens)"
+    if refused is not None:
+        return p.cut(*_stopped(refused))
     try:
         reply = model.turn(request)
     except LimitRefused as exc:
@@ -703,9 +741,40 @@ def _place_turn(
         exc.tools = tuple(p.tools)
         raise
     except BoundaryError as exc:
-        return str(exc)
+        return f"{exc}{fitted}"
     spend.settle(worst, reply.cost_usd)
     return reply
+
+
+def _fit_to_reservation(
+    request: TurnRequest, model: LensModel, spend: Spend, refused: LimitHit
+) -> tuple[TurnRequest, Decimal, LimitHit | None] | LimitHit:
+    """Fit the call's output cap to what the reservation has left, when
+    that leaves at least `min_output_tokens`. The fitted cap is the one
+    sent as `max_tokens`, so its worst case is still a bound. Otherwise
+    the refusal stands and names the cap the reservation could cover."""
+    floor = spend.limits.min_output_tokens
+    left = spend.left()
+    try:
+        cap = model.output_tokens_within(request, left)
+    except (LimitRefused, BoundaryError):
+        return refused
+    if cap < floor:
+        return hit(
+            "reservation_usd",
+            refused.configured,
+            f"{refused.observed}; the ${left} left covers {max(cap, 0)} output "
+            f"tokens, under min_output_tokens {floor} "
+            "(--min-output-tokens or ATLAS_MIN_OUTPUT_TOKENS)",
+        )
+    fitted = replace(request, max_output_tokens=cap)
+    try:
+        worst = model.worst_case_usd(fitted)
+    except (LimitRefused, BoundaryError):
+        return refused
+    if not _valid_cost(worst):
+        return refused
+    return fitted, worst, spend.reserve(worst)
 
 
 def _failed_calls(failures: list[str]) -> str:
@@ -784,10 +853,10 @@ def run_attempt(
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
 
 
-def _reserve_call(
+def _price_call(
     model: LensModel, request: TurnRequest, spend: Spend
 ) -> Decimal | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
-    """The call's reserved worst case, or why it is not sent."""
+    """The call's worst case, or why it is not sent."""
     if spend.halted:
         return Cause.MODEL_ERROR, HALTED_CALL
     try:
@@ -801,9 +870,6 @@ def _reserve_call(
         return Cause.MODEL_ERROR, HALTED_CALL
     if not _valid_cost(worst):
         return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
-    refused = spend.reserve(worst)
-    if refused is not None:
-        return _stopped(refused)
     return worst
 
 
