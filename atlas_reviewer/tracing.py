@@ -54,7 +54,7 @@ from opentelemetry.trace import Status, StatusCode, Tracer
 
 from atlas_reviewer.bridge import Bridge, BridgeResult
 from atlas_reviewer.bridge import Status as ToolStatus
-from atlas_reviewer.call_facts import take_call, take_nudge
+from atlas_reviewer.call_facts import take_call, take_nudge, take_timeout_retries
 from atlas_reviewer.lens_loop import (
     FinalReply,
     LensModel,
@@ -237,15 +237,21 @@ class ReviewTrace:
         if processor is not None and batch is None:
             raise RuntimeError("span processor has no bounded flush")
         if batch is not None:
-            batch.shutdown(timeout_millis=_FLUSH_MS)
+            _bounded(lambda: batch.shutdown(timeout_millis=_FLUSH_MS))
         if provider is not None:
             provider.shutdown()
 
     def flush(self) -> None:
-        """Export queued spans without stopping the provider."""
+        """Export queued spans without stopping the provider.
+
+        On SDK 1.45.2 ``force_flush`` ignores its timeout argument, so the
+        wait is bounded here: the flush runs on its own thread and this
+        call joins it for ``_FLUSH_MS``. An export still in flight against
+        a slow collector keeps running in the background instead of
+        blocking the review's exit."""
         processor = self._processor
         if processor is not None and hasattr(processor, "force_flush"):
-            processor.force_flush(_FLUSH_MS)
+            _bounded(lambda: processor.force_flush())
 
     def with_scrub(self, scrub: Scrub, *, bodies: bool | None = None) -> ReviewTrace:
         """A view with this scrubber. It does not own the provider, so
@@ -424,12 +430,13 @@ class _TracedModel:
                 reservation = self._reservation
                 bound_note = self._bound_note
                 nudge = take_nudge()
+                retries = take_timeout_retries()
                 self._reservation = None
                 self._bound_note = ""
                 _model_attributes(
                     note, self._model, request, reply, take_call(),
                     self._owner._clock() - start, caught, self._owner._bodies,
-                    reservation, bound_note, nudge,
+                    reservation, bound_note, nudge, retries,
                 )  # fmt: skip
         return reply
 
@@ -467,6 +474,7 @@ def _model_attributes(
     reservation: Decimal | None,
     bound_note: str = "",
     nudge: str = "",
+    timeout_retries: int = 0,
 ) -> None:
     model_name = model.name
     if facts is not None and facts.model:
@@ -483,6 +491,10 @@ def _model_attributes(
         # The harness-injected turn this completion answers: one of
         # `unread-files`, `no-progress`, `duplicate-calls`.
         note.set("atlas.nudge", nudge)
+    if timeout_retries:
+        # This completion follows a timed-out request's one retry (review
+        # M2): the retry is its own reserved, counted call.
+        note.set("atlas.timeout_retry", timeout_retries)
     if facts is not None:
         _tokens(note, facts)
         if facts.finish_reason:
@@ -523,6 +535,18 @@ def _caught(note: _Note, caught: Exception | None) -> None:
     elif "prompt bound" in text:
         note.set("atlas.limit_stop", "prompt bound")
     note.error(text)
+
+
+def _bounded(call: Callable[[], Any], timeout_s: float = _FLUSH_MS / 1000) -> None:
+    """Run ``call`` on its own thread and wait at most ``timeout_s`` for it.
+
+    The SDK's ``force_flush`` ignores its timeout on 1.45.2, so a dead
+    collector would otherwise hold the review's exit for one export
+    timeout per batch. The thread is a daemon: a flush that outlives the
+    wait keeps running and is abandoned."""
+    thread = threading.Thread(target=call, daemon=True)
+    thread.start()
+    thread.join(timeout_s)
 
 
 def _openinference_provider(name: str) -> str | None:

@@ -27,10 +27,9 @@ the one-shot 3 calls and $3).
 Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
 executes and returns that refusal, nonce-fenced, as the next tool
-result. This module does not execute a tool. A read timeout is retried
-once at the call level, inside the reservation the loop already placed
-(the timed-out request produced no response to settle); any other
-failure is one request, no retry.
+result. This module does not execute a tool and sends one request per
+turn: a read timeout raises `TransportTimeoutError`, and the loop owns
+the one retry, reserving it as its own call against the shared budget.
 """
 
 from __future__ import annotations
@@ -81,6 +80,7 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    ResponseTooLargeError,
     TransportError,
     TransportTimeoutError,
 )
@@ -116,6 +116,7 @@ class OpenRouterLensModel:
         self._ready_for_turn: tuple[ModelTerms, bool, SelectedEndpoints] | None = None
         self._meter = InputTokenMeter()
         self._bound_note = ""
+        self._last_system: str | None = None
 
     @property
     def name(self) -> str:
@@ -140,6 +141,12 @@ class OpenRouterLensModel:
         self._ready_for_turn = (terms, counts_byok, selected)
         bounds = resolve_per_call(self.per_call, terms)
         payload = _payload(self.provider, request, terms, bounds, selected)
+        if request.system != self._last_system:
+            # A different system prompt is a different conversation (a
+            # retry attempt names the previous refusal; a continuation a
+            # new scope), so the last reported baseline prices content
+            # that is no longer there: reset to the byte bound.
+            self._meter.reset()
         # The meter needs what the messages added since the last reported
         # response weigh: the whole payload serialized, and the same
         # serialization cut back to the messages that response already
@@ -161,13 +168,20 @@ class OpenRouterLensModel:
             ) from exc
         return worst_case_usd(bound, terms, bounds)
 
+    @property
+    def timeout_s(self) -> float:
+        """The per-request timeout this adapter sends with, for the loop's
+        retry gate (review M2): one more timeout must fit the clocks."""
+        return self.provider._timeout_s
+
     def turn(self, request: TurnRequest) -> ModelTurn:
-        """One request. A read timeout is retried once, inside the
-        reservation the loop already placed: the timed-out request produced
-        no response to settle, and the reservation prices the turn's worst
-        case, so the retry cannot spend past it. Any other transport
-        failure, and every failure after a response arrived, is one
-        request, no retry. The loop counts the call and settles the cost."""
+        """One request, no retry. A read timeout raises
+        `TransportTimeoutError`, and the loop owns the one retry: it
+        reserves the retry as its own call against the shared budget and
+        counts it, which a retry inside the adapter could not do. Any
+        other transport failure, and every failure after a response
+        arrived, is one request, no retry. The loop counts the call and
+        settles the cost."""
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok, selected = self._ready() if cached is None else cached
@@ -197,8 +211,10 @@ class OpenRouterLensModel:
         usage_obj = usage if isinstance(usage, dict) else {}
         # The reported prompt tokens are the meter's next baseline, taken
         # before any later check raises, so a refused turn still leaves the
-        # data behind for the retry attempt.
+        # data behind for the retry attempt. The system prompt of that
+        # request is what the baseline priced.
         self._meter.observe(_tokens(usage_obj, "prompt_tokens"), len(request.messages))
+        self._last_system = request.system
         return _turn(
             data,
             terms,
@@ -211,18 +227,18 @@ class OpenRouterLensModel:
     def _send(
         self, url: str, headers: Mapping[str, str], body: bytes, timeout_s: float
     ) -> Any:
-        """The request, with one retry when it times out on the transport."""
+        """The request, once. A timeout raises `TransportTimeoutError` for
+        the loop's retry; a failure before any response arrived is a
+        `TransportError`; a response that arrived but was too large is a
+        model-level error, not a transport one (review Minor 2)."""
         try:
             return self.provider._transport.request(
                 "POST", url, headers, body, timeout_s
             )
         except TransportTimeoutError:
-            try:
-                return self.provider._transport.request(
-                    "POST", url, headers, body, timeout_s
-                )
-            except BoundaryError as exc:
-                raise TransportError(f"OpenRouter transport error: {exc}") from exc
+            raise
+        except ResponseTooLargeError as exc:
+            raise BoundaryError(f"OpenRouter response too large: {exc}") from exc
         except BoundaryError as exc:
             raise TransportError(f"OpenRouter transport error: {exc}") from exc
 

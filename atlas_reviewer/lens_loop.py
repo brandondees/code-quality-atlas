@@ -24,10 +24,14 @@ file left unread makes the attempt partial (`FILES_UNREAD`), and that
 cause is not retried (an `UNPARSED` reply is still retried; D58 narrows
 D42). Before a final reply is accepted with files unread, the loop sends
 the unread list back once, fenced (D58). A model call that failed on the
-transport is a `TRANSPORT_ERROR` cause and is retryable, while a model
-error is not. Once every changed diff is read, or once a tool call is
+transport is a `TRANSPORT_ERROR` cause, retryable on its own -- the
+unread-file veto below still applies -- while a model error is not. A
+timed-out request is retried once as its own reserved, counted call, only
+while the clocks leave room for one more timeout. Once every changed diff
+is read, or once a tool call is
 repeated, one finalize-now nudge is injected (D58's detector), bounded by
-`no_progress_turns` and `duplicate_calls`.
+`no_progress_turns` and `duplicate_calls`. A final reply the harness has
+already judged is kept when the follow-up turn it earned can never run.
 
 The five review limits have defaults Brandon set on 2026-11-11, for
 headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
@@ -47,7 +51,7 @@ import json
 import math
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
@@ -66,7 +70,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
-from atlas_reviewer.call_facts import note_nudge
+from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
 from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
@@ -76,6 +80,7 @@ from atlas_reviewer.ports import (
     ByokRefusedError,
     Clock,
     TransportError,
+    TransportTimeoutError,
 )
 from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
@@ -656,6 +661,10 @@ class _Progress:
     nudges: list[str] = field(default_factory=list)
     unread_nudged: bool = False
     stall_nudged: bool = False
+    # The last judged outcome whose follow-up turn was queued but not yet
+    # answered. Any stop before that turn is placed returns it, so a valid
+    # reply's findings are never thrown away (D58, review M1).
+    held_outcome: AttemptOutcome | None = None
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -664,6 +673,24 @@ class _Progress:
         unread = self.pages.unread(self.changed)
         if unread:
             self.causes.add(Cause.FILES_UNREAD)
+        held = self.held_outcome
+        self.held_outcome = None
+        if held is not None:
+            # The follow-up turn never ran: the reply the harness already
+            # judged stands, with the stop's cause and the limit named.
+            # A repair-held reply keeps its UNPARSED cause; an unread-held
+            # reply keeps its checked findings and FILES_UNREAD.
+            both = (
+                f"{held.detail}; {detail}" if held.detail and detail else
+                (detail or held.detail)
+            )  # fmt: skip
+            return replace(
+                held,
+                causes=frozenset(held.causes) | frozenset(self.causes),
+                detail=both,
+                limit_hit=limit_hit,
+                nudges=tuple(self.nudges),
+            )
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
             frozenset(self.causes),
@@ -727,10 +754,13 @@ def run_attempt(
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
     messages: list[Message] = [UserText(job.first_turn)]
     tools = tool_schemas()
+    reset_events()
     p = _Progress(
         changed=job.changed,
         secrets=[] if secrets is None else secrets,
     )
+    retry_request: TurnRequest | None = None
+    retried_request: TurnRequest | None = None
     while True:
         stopped = _time_up(
             p, clock, limits, review_deadline, review_started,
@@ -738,7 +768,16 @@ def run_attempt(
         )  # fmt: skip
         if stopped is not None:
             return stopped
-        request = TurnRequest(system, tuple(messages), tools)
+        if retry_request is None:
+            request = TurnRequest(system, tuple(messages), tools)
+        else:
+            # One retry of the request that just timed out (D58 item 5):
+            # the timed-out request keeps its full reservation as spent, it
+            # may still be billed, and the retry is its own reserved call
+            # against the shared budget, counted like any turn. The
+            # completion span names it.
+            request, retry_request = retry_request, None
+            note_timeout_retry()
         priced = _reserve_call(model, request, spend)
         if not isinstance(priced, Decimal):
             return p.cut(*priced)
@@ -755,12 +794,21 @@ def run_attempt(
             exc.turns = p.turns
             exc.tools = tuple(p.tools)
             raise
+        except TransportTimeoutError as first:
+            if request is retried_request or not _room_for_one_more_timeout(
+                model, clock, lens_deadline, review_deadline
+            ):
+                return p.cut(Cause.TRANSPORT_ERROR, str(first))
+            retried_request = request
+            retry_request = request
+            continue
         except TransportError as exc:
             return p.cut(Cause.TRANSPORT_ERROR, str(exc))
         except BoundaryError as exc:
             return p.cut(Cause.MODEL_ERROR, str(exc))
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
+        p.held_outcome = None
         if isinstance(reply, FinalReply):
             done = _accept_or_repair(job, reply.text, p, messages)
             if done is not None:
@@ -791,6 +839,18 @@ def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -
         p.nudges.append(trigger)
         note_nudge(trigger)
         messages.append(UserText(_finalize_nudge()))
+
+
+def _room_for_one_more_timeout(
+    model: LensModel, clock: Clock, lens_deadline: float, review_deadline: float
+) -> bool:
+    """Whether one more full request timeout fits inside the clocks that
+    remain (review M2). A model that does not name its timeout -- a test
+    double -- is not gated."""
+    timeout_s = getattr(model, "timeout_s", None)
+    if timeout_s is None:
+        return True
+    return clock.monotonic() + timeout_s < min(lens_deadline, review_deadline)
 
 
 def _reserve_call(
@@ -875,9 +935,18 @@ def _accept_or_repair(
     D44's one repair turn; an accepted reply that leaves files unread
     earns D58's one unread-list nudge; the outcome otherwise. Each turn
     goes back into this conversation, and the next final reply is the one
-    that counts."""
+    that counts. While a queued turn goes unanswered, the judged outcome
+    is held on the progress, so a stop before it is placed keeps the
+    reply's findings (D58, review M1)."""
     repaired = _repair(text, p)
     if repaired is not None:
+        before = set(p.causes)
+        p.held_outcome = _final(job, text, p)
+        # D44's shape: a refused reply is not judged into this attempt's
+        # causes; its own judgment is held for a stop before the repair
+        # turn is placed.
+        p.causes.clear()
+        p.causes |= before
         messages += [AssistantText(text), UserText(repaired)]
         return None
     before = set(p.causes)
@@ -892,8 +961,10 @@ def _accept_or_repair(
         p.unread_nudged = True
         p.nudges.append("unread-files")
         note_nudge("unread-files")
+        p.held_outcome = outcome
         messages += [UserText(_unread_nudge(outcome.unread, job.nonce))]
         return None
+    p.held_outcome = None
     return outcome
 
 

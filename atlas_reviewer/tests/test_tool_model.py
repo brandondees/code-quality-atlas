@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from atlas_reviewer.attestation import Cause, ToolUse
+from atlas_reviewer.attestation import Cause, LensState, ToolUse
 from atlas_reviewer.bridge import UNKNOWN_TOOL, Status
 from atlas_reviewer.bridge_args import RejectedError, Rev, validate
 from atlas_reviewer.budget import worst_case_usd
@@ -34,7 +34,8 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.tool_model import OpenRouterLensModel, _payload
 
-from .agentic import LIMITS, final, finding
+from .agentic import BODY, LIMITS, final, finding
+from .helpers import FakeClock
 from .test_lens_loop import NONCE, attempt
 from .test_openrouter import (
     KEY,
@@ -201,29 +202,21 @@ def test_one_turn_does_not_retry_or_touch_the_one_shot_budget():
     assert lens.provider.budget.calls == []
 
 
-def test_a_read_timeout_is_retried_once_at_the_call_level():
-    """D58: one timed-out request is retried inside the same turn, under
-    the reservation the loop already placed. The trials lost 10 lens
-    attempts to 300 s read timeouts that arrived in bursts."""
+def test_a_timeout_raises_for_the_loop_to_retry():
+    """The adapter sends one request per turn: a read timeout raises
+    `TransportTimeoutError`, and the loop owns the one retry -- it must
+    reserve the retry as its own call against the shared budget, which a
+    retry inside the adapter could not do (review M2)."""
     lens, fake = model(
         TransportTimeoutError(
             "POST https://openrouter.ai/api/v1/chat/completions failed: timed out"
         ),
         reply(completion("done")),
     )
-    turn = lens.turn(request())
-    assert turn.text == "done"
-    assert len(fake.chat_requests()) == 2
-
-
-def test_a_second_timeout_is_a_transport_error_and_no_third_request():
-    lens, fake = model(
-        TransportTimeoutError("POST timed out"),
-        TransportTimeoutError("POST timed out"),
-    )
-    with pytest.raises(TransportError, match="transport error"):
+    with pytest.raises(TransportTimeoutError):
         lens.turn(request())
-    assert len(fake.chat_requests()) == 2
+    assert len(fake.chat_requests()) == 1
+    assert lens.timeout_s == 300.0
 
 
 def test_a_transport_error_other_than_a_timeout_is_not_retried():
@@ -237,6 +230,18 @@ def test_a_model_error_after_a_response_is_not_retried():
     lens, fake = model(reply(completion(), status=503))
     with pytest.raises(BoundaryError, match="503"):
         lens.turn(request())
+    assert len(fake.chat_requests()) == 1
+
+
+def test_a_response_too_large_is_not_a_transport_error():
+    """Review Minor 2: `ResponseTooLargeError` is raised after the response
+    arrived, so it is a model-level error, not a retryable transport one."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    lens, fake = model(ResponseTooLargeError("response exceeded 50 bytes"))
+    with pytest.raises(BoundaryError, match="too large") as excinfo:
+        lens.turn(request())
+    assert not isinstance(excinfo.value, TransportError)
     assert len(fake.chat_requests()) == 1
 
 
@@ -264,7 +269,7 @@ def _terms_and_bounds(lens: OpenRouterLensModel):
 def test_the_input_bound_comes_from_the_reported_usage_plus_new_messages():
     """D58: the byte bound overcounted tokens about 2.8x on the trial
     calls. After a response reports `prompt_tokens`, the next turn's bound
-    is that count plus the new messages' bytes at 2.4 bytes per token."""
+    is that count plus the new messages' bytes at one token per byte."""
     from atlas_reviewer.budget import estimated_input_tokens
 
     usage = {"prompt_tokens": 1000, "completion_tokens": 5, "is_byok": False}
@@ -332,6 +337,129 @@ def test_an_unreadable_usage_count_falls_back_to_the_byte_bound():
     lens.worst_case_usd(ask)
     lens.turn(ask)
     assert "no reported usage yet" in lens.bound_note
+    # The bound the note names is the whole payload's byte bound.
+    assert (
+        f"bytes {len(json.dumps(_payload_of(lens, ask)))} + overhead 64"
+        in lens.bound_note
+    )
+
+
+def test_a_zero_reported_count_falls_back_to_the_byte_bound():
+    """Review Minor 1: a reported `prompt_tokens` of 0 cannot have produced
+    a reply; using it as the baseline would ignore the whole prefix."""
+    usage = {"prompt_tokens": 0, "completion_tokens": 5, "is_byok": False}
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    ask = request()
+    lens.worst_case_usd(ask)
+    lens.turn(ask)
+    assert "no reported usage yet" in lens.bound_note
+    assert (
+        f"bytes {len(json.dumps(_payload_of(lens, ask)))} + overhead 64"
+        in lens.bound_note
+    )
+
+
+def test_an_implausibly_low_count_falls_back_to_the_byte_bound():
+    """Review Minor 1: a reported count far below the bytes of the
+    conversation it priced is a provider miscount, not a tokenizer; the
+    byte bound takes over."""
+    from atlas_reviewer.budget import InputTokenMeter
+
+    meter = InputTokenMeter()
+    meter.observe(1, 3)
+    whole, prefix = 100_000, 90_000
+    bound, note = meter.bound(whole, prefix, 5)
+    assert bound == whole + 64
+    assert "implausibly low" in note
+
+
+def test_a_changed_system_prompt_resets_the_meter():
+    """Review Minor 1: a retry attempt's system prompt carries the refusal
+    reasons, so the last reported baseline prices content that is gone;
+    the meter resets to the byte bound instead of undercounting."""
+    usage = {"prompt_tokens": 1000, "completion_tokens": 5, "is_byok": False}
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    first = request()
+    lens.worst_case_usd(first)
+    lens.turn(first)
+    retried = TurnRequest(SYSTEM + " A previous attempt was not accepted.", (), ())
+    lens.worst_case_usd(retried)
+    assert "no reported usage yet" in lens.bound_note
+
+
+def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
+    """Review M2: the timed-out request keeps its full reservation as
+    spent -- it may still be billed -- and the retry is its own reserved
+    call against the shared budget, counted like any turn."""
+    from .test_lens_loop import CONTRACT, NONCE, job, lens_system
+
+    lens, fake = model(
+        TransportTimeoutError("POST timed out"),
+        reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
+        reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
+    )
+    # The first request's worst case, measured on the exact conversation
+    # the loop's first turn sends.
+    ask = TurnRequest(
+        lens_system(
+            "tracing-correctness-and-invariants", BODY, CONTRACT, None, nonce=NONCE
+        ),
+        (UserText(job().first_turn),),
+        tool_schemas(),
+    )
+    first_worst = lens.worst_case_usd(ask)
+    outcome, _model, spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        spend=Spend(
+            replace(LIMITS, reservation_usd=Decimal(5), lens_wall_s=600).resolve()
+        ),
+    )
+    assert len(fake.chat_requests()) == 3
+    assert spend.calls == 3
+    # committed = the timed-out request's reservation, kept as spent, plus
+    # the retry's and the nudge turn's settled costs.
+    assert spend.committed_usd == first_worst + Decimal("0.02")
+    assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
+
+
+def test_a_second_timeout_at_the_loop_is_not_retried_again(tmp_path):
+    lens, fake = model(
+        TransportTimeoutError("POST timed out"),
+        TransportTimeoutError("POST timed out"),
+    )
+    outcome, _model, spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        spend=Spend(
+            replace(LIMITS, reservation_usd=Decimal(5), lens_wall_s=600).resolve()
+        ),
+    )
+    assert outcome.causes == {Cause.TRANSPORT_ERROR, Cause.FILES_UNREAD}
+    assert outcome.state is LensState.FAILED
+    assert len(fake.chat_requests()) == 2
+    # Two requests, both reserved at their worst case, neither settled:
+    # the timed-out requests may still be billed.
+    assert spend.calls == 2
+
+
+def test_the_timeout_retry_is_skipped_when_no_clock_room_remains(tmp_path):
+    """Review M2: the retry gets a full fresh timeout, so it must not start
+    when less than one timeout is left on the lens or review clock."""
+    clock = FakeClock()
+    clock.advance(350)
+    lens, fake = model(TransportTimeoutError("POST timed out"))
+    outcome, _model, _spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        clock=clock,
+        spend=Spend(replace(LIMITS, reservation_usd=Decimal(5)).resolve()),
+    )
+    assert outcome.causes == {Cause.TRANSPORT_ERROR, Cause.FILES_UNREAD}
+    assert len(fake.chat_requests()) == 1
 
 
 def test_the_reasoning_hint_is_recorded_for_the_trace():

@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 
 import pytest
 
@@ -283,6 +284,44 @@ def test_a_picker_ranked_pr_hygiene_is_not_duplicated():
     assert names[len(CRITICAL_TIER)] == PR_HYGIENE
 
 
+def test_a_ranked_pr_hygiene_survives_a_body_without_verification_results():
+    """Review M3: a pr-hygiene lens the picker ranked must not vanish when
+    the PR body states no verification results; it reaches the plan as an
+    ordinary pick, so a NOT RUN line names it."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, "checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="Adds a rounding helper to the totals module.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert names[-2:] == [PR_HYGIENE, "checking-restraint"]
+    assert chosen.choices[-2].why == "picker rank 1"
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    by = {u.name: u for u in plan.uses}
+    assert by[PR_HYGIENE].status is LensStatus.RUN
+    assert by[PR_HYGIENE].why == "picker rank 1"
+
+
+def test_an_agentic_pick_of_pr_hygiene_survives_a_quiet_body_too():
+    from atlas_reviewer.picker import select_agentic_lenses
+
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, "checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="Adds a rounding helper to the totals module.",
+    )
+    names = [c.name for c in selection.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert {u.name for u in plan.loaded} >= {PR_HYGIENE, "checking-restraint"}
+
+
 def test_the_fallback_paths_add_pr_hygiene_when_the_body_states_results():
     for run in (None, lambda: "not json"):
         chosen = select_lenses(
@@ -303,12 +342,25 @@ def test_the_fallback_paths_add_pr_hygiene_when_the_body_states_results():
         ("CI run 43493645208 passed", True),
         ("All checks are green.", True),
         ("3 tests failed", True),
+        ("96.78% coverage across the suite", True),
+        ("Fixes the CI flake.", False),
         ("Adds a rounding helper.", False),
         ("Follows the existing module design.", False),
+        ("CI" + ",9," * 20_000, False),
     ],
 )
 def test_verification_detection(text, states):
     assert body_states_verification(text) is states
+
+
+def test_verification_detection_is_bounded_on_a_crafted_body():
+    """The digit-run patterns must not backtrack quadratically on untrusted
+    text: a body at GitHub's 65,536-character cap of digit-comma repeats
+    scans in well under a second."""
+    body = "9," * 40_000
+    start = time.monotonic()
+    assert body_states_verification(body) is False
+    assert time.monotonic() - start < 1.0
 
 
 def never():

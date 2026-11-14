@@ -471,6 +471,45 @@ def test_the_unread_nudge_is_sent_once(tmp_path):
     assert outcome.nudges == ("unread-files",)
 
 
+def test_a_valid_reply_survives_a_follow_up_that_never_runs(tmp_path):
+    """Review M1: the nudge is queued after a parsed, quote-verified reply;
+    if the follow-up turn can never run -- here the turn cap -- the judged
+    outcome stands with its findings, and the stop is named. On the
+    pre-fix head this probe returned 0 findings."""
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [READ_DIFF, final(finding())],
+        limits=replace(LIMITS, max_turns=2),
+    )
+    assert outcome.state is LensState.PARTIAL
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.nudges == ("unread-files",)
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert outcome.unread == ("config/keys.py",)
+
+
+def test_a_repair_held_reply_keeps_its_unparsed_cause_when_the_turn_never_runs(
+    tmp_path,
+):
+    """Review M1's second effect: a contract refusal whose repair turn can
+    never run keeps `UNPARSED`, so the attempt stays retryable instead of
+    reading as a plain partial."""
+    bad = final(text="no schema here")
+    outcome, _, _ = attempt(
+        tmp_path,
+        [READ_ALL, bad],
+        limits=replace(LIMITS, max_turns=2),
+    )
+    assert outcome.causes == {Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+    assert "the reply is not one JSON object" in outcome.detail
+    assert "max_turns" in outcome.detail
+
+
 def _stall_script(coverage, greps):
     read = READ_ALL if coverage else READ_DIFF
     return [
@@ -549,9 +588,9 @@ def test_a_transport_failure_is_a_retryable_transport_error(tmp_path):
     assert "timed out" in outcome.detail
 
 
-def test_a_transport_failure_without_unread_files_is_retried(tmp_path):
-    """Without the unread-file veto (no tool call was made here), the
-    transport error is the ledger's retryable cause; a model error stays
+def test_a_transport_error_alone_is_a_retryable_outcome():
+    """A transport error without the unread-file veto (no tool call was
+    made here) is the ledger's retryable cause; a model error stays
     non-retryable (test_a_failed_model_call_fails_the_lens_and_is_not_retried)."""
     outcome = AttemptOutcome(
         Attestation.UNACKNOWLEDGED, frozenset({Cause.TRANSPORT_ERROR})
