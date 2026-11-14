@@ -1783,14 +1783,10 @@ def test_the_one_shot_path_refuses_a_prompt_over_the_row_prompt_ceiling():
 
 
 def test_a_malformed_override_names_the_endpoint_row():
-    rows = zdr_payload(
-        providers=("amazon-bedrock",), pricing={"overrides": "nope"}
-    )
+    rows = zdr_payload(providers=("amazon-bedrock",), pricing={"overrides": "nope"})
     fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
     adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
     adapter.preflight()
-    with pytest.raises(
-        PricingUnknownError, match=r"endpoint row 0 \(amazon-bedrock\)"
-    ):
+    with pytest.raises(PricingUnknownError, match=r"endpoint row 0 \(amazon-bedrock\)"):
         adapter.complete(SMALL)
     assert fake.chat_requests() == []
