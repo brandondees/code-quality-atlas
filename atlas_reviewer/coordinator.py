@@ -125,6 +125,7 @@ HALTED_REASON = (
     "not started: an earlier call in this review stopped it (BYOK or a failed lens)"
 )
 LATE_REASON = "not started: the review deadline had passed"
+NO_BODY_REASON = "no lens body in the bundle"
 
 # ----------------------------------------------------------------- results
 
@@ -764,7 +765,7 @@ def _review_one(
     body = library.body(lens)
     if body is None:
         missing = LensResult(
-            lens, index, None, None, reason="no lens body in the bundle", scope=scope
+            lens, index, None, None, reason=NO_BODY_REASON, scope=scope
         )
         return _LensRun(missing, [], None, spend or Spend(resolved), ())
     ledger_lens = lens
@@ -1154,6 +1155,12 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
                 f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
                 for name, why in review.not_picked
             ]
+    missing = _missing_bodies(review)
+    if missing:
+        lines += ["", "## Lenses NOT RUN (no body in the bundle)", ""]
+        lines += [
+            "- " + quote_untrusted(r.lens, QUOTED_CHARS, scrub=scrub) for r in missing
+        ]
     dropped = _dropped_notes(review)
     if dropped:
         lines += ["", "## Dropped findings (left out of this review)", ""]
@@ -1431,6 +1438,14 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
     return f"{head}; " + "; ".join(parts)
+
+
+def _missing_bodies(review: AgenticReview) -> tuple[LensResult, ...]:
+    return tuple(
+        result
+        for result in review.lenses
+        if result.outcome is None and result.reason == NO_BODY_REASON
+    )
 
 
 def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:

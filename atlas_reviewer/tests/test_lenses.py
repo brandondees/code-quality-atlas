@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -171,6 +173,29 @@ def test_a_blank_body_is_no_body(tmp_path, text):
         text, encoding="utf-8"
     )
     assert LensLibrary(tmp_path).body("empty") is None
+
+
+# Named by the picker and not themselves review lenses with a finding body.
+_NOT_A_REVIEW_LENS = frozenset(
+    {
+        "choosing-review-lenses",
+        "synthesizing-review-findings",
+        "grounding-review-in-tool-output",
+    }
+)
+_BACKTICK_NAME = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)+)`")
+
+
+def test_every_lens_the_picker_names_has_a_body():
+    text = Path("skills/choosing-review-lenses/SKILL.md").read_text()
+    cited = set(_BACKTICK_NAME.findall(text))
+    directories = {path.name for path in Path("skills").iterdir() if path.is_dir()}
+    assert sorted(cited - directories) == []
+    pickable = sorted((cited & directories) - _NOT_A_REVIEW_LENS)
+    assert "auditing-infrastructure-as-code" in pickable
+    library = LensLibrary()
+    missing = [name for name in pickable if library.body(name) is None]
+    assert missing == []
 
 
 def test_every_lens_a_route_can_run_has_a_body():
