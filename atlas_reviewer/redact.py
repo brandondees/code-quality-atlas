@@ -54,7 +54,9 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # The controller's Sprites credential, in the shape the operator
     # confirmed the deployed token has: four slash-separated segments,
     # `<org slug>/<numeric org id>/<token id>/<secret>`, every segment
-    # `[A-Za-z0-9_-]` and only the second all digits, and the secret
+    # `[A-Za-z0-9_-]` of one to forty characters (the secret at least
+    # eight, so a longer slug or token id misses rather than matching
+    # partially), and only the second segment all digits, and the secret
     # carrying at least one digit, which an ordinary four-segment path
     # such as `repos/<id>/issues/comments` does not. The CLI docs'
     # example `my-org/token-id/secret` shows the same shape without the

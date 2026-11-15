@@ -112,6 +112,23 @@ def test_a_seven_character_secret_segment_is_not_a_sprites_token():
     assert redact("token acme/1/t/abcd123").text == "token acme/1/t/abcd123"
 
 
+def test_the_boundary_holds_against_a_host_a_hyphen_and_a_colon():
+    """Review round 3 of PR #687, Nit 1: the lookbehind's `.`, `-` and `:`
+    are pinned. A host directly followed by a four-segment path has no
+    match start (`com` sits after the dot); past a `-` is no start either,
+    shown where the prefix is too long to be a slug (the segment bound is
+    one to forty characters); and a token directly after a colon, with no
+    space, is still redacted."""
+    assert redact("https://api.example.com/42/members/list12345").text == (
+        "https://api.example.com/42/members/list12345"
+    )
+    assert redact("x-" + "a" * 40 + "/4321/t/abcd1234efgh").text == (
+        "x-" + "a" * 40 + "/4321/t/abcd1234efgh"
+    )
+    token = "personal/4321/9876/0123456789abcdef0123456789"
+    assert redact(f"cred:{token}").text == "cred:[REDACTED:sprites-token]"
+
+
 TOKEN = "personal/4321/9876/0123456789abcdef0123456789"
 
 
