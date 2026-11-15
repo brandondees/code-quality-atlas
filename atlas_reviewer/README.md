@@ -439,6 +439,10 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_TURNS` | agentic lens entry | Turns of one lens attempt (default 50) |
 | `ATLAS_LENS_WALL_S` | agentic lens entry | Seconds for one lens attempt (default 1200) |
 | `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
+| `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Turns past full diff coverage without a final reply before one finalize nudge is injected (D58; default 6) |
+| `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
+| `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
+| `ATLAS_QUOTE_TOLERANCE` | agentic lens entry | Lines either side of a citation's first line that the quote checker searches, 0 to 8 (D64; default 3) |
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses a quarter of the endpoint context when the completion limit is larger than that quarter, and the completion limit otherwise. It may be set higher, up to that completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
@@ -451,7 +455,7 @@ Environment variables (names only; never commit values):
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
-uses it. The eight `ATLAS_*` limit variables are not credentials.
+uses it. The twelve `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
 accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
@@ -1075,7 +1079,7 @@ D41 records the 2026-11-12 probe that did.
   reasoning hint defaults to half the output cap, so the reply has the
   other half. The reservation prices the whole output cap at the
   completion rate plus the reasoning rate.
-  `coordinator.limits_for_lens` reads the eight limits through
+  `coordinator.limits_for_lens` reads the twelve limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
@@ -1121,11 +1125,19 @@ D41 records the 2026-11-12 probe that did.
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
   checked against the head file at the cited lines. The cited span is the
   quote's own line count, so a wider range does not verify. A quote of
-  whole lines (8 or more non-space characters) may also match within two
-  lines of the citation, and the finding's location then names the lines
-  that hold it; whitespace inside a line is collapsed. A removed line of
-  that file still verifies, and so does a quote from an unchanged file the
-  lens read at HEAD (D47; `quotes.py`).
+  whole lines (8 or more non-space characters) may also match a window of
+  the quote's own line count starting within three lines of the citation
+  (D64; configurable, `ATLAS_QUOTE_TOLERANCE`), and the finding's location
+  then names the lines that hold it; whitespace inside a line is
+  collapsed. A removed line of that file still verifies, and so does a
+  quote from an unchanged file the lens read at HEAD (D47; `quotes.py`).
+  A quote that verifies neither way earns the bounded quote-repair turn
+  (D64): the rejected quotes, their cited locations and the checker's
+  reasons go back once per attempt (`ATLAS_QUOTE_REPAIRS`, default 1), the
+  model corrects the range or drops the finding, the next reply is
+  re-checked by the same checker, and the held reply's verified findings
+  merge into it through the retry merge; a still-bad quote leaves the
+  attempt as it was, and the bound hit is named in the lens line.
 - **Partial results.** No findings counts as clean only after every
   changed file's diff was read in full: a `diff_file` chain from offset
   0 through every truncated page (D42). A HEAD `read_file` does not
@@ -1269,9 +1281,9 @@ D41 records the 2026-11-12 probe that did.
 | `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
-| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
-| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
+| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |

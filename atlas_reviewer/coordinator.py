@@ -91,7 +91,7 @@ from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
-from atlas_reviewer.quotes import QuoteSource, read_sources
+from atlas_reviewer.quotes import QuoteSource, drift_label, read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
@@ -163,6 +163,9 @@ class MintedFinding:
     verified: bool
     source: str
     problem: str = ""
+    # A verified window match's line distance from the citation (D64); 0
+    # otherwise. The draft builds the source tag from it.
+    drift: int = 0
 
 
 class Verdict(StrEnum):
@@ -268,6 +271,7 @@ def mint(lenses: Sequence[LensResult]) -> tuple[MintedFinding, ...]:
                     checked.verified,
                     "" if checked.source is None else checked.source.value,
                     checked.problem,
+                    checked.drift,
                 )
             )
     return tuple(minted)
@@ -1421,8 +1425,10 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         f"route: {x.route.value}",
         x.attribution.value,
     ]
-    if f.source in (QuoteSource.REMOVED, QuoteSource.HEAD_NEAR):
+    if f.source == QuoteSource.REMOVED.value:
         tags.append(f.source)
+    elif f.source == QuoteSource.HEAD_NEAR.value:
+        tags.append(drift_label(f.drift))
     text = (
         f"- **{f.id}** [{', '.join(tags)}] "
         f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "
@@ -1467,6 +1473,12 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append("escalated: the retry also failed")
     if r.retry_pending:
         parts.append("its retry did not run before the review ended")
+    repairs = o.nudges.count("quote-repair")
+    if repairs:
+        parts.append(f"{repairs} quote-repair turn(s)")
+    corrections = sum(1 for c in o.findings if c.source is QuoteSource.HEAD_NEAR)
+    if corrections:
+        parts.append(f"{corrections} citation(s) corrected within the window")
     if o.dropped:
         parts.append(f"{len(o.dropped)} finding(s) dropped")
     if o.detail:
