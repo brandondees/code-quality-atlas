@@ -138,13 +138,17 @@ def test_a_token_is_redacted_in_every_position_it_appears_in(line):
 @pytest.mark.parametrize(
     "text",
     [
-        "https://github.com/o/r/pull/687/commits/"
-        "0123456789abcdef0123456789abcdef01234567",
+        (
+            "https://github.com/o/r/pull/687/commits/"
+            "0123456789abcdef0123456789abcdef01234567"
+        ),
         "https://github.com/o/r/actions/runs/43653737695/job/12345678901",
         "https://api.github.com/repos/o/r/issues/123/comments/4567890123",
         "https://gitlab.com/g/p/-/merge_requests/42/diffs/abc12345678",
-        "https://files.pythonhosted.org/packages/45/ab/"
-        "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl",
+        (
+            "https://files.pythonhosted.org/packages/45/ab/"
+            "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl"
+        ),
         "https://example.com/2026/11/14/report2026",
         "src/app/2/components/Button2Base.tsx",
         "node_modules/@types/node/16/fs/promises1.d.ts",
