@@ -298,6 +298,7 @@ def test_the_create_limits_are_configurable_and_bad_ones_are_refused():
         _apply(AgenticLimits(), "create_concurrency", "65")
     assert _apply(AgenticLimits(), "create_concurrency", "64").create_concurrency == 64
 
+
 def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
     """D64: the repair bound (0 to 3 turns per attempt) and the checker's
     window (0 to 8 lines) are limits like the others; 0 disables each.

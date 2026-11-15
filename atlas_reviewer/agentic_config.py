@@ -71,22 +71,37 @@ def load_agentic_limits(
 def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
     if name == "reservation_usd":
         return replace(limits, reservation_usd=_amount(raw))
-    if name == "max_calls":
-        return replace(limits, max_calls=_positive_int(name, raw))
-    if name == "max_turns":
-        return replace(limits, max_turns=_positive_int(name, raw))
+    applied = _apply_positive_int(limits, name, raw)
+    if applied is not None:
+        return applied
     if name == "lens_wall_s":
         return replace(limits, lens_wall_s=_positive_seconds(name, raw))
     if name == "review_wall_s":
         return replace(limits, review_wall_s=_positive_seconds(name, raw))
-    if name == "no_progress_turns":
-        return replace(limits, no_progress_turns=_positive_int(name, raw))
-    if name == "duplicate_calls":
-        return replace(limits, duplicate_calls=_positive_int(name, raw))
     if name == "quote_repairs":
         return replace(limits, quote_repairs=_bounded_int(name, raw, 3))
     if name == "quote_tolerance":
         return replace(limits, quote_tolerance=_bounded_int(name, raw, 8))
+    if name == "create_retries":
+        return replace(limits, create_retries=_int_in_range(name, raw, 0, 24))
+    if name == "create_concurrency":
+        return replace(limits, create_concurrency=_int_in_range(name, raw, 1, 64))
+    raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
+
+
+def _apply_positive_int(
+    limits: AgenticLimits, name: str, raw: str
+) -> AgenticLimits | None:
+    """The plain positive-integer limits, applied; None for any other
+    name. Split from `_apply` so each stays under the complexity gate."""
+    if name == "max_calls":
+        return replace(limits, max_calls=_positive_int(name, raw))
+    if name == "max_turns":
+        return replace(limits, max_turns=_positive_int(name, raw))
+    if name == "no_progress_turns":
+        return replace(limits, no_progress_turns=_positive_int(name, raw))
+    if name == "duplicate_calls":
+        return replace(limits, duplicate_calls=_positive_int(name, raw))
     if name == "max_input_tokens":
         return replace(limits, max_input_tokens=_positive_int(name, raw))
     if name == "max_output_tokens":
@@ -95,11 +110,7 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
     if name == "pool_size":
         return replace(limits, pool_size=_positive_int(name, raw))
-    if name == "create_retries":
-        return replace(limits, create_retries=_int_in_range(name, raw, 0, 24))
-    if name == "create_concurrency":
-        return replace(limits, create_concurrency=_int_in_range(name, raw, 1, 64))
-    raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
+    return None
 
 
 def _amount(raw: str) -> Decimal:
