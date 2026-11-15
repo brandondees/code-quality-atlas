@@ -1647,3 +1647,33 @@ the paged-path pin counts a lens fumbling before coverage, which the
 old window never reached.
 Offline only: no live model call, network call or secret, and no
 deployed service setting changed.
+
+## 2026-11-15 — round-1 review fixes for #707: the window counts final-reply turns, and the stall shapes are tested
+
+The round-1 protocol review of #707 came back COMMENT (2 Minor, 3 Nit).
+A nonterminal final reply that queues a follow-up turn — the contract
+repair, the unread-list nudge, a quote repair — and brings no new
+verified filing was never counted: the window counted only tool turns,
+so up to about five bounded follow-up turns per attempt escaped it. The
+judgment turn is now counted as a stalled turn in `_accept_or_repair`,
+with the detector checked before the follow-up is queued, so the
+finalize nudge and the queued follow-up compose in one conversation the
+way the nudge composes after tool results; D66's "every other tool
+turn" wording is corrected in place, and a test pins the probe shape
+(read, stalled tool turn, finding-less reply with a file unread, then a
+stall — the nudge fires on exactly the second non-progress turn). The
+review also found the stall tests only drove `NOTHING`, a shape the
+live adapter never produces, and five predicate mutants survived the
+whole suite; the stall tests now run the production shapes — rejected
+calls (an empty `grep` pattern), a repeated successful call with
+`duplicate_calls` raised above the window, an all-unverified reply, the
+attempt scope of `seen_calls` across an intervening call, and the
+co-fire where the duplicate trigger wins — and M1, M2, M5, M8 and M9
+die on them (M3, M4, M6, M7 and NP1/NP3 re-verified dead). D65 carries
+an appended Correction pointing at D66 for its obsolete
+accessor-bypass clause and P17 reference; D66's revisit clause now
+names argument variation (ever-increasing `diff_file` offsets,
+near-identical `grep` patterns, alternate path spellings) as the first
+suspect for a lens dodging the window, bounded by the unchanged caps;
+and D66 states that a transport-timed-out turn is not counted while its
+one retry counts once. Offline only.

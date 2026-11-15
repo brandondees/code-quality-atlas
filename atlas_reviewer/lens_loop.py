@@ -1239,20 +1239,38 @@ def run_attempt(
 
 def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -> None:
     """The no-progress detector (D58, D66): after the tool results of a
-    stalled turn, inject one finalize nudge once `no_progress_turns`
-    consecutive turns have brought the lens nothing new. A turn with new
+    stalled turn, count the turn and check the detector. A turn with new
     content -- a successful call whose (tool, validated args) the attempt
     has not run before -- resets the count, and a judged final reply
     carrying a new verified finding resets it too (`_accept_or_repair`).
     The count and the trigger are the same on the paged and the
     shared-prefix path (D66): no path seeds the window, and only progress
-    resets it. One detector nudge per attempt, from whichever trigger
-    fires first; the ledger and the completion span name it."""
+    resets it."""
     if p.new_content:
         p.stall_turns = 0
         p.last_progress_turn = p.turns
     else:
         p.stall_turns += 1
+    _note_stall_trigger(p, limits, messages)
+
+
+def _stall_final_reply(p: _Progress, limits: Limits, messages: list[Message]) -> None:
+    """A nonterminal final reply that queues a follow-up turn -- the
+    contract repair, the unread-list nudge, a quote repair -- and brought
+    no new verified finding is a stalled turn like any other (D66): count
+    it and check the detector, so the window's nudge and the queued
+    follow-up compose in one conversation the way the nudge composes
+    after a tool turn's results."""
+    p.stall_turns += 1
+    _note_stall_trigger(p, limits, messages)
+
+
+def _note_stall_trigger(p: _Progress, limits: Limits, messages: list[Message]) -> None:
+    """The detector's one nudge per attempt (D58, D66), from whichever
+    trigger fires first: name it on the ledger and the completion span,
+    and inject the finalize turn. Shared by tool turns and by the
+    nonterminal final replies that queue a follow-up, so the window
+    counts both alike."""
     if p.stall_nudged:
         return
     trigger = _stall(p, limits)
@@ -1397,7 +1415,10 @@ def _accept_or_repair(
     earns D58's one unread-list nudge; an accepted reply a quote check
     rejected earns D64's bounded quote-repair turn; the outcome otherwise.
     Each turn goes back into this conversation, and the next final reply
-    is the one that counts. While a queued turn goes unanswered, the
+    is the one that counts. A judged reply that queues one of those turns
+    and brought no new verified finding counts as a stalled turn, with the
+    detector checked before the follow-up is queued (D66). While a queued
+    turn goes unanswered, the
     judged outcome is held on the progress, so a stop before it is placed
     keeps the reply's findings (D58, review M1); a finding-bearing
     judgment is also kept on its own, as the evidence a later stop returns
@@ -1431,10 +1452,15 @@ def _accept_or_repair(
         # causes; its own judgment is held for a stop before the repair
         # turn is placed.
         messages += [AssistantText(text), UserText(repaired)]
+        # The refused reply brought nothing new (it never parsed): a
+        # stalled turn like any other (D66), checked before the repair is
+        # queued so the nudge and the repair compose in one conversation.
+        _stall_final_reply(p, limits, messages)
         return None
     before = set(p.causes)
     outcome = _final(job, text, p, limits)
-    if _new_findings(outcome, p):
+    progressed = _new_findings(outcome, p)
+    if progressed:
         # A judged reply carrying a verified finding the attempt has not
         # recorded is progress (D66): the stall window starts over from
         # this turn.
@@ -1481,6 +1507,11 @@ def _accept_or_repair(
         p.held_outcome = outcome
         p.held_placed = False
         messages += [UserText(_unread_nudge(outcome.unread, job.nonce))]
+        if not progressed:
+            # A finding-less reply that only earns the unread list back is
+            # a stalled turn like any other (D66); its nudge, if the window
+            # fires, follows the unread list in the same conversation.
+            _stall_final_reply(p, limits, messages)
         return None
     if Cause.QUOTES_FAILED in outcome.causes:
         if p.quote_repairs_used < limits.quote_repairs:
@@ -1500,6 +1531,10 @@ def _accept_or_repair(
                 AssistantText(text),
                 UserText(_quote_repair_nudge(outcome, job.nonce)),
             ]
+            if not progressed:
+                # An all-unverified reply is not progress (D66): a stalled
+                # turn like any other, checked before the repair is queued.
+                _stall_final_reply(p, limits, messages)
             return None
         detail = "the quote-repair bound was reached"
         outcome = replace(
