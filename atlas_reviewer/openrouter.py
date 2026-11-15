@@ -13,9 +13,23 @@
   and is turned off by `ATLAS_REQUIRE_ZDR=false` or `--no-require-zdr`
   (D57). `max_price` is the highest prompt and completion price among
   the selected endpoint rows, not the catalog headline. `only` defaults
-  to the slugs named by the 2026-11-07 public-list check
-  (`PINNED_PROVIDERS`). `ATLAS_PROVIDERS` or `--providers` replaces that
-  list, and a single slug is a valid pin. That page's "Base Slug
+  by model (`_default_providers`): an Anthropic-family route
+  (`anthropic/...`) pins the single endpoint `google-vertex/global`, so
+  one lens's consecutive turns share that endpoint's prompt cache
+  instead of spreading across every eligible Bedrock and Vertex
+  endpoint, each of which keeps its own cache (issue #695: on the
+  2026-11-14 trials, 72 of 146 Sonnet turns on #661 and 46 of 179 on
+  #640 missed the previous turn's cache while all 358 Sonnet calls
+  went to Bedrock under the bare-slug pin, and Haiku on Google Vertex
+  missed none of its 217 turns). The slug was picked from the ZDR
+  endpoint list (fetched 2026-11-15): it is the one tag with a
+  `safety_retention: false` row for both `anthropic/claude-sonnet-5.5`
+  and `anthropic/claude-haiku-4.5` that already sat in the pin, and
+  its rows carry `input_cache_read` and `input_cache_write` rates, the
+  cheapest cache write of those rows. Any other model keeps the slugs
+  named by the 2026-11-07 public-list check (`PINNED_PROVIDERS`).
+  `ATLAS_PROVIDERS` or `--providers` replaces either default, and a
+  single slug is a valid pin. That page's "Base Slug
   Matching" says a bare provider slug in `only` matches every eligible
   endpoint of that provider, regions included.
   https://openrouter.ai/docs/guides/features/in-region-routing
@@ -155,13 +169,22 @@ ENV_REQUIRE_ZDR = "ATLAS_REQUIRE_ZDR"
 ENV_KEY_CEILING_USD = "ATLAS_KEY_CEILING_USD"
 # Slugs named by the 2026-11-07 public-list check and the routing docs.
 # Not an inventory of every Bedrock region: those were reported, not named.
-# This is the default pin, not a closed set of slugs a request may name.
+# This is the non-Anthropic default pin, not a closed set of slugs a
+# request may name.
 PINNED_PROVIDERS = (
     "amazon-bedrock",
     "google-vertex/europe",
     "google-vertex/global",
     "google-vertex/us",
 )
+# One endpoint for every Anthropic-family route (issue #695): a bare
+# provider slug matches every eligible endpoint of that provider and each
+# endpoint keeps its own prompt cache, so the four-slug pin let a lens's
+# turns alternate between independent caches. Picked from the ZDR endpoint
+# list (fetched 2026-11-15): `google-vertex/global` is the one tag with a
+# `safety_retention: false` row for both default Sonnet and Haiku that
+# already sat in the pin, and its rows carry cache read and write rates.
+ANTHROPIC_PINNED_PROVIDERS = ("google-vertex/global",)
 _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._+-]*/[a-z0-9][a-z0-9._+-]*$")
 _PROVIDER_SLUG = re.compile(r"^[a-z0-9][a-z0-9._+-]*(?:/[a-z0-9][a-z0-9._+-]*)*$")
 KEY_LIMIT_MAX_USD = Decimal("5.00")
@@ -271,7 +294,9 @@ def model_route(
 ) -> ModelRoute:
     """A model or provider flag wins over its environment variable. An
     empty flag is refused. An empty variable is unset, so the default
-    stands. Safety Retention is on when the flag is set or
+    stands: the slugs `_default_providers` names for the model — one
+    endpoint for an Anthropic-family route, the four-slug pin otherwise.
+    Safety Retention is on when the flag is set or
     `ATLAS_ALLOW_SAFETY_RETENTION` is true. The flag is store_true, so
     it cannot turn a true environment variable off. The ZDR requirement
     stays on unless `require_zdr` is false (`--no-require-zdr`) or
@@ -302,7 +327,7 @@ def model_route(
     else:
         raw_providers = env.get(ENV_PROVIDERS)
         slugs = (
-            PINNED_PROVIDERS
+            _default_providers(model_id)
             if raw_providers is None or raw_providers.strip() == ""
             else _split_providers(raw_providers)
         )
@@ -310,6 +335,18 @@ def model_route(
         env.get(ENV_ALLOW_SAFETY_RETENTION)
     )
     return ModelRoute(model_id, slugs, allow, required)
+
+
+def _default_providers(model_id: str) -> tuple[str, ...]:
+    """The default `provider.only` slugs for one model id.
+
+    An Anthropic-family route pins one endpoint, so a lens's consecutive
+    turns share one prompt cache (issue #695). Every other model keeps the
+    four-slug pin.
+    """
+    if model_id.startswith("anthropic/"):
+        return ANTHROPIC_PINNED_PROVIDERS
+    return PINNED_PROVIDERS
 
 
 def _safety_flag(row: Json) -> bool | None:
@@ -722,7 +759,7 @@ class OpenRouterProvider:
         api_url: str = API_URL,
         timeout_s: float = 300.0,
         sleep: Callable[[float], None] = lambda _s: None,
-        providers: Sequence[str] = PINNED_PROVIDERS,
+        providers: Sequence[str] | None = None,
         model_id: str = MODEL_ID,
         allow_safety_retention: bool = False,
         key_ceiling: Decimal = KEY_LIMIT_MAX_USD,
@@ -741,7 +778,11 @@ class OpenRouterProvider:
         self.configure(
             ModelRoute(
                 _model_id(model_id),
-                _provider_slugs(providers),
+                _provider_slugs(
+                    providers
+                    if providers is not None
+                    else _default_providers(_model_id(model_id))
+                ),
                 _bool_flag(allow_safety_retention),
             )
         )
