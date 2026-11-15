@@ -1441,3 +1441,50 @@ confirming the fix on any future run. `cache_stats.py` holds the
 tracker, model-agnostic; `OpenRouterLensModel` feeds it. Offline only:
 no live model call was made for this change, and the tests pin every
 rule with fakes and recorded HTTP.
+
+## 2026-11-15 — the review's lenses share one cached prefix (issue #696, D65)
+
+Every lens session paid to write the whole diff into its own cache: the
+lens-specific system prompt came first in every request, only the
+automatic top-level `cache_control` was sent, and no two lenses could
+share a cached block — on the Nov 14 trials each Sonnet session read
+every changed file's diff through `diff_file` (32k tokens on #661, 44k
+on #640, 60–65% of a lens's final context), and every turn 1 reported
+`cached_tokens: 0`. A lens request is now laid out so a byte-identical
+block comes first and carries its own explicit `cache_control`
+breakpoint: the tools, a shared system text (the prefix instructions,
+the review's one fence nonce, the Finding contract) and the fenced
+whole diff of the files the lens was given; the lens skill and the
+turn-1 message follow inside the same user message. The fence nonce is
+minted once per review instead of once per lens, which is what makes
+the prefixes byte-identical across lenses and across a lens's retry;
+the fence's nonce scrub keeps diff text from closing the shared block
+early, and the nonce still comes from the CSPRNG, not from PR content.
+The size threshold is `diff_prefix_share` (default 0.5,
+`ATLAS_DIFF_PREFIX_SHARE` / `--diff-prefix-share`) of the model's
+resolved per-call input cap, so it is configurable and model-aware;
+above it, a model that cannot name an input room, a scope with no diff
+section, or share 0 all page through `diff_file` exactly as before, and
+each names its reason in a `diff_prefix` note the ledger records and
+the draft's lens line shows. On the prefix path coverage is attested
+from what the prefix held — a lens that calls no tool is clean — and
+the unread-list nudge and the `diff_file` page bookkeeping are retired
+there; the paged path keeps both and its honest-coverage rule. First
+wave: no warming — the lenses fan out as configured, each may write the
+prefix (about $0.30 less saving than a warmed start; zero at the
+default `pool_size` 1), because warming would serialize the first lens
+ahead of the pool and spend review wall clock on ordering the pool does
+not need. `cache_stats` gains each session's opening-turn cache read —
+on the prefix path that count is the shared prefix's read for the
+session — so the saving reads straight off the draft. OpenRouter's
+prompt-caching page (fetched 2026-11-15) grounds the per-block
+breakpoints across Anthropic-compatible providers and the sticky
+routing that keys on the first system and first non-system message,
+which the shared prefix now makes common across a review's lenses; the
+combination of the top-level automatic field with the explicit block
+was not probed live (verify). The dry run keeps the paged path, which
+keeps the `gap` scenario's coverage gap reachable. Offline only: no
+live model call was made for this change; the tests pin the byte
+identity over serialized request bytes, the breakpoint, the threshold,
+coverage on both paths, the nudge, the fencing, and the per-session
+prefix read.

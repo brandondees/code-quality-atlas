@@ -220,6 +220,13 @@ real CLI entry for each scenario and asserts the draft's event, the
 coverage gate and the exit code, plus one telemetry read-back proving the
 egress policy was verified.
 
+The dry run keeps the paged path (D65): its scripted reviewer does not
+name an input room, so every review pages through `diff_file`, which is
+what keeps the `gap` scenario's coverage gap reachable — on the
+shared-prefix path, coverage is attested from the delivered prefix and a
+gap of that kind cannot occur. The shared-prefix request layout itself is
+pinned by the adapter and lens-loop tests with fake models.
+
 ## Score a recorded review
 
 `eval` compares a candidate review with a reference review and prints
@@ -443,6 +450,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses a quarter of the endpoint context when the completion limit is larger than that quarter, and the completion limit otherwise. It may be set higher, up to that completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
 | `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
+| `ATLAS_DIFF_PREFIX_SHARE` | `agentic-review` | Largest share of the model's resolved per-call input cap the shared diff prefix may take (D65). Unset is 0.5; 0 turns the shared prefix off, so every review pages through `diff_file` as before it existed. `--diff-prefix-share` wins |
 | `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is one endpoint, `google-vertex/global`, for an Anthropic-family model (`anthropic/...`), and `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us` for any other model (#695, D63). One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
@@ -451,7 +459,7 @@ Environment variables (names only; never commit values):
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
-uses it. The eight `ATLAS_*` limit variables are not credentials.
+uses it. The nine `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
 accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
@@ -1074,8 +1082,10 @@ D41 records the 2026-11-12 probe that did.
   override can tighten either and cannot exceed the model. The
   reasoning hint defaults to half the output cap, so the reply has the
   other half. The reservation prices the whole output cap at the
-  completion rate plus the reasoning rate.
-  `coordinator.limits_for_lens` reads the eight limits through
+  completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
+  the share of the model's resolved input cap the shared diff prefix may
+  take; 0 pages every review, as before the prefix existed.
+  `coordinator.limits_for_lens` reads the nine limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
@@ -1106,6 +1116,21 @@ D41 records the 2026-11-12 probe that did.
   shipped caller builds one yet. It carries no diff text: the lens
   reads that through the tools, and every tool result comes back
   fenced.
+
+  When the diff fits the model, the request is laid out differently so
+  the review's lenses can share one cached block (D65, issue #696): the
+  request opens with a byte-identical prefix — the tools, a shared
+  system text (the prefix instructions, the review's one fence nonce,
+  the Finding contract) and the fenced whole diff of the files the lens
+  was given — and the prefix's last content part carries the explicit
+  `cache_control` breakpoint; the lens skill (the retry preamble, then
+  the attested body) and the first turn follow inside the same user
+  message. The nonce is minted once per review from the CSPRNG, so the
+  prefixes are byte-identical across lenses and across a lens's retry.
+  The size threshold is `diff_prefix_share` of the model's resolved
+  input cap, decided per attempt and named in the lens's draft line
+  either way; above it, or when the model cannot name an input room, the
+  review pages through `diff_file` exactly as this bullet describes.
 - **One attempt** (`lens_loop.run_attempt`). Delivery is checked before the
   first model call. The attempt ends at the final reply, or when one of
   these cuts it short: the turn cap, the call cap, the dollar reservation
@@ -1128,9 +1153,15 @@ D41 records the 2026-11-12 probe that did.
   lens read at HEAD (D47; `quotes.py`).
 - **Partial results.** No findings counts as clean only after every
   changed file's diff was read in full: a `diff_file` chain from offset
-  0 through every truncated page (D42). A HEAD `read_file` does not
+  0 through every truncated page (D42) — or, on the shared-prefix path,
+  the prefix itself, which held the whole diff of the files the lens was
+  given from turn 1 (D65). A HEAD `read_file` does not
   replace that. A changed file left unread makes the lens partial, names
-  the file in the draft, and is not retried. A timed-out, unavailable or
+  the file in the draft, and is not retried. On the shared-prefix path
+  the unread list never occurs — coverage is attested from what the
+  prefix held — so the unread-list nudge and the `diff_file` page
+  bookkeeping are retired there; the paged path keeps both, and its
+  coverage stays honest: a lens never attests coverage it did not get. A timed-out, unavailable or
   over-limit tool call makes the lens partial. Every `diff_file` page
   counts against the bridge's session output budget (`SessionLimits`,
   1 MiB by default). A PR whose diff is larger than that budget cannot
@@ -1162,7 +1193,10 @@ D41 records the 2026-11-12 probe that did.
   no plugins and no server tools) and only the bridge's tool schemas.
   `reasoning` is included only when every selected endpoint lists it.
   `cache_control` is sent on Anthropic-family routes even when no
-  endpoint lists it. The loop settles `_actual_cost`, which
+  endpoint lists it, and a shared-prefix request also carries the
+  explicit part-level breakpoint on the fenced diff (D65); a route whose
+  endpoints do not list `cache_control` gets the prefix layout with no
+  marker on any part. The loop settles `_actual_cost`, which
   includes a BYOK upstream charge. A turn with no readable cost but
   usable token counts is priced from the selected endpoints. Prompt
   tokens use the highest of the prompt and cache-write rates, and when
@@ -1234,8 +1268,10 @@ D41 records the 2026-11-12 probe that did.
     system prompt — with its turn count, the turns whose reported cached
     tokens fell short of the previous turn's prompt (or reported none;
     a session's first turn is never a miss), the session's cache-write
-    total and final context, and then a run total of the cache writes
-    against the sum of the sessions' final contexts. A dry run's
+    total and final context, the session's opening turn's reported cache
+    read — the shared diff prefix's read for that session (issue #696,
+    D65) — and then a run total of the cache writes against the sum of
+    the sessions' final contexts. A dry run's
     scripted model reports none, so the section is absent there.
   - **Scrubbing.** Every model-written value is redacted, scrubbed of
     flagged values, and quoted as data.
@@ -1271,13 +1307,13 @@ D41 records the 2026-11-12 probe that did.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the shared diff prefix's share of the input room, D65), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
 | `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. No shipped caller builds the path yet | writes the log file |
-| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
-| `cache_stats.py` | per-session prompt-cache accounting from a model's reported usage (#695): sessions bounded by the system prompt, the miss rule (cached tokens below the previous turn's prompt, or unreported), and the run summary's session and total lines. Pure; no I/O | no |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route plus the explicit part-level breakpoint on a shared prefix's fenced diff, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `cache_stats.py` | per-session prompt-cache accounting from a model's reported usage (#695): sessions bounded by the system prompt, the miss rule (cached tokens below the previous turn's prompt, or unreported), each session's opening-turn cache read — the shared diff prefix's read (D65) — and the run summary's session and total lines. Pure; no I/O | no |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |

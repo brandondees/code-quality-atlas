@@ -410,6 +410,14 @@ class _TracedModel:
         (review round 3, M-a)."""
         return getattr(self._model, "timeout_s", None)
 
+    def prefix_room_tokens(self) -> Any:
+        """The wrapped model's input room for the shared diff prefix, when
+        it names one (D65). Every production lens model is wrapped, so the
+        loop's prefix decision must see the room through this wrapper, not
+        around it; a model that does not name one pages."""
+        found = getattr(self._model, "prefix_room_tokens", None)
+        return found() if callable(found) else None
+
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         amount = self._model.worst_case_usd(request)
         self._reservation = (

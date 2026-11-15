@@ -585,3 +585,56 @@ def test_max_prompt_tokens_caps_the_input_when_a_row_sets_it():
         lens.worst_case_usd(request())
     assert flagged.value.hit.limit == "max_input_tokens"
     assert "ATLAS_MAX_INPUT_TOKENS" in flagged.value.hit.setting
+
+
+def test_the_diff_prefix_share_is_configurable_and_zero_turns_it_off():
+    """D65: the share of the model's input room the shared diff prefix
+    may take is a limit like the others. 0 turns the shared prefix off,
+    so every review pages through diff_file as before it existed; above
+    1 cannot leave room for the lens's work and is refused."""
+    from atlas_reviewer.lens_loop import DEFAULT_DIFF_PREFIX_SHARE
+
+    limits = load_agentic_limits({"ATLAS_DIFF_PREFIX_SHARE": "0.25"}).resolve()
+    assert limits.diff_prefix_share == 0.25
+    off = load_agentic_limits({"ATLAS_DIFF_PREFIX_SHARE": "0"}).resolve()
+    assert off.diff_prefix_share == 0
+    default = load_agentic_limits({}).resolve()
+    assert default.diff_prefix_share == DEFAULT_DIFF_PREFIX_SHARE == 0.5
+    # A flag wins over the variable.
+    flagged = load_agentic_limits(
+        {"ATLAS_DIFF_PREFIX_SHARE": "0.9"}, diff_prefix_share="0"
+    ).resolve()
+    assert flagged.diff_prefix_share == 0
+    with pytest.raises(ValueError, match="diff_prefix_share"):
+        load_agentic_limits({"ATLAS_DIFF_PREFIX_SHARE": "1.5"})
+    with pytest.raises(ValueError, match="diff_prefix_share"):
+        load_agentic_limits({"ATLAS_DIFF_PREFIX_SHARE": "later"})
+    with pytest.raises(ValueError, match="diff_prefix_share"):
+        AgenticLimits(diff_prefix_share=True).resolve()
+    with pytest.raises(ValueError, match="diff_prefix_share"):
+        AgenticLimits(diff_prefix_share=-0.5).resolve()
+
+
+def test_the_diff_prefix_note_round_trips_through_the_ledger(tmp_path):
+    """D65: the prefix decision's note is ledger state like the other
+    outcome fields, so a restarted controller's draft still shows why the
+    diff was inlined or paged."""
+    from .test_lens_loop import RoomModel, prefixed_job
+    from .test_tool_model import final
+
+    outcome = run_attempt(
+        prefixed_job(),
+        object(),
+        RoomModel([final()]),
+        Spend(LIMITS.resolve()),
+        FakeClock(),
+        review_deadline=600,
+        review_started=0,
+    )
+    assert outcome.diff_prefix.startswith("the shared diff prefix is inlined")
+    path = tmp_path / "ledger.jsonl"
+    book = AttemptLedger(path, FakeClock())
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome, scrub=str)
+    (attempt,) = AttemptLedger(path, FakeClock()).attempts(KEY)
+    assert attempt.outcome.diff_prefix == outcome.diff_prefix

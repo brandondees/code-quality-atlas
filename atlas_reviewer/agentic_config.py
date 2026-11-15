@@ -4,7 +4,9 @@
 A flag wins over its environment variable, and an unset value keeps the
 default. The five review limits refuse a cleared or unparseable value.
 The three per-call token limits stay unset here when the operator does
-not name them; `resolve_per_call` then takes them from the model. The
+not name them; `resolve_per_call` then takes them from the model.
+`diff_prefix_share` (D65) is the share of the model's input room the
+shared diff prefix may take; 0 turns the shared prefix off. The
 one-shot review does not read this: its 3 calls, $3 and 200k input cap
 stay D25's.
 """
@@ -29,6 +31,7 @@ ENV = {
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
     "pool_size": "ATLAS_POOL_SIZE",
+    "diff_prefix_share": "ATLAS_DIFF_PREFIX_SHARE",
 }
 
 
@@ -84,6 +87,8 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
     if name == "pool_size":
         return replace(limits, pool_size=_positive_int(name, raw))
+    if name == "diff_prefix_share":
+        return replace(limits, diff_prefix_share=_share(raw))
     raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
 
 
@@ -115,4 +120,19 @@ def _positive_seconds(name: str, raw: str) -> float:
         ) from None
     if value <= 0:
         raise ValueError(f"{name} must be a positive number of seconds, not {raw!r}")
+    return value
+
+
+def _share(raw: str) -> float:
+    """The shared diff prefix's share of the model's input room. 0 turns
+    the shared prefix off; anything above 1 cannot leave room for the
+    lens's work."""
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"diff_prefix_share must be a number from 0 to 1, not {raw!r}"
+        ) from None
+    if not 0 <= value <= 1:
+        raise ValueError(f"diff_prefix_share must be a number from 0 to 1, not {raw!r}")
     return value
