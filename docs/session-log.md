@@ -1358,6 +1358,7 @@ run's attestation ledger is per run, so editing a scenario replays from
 scratch. Nothing is read from the environment and no network client is
 constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
+
 ## 2026-11-15 — Anthropic routes pin one endpoint, and the draft counts prompt-cache misses (#695, D63)
 
 The Nov 14 trials' Sonnet runs paid to rewrite the whole context on
