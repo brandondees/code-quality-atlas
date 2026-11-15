@@ -1363,7 +1363,7 @@ the end-to-end suite. The one-shot `review --dry-run` is unchanged.
 
 The 2026-11-14 trials lost three reviews to Sprites capacity: about 12
 pooled lenses created Sprites at once, the three waits of 1, 2 and 4s
-#636 left behind gave up, and the `CreateRefusedError` escaped
+that issue #636 left behind gave up, and the `CreateRefusedError` escaped
 `future.result()` and crashed the review with every other lens's result
 lost. A 429'd create now waits a schedule that doubles from 2s capped at
 60s, `create_retries` waits long (default 6, about two minutes;
