@@ -112,6 +112,25 @@ def test_a_429s_retry_after_seconds_are_carried_on_the_error():
     assert caught.value.retry_after == 45.0
 
 
+def test_a_retry_after_header_is_read_regardless_of_case():
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"retry-after": "45"})), "t"
+        ).create(NAME)  # fmt: skip
+    assert caught.value.retry_after == 45.0
+
+
+def test_a_garbage_retry_after_is_none_not_a_crash():
+    """`²` is a Latin-1 byte `http.client` decodes as-is; `isdigit` accepts
+    it and `float` refuses it, so the parser must fall back to None rather
+    than raise out of the response check."""
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"Retry-After": "²"})), "t"
+        ).create(NAME)
+    assert caught.value.retry_after is None
+
+
 def test_a_retry_after_http_date_is_read_against_the_clock():
     with pytest.raises(RateLimitedError) as caught:
         SpritesClient(
@@ -128,7 +147,7 @@ def test_a_retry_after_in_the_past_is_no_wait():
     assert caught.value.retry_after == 0.0
 
 
-@pytest.mark.parametrize("header", [None, "soon", "-5", ""])
+@pytest.mark.parametrize("header", [None, "soon", "-5", "", "²", "٤٥"])
 def test_an_unreadable_retry_after_is_none(header):
     headers = {} if header is None else {"Retry-After": header}
     with pytest.raises(RateLimitedError) as caught:

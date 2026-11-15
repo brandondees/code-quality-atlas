@@ -1368,14 +1368,21 @@ that issue #636 left behind gave up, and the `CreateRefusedError` escaped
 lost. A 429'd create now waits a schedule that doubles from 2s capped at
 60s, `create_retries` waits long (default 6, about two minutes;
 `ATLAS_CREATE_RETRIES`), honoring a Retry-After header the 429 carries
-up to a 120s a wait and truncated to the deadline the runner has left.
-The coordinator passes its pooled lenses a per-review gate of
+(read case-insensitively; a value the parser cannot read is None and the
+schedule stands in) up to 120s a wait and truncated to the deadline the
+runner has left. The coordinator passes its pooled lenses a per-review
+gate of
 `create_concurrency` (default 4, `ATLAS_CREATE_CONCURRENCY`), so at most
 that many Sprites create at once; slot waits are telemetry events, and a
 slot that never frees degrades that runner before any create is sent. A
 create still refused after the schedule now degrades only that lens: it
 is NOT RUN with why in the draft, the other lenses' results and
 continuations run on, and coverage stays incomplete so the review cannot
-approve. A 502 during a tree upload already failed only its runner; the
-new tests pin that path too. Offline only: no live Sprite, model or
-GitHub call was made.
+approve. Because a 429 means the server made nothing, the create outcome
+returns to `not started` for the wait, so a deadline that fires during
+one degrades the runner with cleanup `NOT_CREATED` and no ledger entry
+left. A 502 during a tree upload already failed only its runner; the
+new tests pin that path too. Round 1 on the PR also pinned the
+review-level wiring and bounds (the gate size, the retry count, the env
+ranges and the literal defaults) its mutants showed unpinned. Offline
+only: no live Sprite, model or GitHub call was made.

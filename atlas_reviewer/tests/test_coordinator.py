@@ -5,6 +5,7 @@ model, Sprite or GitHub call is made."""
 
 import re
 import threading
+import time
 from dataclasses import replace
 from decimal import Decimal
 
@@ -61,6 +62,7 @@ from atlas_reviewer.runner import (
     DeadlineExceededError,
     lens_runner_name,
 )
+from atlas_reviewer.sprites_api import parse_retry_after
 from atlas_reviewer.verdict import ReviewEvent, parse_status
 
 from .agentic import (
@@ -1630,6 +1632,127 @@ def test_a_502_during_the_base_tree_upload_leaves_that_lens_not_run(tmp_path):
     draft = render_draft(result, Redactor())
     assert "REVIEW INCOMPLETE" in draft
     assert "502" in draft
+
+
+def test_the_review_gates_its_creates_at_the_configured_concurrency(tmp_path):
+    """D62's headline remedy is wired, not just available: with
+    `create_concurrency` 1 and two pooled lenses, the second create waits
+    its turn on the gate instead of starting alongside the first."""
+    entered = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    state = {"in_create": [], "peak": 0, "contended": None}
+
+    class Gated(LocalSprites):
+        def create(self, name):
+            with lock:
+                state["in_create"].append(name)
+                state["peak"] = max(state["peak"], len(state["in_create"]))
+            entered.set()
+            release.wait(10)
+            with lock:
+                state["in_create"].remove(name)
+            super().create(name)
+
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+
+    def watcher():
+        # Give the second lens time to reach the gate, then record how
+        # many creates are in flight before letting the first finish.
+        if not entered.wait(10):
+            return
+        time.sleep(0.5)
+        with lock:
+            state["contended"] = len(state["in_create"])
+        release.set()
+
+    sprites = Gated()
+    watcher_thread = threading.Thread(target=watcher)
+    watcher_thread.start()
+    try:
+        result, _ = _lenses(
+            tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+            limits=replace(LIMITS, pool_size=2, create_concurrency=1),
+            sprites=sprites,
+        )  # fmt: skip
+    finally:
+        release.set()
+        watcher_thread.join(10)
+    assert result.coverage_complete
+    assert state["contended"] == 1, state
+    assert state["peak"] == 1, state
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 2
+
+
+def test_the_coordinator_passes_its_create_retries_to_the_runner(tmp_path, monkeypatch):
+    """The review's own `create_retries` reaches the runner: with 0, a
+    refused lens makes exactly one create per run, with no waits (not the
+    runner's default six)."""
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", lambda seconds: None)
+    refused_names = {lens_runner_name(EVENT, f"{OTHER}:{i}") for i in range(2, 8)}
+
+    class Refused(LocalSprites):
+        def create(self, name):
+            if name in refused_names:
+                with self._lock:
+                    self.calls.append(("create", name))
+                raise RateLimitedError("Sprites HTTP 429 for POST")
+            super().create(name)
+
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, sprites = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        limits=replace(LIMITS, pool_size=2, create_retries=0),
+        sprites=Refused(),
+    )  # fmt: skip
+    by_lens = {lens.lens: lens for lens in result.lenses}
+    assert by_lens[LENS].state is LensState.CLEAN
+    assert by_lens[OTHER].state is LensState.NOT_RUN
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert sum(name in refused_names for name in created) == 2
+
+
+def test_a_garbage_retry_after_degrades_instead_of_crashing(tmp_path, monkeypatch):
+    """A Retry-After the parser cannot read is None and the schedule stands
+    in: one header value must not crash the review, which is #690's
+    failure reached through a header. The fake reads its header value the
+    way the adapter does, through the real `parse_retry_after`."""
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", lambda seconds: None)
+    refused_names = {lens_runner_name(EVENT, f"{OTHER}:{i}") for i in range(2, 8)}
+
+    class Garbage(LocalSprites):
+        def create(self, name):
+            if name in refused_names:
+                with self._lock:
+                    self.calls.append(("create", name))
+                raise RateLimitedError(
+                    "Sprites HTTP 429 for POST",
+                    retry_after=parse_retry_after("²"),
+                )
+            super().create(name)
+
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        sprites=Garbage(),
+    )  # fmt: skip
+    by_lens = {lens.lens: lens for lens in result.lenses}
+    assert by_lens[LENS].state is LensState.CLEAN
+    assert by_lens[OTHER].state is LensState.NOT_RUN
+    assert "429" in by_lens[OTHER].reason
+    assert not result.coverage_complete
 
 
 def _pair_models(first_reply):

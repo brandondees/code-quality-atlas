@@ -102,23 +102,24 @@ def parse_retry_after(value: str | None) -> float | None:
     """The seconds a Retry-After header asks the client to wait, or None
     when it is absent or unreadable. RFC 9110 allows a delay in seconds or
     an HTTP-date; an HTTP-date is read against the clock this process sees,
-    and a date in the past is no wait at all. A negative or unparseable
-    value is None, so a caller falls back to its own schedule rather than
-    trusting what it cannot read."""
+    and a date in the past is no wait at all. Nothing here raises: a value
+    it cannot read -- including non-ASCII digit look-alikes, which
+    `isdigit` accepts but `float` refuses -- is None, so a caller falls
+    back to its own schedule rather than trusting what it cannot read."""
     if value is None:
         return None
     text = value.strip()
-    if text.isdigit():
+    if text.isascii() and text.isdigit():
         return max(float(text), 0.0)
     try:
         when = parsedate_to_datetime(text)
-    except (TypeError, ValueError):
+        if when is None:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=UTC)
+        return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+    except (ValueError, TypeError, OverflowError):
         return None
-    if when is None:
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=UTC)
-    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
 
 
 def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
@@ -127,7 +128,7 @@ def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
     if resp.status == 429:
         raise RateLimitedError(
             f"Sprites HTTP 429 for {method} {safe_url(url)}",
-            retry_after=parse_retry_after(resp.headers.get("Retry-After")),
+            retry_after=parse_retry_after(resp.header("Retry-After")),
         )
     if 400 <= resp.status < 500:
         raise RefusedError(f"Sprites HTTP {resp.status} for {method} {safe_url(url)}")

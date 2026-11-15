@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from atlas_reviewer.agentic_config import load_agentic_limits
+from atlas_reviewer.agentic_config import _apply, load_agentic_limits
 from atlas_reviewer.attestation import AttemptLedger, Cause, LensState
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.coordinator import status_line, synthesize
@@ -252,6 +252,51 @@ def test_the_no_progress_thresholds_are_configurable_and_bad_ones_are_refused():
         load_agentic_limits({"ATLAS_DUPLICATE_CALLS": "later"})
     with pytest.raises(ValueError, match="no_progress_turns"):
         AgenticLimits(no_progress_turns=True).resolve()
+
+
+def test_the_create_limits_are_configurable_and_bad_ones_are_refused():
+    """D62: how long a 429'd create waits and how many may run at once are
+    limits like the others, with their ranges pinned edge to edge."""
+    limits = load_agentic_limits(
+        {"ATLAS_CREATE_RETRIES": "2", "ATLAS_CREATE_CONCURRENCY": "8"}
+    )
+    resolved = limits.resolve()
+    assert (resolved.create_retries, resolved.create_concurrency) == (2, 8)
+    defaults = load_agentic_limits({}).resolve()
+    assert (defaults.create_retries, defaults.create_concurrency) == (6, 4)
+    assert (
+        load_agentic_limits({"ATLAS_CREATE_RETRIES": "0"}).resolve().create_retries == 0
+    )
+    assert (
+        load_agentic_limits({"ATLAS_CREATE_RETRIES": "24"}).resolve().create_retries
+        == 24
+    )
+    assert (
+        load_agentic_limits({"ATLAS_CREATE_CONCURRENCY": "1"}).resolve()
+    ).create_concurrency == 1
+    assert (
+        load_agentic_limits({"ATLAS_CREATE_CONCURRENCY": "64"}).resolve()
+    ).create_concurrency == 64
+    with pytest.raises(ValueError, match="create_retries"):
+        load_agentic_limits({"ATLAS_CREATE_RETRIES": "25"})
+    with pytest.raises(ValueError, match="create_retries"):
+        load_agentic_limits({"ATLAS_CREATE_RETRIES": "-1"})
+    with pytest.raises(ValueError, match="create_concurrency"):
+        load_agentic_limits({"ATLAS_CREATE_CONCURRENCY": "65"})
+    with pytest.raises(ValueError, match="create_concurrency"):
+        load_agentic_limits({"ATLAS_CREATE_CONCURRENCY": "0"})
+    with pytest.raises(ValueError, match="create_retries"):
+        AgenticLimits(create_retries=True).resolve()
+    with pytest.raises(ValueError, match="create_concurrency"):
+        AgenticLimits(create_concurrency=True).resolve()
+    # The env layer's own ranges, not just `_check_limits`' backstop,
+    # which would otherwise hide an off-by-one in either.
+    with pytest.raises(ValueError, match="from 0 to 24"):
+        _apply(AgenticLimits(), "create_retries", "25")
+    assert _apply(AgenticLimits(), "create_retries", "0").create_retries == 0
+    with pytest.raises(ValueError, match="from 1 to 64"):
+        _apply(AgenticLimits(), "create_concurrency", "65")
+    assert _apply(AgenticLimits(), "create_concurrency", "64").create_concurrency == 64
 
 
 def test_the_reasoning_hint_is_capped_outside_anthropic():

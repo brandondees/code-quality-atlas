@@ -1099,9 +1099,11 @@ def _create_waits(retries: int) -> tuple[float, ...]:
 
 
 def _wait_s(retry_after: float | None, scheduled: float) -> float:
-    """At least the server's Retry-After, capped so one huge value cannot
-    park the deadline in a single wait; otherwise the scheduled wait,
-    jittered so pooled lenses do not retry in step."""
+    """The server's Retry-After exactly, clamped to `[0,
+    CREATE_RETRY_AFTER_CAP_S]` -- a Retry-After of 0 is what the server
+    asked for, so the next create goes out at once -- or, when no header
+    came, the scheduled wait, jittered so pooled lenses do not retry in
+    step."""
     if retry_after is None:
         return scheduled * random.uniform(0.5, 1.0)
     return min(max(retry_after, 0.0), CREATE_RETRY_AFTER_CAP_S)
@@ -1140,10 +1142,11 @@ def _create_with_backoff(run: _Run) -> None:
 
 
 def _create_attempts(run: _Run) -> None:
-    """The create itself, with the 429 waits. `unknown` is set only once a
-    create call is actually sent: a slot wait or a deadline that ends the
-    run first leaves the outcome `not started`, so cleanup deletes nothing
-    and need not guess."""
+    """The create itself, with the 429 waits. `unknown` is set only while a
+    create call is actually in flight or its outcome is genuinely unclear:
+    the call's own 429 says nothing was made, so the outcome goes back to
+    `not started` for the wait, and a deadline that fires during it leaves
+    cleanup nothing to guess about."""
     api, name, t = run.api, run.name, run.telemetry
     waits = _create_waits(run.create_retries)
     waits_done = 0
@@ -1153,6 +1156,9 @@ def _create_attempts(run: _Run) -> None:
             t.span("create", "create sprite", lambda: api.create(name))
             return
         except RateLimitedError as exc:
+            # A 429 is definitive: the server did not act, so nothing
+            # exists to clean up however long the wait runs.
+            run.create.outcome = "not started"
             if waits_done >= len(waits):
                 t.record(
                     "create", "gave up",
