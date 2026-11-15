@@ -1609,3 +1609,41 @@ prefix read. The README's limit counts count every `agentic_config.ENV`
 entry — the command-scoped pool and the prefix share included — which
 is why the merged total reads sixteen after the #698 merge, where
 main's earlier count left the pool out.
+
+## 2026-11-15 — the no-progress window counts stalled turns, on both paths alike (issue #705, D66)
+
+The Nov 15 Sonnet measurement on #640 found 5 of 12 lenses getting the
+"finalize now" nudge at about turn 6, where none did on the Nov 14
+baseline, with lens sessions averaging about 4 turns against about 13
+and verified findings down to 10 from 20. The cause was D65's seeding:
+`_Progress.covered_at_turn` started at 0 on the shared-prefix path, so
+D58's no-progress window counted from the lens's first turn — a lens
+whose diff arrived inline in the prefix got about 6 turns of
+exploration in total, where the paged path gave it 6 turns after
+finishing its diff reads, and on neither path did the window reset when
+the lens was actually making progress. The window now counts
+consecutive turns that brought the lens nothing new, by one rule on
+both paths: a turn makes progress when one of its bridge calls
+succeeded with a (tool, validated-args) pair the attempt has not
+successfully run before — a new file, a new diff page, a new search, a
+new HEAD read; an empty result still counts — or when a judged final
+reply carried a verified finding the attempt has not recorded before
+(the finding's `repr` is the signature, so a repeated finding is not
+progress). A failed call is never progress. `no_progress_turns`
+consecutive stalled turns inject the one finalize nudge as before; the
+duplicate-call trigger, the max-turn/max-call/dollar/clock guards, the
+`ATLAS_NO_PROGRESS_TURNS` configuration and the `nudges` vocabulary
+are unchanged, and no default was resized — per Brandon's standing
+rule the limit guards runaway loops and costly failures, not review
+cost. The nudge text now names why it fired and the turns it counted
+("No turn since turn 1 has brought new content or a new finding: 6
+turns without progress, as of turn 7"), so a run shows which lenses
+hit the limit and on which turn. `_Progress.covered_at_turn` is gone,
+with D65's P17 test replaced by the shared-window tests (mutants NP1–
+NP5 pin steady progress never nudged, the exact stall count on each
+path, and both reset signals). Tests use fakes only; the stalled turns
+are turns that call nothing (`NOTHING` in the agentic fixtures), and
+the paged-path pin counts a lens fumbling before coverage, which the
+old window never reached.
+Offline only: no live model call, network call or secret, and no
+deployed service setting changed.
