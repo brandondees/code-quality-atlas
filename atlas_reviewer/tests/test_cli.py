@@ -2114,3 +2114,120 @@ def test_agentic_review_takes_the_model_and_provider_flags(tmp_path, monkeypatch
     )  # fmt: skip
     assert code == cli.EXIT_INCOMPLETE, err.getvalue()
     assert [(p.model_id, p._providers) for p in made] == [(alt, ("deepinfra/fp8",))]
+
+
+def test_a_live_agentic_review_renders_the_prompt_cache_section(tmp_path, monkeypatch):
+    """The live path's wiring (issue #695, review round 1 M3): each lens
+    run's `OpenRouterLensModel` is collected and its prompt-cache sessions
+    reach the rendered draft. The OpenRouter transport, GitHub and Sprites
+    are fakes; the bridge, the ledger and the draft are the real code."""
+    from contextlib import ExitStack
+
+    from atlas_reviewer.local_runner import LocalSprites, LocalTasks
+    from atlas_reviewer.openrouter import OpenRouterProvider
+    from atlas_reviewer.tool_model import OpenRouterLensModel
+
+    from .test_openrouter import MODEL_ID, OpenRouterFake, reply
+
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+
+    def usage(prompt):
+        return {
+            "prompt_tokens": prompt,
+            "completion_tokens": 5,
+            "cost": 0.01,
+            "is_byok": False,
+            "prompt_tokens_details": {
+                "cached_tokens": 0,
+                "cache_write_tokens": prompt,
+            },
+        }
+
+    def tool_turn(prompt):
+        return reply(
+            {
+                "model": MODEL_ID,
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "diff_file",
+                                        "arguments": json.dumps(
+                                            {"path": "calc.py", "offset": 0}
+                                        ),
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": usage(prompt),
+            }
+        )
+
+    # Four critical-tier lenses, two turns each at `--max-turns 2`, and
+    # `--max-calls 8` stops the continuation rounds at the same count.
+    fake = OpenRouterFake(*[tool_turn(2000 + n) for n in range(16)])
+    made: list[OpenRouterLensModel] = []
+
+    def factory(key, limits):
+        return OpenRouterProvider(fake, key, limits=limits)
+
+    def sprites(env):
+        return LocalSprites()
+
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as claims:
+        tasks = claims.enter_context(LocalTasks(state / "tasks.sock"))
+        monkeypatch.setattr(cli, "SOCKET_PATH", str(tasks.path))
+        monkeypatch.setattr(cli, "BRIDGE_ROOT", str(tmp_path / "bridge"))
+
+        original = cli.model_for_lens
+
+        def model_for(provider, limits):
+            adapter = original(provider, limits)
+            made.append(adapter)
+            return adapter
+
+        monkeypatch.setattr(cli, "model_for_lens", model_for)
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(
+            ["--state-dir", str(state), "agentic-review", "--event", EVENT,
+             "--provider", "openrouter", "--allow-live-inference", "--depth",
+             "triage", "--pool-size", "1", "--max-calls", "8", "--max-turns",
+             "2", "--reservation-usd", "5.00"],
+            env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+            out=out, err=err, sprites_factory=sprites,
+            openrouter_factory=factory,
+        )  # fmt: skip
+    # Two turns per lens stop every attempt at the turn cap, so the
+    # review cannot approve and exits incomplete.
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "## Prompt cache" in draft, err.getvalue()
+    # One session per critical-tier lens run, labeled by the lens the
+    # system prompt's body marker names, and every turn counted: two
+    # turns per session, the second short of the first's prompt, so one
+    # miss each.
+    assert '"tracing-correctness-and-invariants"' in draft
+    assert '"sweeping-for-security"' in draft
+    assert (
+        "total: 8 turn(s), 4 cache miss(es), 16028 cache-write token(s) "
+        "against 8016 token(s) of final context."
+    ) in draft
+    # The adapters the run created are the ones the section came from.
+    assert len(made) >= 4
+    assert all(isinstance(adapter, OpenRouterLensModel) for adapter in made)

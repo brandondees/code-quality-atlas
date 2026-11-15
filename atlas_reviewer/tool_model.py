@@ -37,17 +37,20 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
+from atlas_reviewer.attestation import body_markers
 from atlas_reviewer.budget import (
     InputTokenMeter,
     TokenBoundError,
     check_tokens,
     worst_case_usd,
 )
+from atlas_reviewer.cache_stats import CacheLedger, CacheSession
 from atlas_reviewer.call_facts import CallFacts, note_call
 from atlas_reviewer.http import safe_url
 from atlas_reviewer.lens_loop import (
@@ -122,6 +125,8 @@ class OpenRouterLensModel:
         self._meter = InputTokenMeter()
         self._bound_note = ""
         self._last_system: str | None = None
+        self._cache = CacheLedger()
+        self._session_system: str | None = None
 
     @property
     def name(self) -> str:
@@ -134,6 +139,12 @@ class OpenRouterLensModel:
     def diagnosis(self) -> dict[str, str] | None:
         """Selected tags and the terms those rows set."""
         return self.provider.diagnosis()
+
+    def cache_sessions(self) -> tuple[CacheSession, ...]:
+        """Every prompt-cache session this adapter served, in order (issue
+        #695). The run summary renders them; a dry run's scripted model
+        records none."""
+        return self._cache.sessions()
 
     @property
     def bound_note(self) -> str:
@@ -246,6 +257,22 @@ class OpenRouterLensModel:
         # request is what the baseline priced.
         self._meter.observe(_tokens(usage_obj, "prompt_tokens"), len(request.messages))
         self._last_system = request.system
+        # The cache diagnostic rides the same usage (issue #695). A changed
+        # system prompt is a new conversation, so the session closes there;
+        # a retried or nudged turn keeps its session.
+        if request.system != self._session_system:
+            self._cache.start_session(_session_label(request.system))
+            self._session_system = request.system
+        prompt_details = usage_obj.get("prompt_tokens_details")
+        self._cache.observe(
+            _tokens(usage_obj, "prompt_tokens"),
+            _tokens(prompt_details, "cached_tokens")
+            if isinstance(prompt_details, dict)
+            else None,
+            _tokens(prompt_details, "cache_write_tokens")
+            if isinstance(prompt_details, dict)
+            else None,
+        )
         return _turn(
             data,
             terms,
@@ -477,6 +504,23 @@ def _remember(
             reasoning_hint=reasoning_hint,
         )
     )
+
+
+# Built from `body_markers` so the pattern cannot drift from the marker
+# the controller actually writes. The lens name inside the marker is
+# controller text (a library name), not PR-controlled.
+_SESSION_LABEL = re.compile(
+    re.escape(body_markers("{lens}", "{digest}")[0])
+    .replace(re.escape("{lens}"), "(.+?)")
+    .replace(re.escape("{digest}"), r"[0-9a-f]{64}")
+)
+
+
+def _session_label(system: str) -> str:
+    """The lens a system prompt's body marker names, for the cache
+    session's label. Empty when the prompt carries no marker."""
+    match = _SESSION_LABEL.search(system)
+    return match.group(1) if match else ""
 
 
 def _served_host(raw: object) -> tuple[str, str]:

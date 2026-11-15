@@ -444,7 +444,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
 | `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
 | `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
-| `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us`. One slug pins that provider. `--providers` wins |
+| `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is one endpoint, `google-vertex/global`, for an Anthropic-family model (`anthropic/...`), and `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us` for any other model (#695, D63). One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement and still refuses a tag the ZDR list marks Safety Retention unless the opt-in is on. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
@@ -503,10 +503,23 @@ false, `require_parameters` true, and `data_collection` deny. Those
 three are not configurable. `zdr` is true unless `ATLAS_REQUIRE_ZDR` is
 false or `--no-require-zdr` is passed. `max_price` is the highest prompt
 and completion price on the selected endpoint rows. `provider.only`
-defaults to the slugs a 2026-11-07 read of the public provider list
-named: `amazon-bedrock`, `google-vertex/global`, `google-vertex/us`,
-and `google-vertex/europe`. `ATLAS_PROVIDERS` or `--providers` replaces
-that list, and one slug is a valid pin. Before a completion the adapter
+defaults by model: an Anthropic-family route (`anthropic/...`) pins the
+single endpoint `google-vertex/global`, so one conversation's
+consecutive turns share that endpoint's prompt cache instead of
+spreading across every eligible Bedrock and Vertex endpoint (#695, D63
+— of the three tags with a `safety_retention: false` ZDR row for both
+default Sonnet and Haiku on the list fetched 2026-11-15, it is the
+cheapest, at $0.10 cache read and $2.50 cache write per million against
+$0.11/$2.75 on `google-vertex/europe` and `amazon-bedrock/eu-west-1`,
+and the only region-unbound one; the bare `amazon-bedrock` tag prices
+the same for Sonnet but has no Haiku row and expands to regional
+endpoints). The old four-slug default refused Haiku outright against
+that list, so the single-endpoint default is also what makes a
+default-config Haiku route runnable. Any other model keeps the slugs
+the 2026-11-07 read of the public provider list named:
+`amazon-bedrock`, `google-vertex/global`, `google-vertex/us`, and
+`google-vertex/europe`. `ATLAS_PROVIDERS` or `--providers` replaces
+either default, and one slug is a valid pin. Before a completion the adapter
 reads `GET /api/v1/endpoints/zdr` without the key when ZDR is required,
 and both that list and `GET /api/v1/models/{author}/{slug}/endpoints`
 when it is not. The full endpoint list has no `safety_retention`
@@ -1223,6 +1236,15 @@ D41 records the 2026-11-12 probe that did.
     ranked by severity. The verdict comes from verified, introduced defects
     only. Unverified findings are listed apart and never counted. Possible
     committed secrets that the tools read are controller findings.
+  - **Prompt cache.** When the live adapters reported prompt-cache
+    sessions (#695, D63), a `## Prompt cache` section follows the model
+    calls line: one line per session — a conversation, bounded by its
+    system prompt — with its turn count, the turns whose reported cached
+    tokens fell short of the previous turn's prompt (or reported none;
+    a session's first turn is never a miss), the session's cache-write
+    total and final context, and then a run total of the cache writes
+    against the sum of the sessions' final contexts. A dry run's
+    scripted model reports none, so the section is absent there.
   - **Scrubbing.** Every model-written value is redacted, scrubbed of
     flagged values, and quoted as data.
 
@@ -1262,7 +1284,8 @@ D41 records the 2026-11-12 probe that did.
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
 | `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. No shipped caller builds the path yet | writes the log file |
-| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `cache_stats.py` | per-session prompt-cache accounting from a model's reported usage (#695): sessions bounded by the system prompt, the miss rule (cached tokens below the previous turn's prompt, or unreported), and the run summary's session and total lines. Pure; no I/O | no |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
