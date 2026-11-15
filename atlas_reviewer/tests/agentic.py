@@ -66,6 +66,11 @@ def tools(*calls):
     return ToolCalls(tuple(ToolRequest(t, a) for t, a in calls), COST)
 
 
+# A turn that calls nothing: no new content, no finding -- the raw
+# material of a no-progress stall (D66).
+NOTHING = ToolCalls((), COST)
+
+
 READ_DIFF = tools(("diff_file", {"path": "calc.py"}))
 READ_ALL = tools(
     ("diff_file", {"path": "calc.py"}),

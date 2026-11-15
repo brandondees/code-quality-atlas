@@ -68,6 +68,7 @@ from .agentic import (
     HEAD_TARBALL,
     LENS,
     LIMITS,
+    NOTHING,
     READ_ALL,
     READ_DIFF,
     TOKEN,
@@ -735,13 +736,11 @@ def test_a_repair_held_reply_keeps_its_unparsed_cause_when_the_turn_never_runs(
     assert "max_turns" in outcome.detail
 
 
-def _stall_script(coverage, greps):
+def _stall_script(coverage, stalls):
+    """One read (all changed files, or one) then `stalls` turns that call
+    nothing: the raw material of a stall under D66's window."""
     read = READ_ALL if coverage else READ_DIFF
-    return [
-        read,
-        *(tools(("grep", {"pattern": f"needle-{i}"})) for i in range(greps)),
-        final(),
-    ]
+    return [read, *([NOTHING] * stalls), final()]
 
 
 def _duplicate_script(calls):
@@ -750,8 +749,10 @@ def _duplicate_script(calls):
 
 
 def test_no_progress_is_nudged_after_the_configured_turns(tmp_path):
-    """D58's no-progress detector: once every changed diff is read, six
-    more turns without a final reply inject one finalize nudge."""
+    """D58's no-progress detector as D66 amends it: six consecutive turns
+    that bring the lens nothing new -- here, turns that call nothing at
+    all after the full diff was read -- inject one finalize nudge that
+    names the turns it counted."""
     limits = replace(LIMITS, max_turns=10, max_calls=20)
     outcome, model, _ = attempt(tmp_path, _stall_script(True, 6), limits=limits)
     assert outcome.state is LensState.CLEAN
@@ -759,12 +760,15 @@ def test_no_progress_is_nudged_after_the_configured_turns(tmp_path):
     nudge = model.requests[-1].messages[-1]
     assert isinstance(nudge, UserText)
     assert "Finalize now with what you have" in nudge.text
+    assert "6 turns without progress, as of turn 7" in nudge.text
     # The nudge turn follows the last tool results in the conversation.
     kinds = [type(m).__name__ for m in model.requests[-1].messages]
     assert kinds[-2:] == ["ToolResults", "UserText"]
 
 
-def test_five_turns_past_coverage_are_not_nudged(tmp_path):
+def test_five_stalled_turns_are_not_nudged(tmp_path):
+    """Five stalled turns sit one under the six-turn window, so no nudge
+    goes out (D66)."""
     limits = replace(LIMITS, max_turns=10, max_calls=20)
     outcome, model, _ = attempt(tmp_path, _stall_script(True, 5), limits=limits)
     assert outcome.state is LensState.CLEAN
@@ -874,6 +878,35 @@ def test_the_attempt_itself_resets_a_stale_nudge_marker(tmp_path):
     assert spans
     for span in spans:
         assert "atlas.nudge" not in dict(span.attributes or {})
+
+
+def test_a_nudged_attempt_names_the_nudge_on_the_completion_span(tmp_path):
+    """Round-2 review of #707, mutant R5: the loop's `note_nudge` is what
+    puts `atlas.nudge` on the completion span that answers a detector
+    nudge, and no other test exercises it through the loop -- dropping it
+    passed the whole suite. Through the production trace wrapper, the
+    stalled attempt's nudge turn is named on the span that answers it."""
+    from atlas_reviewer.tracing import memory_trace
+
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    trace, exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(ScriptedLensModel(_stall_script(True, 6)))
+        outcome, _model, _spend = attempt(tmp_path, [], model=wrapped, limits=limits)
+    finally:
+        trace.shutdown()
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    spans = [
+        span for span in exporter.get_finished_spans() if span.name == "completion"
+    ]
+    assert spans
+    nudged = [
+        dict(span.attributes or {})["atlas.nudge"]
+        for span in spans
+        if "atlas.nudge" in dict(span.attributes or {})
+    ]
+    assert nudged == ["no-progress"]
 
 
 # -------------------------------------------------------------- outcomes
@@ -1922,18 +1955,305 @@ def test_a_diff_alone_over_the_budget_pages():
     assert "over the 10000-token budget" in note
 
 
-def test_the_prefix_path_no_progress_window_starts_at_turn_zero(tmp_path):
-    """Mutant P17: seeding `covered_at_turn` as None on the prefix path
-    starts the no-progress window one turn later than the prefix's
-    turn-0 coverage; the window is counted from before turn 1."""
+def test_an_inline_diff_lens_still_making_new_reads_is_not_nudged(tmp_path):
+    """Mutant NP1: a window that does not reset on progress -- D65's
+    turn-0-seeded window, which nudged a prefix lens at its sixth turn
+    however much it was finding -- cuts off a lens that reads something
+    new every turn. Twelve turns of new content are never nudged."""
+    limits = replace(LIMITS, max_turns=20, max_calls=40, no_progress_turns=2)
+    script = [
+        *(tools(("grep", {"pattern": f"needle-{i}"})) for i in range(12)),
+        final(),
+    ]
     outcome, _model, _spend = attempt(
         tmp_path,
         [],
         the_job=prefixed_job(),
-        model=RoomModel([tools(("diff_stat", {})), tools(("diff_stat", {})), final()]),
-        limits=replace(LIMITS, no_progress_turns=2),
+        model=RoomModel(script),
+        limits=limits,
+    )
+    assert outcome.nudges == ()
+    assert outcome.state is LensState.CLEAN
+
+
+def test_a_stalling_lens_is_nudged_after_exactly_no_progress_turns(tmp_path):
+    """Mutant NP2 (and P17's replacement): the shared-prefix path has no
+    seeded window anymore, so the same rule as the paged path applies --
+    `no_progress_turns` consecutive turns that bring the lens nothing new
+    fire the nudge on exactly the last of them, not one turn sooner or
+    later. The nudge says why it fired and on which turn."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=3)
+    script = [
+        tools(("diff_stat", {})),
+        NOTHING,
+        NOTHING,
+        NOTHING,
+        final(),
+    ]
+    outcome, model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel(script),
+        limits=limits,
     )
     assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    # No nudge rode along with the third turn's request; the fourth
+    # stalled turn's results are followed by the nudge.
+    assert not any(
+        isinstance(m, UserText) and "Finalize now" in m.text
+        for m in model.requests[2].messages[1:]
+    )
+    nudge = model.requests[4].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 1" in nudge.text
+    assert "3 turns without progress, as of turn 4" in nudge.text
+
+
+def test_the_paged_path_nudges_a_stall_after_exactly_no_progress_turns(tmp_path):
+    """Mutant NP3: the paged path's old window waited for full diff
+    coverage before counting, so a lens fumbling before coverage was
+    never nudged by it; the shared window counts stalled turns from the
+    attempt's start, and this lens -- one file read, three stalled turns
+    behind it -- is nudged on exactly the third."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=3)
+    script = [
+        READ_DIFF,
+        NOTHING,
+        NOTHING,
+        NOTHING,
+        final(),
+        final(),
+    ]
+    outcome, model, _spend = attempt(tmp_path, script, limits=limits)
+    # The nudged reply still leaves keys.py unread, so it earns the
+    # unread-list nudge too, and the second reply is accepted partial.
+    assert outcome.nudges == ("no-progress", "unread-files")
+    assert outcome.state is LensState.PARTIAL
+    nudge = model.requests[4].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 1" in nudge.text
+    assert "3 turns without progress, as of turn 4" in nudge.text
+
+
+def test_new_progress_resets_the_no_progress_count(tmp_path):
+    """Mutant NP4: a window that never resets -- D58's original, which
+    counted turns since coverage whatever happened in them -- nudges this
+    lens on its third turn, two stalled turns after coverage; the reset
+    moves the nudge to the second stalled turn after the last progress."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=2)
+    script = [
+        READ_ALL,
+        NOTHING,
+        tools(("grep", {"pattern": "fresh"})),
+        NOTHING,
+        NOTHING,
+        final(),
+    ]
+    outcome, model, _spend = attempt(tmp_path, script, limits=limits)
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    # Turn 3's new read reset the count, so the nudge fires after the
+    # second stalled turn that follows it (turn 5), not on turn 3.
+    assert not any(
+        isinstance(m, UserText) and "Finalize now" in m.text
+        for m in model.requests[3].messages[1:]
+    )
+    nudge = model.requests[5].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 3" in nudge.text
+    assert "2 turns without progress, as of turn 5" in nudge.text
+
+
+def test_a_new_verified_finding_resets_the_no_progress_count(tmp_path):
+    """Mutant NP5: a verified finding the attempt has not recorded before
+    is progress too (D66), so the quote-repair turn a failed quote earned
+    does not inherit the stalled turns before it -- the window starts
+    over, and the nudge fires two stalled turns after the finding, not
+    one."""
+    wrong = finding(evidence="return sum(x for x in xs if x)")
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=2)
+    script = [
+        READ_ALL,
+        NOTHING,
+        final(finding(), wrong),
+        NOTHING,
+        NOTHING,
+        final(finding()),
+    ]
+    outcome, model, _spend = attempt(tmp_path, script, limits=limits)
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ("quote-repair", "no-progress")
+    # The finding on turn 3 reset the count: no nudge rode with turn 4's
+    # request, and turn 5's second stalled turn is the one that fires.
+    assert not any(
+        isinstance(m, UserText) and "Finalize now" in m.text
+        for m in model.requests[4].messages[1:]
+    )
+    nudge = model.requests[5].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 3" in nudge.text
+    assert "2 turns without progress, as of turn 5" in nudge.text
+
+
+def test_a_nonterminal_final_reply_counts_as_a_stalled_turn(tmp_path):
+    """Round-1 review of #707, Minor 1: a final reply that queues a
+    follow-up turn -- here the unread-list nudge, with no findings -- and
+    brings no new verified finding is a stalled turn like any other, and
+    the detector is checked before the follow-up is queued, so its nudge
+    follows the unread list in the same conversation."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=2)
+    script = [READ_DIFF, NOTHING, final(), NOTHING, final()]
+    outcome, model, _spend = attempt(tmp_path, script, limits=limits)
+    # Turn 2 is the first stalled turn; turn 3's finding-less reply is the
+    # second, and that is where the window fires -- the unread list and
+    # the finalize turn go back together, and the second unread reply is
+    # accepted partial as before.
+    assert outcome.nudges == ("unread-files", "no-progress")
+    assert outcome.state is LensState.PARTIAL
+    assert not any(
+        isinstance(m, UserText) and "Finalize now" in m.text
+        for m in model.requests[2].messages[1:]
+    )
+    nudge = model.requests[3].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 1" in nudge.text
+    assert "2 turns without progress, as of turn 3" in nudge.text
+
+
+def test_a_repeated_successful_call_is_not_progress(tmp_path):
+    """Round-1 review of #707, Minor 2, mutants M1 and M8: progress is a
+    successful call the attempt has not made before -- a repeat is
+    content the lens has already seen, whatever turn it falls on, so the
+    window counts it. `duplicate_calls` is raised above the window to
+    isolate the no-progress trigger from the duplicate one."""
+    limits = replace(
+        LIMITS, max_turns=10, max_calls=20, no_progress_turns=2, duplicate_calls=10
+    )
+    script = [
+        tools(("diff_stat", {})),
+        tools(("diff_stat", {})),
+        tools(("diff_stat", {})),
+        final(),
+    ]
+    outcome, model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel(script),
+        limits=limits,
+    )
+    assert outcome.nudges == ("no-progress",)
+    assert "duplicate-calls" not in outcome.nudges
+    assert outcome.state is LensState.CLEAN
+    nudge = model.requests[3].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "2 turns without progress, as of turn 3" in nudge.text
+
+
+def test_a_rejected_call_is_not_progress(tmp_path):
+    """Round-1 review of #707, Minor 2, mutant M2: a call the bridge
+    rejected returned nothing, so it is never progress -- an empty grep
+    pattern is rejected, and two of them in a row count as stalled turns.
+    `duplicate_calls` is raised above the window to isolate the trigger
+    (the rejected calls share the empty args text, so the duplicate
+    counter sees them too)."""
+    limits = replace(
+        LIMITS, max_turns=10, max_calls=20, no_progress_turns=2, duplicate_calls=10
+    )
+    script = [
+        tools(("diff_stat", {})),
+        tools(("grep", {"pattern": ""})),
+        tools(("grep", {"pattern": ""})),
+        final(),
+    ]
+    outcome, model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel(script),
+        limits=limits,
+    )
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    nudge = model.requests[3].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "2 turns without progress, as of turn 3" in nudge.text
+
+
+def test_an_unverified_finding_is_not_progress(tmp_path):
+    """Round-1 review of #707, Minor 2, mutant M5: a judged reply whose
+    every finding failed the quote check recorded nothing verified, so it
+    is a stalled turn, not a reset -- the window fires on the stall that
+    was already behind it, not two turns later."""
+    wrong = finding(evidence="return sum(x for x in xs if x)")
+    wronger = finding(evidence="still not in the file")
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=2)
+    script = [READ_ALL, NOTHING, final(wrong), NOTHING, final(wronger)]
+    outcome, model, _spend = attempt(tmp_path, script, limits=limits)
+    # Turn 2 stalled; turn 3's all-unverified reply stalled again, so the
+    # window fires there and the quote repair rides behind it; the
+    # repaired reply still fails, so the bound ends the attempt partial.
+    assert outcome.nudges == ("no-progress", "quote-repair")
+    assert outcome.state is LensState.PARTIAL
+    nudge = model.requests[3].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "No turn since turn 1" in nudge.text
+    assert "2 turns without progress, as of turn 3" in nudge.text
+
+
+def test_seen_calls_reach_across_turns(tmp_path):
+    """Round-1 review of #707, Minor 2, mutant M8: `seen_calls` is the
+    attempt's memory, not the turn's -- a call repeated after an
+    intervening call is still a repeat, so the window counts it."""
+    limits = replace(
+        LIMITS, max_turns=10, max_calls=20, no_progress_turns=2, duplicate_calls=10
+    )
+    script = [
+        tools(("diff_stat", {})),
+        tools(("grep", {"pattern": "x"})),
+        tools(("diff_stat", {})),
+        tools(("diff_stat", {})),
+        final(),
+    ]
+    outcome, model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel(script),
+        limits=limits,
+    )
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    # Turn 3's repeat is the first stalled turn; the nudge follows turn
+    # 4's, the second.
+    assert not isinstance(model.requests[3].messages[-1], UserText)
+    nudge = model.requests[4].messages[-1]
+    assert isinstance(nudge, UserText)
+    assert "2 turns without progress, as of turn 4" in nudge.text
+
+
+def test_the_duplicate_trigger_wins_when_both_hold(tmp_path):
+    """Round-1 review of #707, Minor 2, mutant M9: when the repeated-call
+    trigger and the window both hold on the same turn, the duplicate one
+    wins, as D58 ordered the triggers -- here the third identical call is
+    also the second consecutive stalled turn."""
+    limits = replace(LIMITS, max_turns=10, max_calls=20, no_progress_turns=2)
+    script = [
+        tools(("diff_stat", {})),
+        tools(("diff_stat", {})),
+        tools(("diff_stat", {})),
+        final(),
+    ]
+    outcome, _model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel(script),
+        limits=limits,
+    )
+    assert outcome.nudges == ("duplicate-calls",)
     assert outcome.state is LensState.CLEAN
 
 

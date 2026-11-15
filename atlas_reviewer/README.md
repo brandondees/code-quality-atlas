@@ -449,7 +449,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_PER_LENS_CALLS` | `agentic-review` | Per-lens model-call budget the review-wide call cap derives from (D68; default 50) |
 | `ATLAS_PER_LENS_USD` | `agentic-review` | Per-lens dollar budget the review-wide reservation derives from (D68; default 5) |
 | `ATLAS_REVIEW_CEILING_USD` | `agentic-review` | The absolute per-review dollar ceiling the derived reservation clamps to (D68; default 10). The reviewed repo's `REVIEW.md` may override it with a `review_ceiling_usd:` line |
-| `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Turns past full diff coverage without a final reply before one finalize nudge is injected (D58; default 6) |
+| `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Consecutive turns that bring a lens nothing new -- no successful tool call the attempt has not made before, no new verified finding -- before one finalize nudge is injected, on the paged and the shared-prefix path alike (D58, D66; default 6) |
 | `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
 | `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
 | `ATLAS_QUOTE_TOLERANCE` | agentic lens entry | Lines either side of a citation's first line that the quote checker searches, 0 to 8 (D64; default 3) |

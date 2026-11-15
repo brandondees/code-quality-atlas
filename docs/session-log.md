@@ -1610,6 +1610,80 @@ entry — the command-scoped pool and the prefix share included — which
 is why the merged total reads sixteen after the #698 merge, where
 main's earlier count left the pool out.
 
+## 2026-11-15 — the no-progress window counts stalled turns, on both paths alike (issue #705, D66)
+
+The Nov 15 Sonnet measurement on #640 found 5 of 12 lenses getting the
+"finalize now" nudge at about turn 6, where none did on the Nov 14
+baseline, with lens sessions averaging about 4 turns against about 13
+and verified findings down to 10 from 20. The cause was D65's seeding:
+`_Progress.covered_at_turn` started at 0 on the shared-prefix path, so
+D58's no-progress window counted from the lens's first turn — a lens
+whose diff arrived inline in the prefix got about 6 turns of
+exploration in total, where the paged path gave it 6 turns after
+finishing its diff reads, and on neither path did the window reset when
+the lens was actually making progress. The window now counts
+consecutive turns that brought the lens nothing new, by one rule on
+both paths: a turn makes progress when one of its bridge calls
+succeeded with a (tool, validated-args) pair the attempt has not
+successfully run before — a new file, a new diff page, a new search, a
+new HEAD read; an empty result still counts — or when a judged final
+reply carried a verified finding the attempt has not recorded before
+(the finding's `repr` is the signature, so a repeated finding is not
+progress). A failed call is never progress. `no_progress_turns`
+consecutive stalled turns inject the one finalize nudge as before; the
+duplicate-call trigger, the max-turn/max-call/dollar/clock guards, the
+`ATLAS_NO_PROGRESS_TURNS` configuration and the `nudges` vocabulary
+are unchanged, and no default was resized — per Brandon's standing
+rule the limit guards runaway loops and costly failures, not review
+cost. The nudge text now names why it fired and the turns it counted
+("No turn since turn 1 has brought new content or a new finding: 6
+turns without progress, as of turn 7"), so a run shows which lenses
+hit the limit and on which turn. `_Progress.covered_at_turn` is gone,
+with D65's P17 test replaced by the shared-window tests (mutants NP1–
+NP5 pin steady progress never nudged, the exact stall count on each
+path, and both reset signals). Tests use fakes only; the stalled turns
+are turns that call nothing (`NOTHING` in the agentic fixtures), and
+the paged-path pin counts a lens fumbling before coverage, which the
+old window never reached.
+Offline only: no live model call, network call or secret, and no
+deployed service setting changed.
+
+## 2026-11-15 — round-1 review fixes for #707: the window counts final-reply turns, and the stall shapes are tested
+
+The round-1 protocol review of #707 came back COMMENT (2 Minor, 3 Nit).
+A nonterminal final reply that queues a follow-up turn — the contract
+repair, the unread-list nudge, a quote repair — and brings no new
+verified finding was never counted: the window counted only tool turns,
+so up to about five bounded follow-up turns per attempt escaped it. The
+judgment turn is now counted as a stalled turn in `_accept_or_repair`,
+with the detector checked before the follow-up is queued, so the
+finalize nudge and the queued follow-up compose in one conversation the
+way the nudge composes after tool results; D66's "every other tool
+turn" wording is corrected in place, and a test pins the probe shape
+(read, stalled tool turn, finding-less reply with a file unread, then a
+stall — the nudge fires on exactly the second non-progress turn). The
+review also found the stall tests only drove `NOTHING`, a shape the
+live adapter never produces, and five predicate mutants survived the
+whole suite; the stall tests now run the production shapes — rejected
+calls (an empty `grep` pattern), a repeated successful call with
+`duplicate_calls` raised above the window, an all-unverified reply, the
+attempt scope of `seen_calls` across an intervening call, and the
+co-fire where the duplicate trigger wins — and M1, M2, M5, M8 and M9
+die on them (M3, M4, M6, M7 and NP1/NP3 re-verified dead). D65 carries
+an appended Correction pointing at D66 for its obsolete
+accessor-bypass clause and P17 reference; D66's revisit clause now
+names argument variation (ever-increasing `diff_file` offsets,
+near-identical `grep` patterns, alternate path spellings) as the first
+suspect for a lens dodging the window, bounded by the unchanged caps;
+and D66 states that a transport-timed-out turn is not counted while its
+one retry counts once. The round-2 review (APPROVE, 2 Nit) added one
+more pin: the `atlas.nudge` span naming is now checked end to end
+through the production trace wrapper on a nudged attempt
+(`test_a_nudged_attempt_names_the_nudge_on_the_completion_span`),
+killing mutant R5 — dropping the loop's `note_nudge` from the detector
+had passed the whole suite — and the round-1 entry's "verified filing"
+typo is corrected to "verified finding". Offline only.
+
 ## 2026-11-15 — the review-wide limits derive from the planned lens count, under a $10 ceiling (issue #710, D68)
 
 The flat review-wide defaults — 50 calls and a $5 reservation shared by
@@ -1651,8 +1725,8 @@ derived lens budget instead of eating into it, so the flat cap's other
 failure mode (one busy picker starving the lenses) is gone by
 construction. The single-lens `review_lens` path and the one-shot
 `review` command are unchanged; the service switch onto `agentic-review`
-is #712 and waits on this. D66 is #707's and D67 is #709's (both open at
-authoring time), so the decision is recorded as D68. Offline only: the
+is #712 and waits on this. D66 is #707's (it merged into main while this
+PR was open) and D67 is #709's, so the decision is recorded as D68. Offline only: the
 tests run the real bridge through `LocalSprites` with scripted models
 and fakes — no live model call, network call or secret read — and pin
 the formulas, the clamp, the ceiling precedence, the `REVIEW.md` line's
@@ -1685,3 +1759,4 @@ the $10 ceiling on a one-lens review no longer reads as "the ceiling is
 above it". And a `REVIEW.md` over the 64 KiB read bound is unparseable
 rather than parsed cut, so a truncation inside the value cannot read as
 a number it is not. All three are pinned in `test_review_wide.py`.
+n
