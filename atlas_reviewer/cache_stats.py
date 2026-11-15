@@ -150,6 +150,15 @@ class CacheLedger:
         self._started = False
 
 
+def by_label(sessions: Iterable[CacheSession]) -> tuple[CacheSession, ...]:
+    """Sessions ordered by label, stable: a pooled review creates its
+    adapters in the pool's scheduling order, so the summary orders them
+    by the lens each session's system prompt named, and same-label
+    sessions — one lens's attempts, in run order — keep their relative
+    order."""
+    return tuple(sorted(sessions, key=lambda session: session.label))
+
+
 def session_lines(
     sessions: Iterable[CacheSession],
     *,
@@ -215,4 +224,4 @@ def _counted(tokens: int | None) -> str:
     return "no reported tokens" if tokens is None else f"{tokens} token(s)"
 
 
-__all__ = ["CacheLedger", "CacheSession", "CacheTurn", "session_lines"]
+__all__ = ["CacheLedger", "CacheSession", "CacheTurn", "by_label", "session_lines"]

@@ -64,7 +64,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
-from atlas_reviewer.cache_stats import CacheSession, session_lines
+from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
 from atlas_reviewer.domain import (
@@ -1235,14 +1235,16 @@ def render_draft(
 def _cache_lines(
     cache: Sequence[CacheSession], scrub: Callable[[str], str]
 ) -> list[str]:
-    """One line per session, then the run total (issue #695). The label
-    is the lens a session's system prompt named; it is quoted as data,
-    because it is still text a reader could mistake for prose. An
-    unlabeled session keeps its ordinal."""
+    """One line per session, then the run total (issue #695). The sessions
+    are ordered by lens name, so the pool's scheduling order cannot
+    shuffle the summary (round-2 review, Nit 1). The label is the lens a
+    session's system prompt named; it is quoted as data, because it is
+    still text a reader could mistake for prose. An unlabeled session
+    keeps its ordinal."""
     return [
         "- " + line
         for line in session_lines(
-            cache,
+            by_label(cache),
             label_of=lambda session, number: (
                 (
                     f"session {number} "

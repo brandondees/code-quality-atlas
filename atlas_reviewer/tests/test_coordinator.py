@@ -1975,3 +1975,37 @@ def test_the_draft_renders_the_prompt_cache_sessions(tmp_path):
 def test_a_draft_without_cache_sessions_has_no_prompt_cache_section(tmp_path):
     result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
     assert "## Prompt cache" not in render_draft(result, Redactor())
+
+
+def test_the_cache_section_orders_sessions_by_lens_and_keeps_attempt_order(tmp_path):
+    """The pool creates each lens's adapter when its run starts, so the
+    sessions can arrive in any order; the draft renders them by lens
+    name, and one lens's own attempts stay in run order (round-2 review,
+    Nit 1)."""
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    sessions = [
+        CacheSession(
+            "tracing-correctness-and-invariants", (CacheTurn(30_000, 0, 30_000),)
+        ),
+        CacheSession("sweeping-for-security", (CacheTurn(10_000, 0, 10_000),)),
+        CacheSession(
+            "tracing-correctness-and-invariants",
+            (CacheTurn(20_000, 0, 20_000), CacheTurn(26_000, 20_000, 6_000)),
+        ),
+        CacheSession(
+            "reviewing-concurrency-and-async", (CacheTurn(40_000, 0, 40_000),)
+        ),
+    ]
+    draft = render_draft(result, Redactor(), cache=sessions)
+    cache_lines = [line for line in draft.splitlines() if line.startswith("- session ")]
+    expected = [
+        ('"reviewing-concurrency-and-async"', "1 turn(s)"),
+        ('"sweeping-for-security"', "1 turn(s)"),
+        ('"tracing-correctness-and-invariants"', "1 turn(s)"),
+        ('"tracing-correctness-and-invariants"', "2 turn(s)"),
+    ]
+    assert len(cache_lines) == len(expected)
+    assert all(
+        label in line and counts in line
+        for line, (label, counts) in zip(cache_lines, expected, strict=True)
+    )

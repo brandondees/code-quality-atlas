@@ -789,15 +789,12 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 span.set("atlas.review_event", review.event.value)
         finally:
             release_shared()
+    # The pool creates each adapter when its lens run starts, so the
+    # collection order follows the pool's scheduling, not lens-name
+    # order; the draft orders the sessions by lens name (round-2 review,
+    # Nit 4).
     cache = tuple(
-        sorted(
-            (session for model in live_models for session in model.cache_sessions()),
-            # The pool starts adapters in completion order; naming a
-            # session by its ordinal in the draft needs a deterministic
-            # order, so group the sessions by lens and keep each lens's
-            # own attempt order (the sort is stable).
-            key=lambda session: session.label,
-        )
+        session for model in live_models for session in model.cache_sessions()
     )
     written = _emit(render_draft(review, redactor, cache=cache), args.out, out, err)
     (out if written else err).write(

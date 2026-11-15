@@ -7,6 +7,7 @@ from atlas_reviewer.cache_stats import (
     CacheLedger,
     CacheSession,
     CacheTurn,
+    by_label,
     session_lines,
 )
 
@@ -193,3 +194,39 @@ def test_a_custom_label_renderer_replaces_the_default():
         label_of=lambda _session, number: f"lens {number}",
     )
     assert lines[0].startswith("lens 1:")
+
+
+# --- the draft's ordering (round-2 review, Nit 1) ---------------------------
+
+
+def test_by_label_orders_sessions_by_lens_and_keeps_each_lens_attempt_order():
+    sessions = [
+        session("tracing-correctness-and-invariants", turn(30_000)),
+        session("sweeping-for-security", turn(10_000)),
+        session(
+            "tracing-correctness-and-invariants", turn(20_000), turn(26_000, 20_000)
+        ),
+        session("reviewing-concurrency-and-async", turn(40_000)),
+    ]
+    ordered = by_label(sessions)
+    assert [s.label for s in ordered] == [
+        "reviewing-concurrency-and-async",
+        "sweeping-for-security",
+        "tracing-correctness-and-invariants",
+        "tracing-correctness-and-invariants",
+    ]
+    # The stable sort keeps the lens's own attempts in run order: the
+    # one-turn attempt stays ahead of the two-turn one.
+    assert [len(s.turns) for s in ordered if s.label.startswith("tracing")] == [1, 2]
+
+
+def test_the_rendered_lines_follow_the_by_label_order():
+    sessions = by_label(
+        [
+            session("tracing-correctness-and-invariants", turn(30_000)),
+            session("sweeping-for-security", turn(10_000)),
+        ]
+    )
+    lines = session_lines(sessions)
+    assert lines[0].startswith("session 1 (sweeping-for-security):")
+    assert lines[1].startswith("session 2 (tracing-correctness-and-invariants):")
