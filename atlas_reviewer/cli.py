@@ -27,6 +27,7 @@ import os
 import re
 import secrets
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
@@ -37,7 +38,7 @@ from typing import TextIO, cast
 
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
 from atlas_reviewer.attestation import AttemptLedger
-from atlas_reviewer.bridge_staging import fetch_sources
+from atlas_reviewer.bridge_staging import BRIDGE_ROOT, fetch_sources
 from atlas_reviewer.budget import (
     BUDGET_CEILING_USD,
     MAX_CALLS_CEILING,
@@ -79,6 +80,7 @@ from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.interpreter import TrustedPython
+from atlas_reviewer.keepalive import SOCKET_PATH
 from atlas_reviewer.ledger import (
     FileLedger,
     ReviewInProgressError,
@@ -86,7 +88,14 @@ from atlas_reviewer.ledger import (
     single_review_lock,
 )
 from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
+from atlas_reviewer.lens_script import (
+    LensScript,
+    LensScriptError,
+    LensScriptModel,
+    load_lens_script,
+)
 from atlas_reviewer.lenses import LensLibrary, LensStatus
+from atlas_reviewer.local_runner import LocalSprites, LocalTasks
 from atlas_reviewer.openrouter import (
     ENV_KEY_CEILING_USD,
     KEY_LIMIT_MAX_USD,
@@ -397,6 +406,44 @@ def _scripted_runner(path: Path) -> FakeSprites:
         raise UsageError(f"invalid runner script {path}: {exc!r}") from exc
 
 
+def _scripted_lens_models(
+    script: LensScript,
+) -> tuple[LensScriptModel, Callable[[], LensModel]]:
+    """The dry run's model and the per-run factory: every lens run and
+    continuation gets a fresh instance, so each derives its own coverage
+    state from the turns it is handed."""
+    return LensScriptModel(script), lambda: LensScriptModel(script)
+
+
+def _lens_script(args: argparse.Namespace, fixtures: Path) -> LensScript | None:
+    """The dry run's lens script: `--lens-script` when given, else the
+    fixture's own `scenarios/blocker.json` when it ships one. A fixture
+    without one keeps the older no-tool dry-run model."""
+    raw = getattr(args, "lens_script", None)
+    path = Path(raw) if raw else fixtures / "scenarios" / "blocker.json"
+    if not path.is_file():
+        if raw:
+            raise UsageError(f"lens script {path} does not exist")
+        return None
+    try:
+        return load_lens_script(path)
+    except LensScriptError as exc:
+        raise UsageError(str(exc)) from exc
+
+
+def _attestation_ledger_path(
+    args: argparse.Namespace, env: Mapping[str, str], scratch: str | None
+) -> Path:
+    """A dry run's ledger is a per-run file inside its scratch directory,
+    so re-running or editing a scenario replays from scratch instead of
+    reusing an attempt settled for the same head and lens body. A live
+    review's ledger persists in the state directory, so a settled attempt
+    survives a crash and a retry resumes its count."""
+    if scratch is None:
+        return _state_dir(args, env) / "attestation.ledger"
+    return Path(scratch) / "attestation.ledger"
+
+
 class _FixedToken:
     """A token the parent already minted. It cannot mint another.
 
@@ -579,6 +626,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     fixture directory and an in-memory runner and does not read credentials.
     """
     env, out, err = run.env, run.out, run.err
+    if not args.dry_run and args.lens_script:
+        raise UsageError(
+            "--lens-script is a dry-run fixture; live mode calls the real model"
+        )
     limits = _agentic_limits(args, env)
     event = load_event(Path(args.event))
     _check_out_path(args.out)
@@ -591,16 +642,31 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         model_factory: Callable[[], LensModel] | None
         picker_provider: ModelProvider
         github: FixtureGitHub | GitHubClient
+        task_socket = SOCKET_PATH
+        bridge_root = BRIDGE_ROOT
+        scratch: str | None = None
         if args.dry_run:
             fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
             if not fixtures.is_dir():
                 raise UsageError(f"fixture directory {fixtures} does not exist")
+            script = _lens_script(args, fixtures)
             github = FixtureGitHub(fixtures)
-            sprites = _scripted_runner(fixtures / "runner-script.json")
+            sprites = LocalSprites()
             redactor = Redactor()
-            lens_model = _DryRunLensModel()
-            model_factory = None
+            if script is not None:
+                lens_model, model_factory = _scripted_lens_models(script)
+            else:
+                lens_model = _DryRunLensModel()
+                model_factory = None
             picker_provider = OfflineProvider()
+            state = _state_dir(args, env)
+            task_socket = str(
+                claims.enter_context(LocalTasks(state / "tasks.sock")).path
+            )
+            scratch = claims.enter_context(
+                tempfile.TemporaryDirectory(dir=state, prefix="dry-run-")
+            )
+            bridge_root = str(Path(scratch) / "bridge")
         else:
             provider = _select_provider(
                 args, env, args.openrouter_factory, telemetry, _picker_limits(limits)
@@ -683,7 +749,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     else (0, Decimal(0))
                 )
                 ledger = AttemptLedger(
-                    _state_dir(args, env) / "attestation.ledger", clock
+                    _attestation_ledger_path(args, env, scratch), clock
                 )
                 review = review_lenses(
                     event,
@@ -701,6 +767,8 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     telemetry=telemetry,
                     model_for=model_factory,
                     picker_spend=picker_spend,
+                    task_socket=task_socket,
+                    bridge_root=bridge_root,
                 )
                 review = replace(
                     review,
@@ -1155,6 +1223,14 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument(
         "--fixtures",
         help="fixture directory for --dry-run (default: the event file's directory)",
+    )
+    ag.add_argument(
+        "--lens-script",
+        help=(
+            "dry-run only: the JSON lens script the fake model replays "
+            "(default: scenarios/blocker.json in the fixture directory, "
+            "when the fixture ships one)"
+        ),
     )
     ag.add_argument("--out", help="write the draft here instead of stdout")
     ag.add_argument(

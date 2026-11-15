@@ -1,0 +1,290 @@
+# SPDX-License-Identifier: MIT
+"""The dry-run lens script: the canned reviewer `agentic-review --dry-run`
+replays.
+
+A dry run must reach and run the lenses end to end with no network, no
+Sprites and no model key. Everything around the model already runs as real
+code: the runner lifecycle, the bridge staging, the tool calls, the quote
+checks, the attestation ledger, the synthesis, the verdict and the draft.
+This module is only the part that stands in for the model. Its reading
+behavior is fixed — the order the lens instructions themselves ask for,
+every changed file's diff page by page, then the head files the findings
+cite — and everything that varies comes from a JSON script in the fixture
+directory, so a new scenario is a new file, not new code:
+
+```json
+{
+  "findings": {
+    "<lens name>": [{"location": "calc.py:4", "evidence": "...", ...}]
+  },
+  "unread": ["settings.ini"]
+}
+```
+
+`findings` maps a lens name to the finding objects that lens reports, in
+the finding contract's shape (each entry is validated with the real
+parser at load, so a malformed scenario is refused before a run rather
+ than discovered as a contract refusal mid-run). `unread` names changed
+files no lens ever reads, for a scenario that must end with a coverage
+gap. A lens with no entry here reports no findings.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+from types import MappingProxyType
+
+from atlas_reviewer.lens_contract import ContractError, parse_reply
+from atlas_reviewer.lens_loop import (
+    AssistantCalls,
+    FinalReply,
+    ModelTurn,
+    ToolCalls,
+    ToolRequest,
+    ToolResults,
+    TurnRequest,
+    UserText,
+)
+from atlas_reviewer.ports import BoundaryError
+
+COST_PER_TURN = Decimal("0.01")
+
+_BODY_MARKER = re.compile(r"=== lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\) ===")
+_LISTING_BLOCK = re.compile(
+    r'label="changed-files">\n(.*?)\n</untrusted-data', re.DOTALL
+)
+_LISTING_LINE = re.compile(r"^\[[^\]]+\] (.+) \(\+\d+ -\d+\)$", re.MULTILINE)
+_NEXT_PAGE = re.compile(r"next page at offset (\d+)")
+_RANGE = re.compile(r"^(.+):[1-9][0-9]*(?:-[1-9][0-9]*)?$")
+_FENCE_TAIL = "\n</untrusted-data"
+_OK = ": ok"
+
+
+class LensScriptError(ValueError):
+    """The lens script cannot be loaded: the file is missing, unreadable,
+    or holds a shape this loader does not accept."""
+
+
+@dataclass(frozen=True)
+class LensScript:
+    """`findings` maps a lens name to the finding objects it reports, in
+    reply order. `unread` names changed files no lens ever reads."""
+
+    findings: Mapping[str, tuple[Mapping[str, str], ...]]
+    unread: frozenset[str]
+
+    def findings_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
+        return self.findings.get(lens, ())
+
+
+def load_lens_script(path: Path) -> LensScript:
+    """The script at `path`, validated: every finding must parse under the
+    real finding contract (an unknown severity loads — dropping it is a
+    scenario — but any other contract problem is refused here)."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LensScriptError(f"cannot read lens script {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise LensScriptError(f"lens script {path} must hold a JSON object")
+    unknown = set(raw) - {"findings", "unread"}
+    if unknown:
+        raise LensScriptError(
+            f"lens script {path} has keys outside findings and unread: "
+            f"{', '.join(sorted(unknown))}"
+        )
+    return LensScript(_findings(path, raw.get("findings", {})), _unread(path, raw))
+
+
+def _findings(path: Path, raw: object) -> Mapping[str, tuple[Mapping[str, str], ...]]:
+    if not isinstance(raw, dict):
+        raise LensScriptError(f"lens script {path}: findings must be an object")
+    parsed: dict[str, tuple[Mapping[str, str], ...]] = {}
+    for lens, entries in raw.items():
+        if not isinstance(lens, str) or not isinstance(entries, list):
+            raise LensScriptError(
+                f"lens script {path}: each findings value must be a list of "
+                "finding objects"
+            )
+        parsed[lens] = tuple(
+            _entry(path, lens, i, entry) for i, entry in enumerate(entries, 1)
+        )
+    return MappingProxyType(parsed)
+
+
+def _entry(path: Path, lens: str, index: int, raw: object) -> Mapping[str, str]:
+    if not isinstance(raw, dict) or not all(
+        isinstance(value, str) for value in raw.values()
+    ):
+        raise LensScriptError(
+            f"lens script {path}: finding {index} for {lens!r} must be an "
+            "object of strings"
+        )
+    reply = json.dumps({"lens": lens, "body_sha256": "0" * 64, "findings": [raw]})
+    try:
+        parse_reply(reply)
+    except ContractError as exc:
+        raise LensScriptError(
+            f"lens script {path}: finding {index} for {lens!r} breaks the "
+            f"finding contract: {exc}"
+        ) from exc
+    return MappingProxyType(dict(raw))
+
+
+def _unread(path: Path, raw: Mapping[str, object]) -> frozenset[str]:
+    unread = raw.get("unread", [])
+    if not isinstance(unread, list) or not all(isinstance(p, str) for p in unread):
+        raise LensScriptError(f"lens script {path}: unread must be a list of paths")
+    return frozenset(unread)
+
+
+class LensScriptModel:
+    """The scripted reviewer one lens run talks to. Each run gets a fresh
+    instance, so a continuation starts with its own coverage state and
+    re-derives it from the turn it is handed.
+
+    The turns follow the lens instructions' own order: every changed
+    file's diff (a `diff_file` page at a time, following each truncated
+    page's next offset), then a `read_file` at HEAD of every file a
+    finding cites, then the final reply. A changed file named in the
+    script's `unread` is never diffed, and the loop's one unread-list
+    nudge is answered by finalizing again with the same findings — the
+    scenario keeps its gap. The reply's quotes are the script's, and the
+    controller verifies them against the head tree the way it verifies a
+    live model's."""
+
+    name = "lens-script"
+
+    def __init__(self, script: LensScript, cost_usd: Decimal = COST_PER_TURN) -> None:
+        self._script = script
+        self._cost = cost_usd
+        self._pages: dict[str, int | None] = {}
+        self._read: set[str] = set()
+
+    def worst_case_usd(self, request: TurnRequest) -> Decimal:
+        return self._cost
+
+    def turn(self, request: TurnRequest) -> ModelTurn:
+        lens, digest = _markers(request.system)
+        if len(request.messages) == 1:
+            # A conversation restart (a retry attempt reuses this instance):
+            # the coverage state is the old attempt's, so start over.
+            self._pages.clear()
+            self._read.clear()
+        self._note_results(request.messages)
+        if _after_first_turn(request.messages):
+            # A controller nudge (the unread list, or finalize now): the
+            # scenario holds, so finalize with what we have.
+            return self._final(lens, digest)
+        paths = _changed_paths(request.messages)
+        if paths is None:
+            raise BoundaryError("the changed-file list is missing from the first turn")
+        for path in paths:
+            self._pages.setdefault(path, 0)
+        pending = sorted(
+            (path, offset)
+            for path, offset in self._pages.items()
+            if offset is not None and path not in self._script.unread
+        )
+        if pending:
+            return ToolCalls(
+                tuple(
+                    ToolRequest("diff_file", {"path": path, "offset": offset})
+                    for path, offset in pending
+                ),
+                self._cost,
+            )
+        cited: set[str] = set()
+        for finding in self._script.findings_for(lens):
+            cited_path = _cited_path(finding)
+            if (
+                cited_path is not None
+                and cited_path in paths
+                and cited_path not in self._read
+            ):
+                cited.add(cited_path)
+        ordered = sorted(cited)
+        if ordered:
+            return ToolCalls(
+                tuple(ToolRequest("read_file", {"path": path}) for path in ordered),
+                self._cost,
+            )
+        return self._final(lens, digest)
+
+    def _final(self, lens: str, digest: str) -> FinalReply:
+        payload = {
+            "lens": lens,
+            "body_sha256": digest,
+            "findings": [dict(finding) for finding in self._script.findings_for(lens)],
+        }
+        return FinalReply(json.dumps(payload), self._cost)
+
+    def _note_results(self, messages: tuple[object, ...]) -> None:
+        """Reconcile the coverage state with the tool results already in
+        the conversation. A failed or refused call stops its file's page
+        chain: the attempt ends partial on the tool gap, not looping."""
+        calls: tuple[ToolRequest, ...] | None = None
+        for message in messages:
+            if isinstance(message, AssistantCalls):
+                calls = message.calls
+            elif isinstance(message, ToolResults) and calls is not None:
+                for call, result in zip(calls, message.results, strict=True):
+                    self._note_result(call, result)
+                calls = None
+
+    def _note_result(self, call: ToolRequest, result: object) -> None:
+        body = str(result)
+        if body.startswith("<untrusted-data"):
+            body = body.split("\n", 1)[1] if "\n" in body else ""
+        body = body.split(_FENCE_TAIL, 1)[0]
+        first = body.split("\n", 1)[0]
+        args = dict(call.args) if isinstance(call.args, Mapping) else {}
+        path = args.get("path")
+        if not isinstance(path, str):
+            return
+        if call.tool == "diff_file":
+            if _OK not in first:
+                self._pages[path] = None
+                return
+            page = _NEXT_PAGE.search(first)
+            self._pages[path] = int(page.group(1)) if page is not None else None
+        elif call.tool == "read_file" and _OK in first:
+            self._read.add(path)
+
+
+def _after_first_turn(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is a controller nudge rather than tool
+    results: any UserText after the first turn is one (the repair turn,
+    the unread list, or finalize now)."""
+    return len(messages) > 1 and isinstance(messages[-1], UserText)
+
+
+def _markers(system: str) -> tuple[str, str]:
+    match = _BODY_MARKER.search(system)
+    if match is None:
+        raise BoundaryError("the lens body markers are missing from the system prompt")
+    return match.group(1), match.group(2)
+
+
+def _changed_paths(messages: tuple[object, ...]) -> tuple[str, ...] | None:
+    """The changed paths the first turn's `changed-files` block lists, in
+    its risk order. That block is controller-assembled, so its shape is
+    the controller's; the paths inside it are PR data."""
+    first = messages[0].text if isinstance(messages[0], UserText) else ""
+    block = _LISTING_BLOCK.search(first)
+    if block is None:
+        return None
+    return tuple(match.group(1) for match in _LISTING_LINE.finditer(block.group(1)))
+
+
+def _cited_path(finding: Mapping[str, str]) -> str | None:
+    """The head file a `file:line` finding cites; a whole-file or design
+    location cites no line to read."""
+    location = finding.get("location", "")
+    match = _RANGE.match(location)
+    return match.group(1) if match is not None else None

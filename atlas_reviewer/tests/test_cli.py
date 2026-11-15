@@ -1838,28 +1838,53 @@ def test_agentic_review_refuses_a_pool_outside_one_to_sixteen(tmp_path):
 
 
 def test_agentic_review_dry_run_writes_one_draft_without_credentials(tmp_path):
-    code, out, err = run_cli(
-        "--state-dir",
-        str(tmp_path),
-        "agentic-review",
-        "--dry-run",
-        "--event",
-        EVENT,
-        "--depth",
-        "triage",
-        "--pool-size",
-        "1",
+    """The shipped fixture's lens script replays a canned reviewer: the
+    lenses run for real through the offline runner, and the draft is one
+    complete review. The whole environment is empty — no credentials."""
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "agentic-review",
+            "--dry-run",
+            "--event",
+            EVENT,
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
     )
-    assert code == cli.EXIT_INCOMPLETE, err
-    assert "coverage_complete=false" in err
-    assert "lenses=" in err
-    assert "REVIEW INCOMPLETE" in out
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    assert err.getvalue() == ""
+    status = json.loads(
+        (tmp_path / "draft.md")
+        .read_text(encoding="utf-8")
+        .splitlines()[0]
+        .removeprefix("<!-- atlas-review-status: ")
+        .removesuffix("-->")
+    )
+    assert status["coverage_complete"] is True
+    assert status["verified_findings"] == 1
+    assert status["lenses"] == {
+        "clean": 4,
+        "failed": 0,
+        "not_run": 0,
+        "partial": 0,
+    }
 
 
 def _agentic_dry_run(tmp_path):
     return run_cli(
         "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
         "--event", EVENT, "--depth", "review", "--pool-size", "1",
+        "--lens-script", str(FIXTURE / "scenarios" / "approve.json"),
     )  # fmt: skip
 
 
@@ -1867,7 +1892,7 @@ def test_agentic_review_puts_the_picker_fallback_note_in_the_draft(tmp_path):
     """The offline picker's reply is not a lens list, so selection falls
     back to the critical tier. The draft says so."""
     code, out, err = _agentic_dry_run(tmp_path)
-    assert code == cli.EXIT_INCOMPLETE, err
+    assert code == cli.EXIT_OK, err
     assert "## Lens selection" in out
     assert "the lens picker gave no usable lens list" in out
 
@@ -1963,6 +1988,48 @@ def test_agentic_review_redacts_the_pr_title_before_the_picker(tmp_path, monkeyp
     assert len(seen) == 1
     assert "Rotate" in seen[0]
     assert token not in seen[0]
+
+
+def test_a_live_review_keeps_its_ledger_in_the_state_directory(tmp_path, monkeypatch):
+    """Pinned against the dry run's per-run ledger: a live review's
+    attestation ledger is still `<state dir>/attestation.ledger`."""
+    from atlas_reviewer.attestation import AttemptLedger
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    paths = []
+
+    class SpyLedger(AttemptLedger):
+        def __init__(self, path, clock):
+            paths.append(path)
+            super().__init__(path, clock)
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "AttemptLedger", SpyLedger)
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=err,
+        sprites_factory=scripted_sprites,
+        openrouter_factory=lambda key, limits: Live(object(), key, limits=limits),
+    )  # fmt: skip
+    assert paths, err.getvalue()
+    assert paths == [tmp_path / "attestation.ledger"]
 
 
 def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatch):

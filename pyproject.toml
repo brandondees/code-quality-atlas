@@ -79,7 +79,10 @@ max-complexity = 15
 # looser-typed by convention, and this repo's tests aren't currently
 # annotated at all).
 files = ["tooling", "atlas_reviewer"]
-exclude = ["^atlas_reviewer/tests/"]
+# The tests and the sample-pr fixture's source trees (including a PR's own
+# sample modules, which can repeat a name across trees) are data, not the
+# annotated package.
+exclude = ["^atlas_reviewer/tests/", "^atlas_reviewer/fixtures/"]
 python_version = "3.12"
 warn_unused_ignores = true
 warn_redundant_casts = true

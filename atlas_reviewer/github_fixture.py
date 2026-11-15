@@ -9,7 +9,9 @@ listed under the head branch's name; `list_workflow_runs_at` serves those at one
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
 `issue-<n>.json`, `compare.json`, and a `source/` tree served as the
-tarball at any SHA.
+tarball at any SHA (the head tree); a `source-<first 7 hex of the SHA>/`
+directory, when the fixture ships one, is served at that SHA instead, so
+a fixture can give the merge base the tree the diff is against.
 Each list file is one page (`truncated` is never set). A file that is
 absent behaves like a GitHub 404; a download over its byte cap raises
 `ResponseTooLargeError`, as the live client does.
@@ -144,13 +146,24 @@ class FixtureGitHub:
 
     def get_tarball(self, repo: str, sha: str) -> bytes:
         self.calls.append(("get_tarball", repo, sha))
-        source = self._root / "source"
-        if not source.is_dir():
+        source = self._tree(sha)
+        if source is None:
             raise NotFoundError("fixture source/ not found")
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tf:
             tf.add(source, arcname=f"{repo.replace('/', '-')}-{sha[:7]}")
         return buf.getvalue()
+
+    def _tree(self, sha: str) -> Path | None:
+        """The tree served at `sha`: a `source-<first 7 hex>/` directory
+        when the fixture ships one (the tree a PR's diff is against, for
+        the merge base the compare reply names), else `source/` (the head
+        tree, served at every other SHA)."""
+        override = self._root / f"source-{sha[:7]}"
+        if override.is_dir():
+            return override
+        source = self._root / "source"
+        return source if source.is_dir() else None
 
     def get_issue(self, repo: str, number: int) -> Json:
         self.calls.append(("get_issue", repo, str(number)))
