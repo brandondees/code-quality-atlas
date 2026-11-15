@@ -1653,7 +1653,7 @@ deployed service setting changed.
 The round-1 protocol review of #707 came back COMMENT (2 Minor, 3 Nit).
 A nonterminal final reply that queues a follow-up turn — the contract
 repair, the unread-list nudge, a quote repair — and brings no new
-verified filing was never counted: the window counted only tool turns,
+verified finding was never counted: the window counted only tool turns,
 so up to about five bounded follow-up turns per attempt escaped it. The
 judgment turn is now counted as a stalled turn in `_accept_or_repair`,
 with the detector checked before the follow-up is queued, so the
@@ -1676,4 +1676,10 @@ names argument variation (ever-increasing `diff_file` offsets,
 near-identical `grep` patterns, alternate path spellings) as the first
 suspect for a lens dodging the window, bounded by the unchanged caps;
 and D66 states that a transport-timed-out turn is not counted while its
-one retry counts once. Offline only.
+one retry counts once. The round-2 review (APPROVE, 2 Nit) added one
+more pin: the `atlas.nudge` span naming is now checked end to end
+through the production trace wrapper on a nudged attempt
+(`test_a_nudged_attempt_names_the_nudge_on_the_completion_span`),
+killing mutant R5 — dropping the loop's `note_nudge` from the detector
+had passed the whole suite — and the round-1 entry's "verified filing"
+typo is corrected to "verified finding". Offline only.

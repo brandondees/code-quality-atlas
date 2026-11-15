@@ -880,6 +880,35 @@ def test_the_attempt_itself_resets_a_stale_nudge_marker(tmp_path):
         assert "atlas.nudge" not in dict(span.attributes or {})
 
 
+def test_a_nudged_attempt_names_the_nudge_on_the_completion_span(tmp_path):
+    """Round-2 review of #707, mutant R5: the loop's `note_nudge` is what
+    puts `atlas.nudge` on the completion span that answers a detector
+    nudge, and no other test exercises it through the loop -- dropping it
+    passed the whole suite. Through the production trace wrapper, the
+    stalled attempt's nudge turn is named on the span that answers it."""
+    from atlas_reviewer.tracing import memory_trace
+
+    limits = replace(LIMITS, max_turns=10, max_calls=20)
+    trace, exporter = memory_trace(str)
+    try:
+        wrapped = trace.wrap_model(ScriptedLensModel(_stall_script(True, 6)))
+        outcome, _model, _spend = attempt(tmp_path, [], model=wrapped, limits=limits)
+    finally:
+        trace.shutdown()
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+    spans = [
+        span for span in exporter.get_finished_spans() if span.name == "completion"
+    ]
+    assert spans
+    nudged = [
+        dict(span.attributes or {})["atlas.nudge"]
+        for span in spans
+        if "atlas.nudge" in dict(span.attributes or {})
+    ]
+    assert nudged == ["no-progress"]
+
+
 # -------------------------------------------------------------- outcomes
 
 
