@@ -97,6 +97,7 @@ def test_a_sprites_token_shape_is_redacted_and_reported():
         "acme/1/t/abcd1234efgh",  # a one-digit org id is a token too
         "acme/123/tok_9/abcdefgh-ij9kl_mnop",  # a three-digit org id
         "acme/5/t/abcd1234",  # an eight-character secret is the floor
+        "a-long-org-slug/4321/tok_1234567890/abcd1234efgh5678",
         "personal/4321/9876/0123456789abcdef0123456789",
     ],
 )
@@ -109,6 +110,71 @@ def test_sprites_token_ids_and_slugs_of_any_length_are_redacted(token):
 
 def test_a_seven_character_secret_segment_is_not_a_sprites_token():
     assert redact("token acme/1/t/abcd123").text == "token acme/1/t/abcd123"
+
+
+TOKEN = "personal/4321/9876/0123456789abcdef0123456789"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        TOKEN,
+        f"Bearer {TOKEN}",
+        f"ATLAS_SPRITES_TOKEN={TOKEN}",
+        f'{{"t": "{TOKEN}"}}',
+        f"'{TOKEN}'",
+        f"--token {TOKEN}",
+    ],
+)
+def test_a_token_is_redacted_in_every_position_it_appears_in(line):
+    """The boundary accepts a token standing alone and after the separators
+    it really follows: whitespace, `=`, `:` and a quote (review round 2 of
+    PR #687)."""
+    out = redact(line)
+    assert "4321" not in out.text
+    assert "[REDACTED:sprites-token]" in out.text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "https://github.com/o/r/pull/687/commits/"
+        "0123456789abcdef0123456789abcdef01234567",
+        "https://github.com/o/r/actions/runs/43653737695/job/12345678901",
+        "https://api.github.com/repos/o/r/issues/123/comments/4567890123",
+        "https://gitlab.com/g/p/-/merge_requests/42/diffs/abc12345678",
+        "https://files.pythonhosted.org/packages/45/ab/"
+        "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl",
+        "https://example.com/2026/11/14/report2026",
+        "src/app/2/components/Button2Base.tsx",
+        "node_modules/@types/node/16/fs/promises1.d.ts",
+        "acme/v2/tok_9/abcdefg1",
+    ],
+)
+def test_a_url_or_path_is_not_a_sprites_token(text):
+    """Review round 2 of PR #687, Minor 1: the match may not start where a
+    URL path's segments begin (after `/`, `.`, `-` or `_`), so commit and
+    job links, wheel URLs and dated paths are not findings; and the second
+    segment must be all digits (`acme/v2/...` is not)."""
+    assert redact(text).text == text
+    assert detect_secrets(text).hits == ()
+
+
+def test_a_diff_with_url_shapes_gets_no_committed_secret_finding():
+    diff = (
+        "diff --git a/README.md b/README.md\n"
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1,2 +1,4 @@\n"
+        " see the run\n"
+        "+https://github.com/o/r/pull/687/commits/"
+        "0123456789abcdef0123456789abcdef01234567\n"
+        "+https://files.pythonhosted.org/packages/45/ab/"
+        "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl\n"
+    )
+    scan = scan_diff(diff)
+    assert scan.findings == ()
+    assert scan.values == ()
 
 
 @pytest.mark.parametrize(

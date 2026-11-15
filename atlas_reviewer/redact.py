@@ -58,14 +58,19 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     # carrying at least one digit, which an ordinary four-segment path
     # such as `repos/<id>/issues/comments` does not. The CLI docs'
     # example `my-org/token-id/secret` shows the same shape without the
-    # numeric id. Issue #663; re-grounded in review round 1 of PR #687,
-    # which found the first draft's literal `org/` anchor matched no real
-    # token and flagged the `w3.org` XML-schema namespace instead.
+    # numeric id. The match may not start after a `/`, `.`, `-` or `_` --
+    # where a URL path's segments begin -- so a link whose path happens
+    # to fit the shape is not flagged (review round 2 of PR #687,
+    # Minor 1); a bare relative path at the start of a line still is,
+    # which no boundary can distinguish from a token. Issue #663;
+    # re-grounded in review round 1 of PR #687, which found the first
+    # draft's literal `org/` anchor matched no real token and flagged
+    # the `w3.org` XML-schema namespace instead.
     (
         "sprites-token",
         re.compile(
-            r"\b[A-Za-z0-9_-]{1,40}/\d{1,12}/[A-Za-z0-9_-]{1,40}/"
-            r"(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}"
+            r"(?<![A-Za-z0-9_./-])[A-Za-z0-9_-]{1,40}/\d{1,12}/"
+            r"[A-Za-z0-9_-]{1,40}/(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{8,}"
         ),
     ),
     (
@@ -257,7 +262,8 @@ def _encodings(secret: str) -> tuple[str, ...]:
     with undecodable bytes scrubs instead of crashing redaction. Not
     covered: base64 of a blob that carries the value at a shifted 3-byte
     alignment (`Bearer <secret>` encoded whole), a value split across
-    lines, and hex in mixed case; D59 states these limits."""
+    lines, hex in mixed case, and lower-case percent escapes (`%2f`
+    against the upper-case `%2F` this builds); D60 states these limits."""
     raw = secret.encode("utf-8", errors="surrogateescape")
     standard = base64.b64encode(raw).decode("ascii")
     urlsafe = base64.urlsafe_b64encode(raw).decode("ascii")
