@@ -46,7 +46,7 @@ from atlas_reviewer.lens_contract import (
     Severity,
     Valence,
 )
-from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError
+from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError, UserText
 from atlas_reviewer.ports import ByokRefusedError, RefusedError
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
@@ -416,9 +416,12 @@ def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
 def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     tmp_path,
 ):
+    """With the repair bound at 0 (D64), a failed quote is not repaired
+    in-session and the attempt stays what it was: retryable, so the retry
+    runs and the still-bad quote escalates."""
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
-    script = [READ_ALL, final(finding(), wrong)] * 2
-    result, _, _ = review(tmp_path, script)
+    script = [READ_ALL, final(finding(), wrong), final(finding(), wrong)] * 2
+    result, _, _ = review(tmp_path, script, limits=replace(LIMITS, quote_repairs=0))
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
     assert [f.id for f in result.verified] == ["L1-F1"]
@@ -429,12 +432,55 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert "## Not verified (not reported as findings)" in draft
 
 
+def test_a_failed_quote_is_repaired_in_the_session_and_the_lens_settles_clean(
+    tmp_path,
+):
+    """D64: the rejected quotes go back once in the same conversation, so
+    one bad line range does not re-run the lens; the repaired reply is
+    re-checked by the same checker and the lens settles clean in one
+    attempt."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, model, _ = review(
+        tmp_path, [READ_ALL, final(finding(), wrong), final(finding())]
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 1, False)
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.event is ReviewEvent.COMMENT
+    assert "1 quote-repair turn(s)" in render_draft(result, Redactor())
+    repair = model.requests[2].messages[-1]
+    assert isinstance(repair, UserText)
+    assert 'label="failed-quotes"' in repair.text
+    assert "drop the finding" in repair.text
+
+
+def test_a_window_correction_is_counted_in_the_lens_line(tmp_path):
+    """D64: the tolerance window's corrected citations are counted on the
+    lens line, next to the per-finding source tag."""
+    drifted = finding(location="calc.py:4")
+    result, _, _ = review(tmp_path, [READ_ALL, final(drifted)])
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    (minted,) = result.verified
+    assert minted.source == QuoteSource.HEAD_NEAR.value
+    assert str(minted.finding.location) == "calc.py:2"
+    draft = render_draft(result, Redactor())
+    assert "1 citation(s) corrected within the window" in draft
+    assert "head within 3 lines of the citation" in draft
+
+
 def test_a_verified_finding_survives_an_empty_retry(tmp_path):
     """#691: one unverifiable quote retries the lens; the empty retry must
-    not throw away the finding the first attempt verified."""
+    not throw away the finding the first attempt verified. The repair
+    bound is 0 here, so the quote failure stays retryable and the retry
+    path itself is what runs."""
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
     result, _, _ = review(
-        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final()]
+        tmp_path,
+        [READ_ALL, final(finding(), wrong), READ_ALL, final()],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 2, False)
@@ -448,7 +494,9 @@ def test_a_verified_finding_survives_an_empty_retry(tmp_path):
 def test_a_verified_finding_survives_a_retry_that_verifies_less(tmp_path):
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
     result, _, _ = review(
-        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final(wrong)]
+        tmp_path,
+        [READ_ALL, final(finding(), wrong), READ_ALL, final(wrong)],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
@@ -468,6 +516,7 @@ def test_a_retry_that_never_attests_keeps_the_lens_failed(tmp_path):
         # The unparseable reply earns its one repair turn (D44); the
         # second one is the attempt's result.
         [READ_ALL, final(finding(), wrong), READ_ALL, final(text=bad), final(text=bad)],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.FAILED, True)
@@ -1181,11 +1230,11 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
     assert TOKEN not in draft
 
 
-def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
+def test_a_quote_matched_within_the_window_is_tagged_in_the_draft():
     drifted = CheckedFinding(checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR)
     result = synthesize([lens_result(clean(drifted))])
     draft = render_draft(result, Redactor())
-    assert "head within 2 lines of the citation" in draft
+    assert "head within 3 lines of the citation" in draft
     assert result.event is ReviewEvent.COMMENT
 
 

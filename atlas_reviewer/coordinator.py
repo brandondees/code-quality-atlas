@@ -1429,6 +1429,12 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append("escalated: the retry also failed")
     if r.retry_pending:
         parts.append("its retry did not run before the review ended")
+    repairs = o.nudges.count("quote-repair")
+    if repairs:
+        parts.append(f"{repairs} quote-repair turn(s)")
+    corrections = sum(1 for c in o.findings if c.source is QuoteSource.HEAD_NEAR)
+    if corrections:
+        parts.append(f"{corrections} citation(s) corrected within the window")
     if o.dropped:
         parts.append(f"{len(o.dropped)} finding(s) dropped")
     if o.detail:
