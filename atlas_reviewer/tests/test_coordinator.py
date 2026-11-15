@@ -22,6 +22,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
+from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.coordinator import (
     HALTED_REASON,
     LATE_REASON,
@@ -121,6 +122,34 @@ def test_a_model_with_other_per_call_limits_is_refused_before_anything_runs(tmp_
         review(tmp_path, [], sprites=sprites, model=model)
     assert sprites.calls == []
     assert not (tmp_path / "state").exists()
+
+
+def test_a_refusals_detail_reaches_the_drafts_lens_line(tmp_path):
+    """Review round 2 of PR #687, Minor 2: the adapter records a failed
+    endpoint read in the provider's budget, and what the operator reads in
+    the agentic draft is the lens line's cause detail, which carries the
+    refusal text; the agentic draft does not print the provider's budget
+    refusals as a separate list."""
+
+    class Refusing:
+        name = "refusing"
+
+        def worst_case_usd(self, request):
+            raise BudgetRefusedError(
+                "refusing inference: no eligible zero-data-retention endpoint"
+            )
+
+        def turn(self, request):
+            raise AssertionError("a refused call is not sent")
+
+    result, _model, _sprites = review(tmp_path, [], model=Refusing())
+    line = next(
+        line
+        for line in render_draft(result, Redactor()).splitlines()
+        if line.startswith(f"- L1 {LENS}:")
+    )
+    assert "a model call was refused" in line
+    assert "no eligible zero-data-retention endpoint" in line
 
 
 def test_a_model_that_names_these_limits_still_runs(tmp_path):

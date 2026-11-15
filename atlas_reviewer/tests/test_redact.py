@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
+import base64
+
 import pytest
 
+from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.redact import (
     TRUNCATION_MARKER,
     RedactedText,
@@ -67,6 +70,234 @@ def test_controller_credentials_are_scrubbed_by_exact_value():
     assert "plainsecretvalue" not in result.text
     assert "short" in result.text
     assert result.redaction_count == 1
+
+
+SPRITES_TOKEN = "personal/4321/9876/0123456789abcdef0123456789"
+
+
+def test_a_sprites_token_shape_is_redacted_and_reported():
+    """Issue #663: no pattern covered the controller's Sprites token, so a
+    value the controller does not hold survived redaction. The shape is the
+    one the operator confirmed the deployed token has -- four
+    slash-separated segments `<org slug>/<numeric org id>/<token id>/<secret>`,
+    every segment `[A-Za-z0-9_-]`, only the second all digits; the value
+    here is synthetic."""
+    result = redact(f"token {SPRITES_TOKEN} after")
+    assert SPRITES_TOKEN not in result.text
+    assert result.text == "token [REDACTED:sprites-token] after"
+    assert result.redaction_count == 1
+    scan = detect_secrets(f"auth = {SPRITES_TOKEN}\n")
+    assert scan.hits == (SecretHit("sprites-token", 1),)
+    assert scan.values == (SPRITES_TOKEN,)
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "acme/1/t/abcd1234efgh",  # a one-digit org id is a token too
+        "acme/123/tok_9/abcdefgh-ij9kl_mnop",  # a three-digit org id
+        "acme/5/t/abcd1234",  # an eight-character secret is the floor
+        "a-long-org-slug/4321/tok_1234567890/abcd1234efgh5678",
+        "personal/4321/9876/0123456789abcdef0123456789",
+    ],
+)
+def test_sprites_token_ids_and_slugs_of_any_length_are_redacted(token):
+    out = redact(f"bearer {token}")
+    assert token not in out.text
+    assert out.text == "bearer [REDACTED:sprites-token]"
+    assert out.redaction_count == 1
+
+
+def test_a_seven_character_secret_segment_is_not_a_sprites_token():
+    assert redact("token acme/1/t/abcd123").text == "token acme/1/t/abcd123"
+
+
+TOKEN = "personal/4321/9876/0123456789abcdef0123456789"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        TOKEN,
+        f"Bearer {TOKEN}",
+        f"ATLAS_SPRITES_TOKEN={TOKEN}",
+        f'{{"t": "{TOKEN}"}}',
+        f"'{TOKEN}'",
+        f"--token {TOKEN}",
+    ],
+)
+def test_a_token_is_redacted_in_every_position_it_appears_in(line):
+    """The boundary accepts a token standing alone and after the separators
+    it really follows: whitespace, `=`, `:` and a quote (review round 2 of
+    PR #687)."""
+    out = redact(line)
+    assert "4321" not in out.text
+    assert "[REDACTED:sprites-token]" in out.text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "https://github.com/o/r/pull/687/commits/"
+            "0123456789abcdef0123456789abcdef01234567"
+        ),
+        "https://github.com/o/r/actions/runs/43653737695/job/12345678901",
+        "https://api.github.com/repos/o/r/issues/123/comments/4567890123",
+        "https://gitlab.com/g/p/-/merge_requests/42/diffs/abc12345678",
+        (
+            "https://files.pythonhosted.org/packages/45/ab/"
+            "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl"
+        ),
+        "https://example.com/2026/11/14/report2026",
+        "src/app/2/components/Button2Base.tsx",
+        "node_modules/@types/node/16/fs/promises1.d.ts",
+        "acme/v2/tok_9/abcdefg1",
+    ],
+)
+def test_a_url_or_path_is_not_a_sprites_token(text):
+    """Review round 2 of PR #687, Minor 1: the match may not start where a
+    URL path's segments begin (after `/`, `.`, `-` or `_`), so commit and
+    job links, wheel URLs and dated paths are not findings; and the second
+    segment must be all digits (`acme/v2/...` is not)."""
+    assert redact(text).text == text
+    assert detect_secrets(text).hits == ()
+
+
+def test_a_diff_with_url_shapes_gets_no_committed_secret_finding():
+    diff = (
+        "diff --git a/README.md b/README.md\n"
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1,2 +1,4 @@\n"
+        " see the run\n"
+        "+https://github.com/o/r/pull/687/commits/"
+        "0123456789abcdef0123456789abcdef01234567\n"
+        "+https://files.pythonhosted.org/packages/45/ab/"
+        "0123456789abcdef0123456789abcdef01/requests-2.31.0-py3-none-any.whl\n"
+    )
+    scan = scan_diff(diff)
+    assert scan.findings == ()
+    assert scan.values == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "http://www.w3.org/2001/XMLSchema-instance",
+        "/org/123/repositories",
+        "https://api.example.com/org/42/members-list",
+        "repos/123/issues/comments",
+        "api/2024/users/list",
+        "my-org//tok9/abcd1234efgh",
+        "my-org/tok_1234/abcdef0123456789abcdef",
+        "w3.org/2000/svg",
+        "borg/1/abcdefgh",
+    ],
+)
+def test_text_merely_shaped_like_a_sprites_token_survives(text):
+    """A token is four segments with a numeric second one and a secret that
+    carries a digit; the CLI docs' three-segment example, an empty org id,
+    and ordinary four-segment paths are not tokens."""
+    assert redact(text).text == text
+
+
+def test_a_pom_xml_diff_with_the_schema_namespace_gets_no_finding():
+    """Review round 1 of PR #687: the first pattern flagged the standard
+    XML-schema namespace in every Maven pom.xml, XSD or WSDL diff. The
+    scanner must report none."""
+    diff = (
+        "diff --git a/pom.xml b/pom.xml\n"
+        "--- a/pom.xml\n"
+        "+++ b/pom.xml\n"
+        "@@ -0,0 +1,3 @@\n"
+        '+<?xml version="1.0"?>\n'
+        '+<project xmlns="http://maven.apache.org/POM/4.0.0"\n'
+        '+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+    )
+    scan = scan_diff(diff)
+    assert scan.findings == ()
+    assert scan.values == ()
+
+
+def test_a_seven_character_value_is_below_the_scrub_floor_and_an_eight_is_not():
+    """Review round 1 of PR #687, mutants R1/R2: the 8-character floor on a
+    known value is pinned from both sides."""
+    eight = Redactor(("abcdefgh",))("value abcdefgh kept")
+    assert eight.text == "value [REDACTED:controller-credential] kept"
+    seven = Redactor(("abcdefg",))("value abcdefg kept")
+    assert seven.text == "value abcdefg kept"
+    assert seven.redaction_count == 0
+
+
+def test_known_credentials_are_scrubbed_in_base64_and_hex():
+    """Issue #663: the known-value scrub was an exact substring replace, so
+    a log that carried the controller's credential base64- or hex-encoded
+    kept it. Every encoding of the value is scrubbed under the same
+    label."""
+    secret = "org/123/plainsecretvalue"
+    raw = secret.encode()
+    forms = {
+        "raw": secret,
+        "base64": base64.b64encode(raw).decode(),
+        "base64url": base64.urlsafe_b64encode(raw).decode(),
+        "hex": raw.hex(),
+    }
+    out = Redactor((secret,))(f"raw {secret} b64 {forms['base64']} hex {forms['hex']}")
+    assert out.text == (
+        "raw [REDACTED:controller-credential]"
+        " b64 [REDACTED:controller-credential]"
+        " hex [REDACTED:controller-credential]"
+    )
+    assert out.redaction_count == 3
+    flagged = Redactor(flagged=(secret,))(f"quoted b64 {forms['base64']}")
+    assert forms["base64"] not in flagged.text
+    assert flagged.redaction_count == 1
+
+
+ENCODED_VALUE = "org/123/~~??value"
+ENCODED_RAW = ENCODED_VALUE.encode()
+ENCODED_STD = "b3JnLzEyMy9+fj8/dmFsdWU="
+ENCODED_URL = "b3JnLzEyMy9-fj8_dmFsdWU="
+
+
+def test_every_encoding_form_of_a_known_value_is_scrubbed():
+    """Review round 1 of PR #687, Minor 2: unpadded base64, upper-case hex,
+    the percent-encoded form and the JSON-escaped form are scrubbed too.
+    This value's standard and URL-safe base64 differ and need padding, so
+    neither variant can stand in for the other."""
+    out = Redactor((ENCODED_VALUE,))(
+        f"{ENCODED_STD} {ENCODED_STD.rstrip('=')} {ENCODED_URL}"
+        f" {ENCODED_URL.rstrip('=')} {ENCODED_RAW.hex()}"
+        f" {ENCODED_RAW.hex().upper()}"
+        " org%2F123%2F~~%3F%3Fvalue org\\/123\\/~~??value"
+    )  # fmt: skip
+    assert out.text == " ".join(["[REDACTED:controller-credential]"] * 8)
+    assert out.redaction_count == 8
+    # The padded form is cut whole: no "=" survives the replacement.
+    padded = Redactor((ENCODED_VALUE,))(f"token {ENCODED_STD}")
+    assert padded.text == "token [REDACTED:controller-credential]"
+
+
+def test_overlapping_known_values_replace_longest_first():
+    """Review round 1 of PR #687, mutant E5: when one known value contains
+    another, the longer is replaced first, so the shorter's replacement
+    cannot chop the longer and leave its tail."""
+    out = Redactor(("abcdefgh", "abcdefgh1234"))("token abcdefgh1234")
+    assert out.text == "token [REDACTED:controller-credential]"
+    assert out.redaction_count == 1
+
+
+def test_a_value_with_undecodable_bytes_is_scrubbed_not_fatal():
+    """Review round 1 of PR #687, Nit 3: a known secret read from the
+    environment can carry bytes no UTF-8 decode accepts. Redaction must
+    never crash on one."""
+    import os
+
+    value = os.fsdecode(b"tok\xff\xfeen1234567")
+    out = Redactor((value,))(f"token {value} after")
+    assert value not in out.text
+    assert out.redaction_count == 1
 
 
 def test_clean_text_is_untouched_and_truncation_is_marked():
