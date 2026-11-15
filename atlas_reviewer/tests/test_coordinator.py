@@ -549,6 +549,10 @@ def test_a_repair_reply_that_names_another_lens_keeps_the_verified_findings(
     assert first.outcome.causes == {Cause.QUOTES_FAILED}
     assert [c.verified for c in first.outcome.findings] == [True, False]
     assert "the reply named another lens or body" in first.outcome.detail
+    # The fold carries the attempt's nudges, not the held outcome's own:
+    # the held judgment was built before the repair turn was counted
+    # (round-3 review of #703, Nit 1).
+    assert first.outcome.nudges == ("quote-repair",)
 
 
 def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
@@ -587,11 +591,11 @@ def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
 
 def test_the_held_folds_the_attempts_current_state(tmp_path):
     """Round-2 review of #703, Nit 1: the fold takes the attempt's current
-    tools, turns, unread list and nudges, not the held outcome's own. The
-    repair turn here is answered with the diff read that closes coverage,
-    then a prose reply earns D44's contract repair and the cap lands: the
-    recorded attempt shows the read (three tool calls, five turns, no
-    unread files, both nudges), not the held reply's older ones."""
+    tools, turns and unread list, not the held outcome's own. The repair
+    turn here is answered with the diff read that closes coverage, then a
+    prose reply earns D44's contract repair and the cap lands: the
+    recorded attempt shows the read (two tool calls, five turns, no
+    unread files), not the held reply's older ones."""
     wrong = finding(evidence="not in the head file", severity="blocker")
     result, _, _ = review(
         tmp_path,
