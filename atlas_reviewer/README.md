@@ -1060,7 +1060,7 @@ D41 records the 2026-11-12 probe that did.
   ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
   `ATLAS_POOL_SIZE` is set. `create_retries` is how many times a 429'd
-  Sprite create waits and retries before giving up (D60): 0 to 24,
+  Sprite create waits and retries before giving up (D62): 0 to 24,
   default 6, the waits doubling from 2s capped at 60s, so the default
   spends about two minutes where #636's three waits spent 7. A Retry-After
   header the 429 carries is honored up to a 120s per-wait cap, and the

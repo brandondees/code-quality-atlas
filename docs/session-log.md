@@ -1359,7 +1359,7 @@ scratch. Nothing is read from the environment and no network client is
 constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
 
-## 2026-11-15 — one lens's refused runner no longer aborts the review (D60)
+## 2026-11-15 — one lens's refused runner no longer aborts the review (D62)
 
 The 2026-11-14 trials lost three reviews to Sprites capacity: about 12
 pooled lenses created Sprites at once, the three waits of 1, 2 and 4s
