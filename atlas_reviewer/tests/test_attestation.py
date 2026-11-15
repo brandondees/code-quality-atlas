@@ -670,6 +670,43 @@ def test_an_unattested_first_attempt_carries_nothing_into_the_merge():
     assert step.outcome.state is LensState.CLEAN
 
 
+def test_an_unattested_first_attempt_carries_no_findings_even_real_ones():
+    """The attested-only skip, pinned against a ledger line that carries
+    findings on an attempt that never attested: production does not write
+    one, but the merge must not trust one either."""
+    unattested = AttemptOutcome(
+        Attestation.UNACKNOWLEDGED,
+        frozenset({Cause.UNPARSED}),
+        findings=(verified(finding()),),
+    )
+    step = next_step((Attempt(1, unattested), Attempt(2, CLEAN)))
+    assert step.outcome.findings == ()
+    assert step.outcome.state is LensState.CLEAN
+
+
+@pytest.mark.parametrize(
+    ("part", "changed"),
+    [
+        ("location", replace(finding(), location=LineRange("calc.py", 3, 3))),
+        ("severity", replace(finding(), severity=Severity.NIT)),
+        ("valence", replace(finding(), valence=Valence.IMPROVEMENT)),
+        ("attribution", replace(finding(), attribution=Attribution.PRE_EXISTING)),
+    ],
+    ids=["location", "severity", "valence", "attribution"],
+)
+def test_findings_alike_but_for_one_key_part_are_both_kept(part, changed):
+    """Each key part is load-bearing: two verified findings that differ
+    only in it are two findings, so dropping the part from the identity
+    would collapse them and lose the earlier one."""
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(changed))),
+            Attempt(2, AttemptOutcome(Attestation.ATTESTED, findings=(verified(finding()),))),
+        )
+    )  # fmt: skip
+    assert [c.finding for c in step.outcome.findings] == [finding(), changed]
+
+
 def test_a_settled_single_attempt_keeps_its_own_duplicate_findings():
     clean = AttemptOutcome(
         Attestation.ATTESTED, findings=(verified(finding()), verified(finding()))
