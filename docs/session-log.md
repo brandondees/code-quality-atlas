@@ -1409,3 +1409,35 @@ attempt never attested keeps them on the ledger but reports none. The
 retry prompt is unchanged — the body is still applied whole. Policy
 tests in `test_attestation.py`, end-to-end over the real bridge with the
 scripted model in `test_coordinator.py`. Offline only.
+
+## 2026-11-15 — Anthropic routes pin one endpoint, and the draft counts prompt-cache misses (#695, D63)
+
+The Nov 14 trials' Sonnet runs paid to rewrite the whole context on
+about a third of their turns: the default pin's bare `amazon-bedrock`
+slug matched every eligible Bedrock endpoint, regions included, each
+endpoint keeps its own prompt cache, and consecutive turns of one lens
+conversation alternated between them (72 of 146 turns missed on #661,
+46 of 179 on #640; cache writes ran 1.73x and 1.66x the sessions'
+final contexts). Haiku, served by Google Vertex all run, missed none
+of its 217 turns. An Anthropic-family model id (anything under
+`anthropic/`) now defaults `provider.only` to the single endpoint
+`google-vertex/global` — of the three tags with a `safety_retention:
+false` ZDR row for both that Sonnet and that Haiku on the list
+(`google-vertex/global`, `google-vertex/europe`, and
+`amazon-bedrock/eu-west-1`), it is the cheapest, at $0.10 cache read
+and $2.50 cache write per million against $0.11/$2.75 on both others,
+and the only region-unbound one; the bare `amazon-bedrock` tag prices
+the same for Sonnet but has no Haiku row and expands to regional
+endpoints. Any other model keeps
+the four-slug pin, and `ATLAS_PROVIDERS`/`--providers` still overrides.
+A pin the list does not serve is refused before any request, so a bad
+pin fails loudly instead of spreading. The agentic draft gains a
+`## Prompt cache` section: per session (one conversation, bounded by
+the system prompt), the turns, the turns whose reported cached tokens
+fell short of the previous turn's prompt (or reported none), the
+cache-write total, and the final context, plus a run total of writes
+against the summed final contexts — the check issue #695 names for
+confirming the fix on any future run. `cache_stats.py` holds the
+tracker, model-agnostic; `OpenRouterLensModel` feeds it. Offline only:
+no live model call was made for this change, and the tests pin every
+rule with fakes and recorded HTTP.
