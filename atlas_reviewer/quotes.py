@@ -7,8 +7,9 @@ lines of the head file, or among the PR diff's removed lines of that file
 (code the PR deletes is not in the head). The head files are the changed
 ones plus, through `with_head_files`, any file the lens read at head. The cited span is the quote's
 own line count: one line of evidence needs `start == end`, and several
-lines need a range of that many lines. A wider range is not searched, so
-a quote cannot verify against a line the citation does not name. A range
+lines need a range of that many lines — a wider cited range matches only
+where the drifted window below puts the quote, never anywhere inside it.
+A range
 that runs past the end of the file is not trimmed to the file and
 searched, since that would let a quote match anywhere in it. A whole-file
 finding is verified when the path is in the head tree or the diff. A
@@ -22,12 +23,14 @@ shorter than `MIN_FRAGMENT_CHARS` non-space characters must be the whole
 line, so a quote such as `}` cannot pass by luck. A quote of several
 lines must be those cited lines, after that whitespace collapse. A quote
 of whole lines whose text is at least `MIN_FRAGMENT_CHARS` non-space
-characters may also match the same number of lines starting within
-`QUOTE_DRIFT` lines of the citation. That match is tagged as drifted, and
+characters may also match `len(quote)` consecutive head lines starting
+within `tolerance` lines of the citation's first line (D64 amends D40's
+span rule and D47's drift search: the quote's own line count sets the
+searched span, and the window is `QUOTE_TOLERANCE` lines by default).
+That match is tagged as drifted, and
 the verified finding's location becomes the matched head lines, so the
 location names the lines that hold the quote. A shorter quote, including
-`}`, does not get that search, and a wider cited range is still not
-searched. Removed lines match within one run of consecutive `-` lines of
+`}`, does not get that search. Removed lines match within one run of consecutive `-` lines of
 one hunk, at any line of the file's diff, with the same whitespace
 collapse, and the span rule does not apply to them: D31 checks the head
 at the cited range, and the removed side has no head line. A removed
@@ -48,15 +51,17 @@ from atlas_reviewer.lens_contract import DesignRef, Finding, LineRange, WholeFil
 from atlas_reviewer.runner import refused_archive
 
 MIN_FRAGMENT_CHARS = 8
-# A whole-line quote may sit this many lines off the citation.
-QUOTE_DRIFT = 2
+# A whole-line quote may sit this many lines off the citation: the
+# tolerance window (D64). The quote's own line count sets the searched
+# span inside it.
+QUOTE_TOLERANCE = 3
 MAX_CHECKED_FILE_BYTES = 8 * 1024 * 1024
 _HUNK_START = "@@ "
 
 
 class QuoteSource(StrEnum):
     HEAD = "head"
-    HEAD_NEAR = f"head within {QUOTE_DRIFT} lines of the citation"
+    HEAD_NEAR = f"head within {QUOTE_TOLERANCE} lines of the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
 
@@ -191,7 +196,9 @@ def _runs(text: str) -> tuple[tuple[str, ...], ...]:
     return tuple(runs)
 
 
-def check_quote(finding: Finding, sources: SourceText) -> QuoteCheck:
+def check_quote(
+    finding: Finding, sources: SourceText, tolerance: int = QUOTE_TOLERANCE
+) -> QuoteCheck:
     location = finding.location
     match location:
         case DesignRef():
@@ -203,10 +210,12 @@ def check_quote(finding: Finding, sources: SourceText) -> QuoteCheck:
                 return Unverified(finding, sources.unreadable)
             return Unverified(finding, "the path is not in the head tree or the diff")
         case LineRange():
-            return _check_range(finding, location, sources)
+            return _check_range(finding, location, sources, tolerance)
 
 
-def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> QuoteCheck:
+def _check_range(
+    finding: Finding, where: LineRange, sources: SourceText, tolerance: int
+) -> QuoteCheck:
     quote = _quote_lines(finding.evidence)
     if not quote:
         return Unverified(finding, "the evidence quotes nothing")
@@ -219,7 +228,7 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
         return Verified(finding, QuoteSource.HEAD)
     if any(_found(quote, run) for run in sources.removed.get(where.path, ())):
         return Verified(finding, QuoteSource.REMOVED)
-    near = None if head is None or not span_matches else _near(quote, head, where)
+    near = None if head is None else _drifted(quote, head, where, tolerance)
     if near is not None:
         return Verified(replace(finding, location=near), QuoteSource.HEAD_NEAR)
     if head is None and sources.unreadable:
@@ -276,29 +285,42 @@ def _squash(line: str) -> str:
     return " ".join(line.split())
 
 
-def _near(
-    quote: tuple[str, ...], head: tuple[str, ...], where: LineRange
+def _drifted(
+    quote: tuple[str, ...],
+    head: tuple[str, ...],
+    where: LineRange,
+    tolerance: int,
 ) -> LineRange | None:
-    """The head lines a whole-line quote matches within `QUOTE_DRIFT`
-    lines of the citation, or None. A fragment does not qualify: it would
-    match a nearby line that merely contains the words."""
+    """The head lines a whole-line quote matches when a window of the
+    quote's own line count starts within `tolerance` lines of the
+    citation's first line (D64), or None. A fragment does not qualify: it
+    would match a nearby line that merely contains the words. Delta 0 is
+    the span-mismatch case: the quote's lines start at the citation but
+    the cited span was not the quote's length. The nearest match wins:
+    deltas are tried 0, +1, -1, +2, -2, and so on to the tolerance."""
     joined = "".join(_squash(line).replace(" ", "") for line in quote)
     if len(joined) < MIN_FRAGMENT_CHARS:
         return None
     wanted = tuple(_squash(line) for line in quote)
-    for delta in range(1, QUOTE_DRIFT + 1):
-        for sign in (1, -1):
-            start = where.start + sign * delta
-            if start < 1:
-                continue
-            shifted = LineRange(where.path, start, where.end + sign * delta)
-            window = _cited_lines(head, shifted)
-            if window is not None and tuple(_squash(line) for line in window) == wanted:
-                return shifted
+    length = len(quote)
+    for delta in _window_deltas(tolerance):
+        start = where.start + delta
+        if start < 1:
+            continue
+        window = head[start - 1 : start - 1 + length]
+        if len(window) == length and tuple(_squash(line) for line in window) == wanted:
+            return LineRange(where.path, start, start + length - 1)
     return None
 
 
+def _window_deltas(tolerance: int) -> Iterable[int]:
+    yield 0
+    for distance in range(1, tolerance + 1):
+        yield distance
+        yield -distance
+
+
 def check_all(
-    findings: Iterable[Finding], sources: SourceText
+    findings: Iterable[Finding], sources: SourceText, tolerance: int = QUOTE_TOLERANCE
 ) -> tuple[QuoteCheck, ...]:
-    return tuple(check_quote(f, sources) for f in findings)
+    return tuple(check_quote(f, sources, tolerance) for f in findings)

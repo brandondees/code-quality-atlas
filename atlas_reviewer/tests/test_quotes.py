@@ -107,7 +107,6 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
 @pytest.mark.parametrize(
     ("start", "end", "evidence"),
     [
-        (4, 7, "return sum(round(x, 2) for x in xs)"),
         (1, 3, "sum("),
         (4, 7, "if not xs:\n    return total(xs) / len(xs)"),
         (4, 7, "if not xs:\n        return 1"),
@@ -115,6 +114,9 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
     ],
 )
 def test_a_quote_not_at_the_cited_range_is_not_verified(start, end, evidence):
+    """Line 2's whole-line text cited as 4-7 verifies now -- as a drifted
+    match whose location is corrected (D64); it moved to
+    `test_a_whole_line_quote_within_the_window_is_verified_as_drifted`."""
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
@@ -143,12 +145,19 @@ def test_internal_whitespace_does_not_reject_the_cited_line():
     [
         (1, 1, "return sum(round(x, 2) for x in xs)"),
         (4, 4, "return sum(round(x, 2) for x in xs)"),
+        (5, 5, "return sum(round(x, 2) for x in xs)"),
         (6, 7, "if not xs:\n    return 0"),
+        (4, 4, "return total(xs) / len(xs)"),
+        (8, 8, "return total(xs) / len(xs)"),
     ],
 )
-def test_a_whole_line_quote_within_two_lines_is_verified_as_drifted(
+def test_a_whole_line_quote_within_the_window_is_verified_as_drifted(
     start, end, evidence
 ):
+    """D64 widens D47's drift search: a whole-line quote may match a
+    window of its own line count starting within three lines of the
+    citation, so the off-by-one, the span mismatch and a two-line slip
+    all verify, with the location corrected."""
     result = check(LineRange("calc.py", start, end), evidence)
     assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
 
@@ -156,6 +165,65 @@ def test_a_whole_line_quote_within_two_lines_is_verified_as_drifted(
 def test_a_drifted_quote_takes_the_location_of_the_matched_lines():
     result = check(LineRange("calc.py", 4, 4), "return sum(round(x, 2) for x in xs)")
     assert result.finding.location == LineRange("calc.py", 2, 2)
+
+
+def test_a_whole_line_quote_exactly_three_lines_off_is_the_window_edge():
+    at_edge = check(LineRange("calc.py", 4, 4), "return total(xs) / len(xs)")
+    assert at_edge == Verified(at_edge.finding, QuoteSource.HEAD_NEAR)
+    assert at_edge.finding.location == LineRange("calc.py", 7, 7)
+    beyond = check(LineRange("calc.py", 1, 1), "return total(xs) / len(xs)")
+    assert isinstance(beyond, Unverified)
+    assert "not at that range" in beyond.reason
+
+
+def test_a_span_mismatch_lets_the_quote_set_the_span():
+    """The issue's span-mismatch cases: a quote whose line count differs
+    from the cited span verifies when its lines start within the window,
+    and the finding carries the corrected range (D64 amends D40's span
+    rule)."""
+    # A two-line quote cited as three lines (6-8), starting one above the
+    # citation's first line.
+    short = check(LineRange("calc.py", 6, 8), "if not xs:\n    return 0")
+    assert short == Verified(short.finding, QuoteSource.HEAD_NEAR)
+    assert short.finding.location == LineRange("calc.py", 5, 6)
+    # A four-line quote cited at one line, whose first line sits one above
+    # the cited one.
+    long = check(
+        LineRange("calc.py", 6, 6),
+        "if not xs:\n    return 0\n    return total(xs) / len(xs)\n}",
+    )
+    assert long == Verified(long.finding, QuoteSource.HEAD_NEAR)
+    assert long.finding.location == LineRange("calc.py", 5, 8)
+    # The same four-line quote whose citation is nowhere near it.
+    far = check(
+        LineRange("calc.py", 1, 1),
+        "if not xs:\n    return 0\n    return total(xs) / len(xs)\n}",
+    )
+    assert isinstance(far, Unverified)
+
+
+def test_the_window_is_configurable():
+    quote = "return sum(round(x, 2) for x in xs)"
+    zero = check_quote(finding(LineRange("calc.py", 4, 4), quote), sources(), 0)
+    assert isinstance(zero, Unverified)
+    one = check_quote(finding(LineRange("calc.py", 3, 3), quote), sources(), 1)
+    assert one == Verified(one.finding, QuoteSource.HEAD_NEAR)
+    assert one.finding.location == LineRange("calc.py", 2, 2)
+    tight = check_quote(finding(LineRange("calc.py", 4, 4), quote), sources(), 1)
+    assert isinstance(tight, Unverified)
+
+
+def test_the_window_zero_still_corrects_a_span_mismatch():
+    """Tolerance 0 disables the offset search, not the span rule's
+    amendment: a quote whose lines start at the citation still sets its
+    own span."""
+    result = check_quote(
+        finding(LineRange("calc.py", 5, 8), "if not xs:\n    return 0"),
+        sources(),
+        0,
+    )
+    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+    assert result.finding.location == LineRange("calc.py", 5, 6)
 
 
 def test_a_quote_of_a_removed_line_is_tagged_removed_even_near_the_citation():
@@ -178,14 +246,15 @@ def test_a_quote_of_a_removed_line_is_tagged_removed_even_near_the_citation():
         (6, 6, "return sum(round(x, 2) for x in xs)"),
         (1, 1, "}"),
         (7, 7, "}"),
-        (5, 5, "return sum(round(x, 2) for x in xs)"),
         (1, 1, "round(x, 2) for x"),
-        (4, 4, "return 0"),
-        (8, 8, "return 0"),
         (1, 1, "return total(xs) / len(xs)"),
     ],
 )
 def test_a_short_fragment_or_a_far_line_is_not_treated_as_drift(start, end, evidence):
+    """A fragment never drifts, and a whole line more than the window
+    away does not. (D64: the window is three lines, so `return 0` cited
+    at 4 or 8, and line 2's text cited at 5, are drifted matches now --
+    see `test_a_whole_line_quote_within_the_window_is_verified_as_drifted`.)"""
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
@@ -240,13 +309,25 @@ def test_a_quote_that_sits_outside_its_cited_lines_is_not_verified():
     assert "not at that range" in result.reason
 
 
-@pytest.mark.parametrize("end", [9, 10_000_000])
-def test_a_range_that_ends_past_the_file_is_not_verified(end):
-    """Line 2's text, cited from line 2 to past the file. The slice of that
-    range would be the rest of the file, and the quote would match."""
-    result = check(LineRange("calc.py", 2, end), "return sum(round(x, 2) for x in xs)")
+def test_a_range_that_ends_past_the_file_is_not_verified():
+    """Line 6's text, cited from line 2 to past the file. No window of
+    the quote's own length near the citation's start holds it, so the
+    range's own over-run is what the reason names (D64: line 2's text
+    cited as 2-9 verifies now -- the quote sets the span -- see
+    `test_a_span_mismatch_lets_the_quote_set_the_span`)."""
+    result = check(LineRange("calc.py", 2, 9), "return 0")
     assert isinstance(result, Unverified)
     assert "past the end of the head file (8 lines)" in result.reason
+
+
+def test_a_one_line_quote_cited_across_the_file_verifies_when_it_starts_the_range():
+    """D64: the quote's own line count sets the searched span, so a
+    whole-line quote cited across a wider range verifies when its line
+    starts within the window of the citation's first line, with the
+    location corrected to the lines that hold it."""
+    result = check(LineRange("calc.py", 2, 9), "return sum(round(x, 2) for x in xs)")
+    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+    assert result.finding.location == LineRange("calc.py", 2, 2)
 
 
 def test_a_short_fragment_passes_only_as_the_whole_line():
@@ -264,12 +345,14 @@ def test_a_one_line_quote_cited_across_the_file_is_not_verified():
     assert exact == Verified(exact.finding, QuoteSource.HEAD)
 
 
-def test_a_multi_line_quote_needs_a_span_of_its_own_length():
-    """Lines 5-6, cited as lines 4-7. Both lines sit in that window."""
+def test_a_multi_line_quote_cited_over_a_wider_span_is_corrected():
+    """Lines 5-6 cited as 4-7: the quote's own line count sets the span,
+    so the match at 5-6 is found within the window and the location is
+    corrected to it (D64)."""
     evidence = "if not xs:\n    return 0"
     wide = check(LineRange("calc.py", 4, 7), evidence)
-    assert isinstance(wide, Unverified)
-    assert "not at that range" in wide.reason
+    assert wide == Verified(wide.finding, QuoteSource.HEAD_NEAR)
+    assert wide.finding.location == LineRange("calc.py", 5, 6)
     exact = check(LineRange("calc.py", 5, 6), evidence)
     assert exact == Verified(exact.finding, QuoteSource.HEAD)
 
