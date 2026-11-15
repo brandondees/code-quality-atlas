@@ -1683,3 +1683,41 @@ through the production trace wrapper on a nudged attempt
 killing mutant R5 — dropping the loop's `note_nudge` from the detector
 had passed the whole suite — and the round-1 entry's "verified filing"
 typo is corrected to "verified finding". Offline only.
+
+## 2026-11-15 — the agentic review passes the PR conversation and the round log into every lens, and the picker gets the PR body (issue #709, D67)
+
+The lens-budget plan's S1. `review_lens` had accepted `context=` and
+`round_log=` since D52, but no shipped caller passed either, so the
+agentic lenses' first turn never carried the PR conversation and the
+picker saw only the PR title, so process and claim findings such as the
+m1 mutant pinned on issue #661 were unreachable in a real run.
+`_cmd_agentic_review` now
+builds the one-shot path's `Conversation` (parse, commits through the
+new `gather.pr_commits`, remarks through `fetch_remarks`,
+`build_conversation`) and passes `conversation.review_context` plus its
+omissions into `review_lenses`, together with a `RoundLog` at
+`<state dir>/rounds.jsonl` — the caller-chosen path D52 left open — so
+the prior rounds open the first turn and the review appends its own
+record. The picker's pull-request block is the one-shot view, title and
+body, redacted and fenced: `conversation.picker_block` is now the one
+helper both pickers call. The sizing D52 left to the caller is here
+too: the model's resolved per-call input room minus D65's prefix share,
+the largest loaded lens body, the turn-1 framing measured from the
+diff, and an 8,192-character reserve for the controller text
+(`CONTEXT_RESERVE_CHARS`) bounds the context blocks; a block that does
+not fit is rebuilt smaller under the same recorded-omission trail D38
+uses, and one that still does not fit is left out whole and named —
+never silently truncated, never sent to overflow the per-call token
+check. A model that names no room keeps the D52 fixed caps. A partial
+context cannot approve and stays COMMENT, unchanged, and the parity
+gate is unchanged. Six behaviors pinned in
+`atlas_reviewer/tests/test_agentic_context.py`, mutants M1–M6 applied
+by hand and killed by their named tests (drop `context=`, the
+title-only picker, body-as-instructions, room without the prefix share,
+`round_log=None`, silent slice). The diff stays off #717's files: no
+`review_wide.py`, `agentic_config.py`, `lens_loop.py`, coordinator,
+`test_coordinator.py` or `docs/agentic-reviewer.md` change, and D68 is
+untouched. Offline only: fixture, scripted reviewer and fakes; no live
+model call, network call or secret, and no deployed service setting
+changed. The live confirmation that #661 m1 is reachable stays with S0
+(#708).

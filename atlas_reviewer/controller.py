@@ -21,6 +21,7 @@ from atlas_reviewer.conversation import (
     ConversationBudget,
     build_conversation,
     fetch_remarks,
+    picker_block,
 )
 from atlas_reviewer.diffs import (
     UNPARSED_PATH,
@@ -565,11 +566,7 @@ def _not_rerun_notes(
 
 
 def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
-    """The picker's view of the PR: title and body only, not the whole
-    conversation."""
-    return UntrustedBlock(
-        "pull-request", deps.redactor(f"Title: {pull.title.text}\n\n{pull.body.text}")
-    )
+    return picker_block(pull, deps.redactor)
 
 
 def _omissions(
