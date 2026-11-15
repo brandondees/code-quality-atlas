@@ -547,3 +547,132 @@ def test_a_lens_that_already_finished_is_not_run_again_for_the_same_head_and_bod
     book.finish(KEY, 1, outcome(), scrub=str)
     step = next_step(ledger(tmp_path).attempts(KEY))
     assert step == Settled(outcome(), 1, escalated=False)
+
+
+# ------------------------------------------------- merged retry findings
+
+
+def verified(f, source=QuoteSource.HEAD):
+    return CheckedFinding(f, source)
+
+
+def unverified(f):
+    return CheckedFinding(f, problem="the quote is not at that range")
+
+
+def quotes_failed(*findings):
+    return AttemptOutcome(
+        Attestation.ATTESTED, frozenset({Cause.QUOTES_FAILED}), findings=findings
+    )
+
+
+def test_a_verified_finding_survives_an_empty_retry():
+    step = next_step(
+        (Attempt(1, quotes_failed(verified(finding()))), Attempt(2, CLEAN))
+    )
+    assert (step.escalated, step.attempts) == (False, 2)
+    assert step.outcome.state is LensState.CLEAN
+    assert step.outcome.causes == frozenset()
+    assert [c.finding for c in step.outcome.findings] == [finding()]
+    assert all(c.verified for c in step.outcome.findings)
+
+
+def test_a_verified_finding_survives_a_weaker_retry():
+    step = next_step(
+        (Attempt(1, quotes_failed(verified(finding()))), Attempt(2, quotes_failed(unverified(finding()))))
+    )  # fmt: skip
+    assert step.escalated is True
+    assert step.outcome.state is LensState.PARTIAL
+    assert Cause.QUOTES_FAILED in step.outcome.causes
+    assert [(c.verified, c.finding) for c in step.outcome.findings] == [
+        (True, finding())
+    ]
+
+
+def test_a_finding_the_retry_restates_stays_the_retry_s_copy():
+    restated = replace(finding(), fix="round once, at the end")
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(finding()))),
+            Attempt(2, AttemptOutcome(Attestation.ATTESTED, findings=(verified(restated),))),
+        )
+    )  # fmt: skip
+    assert [c.finding for c in step.outcome.findings] == [restated]
+
+
+def test_a_restatement_is_deduplicated_across_case_and_whitespace():
+    loosened = replace(finding(), finding="Sums  Without Rounding")
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(finding()))),
+            Attempt(2, AttemptOutcome(Attestation.ATTESTED, findings=(verified(loosened),))),
+        )
+    )  # fmt: skip
+    assert [c.finding for c in step.outcome.findings] == [loosened]
+
+
+def test_findings_alike_but_for_their_evidence_are_both_kept():
+    requoted = replace(finding(), evidence="return sum(round(x, 3) for x in xs)")
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(requoted))),
+            Attempt(2, AttemptOutcome(Attestation.ATTESTED, findings=(verified(finding()),))),
+        )
+    )  # fmt: skip
+    assert [c.finding for c in step.outcome.findings] == [finding(), requoted]
+
+
+def test_a_finding_the_retry_does_not_restate_is_kept_after_the_retry_s_own():
+    other = replace(
+        finding(), location=LineRange("calc.py", 3, 3), finding="drops the last item"
+    )
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(finding()))),
+            Attempt(2, quotes_failed(verified(other))),
+        )
+    )
+    assert [c.finding for c in step.outcome.findings] == [other, finding()]
+    assert all(c.verified for c in step.outcome.findings)
+
+
+def test_an_unverified_finding_from_the_first_attempt_is_not_carried():
+    step = next_step(
+        (Attempt(1, quotes_failed(unverified(finding()))), Attempt(2, CLEAN))
+    )
+    assert step.outcome.findings == ()
+    assert step.outcome.state is LensState.CLEAN
+
+
+def test_a_retry_that_never_attests_keeps_the_lens_failed():
+    step = next_step(
+        (
+            Attempt(1, quotes_failed(verified(finding()))),
+            Attempt(2, AttemptOutcome(Attestation.UNACKNOWLEDGED, frozenset({Cause.UNPARSED}))),
+        )
+    )  # fmt: skip
+    assert step.escalated is True
+    assert step.outcome.state is LensState.FAILED
+    assert step.outcome.causes == frozenset({Cause.UNPARSED})
+    # The verified finding stays on the outcome; the draft reports only
+    # what an attested outcome carries (see `mint`).
+    assert [c.finding for c in step.outcome.findings] == [finding()]
+
+
+def test_an_unattested_first_attempt_carries_nothing_into_the_merge():
+    step = next_step(
+        (
+            Attempt(1, AttemptOutcome(Attestation.UNACKNOWLEDGED, frozenset({Cause.UNPARSED}))),
+            Attempt(2, CLEAN),
+        )
+    )  # fmt: skip
+    assert step.outcome.findings == ()
+    assert step.outcome.state is LensState.CLEAN
+
+
+def test_a_settled_single_attempt_keeps_its_own_duplicate_findings():
+    clean = AttemptOutcome(
+        Attestation.ATTESTED, findings=(verified(finding()), verified(finding()))
+    )
+    step = next_step((Attempt(1, clean),))
+    assert len(step.outcome.findings) == 2
