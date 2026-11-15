@@ -7,6 +7,9 @@ The three per-call token limits stay unset here when the operator does
 not name them; `resolve_per_call` then takes them from the model.
 `diff_prefix_share` (D65) is the share of the model's input room the
 shared diff prefix may take; 0 turns the shared prefix off. The
+quote-repair bound and the quote-checker window (D64) are bounded here
+too: `ATLAS_QUOTE_REPAIRS` is 0 to 3 repair turns per attempt, and
+`ATLAS_QUOTE_TOLERANCE` is the window in lines, 0 to 8. The
 one-shot review does not read this: its 3 calls, $3 and 200k input cap
 stay D25's.
 """
@@ -27,6 +30,8 @@ ENV = {
     "review_wall_s": "ATLAS_REVIEW_WALL_S",
     "no_progress_turns": "ATLAS_NO_PROGRESS_TURNS",
     "duplicate_calls": "ATLAS_DUPLICATE_CALLS",
+    "quote_repairs": "ATLAS_QUOTE_REPAIRS",
+    "quote_tolerance": "ATLAS_QUOTE_TOLERANCE",
     "max_input_tokens": "ATLAS_MAX_INPUT_TOKENS",
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
@@ -79,6 +84,10 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, no_progress_turns=_positive_int(name, raw))
     if name == "duplicate_calls":
         return replace(limits, duplicate_calls=_positive_int(name, raw))
+    if name == "quote_repairs":
+        return replace(limits, quote_repairs=_bounded_int(name, raw, 3))
+    if name == "quote_tolerance":
+        return replace(limits, quote_tolerance=_bounded_int(name, raw, 8))
     if name == "max_input_tokens":
         return replace(limits, max_input_tokens=_positive_int(name, raw))
     if name == "max_output_tokens":
@@ -108,6 +117,21 @@ def _positive_int(name: str, raw: str) -> int:
         raise ValueError(f"{name} must be a positive integer, not {raw!r}") from None
     if value < 1:
         raise ValueError(f"{name} must be a positive integer, not {raw!r}")
+    return value
+
+
+def _bounded_int(name: str, raw: str, hi: int) -> int:
+    """A non-negative integer at most `hi` (D64): 0 disables the guard it
+    bounds, and a value past `hi` is the runaway the guard exists to
+    prevent."""
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"{name} must be an integer from 0 to {hi}, not {raw!r}"
+        ) from None
+    if not 0 <= value <= hi:
+        raise ValueError(f"{name} must be an integer from 0 to {hi}, not {raw!r}")
     return value
 
 

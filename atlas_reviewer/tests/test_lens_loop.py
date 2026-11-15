@@ -11,6 +11,7 @@ from atlas_reviewer.attestation import (
     AttemptOutcome,
     Attestation,
     Cause,
+    CheckedFinding,
     LensState,
     body_digest,
 )
@@ -35,6 +36,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     _DiffPages,
     _Progress,
+    _quote_repair_nudge,
     _repair,
     _time_up,
     diff_prefix_for,
@@ -1051,13 +1053,150 @@ def test_a_reply_whose_every_finding_is_dropped_is_held_like_an_empty_one(
     assert empty.dropped == ()
 
 
-def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path):
+def test_a_failed_quote_earns_one_repair_turn_and_the_next_reply_counts(tmp_path):
+    """D64: one bad quote does not re-run the lens. The rejected quotes
+    and their cited locations go back once in the same conversation; the
+    repaired reply is the one that counts, and its corrected quote is
+    re-checked by the same checker."""
     wrong = finding(evidence="return sum(x for x in xs if x)")
-    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(finding(), wrong)])
+    bad = final(finding(), wrong)
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, final(finding())])
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ("quote-repair",)
+    assert outcome.turns == 3
+    assert [c.verified for c in outcome.findings] == [True]
+    assert model.requests[2].messages[-2] == AssistantText(bad.text)
+    repair = model.requests[2].messages[-1]
+    assert isinstance(repair, UserText)
+    assert "did not verify" in repair.text
+    assert "calc.py:2" in repair.text
+    assert "drop the finding" in repair.text
+    assert f'<untrusted-data id="{NONCE}" label="failed-quotes">' in repair.text
+
+
+def test_a_repair_that_drops_the_finding_keeps_the_other_verified_ones(tmp_path):
+    """D64 builds on D61's merge: the repaired reply drops the finding
+    whose quote failed, and the attempt's other verified finding survives
+    it -- appended when the repair reply does not restate it."""
+    bad = finding(finding="the unverifiable claim", evidence="never said in the file")
+    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(finding(), bad), final()])
+    assert outcome.state is LensState.CLEAN
+    assert outcome.nudges == ("quote-repair",)
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert checked.finding.finding == "rounds each item before summing, so totals drift"
+
+
+def test_a_repair_that_still_fails_keeps_the_quote_failure_and_names_the_bound(
+    tmp_path,
+):
+    """A repaired quote that still does not verify keeps QUOTES_FAILED on
+    the attempt -- the state and the retryable cause a full re-run would
+    get -- and the bound hit is named in the detail."""
+    first = finding(evidence="still not in the file, one")
+    second = finding(evidence="still not in the file, two")
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, final(first), final(second)])
     assert outcome.causes == {Cause.QUOTES_FAILED}
     assert outcome.state is LensState.PARTIAL
     assert outcome.retryable
+    assert len(model.requests) == 3
+    assert "the quote-repair bound was reached" in outcome.detail
+    assert [c.verified for c in outcome.findings] == [False]
+
+
+def test_the_repair_bound_is_configurable_and_zero_disables_the_turn(tmp_path):
+    """`quote_repairs` bounds the repair turns per attempt; 0 sends none
+    and the bound is named on the first failure; 2 sends a second turn
+    when the first repair fails again."""
+    bad = finding(evidence="not in the head file")
+    zero, zero_model, _ = attempt(
+        tmp_path / "zero",
+        [READ_ALL, final(bad)],
+        limits=replace(LIMITS, quote_repairs=0),
+    )
+    assert len(zero_model.requests) == 2
+    assert zero.nudges == ()
+    assert Cause.QUOTES_FAILED in zero.causes
+    assert "the quote-repair bound was reached" in zero.detail
+
+    two, two_model, _ = attempt(
+        tmp_path / "two",
+        [READ_ALL, final(bad), final(bad), final(finding())],
+        limits=replace(LIMITS, quote_repairs=2),
+    )
+    assert two.state is LensState.CLEAN
+    assert two.nudges == ("quote-repair", "quote-repair")
+    assert len(two_model.requests) == 4
+
+
+def test_a_quote_repair_turn_that_never_runs_keeps_the_rejected_reply(tmp_path):
+    """The repair turn is queued behind the turn cap: the rejected reply's
+    own judgment stands, with its failed quotes and the stop named, as
+    D58's review M1 holds for every queued turn -- and the turn that never
+    ran is not counted as one (round-1 review of #703, Minor 2)."""
+    bad = finding(evidence="not in the head file")
+    outcome, _, _ = attempt(
+        tmp_path,
+        [READ_ALL, final(finding(), bad)],
+        limits=replace(LIMITS, max_turns=2),
+    )
     assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.causes == {Cause.QUOTES_FAILED, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.nudges == ()
+
+
+def test_the_repair_message_marks_a_cut_quote():
+    """The rejected quote text is cut at 120 characters, and the cut is
+    marked (round-1 review of #703, Nit 3); a quote that fits is not."""
+    from atlas_reviewer.lens_contract import (
+        Attribution,
+        Finding,
+        LineRange,
+        Route,
+        Severity,
+        Valence,
+    )
+
+    def outcome_with(evidence):
+        f = Finding(
+            LineRange("calc.py", 2, 2), Severity.MAJOR, Valence.DEFECT, Route.ENG,
+            Attribution.INTRODUCED, "something", "fix it", evidence,
+        )  # fmt: skip
+        return AttemptOutcome(
+            Attestation.ATTESTED,
+            frozenset({Cause.QUOTES_FAILED}),
+            findings=(CheckedFinding(f, problem="the quote is not at that range"),),
+        )
+
+    cut = _quote_repair_nudge(outcome_with("x" * 200), NONCE)
+    assert "[cut]" in cut
+    whole = _quote_repair_nudge(outcome_with("short quote"), NONCE)
+    assert "[cut]" not in whole
+
+
+def test_the_configured_window_reaches_the_quote_checker(tmp_path):
+    """D64's tolerance is a limit: the loop passes it to the checker, so
+    an operator's narrower window actually narrows what verifies. Line 2's
+    text cited at line 4 is two lines off: inside the default window,
+    outside a one-line one."""
+    drifted = finding(location="calc.py:4")
+    wide, _, _ = attempt(
+        tmp_path / "wide", [READ_ALL, final(drifted)],
+        limits=replace(LIMITS, quote_tolerance=3),
+    )  # fmt: skip
+    assert wide.state is LensState.CLEAN
+    (checked,) = wide.findings
+    assert checked.source is QuoteSource.HEAD_NEAR
+    from atlas_reviewer.lens_contract import LineRange
+
+    assert checked.finding.location == LineRange("calc.py", 2, 2)
+    narrow, _, _ = attempt(
+        tmp_path / "narrow", [READ_ALL, final(drifted)],
+        limits=replace(LIMITS, quote_tolerance=1, max_turns=2),
+    )  # fmt: skip
+    assert [c.verified for c in narrow.findings] == [False]
+    assert Cause.QUOTES_FAILED in narrow.causes
 
 
 def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):

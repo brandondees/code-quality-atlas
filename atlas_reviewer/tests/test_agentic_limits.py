@@ -254,6 +254,47 @@ def test_the_no_progress_thresholds_are_configurable_and_bad_ones_are_refused():
         AgenticLimits(no_progress_turns=True).resolve()
 
 
+def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
+    """D64: the repair bound (0 to 3 turns per attempt) and the checker's
+    window (0 to 8 lines) are limits like the others; 0 disables each.
+    Both layers refuse an over-bound value: the env parser and
+    `resolve` (round-1 review of #703, Nit 2)."""
+    limits = load_agentic_limits(
+        {"ATLAS_QUOTE_REPAIRS": "0", "ATLAS_QUOTE_TOLERANCE": "5"}
+    )
+    resolved = limits.resolve()
+    assert (resolved.quote_repairs, resolved.quote_tolerance) == (0, 5)
+    defaults = load_agentic_limits({}).resolve()
+    assert (defaults.quote_repairs, defaults.quote_tolerance) == (1, 3)
+    # Both layers refuse an over-bound value, and each layer is pinned by
+    # its own message: the parser names the raw value, `resolve` does not
+    # (round-1 review of #703, Nit 2).
+    with pytest.raises(
+        ValueError, match="quote_repairs must be an integer from 0 to 3, not"
+    ):
+        load_agentic_limits({"ATLAS_QUOTE_REPAIRS": "4"})
+    with pytest.raises(
+        ValueError, match="quote_repairs must be an integer from 0 to 3$"
+    ):
+        AgenticLimits(quote_repairs=4).resolve()
+    with pytest.raises(ValueError, match="quote_tolerance"):
+        load_agentic_limits({"ATLAS_QUOTE_TOLERANCE": "-1"})
+    # The parser layer is pinned by its own message: it names the raw
+    # value, which `resolve`'s rejection does not (round-2 review, Nit 1).
+    with pytest.raises(
+        ValueError, match="quote_tolerance must be an integer from 0 to 8, not"
+    ):
+        load_agentic_limits({"ATLAS_QUOTE_TOLERANCE": "9"})
+    with pytest.raises(ValueError, match="quote_tolerance must be an integer"):
+        AgenticLimits(quote_tolerance=9).resolve()
+    with pytest.raises(ValueError, match="quote_repairs"):
+        AgenticLimits(quote_repairs=True).resolve()
+    with pytest.raises(ValueError, match="quote_tolerance must be an integer"):
+        AgenticLimits(quote_tolerance=3.0).resolve()
+    with pytest.raises(ValueError, match="quote_repairs must be an integer"):
+        AgenticLimits(quote_repairs=1.0).resolve()
+
+
 def test_the_reasoning_hint_is_capped_outside_anthropic():
     """D58: the trials measured open-weight models spending up to 96% of
     each turn on reasoning at the half-output hint, at 31-46 s a turn,
@@ -328,6 +369,39 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
     assert outcome.retryable is False
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.setting == "the pinned endpoints' max_completion_tokens"
+
+
+def test_a_damaged_drift_value_abandons_the_ledger_line(tmp_path):
+    """Round-2 review of #703, Nit 1: the ledger validates a finding's
+    `drift` as a non-negative integer; a damaged value abandons the line,
+    and the attempt reads as abandoned, which fails closed."""
+    from atlas_reviewer.attestation import AttemptOutcome, Attestation, CheckedFinding
+    from atlas_reviewer.quotes import QuoteSource
+    from atlas_reviewer.tests.test_attestation import finding as attested_finding
+
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(
+            CheckedFinding(
+                attested_finding("return sum(round(x, 2) for x in xs)"),
+                QuoteSource.HEAD_NEAR,
+                drift=2,
+            ),
+        ),
+    )
+    path = tmp_path / "ledger.jsonl"
+    book = AttemptLedger(path, FakeClock())
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome, scrub=str)
+    lines = path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    finished["outcome"]["findings"][0]["drift"] = "two"
+    lines[-1] = json.dumps(finished)
+    path.write_text("\n".join(lines) + "\n")
+    again = AttemptLedger(path, FakeClock())
+    (attempt,) = again.attempts(KEY)
+    assert attempt.outcome.attestation is Attestation.UNRECORDED
+    assert again.damaged == 1
 
 
 def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):

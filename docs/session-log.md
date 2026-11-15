@@ -1410,6 +1410,33 @@ retry prompt is unchanged — the body is still applied whole. Policy
 tests in `test_attestation.py`, end-to-end over the real bridge with the
 scripted model in `test_coordinator.py`. Offline only.
 
+## 2026-11-15 — a rejected quote is repaired in the session, and the checker tolerates a small offset (#697, D64)
+
+The Nov 14 trials made the retry path the most expensive failure mode:
+all 7 Sonnet retries were `QUOTES_FAILED`, one failed quote re-ran the
+whole lens from turn 1 ($2.00 on #661, $0.69 on #640), and every failed
+quote was text that really is in the head file — two one line off, two
+span mismatches, three 9–62 lines off. Two changes, on the quote checker
+and the loop only. The checker's drift search is generalized: a quote of
+whole lines may now match a window of the quote's own line count starting
+within three lines of the citation's first line (`ATLAS_QUOTE_TOLERANCE`,
+default 3, bounded 0–8), so an off-by-one citation and a span mismatch
+verify with the finding's location corrected to the lines that hold the
+quote; fragments never drift, removed-line matches still win, and nothing
+outside the window verifies. A quote that still fails earns a bounded
+repair turn in the same conversation (`ATLAS_QUOTE_REPAIRS`, default 1,
+bounded 0–3): the rejected locations, reasons and quotes go back fenced,
+the model corrects the range or drops the finding, and the answering
+reply is re-checked by the same checker, with the held reply's verified
+findings merged in through D61's `_merged_findings` — #694's merge
+reused, not duplicated. When the bound is spent and quotes still fail,
+the attempt keeps `QUOTES_FAILED` exactly as before, with the bound named
+in the detail; the ledger's `nudges` and the completion span record the
+`quote-repair` turn, and the draft's lens line counts repair turns and
+window corrections. Tests in `test_quotes.py`, `test_lens_loop.py`,
+`test_agentic_limits.py` and `test_coordinator.py`, each behavior also
+checked against a killed mutant. Offline only.
+
 ## 2026-11-15 — Anthropic routes pin one endpoint, and the draft counts prompt-cache misses (#695, D63)
 
 The Nov 14 trials' Sonnet runs paid to rewrite the whole context on
@@ -1441,6 +1468,57 @@ confirming the fix on any future run. `cache_stats.py` holds the
 tracker, model-agnostic; `OpenRouterLensModel` feeds it. Offline only:
 no live model call was made for this change, and the tests pin every
 rule with fakes and recorded HTTP.
+
+## 2026-11-15 — round-1 review fixes for #703: the repair's failure paths keep the verified findings
+
+The round-1 protocol review of #703 traced two failure paths the happy-
+path tests did not cover. A repair reply that never attests — a second
+contract refusal, or one naming another lens — used to become the
+attempt's recorded outcome, and D61's attested-only merge then dropped
+the held reply's verified findings on the retry: an attested empty retry
+settled the lens clean with nothing to report and the review approved.
+The held reply's attested judgment is now what the attempt records, with
+the failed repair reply's causes and detail folded on, so the verified
+findings report, block approval, and carry to the retry. A contract
+repair queued after a quote repair used to overwrite the held judgment
+with the unparsed one, so a stop before it was sent dropped the findings
+too; the hold stays the quote hold's with the refusal folded in. The
+repair turn is counted — `nudges`, the span, the draft's lens line —
+only when its call is sent, so a stop in the gap no longer counts a turn
+that never ran (the unread and no-progress labels keep D58's queue-time
+recording, which their tests pin). The posted source tag is built from
+the match's own distance instead of the configured window, so it stays
+true at any setting, and `QuoteSource.HEAD_NEAR` no longer hardcodes the
+number; a float is refused at the quote-limit check before it could
+break the window mid-review; the repair message marks a quote cut at 120
+characters; and the three mutants the round-1 review found surviving —
+the equal-distance tie-break, removed-lines-wins over an in-window head
+match, and the `resolve()`-layer bound rejection — are pinned by tests.
+D64's update paragraph carries the same record. Offline only.
+
+## 2026-11-15 — round-2 review fixes for #703: the misacknowledged repair leaves a trace
+
+Round 2 verified every round-1 fix and left one Minor: a repair reply
+that named another lens folds nothing onto the held judgment (a
+misacknowledged outcome has no causes and no detail), so the recorded
+attempt read character-for-character like a repair that attested and
+still failed its quote. The fold now records the attestation's
+controller text as the detail on that path, and both round-1 Major
+tests assert the recorded first attempt through the ledger, not only
+the lens after the retry — so the fold's causes and detail are pinned,
+along with the contract-repair fold's validator message. The held
+outcome's fold is pinned to the attempt's current tools, turns, unread
+list and nudges (a scenario where the repair turn's tool work closes
+coverage before the cap lands), a budget refusal before the repair call
+is pinned uncounted, the ledger's `drift` validation is pinned by a
+damaged line that fails closed, and the env parser's tolerance cap is
+pinned by its own message. The unread list now flows through one
+`_Progress.unread()` accessor, which is where #704's shared-prefix path
+will land its bookkeeping (the accessor takes no different value today).
+D64's Telemetry and Reversibility sentences were corrected to the
+`drift_label` tag, the "head near the citation" value and the
+backward-readable `drift` ledger field, and the README's other limit
+count now says twelve. Offline only.
 
 ## 2026-11-15 — the review's lenses share one cached prefix (issue #696, D65)
 
