@@ -101,6 +101,9 @@ def test_a_reply_acknowledges_only_its_own_lens_and_body():
         (Attestation.UNACKNOWLEDGED, {Cause.LENS_CLOCK}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.UNPARSED}, LensState.FAILED, True),
         (Attestation.UNACKNOWLEDGED, {Cause.MODEL_ERROR}, LensState.FAILED, False),
+        # Issue #664: a ZDR or pricing refusal is not a model failure; it
+        # has its own cause and is not retried either.
+        (Attestation.UNACKNOWLEDGED, {Cause.MODEL_REFUSED}, LensState.FAILED, False),
         (Attestation.UNACKNOWLEDGED, {Cause.TRANSPORT_ERROR}, LensState.FAILED, True),
         (
             Attestation.UNACKNOWLEDGED,

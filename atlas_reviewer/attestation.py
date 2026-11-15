@@ -102,6 +102,10 @@ class Cause(StrEnum):
     QUOTES_FAILED = "a finding's quote was not found at the head SHA"
     ABANDONED = "the attempt never finished (the controller stopped mid-attempt)"
     MODEL_ERROR = "a model call failed"
+    # Issue #664: a ZDR or pricing refusal the provider raised before any
+    # request is a policy refusal, not a model failure, so a report can
+    # tell them apart. Not retried, like a model error.
+    MODEL_REFUSED = "a model call was refused"
     TRANSPORT_ERROR = "a model call failed on the transport"
     INPUT_CAP = "the per-call input cap was reached"
     OUTPUT_CAP = "the per-call output cap does not fit the model"
@@ -133,7 +137,13 @@ _FAILED_ATTESTATIONS = frozenset(
     {Attestation.NOT_DELIVERED, Attestation.MISACKNOWLEDGED, Attestation.UNRECORDED}
 )
 _FAILING = frozenset(
-    {Cause.UNPARSED, Cause.ABANDONED, Cause.MODEL_ERROR, Cause.TRANSPORT_ERROR}
+    {
+        Cause.UNPARSED,
+        Cause.ABANDONED,
+        Cause.MODEL_ERROR,
+        Cause.MODEL_REFUSED,
+        Cause.TRANSPORT_ERROR,
+    }
 )
 _RETRYABLE_ATTESTATIONS = _FAILED_ATTESTATIONS
 _RETRYABLE = frozenset(

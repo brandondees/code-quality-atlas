@@ -26,6 +26,8 @@ D42). Before a final reply is accepted with files unread, the loop sends
 the unread list back once, fenced (D58). A model call that failed on the
 transport is a `TRANSPORT_ERROR` cause, retryable on its own -- the
 unread-file veto below still applies -- while a model error is not. A
+provider that refuses the call before any request -- a zero-data-retention
+or pricing refusal -- is its own `MODEL_REFUSED` cause, also not retried. A
 timed-out request is retried once as its own reserved, counted call, only
 while the clocks leave room for one more timeout. Once every changed diff
 is read, or once a tool call is
@@ -72,6 +74,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
+from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
 from atlas_reviewer.lens_contract import (
     _SEVERITY_ALIASES,
@@ -88,7 +91,7 @@ from atlas_reviewer.ports import (
     TransportError,
     TransportTimeoutError,
 )
-from atlas_reviewer.pricing import ModelTerms
+from atlas_reviewer.pricing import ModelTerms, PricingUnknownError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all, with_head_files
 from atlas_reviewer.runner import (
@@ -807,6 +810,15 @@ def _stopped(found: LimitHit) -> tuple[Cause, str, LimitHit]:
     return _cause_for(found), found.message(), found
 
 
+def _refusal_cause(exc: BoundaryError) -> Cause:
+    """A ZDR or pricing refusal the provider raised before any request
+    (#664) is its own cause, so a report can tell it from a model failure.
+    Any other boundary error stays `MODEL_ERROR`."""
+    if isinstance(exc, BudgetRefusedError | PricingUnknownError):
+        return Cause.MODEL_REFUSED
+    return Cause.MODEL_ERROR
+
+
 def run_attempt(
     job: LensJob,
     bridge: Bridge,
@@ -883,7 +895,7 @@ def run_attempt(
         except TransportError as exc:
             return p.cut(Cause.TRANSPORT_ERROR, str(exc))
         except BoundaryError as exc:
-            return p.cut(Cause.MODEL_ERROR, str(exc))
+            return p.cut(_refusal_cause(exc), str(exc))
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
         _mark_held_placed(p, reply)
@@ -969,7 +981,7 @@ def _reserve_call(
     except TransportError as exc:
         return Cause.TRANSPORT_ERROR, str(exc)
     except BoundaryError as exc:
-        return Cause.MODEL_ERROR, str(exc)
+        return _refusal_cause(exc), str(exc)
     # The estimate can wait on the catalog while another lens halts.
     if spend.halted:
         return Cause.MODEL_ERROR, HALTED_CALL

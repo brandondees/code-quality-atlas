@@ -279,7 +279,16 @@ class OpenRouterLensModel:
         status = self.provider._key_status
         if status is None:
             raise BoundaryError("refusing inference: key preflight has not passed")
-        terms, selected = self.provider.load_terms()
+        try:
+            terms, selected = self.provider.load_terms()
+        except BoundaryError as exc:
+            # The one-shot path records this refusal in `complete`; the
+            # adapter reaches `load_terms` directly (review round 1 of
+            # PR #687, Minor 3), so it records it here instead: why no lens
+            # call could be made. One entry per failed read, like the
+            # budget's own refusals.
+            self.provider.budget.refusals.append(str(exc))
+            raise
         return terms, status.counts_byok, selected
 
 

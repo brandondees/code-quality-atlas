@@ -872,7 +872,11 @@ class OpenRouterProvider:
         try:
             terms, selected = self.load_terms()
             body = self._body(prompt, terms, selected)
-        except (PricingUnknownError, BudgetRefusedError) as exc:
+        except BoundaryError as exc:
+            # Every way this fails closed before a request is a refusal the
+            # budget records (#664): a ZDR-list or catalog GET whose
+            # transport failed is why no call was made, as an HTTP status
+            # or a policy refusal already was.
             self._refused(exc)
         tokens = input_token_bound(prompt.system + prompt.user)
         try:

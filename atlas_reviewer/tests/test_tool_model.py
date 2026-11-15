@@ -31,6 +31,7 @@ from atlas_reviewer.ports import (
     TransportError,
     TransportTimeoutError,
 )
+from atlas_reviewer.pricing import PricingUnknownError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.tool_model import OpenRouterLensModel, _payload
 
@@ -224,6 +225,63 @@ def test_a_transport_error_other_than_a_timeout_is_not_retried():
     with pytest.raises(TransportError, match="transport error"):
         lens.turn(request())
     assert len(fake.chat_requests()) == 1
+
+
+def test_a_zdr_list_timeout_on_the_lens_path_is_recorded_as_a_refusal():
+    """Review round 1 of PR #687, Minor 3: the adapter reaches `load_terms`
+    directly, not through `complete`, so a ZDR-list read that failed closed
+    was never recorded in `budget.refusals` and the budget report did not
+    say why no lens call could be made."""
+
+    class Timeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if str(url).endswith("/endpoints/zdr"):
+                raise TransportTimeoutError(
+                    "GET https://openrouter.ai/api/v1/endpoints/zdr failed: timed out"
+                )
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    fake = Timeout(reply(completion()))
+    lens = OpenRouterLensModel(OpenRouterProvider(fake, KEY))
+    with pytest.raises(TransportTimeoutError, match="timed out"):
+        lens.worst_case_usd(request())
+    assert fake.chat_requests() == []
+    assert lens.provider.budget.refusals == [
+        "GET https://openrouter.ai/api/v1/endpoints/zdr failed: timed out"
+    ]
+    # One entry per failed read, like the budget's own refusals.
+    with pytest.raises(TransportTimeoutError):
+        lens.worst_case_usd(request())
+    assert len(lens.provider.budget.refusals) == 2
+
+
+def test_a_zdr_list_http_failure_on_the_lens_path_is_recorded_as_a_refusal():
+    fake = OpenRouterFake(reply(completion()), zdr=reply({}, status=503))
+    lens = OpenRouterLensModel(OpenRouterProvider(fake, KEY))
+    with pytest.raises(PricingUnknownError, match="HTTP 503"):
+        lens.worst_case_usd(request())
+    assert lens.provider.budget.refusals == [
+        "OpenRouter HTTP 503 for https://openrouter.ai/api/v1/endpoints/zdr"
+    ]
+
+
+def test_a_catalog_timeout_on_the_lens_path_is_recorded_as_a_refusal():
+    class CatalogTimeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if "/model/" in str(url):
+                raise TransportTimeoutError(
+                    f"GET https://openrouter.ai/api/v1/model/{MODEL_ID} "
+                    "failed: timed out"
+                )
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    fake = CatalogTimeout(reply(completion()))
+    lens = OpenRouterLensModel(OpenRouterProvider(fake, KEY))
+    with pytest.raises(TransportTimeoutError, match="timed out"):
+        lens.worst_case_usd(request())
+    assert lens.provider.budget.refusals == [
+        f"GET https://openrouter.ai/api/v1/model/{MODEL_ID} failed: timed out"
+    ]
 
 
 def test_a_model_error_after_a_response_is_not_retried():
