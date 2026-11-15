@@ -1828,3 +1828,40 @@ def test_a_model_whose_room_is_unusable_pages_and_says_so(tmp_path):
         "the model does not report an input room, so the diff pages through diff_file"
     )
     assert outcome.state is LensState.CLEAN
+
+
+def test_a_failed_quote_repair_on_the_prefix_path_reports_no_coverage_gap(
+    tmp_path,
+):
+    """D64's repair turn meets D65's prefix path. A reply whose quote
+    failed is attested and held, the repair turn is queued, and when the
+    repair reply names another body the fold (`_held_with`) takes the
+    attempt's unread list through `_Progress.unread()` -- empty on the
+    prefix path, where the prefix held the whole diff and no `diff_file`
+    call ever ran -- so a failed quote repair cannot dress itself up as a
+    coverage gap. Mutant P11: routing the fold's unread around the
+    accessor (back to `pages.unread`) reports both changed files unread,
+    adds `FILES_UNREAD` to the causes, and fails here; the same bypass in
+    `_final` (which judged the held reply) fails it too."""
+    bad = finding(evidence="not in the head file")
+    misacknowledged_repair = final(finding(), digest="0" * 64)
+    model = RoomModel([final(finding(), bad), misacknowledged_repair])
+    outcome, model, _spend = attempt(tmp_path, [], the_job=prefixed_job(), model=model)
+    # The combination really ran on the prefix path: every request carried
+    # the same shared block, and the model made no tool call at all.
+    assert all(request.prefix is not None for request in model.requests)
+    assert all(t.tool != "diff_file" for t in outcome.tools)
+    # No coverage gap: the prefix held every changed file's diff, so the
+    # failed repair leaves the attempt partial on the quote failure alone.
+    assert outcome.unread == ()
+    assert outcome.causes == {Cause.QUOTES_FAILED}
+    assert outcome.changed_files == len(CHANGED)
+    assert outcome.state is LensState.PARTIAL
+    # The held outcome survived the failed repair: the verified finding is
+    # still the attempt's evidence, and the fold names why the repair
+    # failed and where the bound was reached.
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert "the reply named another lens or body" in outcome.detail
+    assert "the quote-repair bound was reached" in outcome.detail
+    assert outcome.nudges == ("quote-repair",)
+    assert outcome.diff_prefix.startswith("the shared diff prefix is inlined")
