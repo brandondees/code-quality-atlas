@@ -135,7 +135,7 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
-from atlas_reviewer.redact import Redactor
+from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -658,6 +658,15 @@ _NONCE_PROBE = "0" * (NONCE_BYTES * 2)
 """A same-length stand-in for the per-review fence nonce, so the scaffold
 measurement counts the framing the real nonce produces."""
 
+_MARKER_CHARS = len(TRUNCATION_MARKER)
+"""The characters a truncated build appends after its cap (`_truncate`),
+which every byte bound below must count."""
+
+_MIN_FIT_CHARS = 4 + _MARKER_CHARS
+"""The smallest input room a provably-fitting block can fill: one
+worst-case UTF-8 character (four bytes) plus the truncation marker. A
+room below this cannot hold any block, and the omit-whole gate fires."""
+
 
 def _input_room_chars(
     limits: AgenticLimits,
@@ -708,16 +717,19 @@ def _conversation_block(
     `fit` is the characters the model's input room holds for the context
     blocks, or None when the model names no room and D52's fixed caps
     stand. Under a fit the block is first built at the room's own size,
-    not D38's cap; UTF-8 encodes one to four bytes per character, so a
-    block whose character count fits the room can still overflow it in
-    bytes, and one rebuild at a quarter of the room then fits by
-    construction -- the block's characters are capped at fit // 4, so its
-    bytes are at most 4 * (fit // 4) <= fit. What omits a block whole is
-    the fit < 1 gate: the room cannot hold the block next to the shared
-    diff prefix and the lens body, the block is never built, and the
-    omission says so. A pull whose fields do not parse yields no block
-    and one omission, so the review stays COMMENT instead of dying before
-    it started."""
+    not D38's cap. A truncated build appends `TRUNCATION_MARKER` after
+    its cap, so its bytes are at most four per content character plus the
+    ASCII marker's 39: building at `fit - 39` characters makes an
+    ASCII-truncated build exactly the room's size, and a multi-byte build
+    that still overflows is rebuilt once at a quarter of what remains,
+    `(fit - 39) // 4`, whose byte bound holds by construction
+    (4 * ((fit - 39) // 4) + 39 <= fit). What omits a block whole is the
+    small-fit gate: a room below one worst-case character plus the marker
+    (43 characters) cannot hold any block next to the shared diff prefix
+    and the lens body, so the block is never built and the omission says
+    so. A pull whose fields do not parse yields no block and one
+    omission, so the review stays COMMENT instead of dying before it
+    started."""
     if pull_info is None:
         return None, (
             Omission(
@@ -727,7 +739,7 @@ def _conversation_block(
                 "block was not built",
             ),
         )
-    if fit is not None and fit < 1:
+    if fit is not None and fit < _MIN_FIT_CHARS:
         return None, (
             Omission(
                 CONVERSATION_SOURCE,
@@ -751,10 +763,10 @@ def _conversation_block(
     if fit is None:
         block, omissions = build(budget.total_chars)
         return block, (*collected.omissions, *omissions)
-    block, omissions = build(min(budget.total_chars, fit))
+    block, omissions = build(min(budget.total_chars, fit - _MARKER_CHARS))
     size = len(block.content.text.encode("utf-8"))
     if size > fit:
-        block, omissions = build(fit // 4)
+        block, omissions = build((fit - _MARKER_CHARS) // 4)
     return block, (*collected.omissions, *omissions)
 
 

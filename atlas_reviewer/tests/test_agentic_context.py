@@ -17,6 +17,8 @@ import shutil
 from pathlib import Path
 from typing import ClassVar
 
+import pytest
+
 from atlas_reviewer import cli
 from atlas_reviewer.conversation import (
     CONVERSATION_CHARS,
@@ -428,20 +430,30 @@ def test_a_room_that_fits_a_shrunken_conversation_sizes_the_first_build_to_it(
     assert int(prior.group(1)) < PRIOR_ROUND_CHARS
 
 
-def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget():
-    """UTF-8 encodes one to four bytes per character, so a conversation of
-    multi-byte characters whose character count fits the room still
-    overflows it in bytes; the assembly rebuilds once at a quarter of the
-    room, whose byte bound holds by construction (mutant M7 skips the
-    rebuild and ships an oversized block)."""
+def _block_at_fit(
+    fit: int, body: str, pull_body: str | None = None
+) -> tuple[object, tuple[object, ...]]:
+    """`cli._conversation_block` at one `fit` over the fixture's pull (its
+    body replaced by `pull_body` when given) and a review list of thirty
+    copies of one remark `body`, for the byte-budget tests below."""
     from atlas_reviewer.ports import Listing
 
     redactor = Redactor()
     budget = ConversationBudget()
-    pull_info = parse_pull(json.loads((FIXTURE / "pull.json").read_text()), redactor)
+    pull = json.loads((FIXTURE / "pull.json").read_text())
+    if pull_body is not None:
+        pull["body"] = pull_body
+    pull_info = parse_pull(pull, redactor)
     event = PrEvent("example-org/example-app", 42, HEAD_SHA)
 
-    class CjkGitHub(FixtureGitHub):
+    class WideGitHub(FixtureGitHub):
+        """The fixture's GitHub, whose reviews carry thirty copies of one
+        wide (multi-byte) remark body."""
+
+        def __init__(self, body: str) -> None:
+            super().__init__(FIXTURE)
+            self._body = body
+
         def list_pull_commits(self, repo: str, number: int) -> Listing:
             return Listing((), False, 1)
 
@@ -454,7 +466,7 @@ def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget():
                         "submitted_at": "2026-11-06T18:00:00Z",
                         "user": {"login": "example-maintainer"},
                         "commit_id": HEAD_SHA,
-                        "body": "丸小" * 2_200,
+                        "body": self._body,
                     }
                     for i in range(30)
                 ),
@@ -464,15 +476,83 @@ def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget():
 
     block, omissions = cli._conversation_block(
         event,
-        CjkGitHub(FIXTURE),
+        WideGitHub(body),
         pull_info,
         redactor,
         lambda text: redactor(text).text,
         budget,
-        56_000,
+        fit,
     )
+    return block, omissions
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("丸小" * 2_200, id="three-byte"),
+        pytest.param("😀" * 2_200, id="four-byte"),
+    ],
+)
+def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget(body):
+    """UTF-8 encodes one to four bytes per character, so a conversation of
+    multi-byte characters whose character count fits the room still
+    overflows it in bytes; the assembly rebuilds once at a quarter of the
+    room with the truncation marker counted, whose byte bound holds by
+    construction (mutant M7 skips the rebuild and ships an oversized
+    block; the unclamped `fit // 4` mutant ships up to the marker's 39
+    bytes over, which the four-byte variant catches)."""
+    block, omissions = _block_at_fit(56_000, body)
     assert block is not None
     assert len(block.content.text.encode("utf-8")) <= 56_000
     assert len(block.content.text) < CONVERSATION_CHARS
     assert omissions
+    assert any(o.source == CONVERSATION_SOURCE for o in omissions)
+
+
+@pytest.mark.parametrize("fit", range(1, 61))
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param("x" * 4_000, id="ascii"),
+        pytest.param("😀" * 2_000, id="four-byte"),
+    ],
+)
+def test_the_small_fit_band_never_crashes_and_never_ships_an_oversized_block(fit, body):
+    """The band the round-2 review found uncovered (MJ-1): fit 1 to 3
+    crashed on a zero-character rebuild budget, and every truncated build
+    carries a 39-character marker its byte bound had ignored. Across the
+    whole small-fit band, in both byte widths, the assembly either ships
+    a block whose UTF-8 bytes fit the room or omits it whole by name --
+    never an exception, never an oversized block (mutant M8, the round-2
+    scheme with only the `max(1, fit // 4)` clamp, ships a 40-byte block
+    at fit 1 and fails here; the unclamped round-2 rebuild `fit // 4`
+    crashes at fit 1 to 3 and fails here as an error)."""
+    block, omissions = _block_at_fit(fit, body)
+    if block is None:
+        assert any(o.limit == "model input room" for o in omissions)
+    else:
+        assert len(block.content.text.encode("utf-8")) <= fit
+
+
+def test_the_first_build_leaves_room_for_the_truncation_marker(monkeypatch):
+    """A truncated build appends the 39-character marker after its cap,
+    so the first build is sized at the room minus the marker: an ASCII
+    conversation truncated to the room ships at exactly the room's bytes
+    in one build (the skipped-marker mutant builds at `fit`, overflows by
+    exactly the marker, and burns the rebuild -- killed by the build
+    count here)."""
+    builds = []
+    real_build = cli.build_conversation
+
+    def counting_build(*args, **kwargs):
+        builds.append(args)
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "build_conversation", counting_build)
+    block, omissions = _block_at_fit(
+        2_000, "x" * 10_000, pull_body="round the shipping fees, please. " * 800
+    )
+    assert block is not None
+    assert len(builds) == 1
+    assert len(block.content.text.encode("utf-8")) <= 2_000
     assert any(o.source == CONVERSATION_SOURCE for o in omissions)

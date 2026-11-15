@@ -1755,3 +1755,31 @@ n-3: the room accessor is public (`lens_loop.input_room_tokens`), no
 private import from the CLI. Offline only, as before: fixture, scripted
 reviewer and fakes; no live model call, network call or secret, and no
 deployed service setting changed.
+
+## 2026-11-15 — round-2 review fix for #718: the sizing counts the truncation marker, and the small-fit band is swept
+
+MJ-1, the round's one new Major: the round-1 fix's two-build scheme
+crashed at fit 1 to 3 — the rebuild asked `build_conversation` for a
+zero-character budget (`fit // 4` at fit below 4), and the resulting
+`ValueError` is one no CLI handler catches, so the review died with a
+traceback instead of an omission — and its "fits by construction" byte
+bound ignored `_truncate`'s 39-character marker, which a truncated
+build appends after its cap, so a rebuilt block could ship up to 39
+bytes over the room. The sizing is marker-aware now: the omit-whole
+gate fires below 43 characters (one worst-case UTF-8 character plus the
+marker — a room that small holds no block), the first build runs at
+`fit − 39` (an ASCII build truncated to the room ships at exactly the
+room's bytes in one build), and the multi-byte rebuild at
+`(fit − 39) // 4`, whose bound `4 × ((fit − 39) // 4) + 39 ≤ fit` holds
+by construction. A unit sweep over fit 1 to 60 in both byte widths
+(ASCII and four-byte) pins no-exception and bytes-within-the-room;
+the multi-byte test runs a four-byte variant beside the three-byte one;
+and a marker test pins the first build's subtraction (a giant fixed
+part truncated to the room ships in one build). Killed: the round-2
+scheme as written (crash), M8 (its clamped variant, which ships a
+40-byte block at fit 1), the skipped-marker first build, and a gate at
+39 instead of 43. D67's second Correction also retracts the round-1
+Correction's false unreachability claim: the deleted loop's exhaustion
+branch WAS reachable for fit 1 through 39, because of that same marker
+— the old code omitted whole there, which was correct. Offline only,
+as before.
