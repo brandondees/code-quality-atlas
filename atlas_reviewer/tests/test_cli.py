@@ -2260,3 +2260,12 @@ def test_agentic_review_validates_the_diff_prefix_share_flag(tmp_path):
         "0",
     )
     assert code == cli.EXIT_CHANGES_REQUESTED, err
+
+
+def test_the_agentic_command_default_pool_stays_four():
+    """Minor 1 (review round 1 of #704): D65's first-wave cost is priced
+    at this default -- the command replaces an unset pool with 4, so a
+    flagless first wave starts its lenses together and each may write the
+    shared prefix. A change to this default must revisit that claim and
+    the decision's cost sentence."""
+    assert cli.AGENTIC_POOL == 4

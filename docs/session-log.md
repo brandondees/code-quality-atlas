@@ -1582,20 +1582,29 @@ from what the prefix held — a lens that calls no tool is clean — and
 the unread-list nudge and the `diff_file` page bookkeeping are retired
 there; the paged path keeps both and its honest-coverage rule. First
 wave: no warming — the lenses fan out as configured, each may write the
-prefix (about $0.30 less saving than a warmed start; zero at the
-default `pool_size` 1), because warming would serialize the first lens
-ahead of the pool and spend review wall clock on ordering the pool does
-not need. `cache_stats` gains each session's opening-turn cache read —
+prefix (about $0.24–$0.33 per review at the cited sizes, because the
+`agentic-review` command defaults its pool to 4 — `AGENTIC_POOL` in
+`cli.py`, not the `AgenticLimits` default of 1 — so a flagless first
+wave starts its lenses together and up to three of them write the
+prefix at the $2.50/M write price), because warming would serialize
+the first lens ahead of the pool and spend review wall clock on
+ordering the pool does not need. `cache_stats` gains each session's opening-turn cache read —
 on the prefix path that count is the shared prefix's read for the
 session — so the saving reads straight off the draft. OpenRouter's
 prompt-caching page (fetched 2026-11-15) grounds the per-block
-breakpoints across Anthropic-compatible providers and the sticky
-routing that keys on the first system and first non-system message,
-which the shared prefix now makes common across a review's lenses; the
-combination of the top-level automatic field with the explicit block
-was not probed live (verify). The dry run keeps the paged path, which
+breakpoints across Anthropic-compatible providers. The page's sticky
+routing keys on the first system and first non-system message, and the
+prefix leaves the first non-system message lens-specific — it carries
+the lens skill and the turn-1 text after the diff — so the routing hash
+still differs per lens: the locality comes from D63's endpoint pin, and
+the cache sharing from the explicit breakpoint over the byte-identical
+first part. The combination of the top-level automatic field with the
+explicit block was not probed live (verify). The dry run keeps the paged path, which
 keeps the `gap` scenario's coverage gap reachable. Offline only: no
 live model call was made for this change; the tests pin the byte
 identity over serialized request bytes, the breakpoint, the threshold,
 coverage on both paths, the nudge, the fencing, and the per-session
-prefix read.
+prefix read. The README's limit counts count every `agentic_config.ENV`
+entry — the command-scoped pool and the prefix share included — which
+is why the merged total reads sixteen after the #698 merge, where
+main's earlier count left the pool out.

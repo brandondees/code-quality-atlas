@@ -1255,11 +1255,41 @@ def test_the_shared_prefix_is_byte_identical_across_lenses_and_a_retry():
     b = cached_prefix_bytes(json.loads(second_fake.chat_requests()[0][3]))
     r = cached_prefix_bytes(json.loads(first_fake.chat_requests()[1][3]))
     assert a == b == r
+    # The cached prefix carries the real tools, not an empty list (mutant
+    # P15: an empty `tools` on both sides stays byte-identical and would
+    # cache a prefix no real request sends).
+    prefix_object = json.loads(a)
+    assert [tool["function"]["name"] for tool in prefix_object["tools"]] == [
+        "diff_stat",
+        "diff_file",
+        "list_files",
+        "read_file",
+        "grep",
+    ]
     # The lens-specific text sits after the breakpoint: the retry's own
     # skill text (its preamble names the refused attempt) is not in any
     # cached prefix, and neither is the other lens's body.
     assert body_markers(LENS, body_digest(BODY))[0].encode() not in a
     assert body_markers(SECOND_LENS, body_digest(SECOND_BODY))[0].encode() not in a
+
+
+def test_the_first_non_system_message_differs_per_lens():
+    """Minor 2 (review round 1 of #704): OpenRouter's sticky-routing hash
+    covers the first system message and the first non-system message. The
+    layout keeps the lens skill and the turn-1 text in that first
+    non-system message, so the routing key differs per lens and the
+    locality claim rests on D63's endpoint pin; what the lenses share is
+    the breakpoint-marked part 0, the fenced diff."""
+    first, first_fake = model(reply(completion("ok")))
+    second, second_fake = model(reply(completion("ok")))
+    first.turn(prefixed_request())
+    second.turn(prefixed_request(lens=SECOND_LENS, body=SECOND_BODY))
+    a = json.loads(first_fake.chat_requests()[0][3])
+    b = json.loads(second_fake.chat_requests()[0][3])
+    assert a["messages"][0]["content"] == b["messages"][0]["content"]
+    assert a["messages"][1]["content"][0] == b["messages"][1]["content"][0]
+    assert a["messages"][1]["content"][1] != b["messages"][1]["content"][1]
+    assert a["messages"][1]["content"][2] == b["messages"][1]["content"][2]
 
 
 def test_the_explicit_breakpoint_sits_on_the_diff_part_of_the_prefix():

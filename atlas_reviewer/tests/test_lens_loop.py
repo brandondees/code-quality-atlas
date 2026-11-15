@@ -1865,3 +1865,95 @@ def test_a_failed_quote_repair_on_the_prefix_path_reports_no_coverage_gap(
     assert "the quote-repair bound was reached" in outcome.detail
     assert outcome.nudges == ("quote-repair",)
     assert outcome.diff_prefix.startswith("the shared diff prefix is inlined")
+
+
+def test_a_prefix_path_turn_cap_reports_no_unread_files(tmp_path):
+    """Mutant P12: `cut` reading the page bookkeeping around the accessor
+    would report both changed files unread on a prefix-path stop -- a
+    false coverage gap no other test catches, because `_held_with` and
+    `_final` are already pinned."""
+    outcome, _model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel([tools(("diff_stat", {}))]),
+        limits=replace(LIMITS, max_turns=1),
+    )
+    assert outcome.causes == {Cause.TURN_CAP}
+    assert outcome.unread == ()
+    assert outcome.diff_prefix.startswith("the shared diff prefix is inlined")
+
+
+def test_the_prefix_budget_boundary_inlines_at_equal_and_pages_one_byte_over():
+    """Mutant P13: a `>=` comparison pages a block that fits exactly, and
+    a slack `>` (budget plus one) inlines a block one byte over; the
+    boundary is equality fits, one byte over pages."""
+    limits = replace(LIMITS, diff_prefix_share=1).resolve()
+    fitted, _note = diff_prefix_for(prefixed_job(), limits, RoomModel([], room=10**9))
+    assert fitted is not None
+    size = fitted.bytes
+    inline, _inlined_note = diff_prefix_for(
+        prefixed_job(), limits, RoomModel([], room=size)
+    )
+    assert inline is not None
+    over, over_note = diff_prefix_for(
+        prefixed_job(), limits, RoomModel([], room=size - 1)
+    )
+    assert over is None
+    assert "over the" in over_note
+
+
+def test_a_diff_alone_over_the_budget_pages():
+    """Mutant P14: counting only the shared system text against the
+    budget would inline a block whose diff alone is over it."""
+    section = (
+        "diff --git a/big.py b/big.py\n"
+        "--- a/big.py\n"
+        "+++ b/big.py\n"
+        "@@ -0,0 +1 @@\n"
+        "+" + "x" * 50_000 + "\n"
+    )
+    job = replace(prefixed_job(diff=section), changed=frozenset({"big.py"}))
+    limits = replace(LIMITS, diff_prefix_share=1).resolve()
+    prefix, note = diff_prefix_for(job, limits, RoomModel([], room=10_000))
+    assert prefix is None
+    # The budget is the whole room at share 1. The shared system text
+    # alone fits it; the diff alone pushes the block past it.
+    assert "over the 10000-token budget" in note
+
+
+def test_the_prefix_path_no_progress_window_starts_at_turn_zero(tmp_path):
+    """Mutant P17: seeding `covered_at_turn` as None on the prefix path
+    starts the no-progress window one turn later than the prefix's
+    turn-0 coverage; the window is counted from before turn 1."""
+    outcome, _model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=prefixed_job(),
+        model=RoomModel([tools(("diff_stat", {})), tools(("diff_stat", {})), final()]),
+        limits=replace(LIMITS, no_progress_turns=2),
+    )
+    assert outcome.nudges == ("no-progress",)
+    assert outcome.state is LensState.CLEAN
+
+
+def test_a_scope_with_a_path_without_a_section_pages_and_is_not_attested(tmp_path):
+    """Nit 3 (review round 1 of #704), mutant P18: a scope mixing a real
+    section with a path the diff has no section for must not inline a
+    fence that attests the path it does not hold; the decision pages, and
+    the paged rules report the gap honestly. The note names the count,
+    not the paths -- they are PR data."""
+    model = RoomModel([READ_ALL, final(), final()])
+    outcome, model, _spend = attempt(
+        tmp_path,
+        [],
+        the_job=replace(prefixed_job(), changed=frozenset({"calc.py", "ghost.py"})),
+        model=model,
+    )
+    assert all(request.prefix is None for request in model.requests)
+    assert outcome.diff_prefix == (
+        "the diff holds no section for 1 of the paths in scope, so the "
+        "diff pages through diff_file"
+    )
+    assert Cause.FILES_UNREAD in outcome.causes
+    assert outcome.state is LensState.PARTIAL

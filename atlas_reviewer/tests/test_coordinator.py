@@ -2570,3 +2570,12 @@ def test_a_prefix_review_is_clean_and_complete_with_no_tool_calls(tmp_path):
     assert result.lenses[0].outcome.changed_files == 2
     assert result.lenses[0].outcome.unread == ()
     assert "the shared diff prefix is inlined" in render_draft(result, Redactor())
+
+
+def test_the_fence_nonce_is_eight_bytes():
+    """Mutant P16: the nonce's width is part of the fence's unpredictability
+    guarantee (D65), pinned to the literal 8 so a change of the constant
+    cannot silently halve it."""
+    import atlas_reviewer.coordinator as coordinator_module
+
+    assert coordinator_module.NONCE_BYTES == 8
