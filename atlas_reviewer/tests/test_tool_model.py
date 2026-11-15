@@ -7,10 +7,17 @@ from decimal import Decimal
 
 import pytest
 
-from atlas_reviewer.attestation import Cause, LensState, ToolUse
+from atlas_reviewer.attestation import (
+    Cause,
+    LensState,
+    ToolUse,
+    body_digest,
+    body_markers,
+)
 from atlas_reviewer.bridge import UNKNOWN_TOOL, Status
 from atlas_reviewer.bridge_args import RejectedError, Rev, validate
 from atlas_reviewer.budget import worst_case_usd
+from atlas_reviewer.cache_stats import session_lines
 from atlas_reviewer.call_facts import take_call
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
@@ -1011,3 +1018,112 @@ def test_a_call_that_is_not_a_function_cannot_be_executed():
     assert (call.tool, call.args) == ("", ())
     with pytest.raises(RejectedError):
         validate(call.tool, call.args, frozenset({Rev.HEAD}))
+
+
+# --- the prompt-cache sessions (issue #695) ---------------------------------
+
+
+def cache_usage(prompt, *, cached=None, written=None):
+    usage = {"prompt_tokens": prompt, "completion_tokens": 5, "cost": 0.01}
+    details = {}
+    if cached is not None:
+        details["cached_tokens"] = cached
+    if written is not None:
+        details["cache_write_tokens"] = written
+    if details:
+        usage["prompt_tokens_details"] = details
+    return usage
+
+
+def marker_system(lens="hunting-silent-failures"):
+    begin, end = body_markers(lens, body_digest("the lens body"))
+    return f"You are one lens.\n\n{begin}\nthe lens body\n{end}"
+
+
+def marked_request(system, *messages):
+    return TurnRequest(
+        system, messages or (UserText("Review the change."),), tool_schemas()
+    )
+
+
+def test_consecutive_turns_of_one_conversation_are_one_cache_session():
+    lens, _fake = model(
+        reply(completion("thinking", usage=cache_usage(20_000, cached=0, written=20_000))),
+        reply(completion("findings", usage=cache_usage(26_000, cached=20_000, written=6_000))),
+    )  # fmt: skip
+    lens.turn(request())
+    lens.turn(request())
+    (only,) = lens.cache_sessions()
+    assert len(only.turns) == 2
+    assert only.misses == 0
+    assert only.cache_write_tokens == 26_000
+    assert only.final_prompt_tokens == 26_000
+
+
+def test_a_turn_short_of_the_previous_prompt_counts_as_a_cache_miss():
+    lens, _fake = model(
+        reply(completion("thinking", usage=cache_usage(20_000, cached=0, written=20_000))),
+        reply(completion("findings", usage=cache_usage(26_000, cached=100, written=25_900))),
+    )  # fmt: skip
+    lens.turn(request())
+    lens.turn(request())
+    (only,) = lens.cache_sessions()
+    assert only.misses == 1
+
+
+def test_a_turn_with_no_reported_cache_counts_counts_as_a_miss():
+    lens, _fake = model(
+        reply(completion("thinking", usage=cache_usage(20_000, cached=0, written=20_000))),
+        reply(completion("findings", usage=cache_usage(26_000))),
+    )  # fmt: skip
+    lens.turn(request())
+    lens.turn(request())
+    (only,) = lens.cache_sessions()
+    assert only.misses == 1
+
+
+def test_a_changed_system_prompt_opens_a_new_session_named_by_the_body_marker():
+    first = marker_system("hunting-silent-failures")
+    second = marker_system("reviewing-test-quality")
+    lens, _fake = model(
+        reply(
+            completion("thinking", usage=cache_usage(20_000, cached=0, written=20_000))
+        ),
+        reply(completion("findings", usage=cache_usage(26_000, cached=20_000))),
+        reply(
+            completion("thinking", usage=cache_usage(30_000, cached=0, written=30_000))
+        ),
+        reply(completion("findings", usage=cache_usage(34_000, cached=30_000))),
+    )
+    lens.turn(marked_request(first))
+    lens.turn(marked_request(first))
+    lens.turn(marked_request(second))
+    lens.turn(marked_request(second))
+    first_session, second_session = lens.cache_sessions()
+    assert first_session.label == "hunting-silent-failures"
+    assert first_session.misses == 0
+    assert second_session.label == "reviewing-test-quality"
+    assert second_session.misses == 0
+
+
+def test_sessions_render_with_a_run_total():
+    lens, _fake = model(
+        reply(
+            completion("thinking", usage=cache_usage(20_000, cached=0, written=20_000))
+        ),
+        reply(completion("findings", usage=cache_usage(26_000, cached=100))),
+        reply(
+            completion("thinking", usage=cache_usage(30_000, cached=0, written=30_000))
+        ),
+        reply(completion("findings", usage=cache_usage(34_000, cached=30_000))),
+    )
+    lens.turn(marked_request("one"))
+    lens.turn(marked_request("one"))
+    lens.turn(marked_request("two"))
+    lens.turn(marked_request("two"))
+    lines = session_lines(lens.cache_sessions())
+    assert "1 cache miss(es)" in lines[0]
+    assert lines[-1].startswith("total: 4 turn(s), 1 cache miss(es)")
+    assert lines[-1].endswith(
+        "50000 cache-write token(s) against 60000 token(s) of final context."
+    )

@@ -64,6 +64,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
+from atlas_reviewer.cache_stats import CacheSession, session_lines
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
 from atlas_reviewer.domain import (
@@ -1133,10 +1134,15 @@ def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
     return None
 
 
-def render_draft(review: AgenticReview, redactor: Redactor) -> str:
+def render_draft(
+    review: AgenticReview,
+    redactor: Redactor,
+    cache: Sequence[CacheSession] = (),
+) -> str:
     """The draft as the operator reads it. Every model-written value (and
     every PR path) is redacted, with the review's flagged values scrubbed,
-    and quoted as data."""
+    and quoted as data. `cache` is the prompt-cache sessions the model
+    adapters reported (issue #695); empty when none did."""
     scrubber = Redactor(
         redactor.known_secrets, redactor.sources, (*redactor.flagged, *review.flagged)
     )
@@ -1189,6 +1195,9 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    if cache:
+        lines += ["", "## Prompt cache", ""]
+        lines += _cache_lines(cache, scrub)
     if review.round_log_note:
         lines.append(
             "Round log, quoted: "
@@ -1215,6 +1224,29 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
             + "; recover each with `sweep --runner NAME --force-live`."
         )
     return "\n".join(lines) + "\n"
+
+
+def _cache_lines(
+    cache: Sequence[CacheSession], scrub: Callable[[str], str]
+) -> list[str]:
+    """One line per session, then the run total (issue #695). The label
+    is the lens a session's system prompt named; it is quoted as data,
+    because it is still text a reader could mistake for prose. An
+    unlabeled session keeps its ordinal."""
+    return [
+        "- " + line
+        for line in session_lines(
+            cache,
+            label_of=lambda session, number: (
+                (
+                    f"session {number} "
+                    + quote_untrusted(session.label, QUOTED_CHARS, scrub=scrub)
+                )
+                if session.label
+                else f"session {number}"
+            ),
+        )
+    ]
 
 
 def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:

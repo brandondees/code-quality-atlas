@@ -22,6 +22,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
+from atlas_reviewer.cache_stats import CacheSession, CacheTurn
 from atlas_reviewer.coordinator import (
     HALTED_REASON,
     LATE_REASON,
@@ -1863,3 +1864,30 @@ def test_the_draft_names_the_picker_fallback_and_the_names_it_did_not_run():
     assert "## Lens selection" in draft
     assert "gave no usable lens list" in draft
     assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in draft
+
+
+# --- the prompt-cache section of the draft (issue #695) ---------------------
+
+
+def test_the_draft_renders_the_prompt_cache_sessions(tmp_path):
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    sessions = [
+        CacheSession(
+            "hunting-silent-failures",
+            (CacheTurn(20_000, 0, 20_000), CacheTurn(26_000, 20_000, 6_000)),
+        ),
+        CacheSession("reviewing-test-quality", (CacheTurn(30_000, 0, 30_000),)),
+    ]
+    draft = render_draft(result, Redactor(), cache=sessions)
+    assert "## Prompt cache" in draft
+    assert '"hunting-silent-failures"' in draft
+    assert '"reviewing-test-quality"' in draft
+    assert (
+        "total: 3 turn(s), 0 cache miss(es), 56000 cache-write token(s) "
+        "against 56000 token(s) of final context."
+    ) in draft
+
+
+def test_a_draft_without_cache_sessions_has_no_prompt_cache_section(tmp_path):
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    assert "## Prompt cache" not in render_draft(result, Redactor())

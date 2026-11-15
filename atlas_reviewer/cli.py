@@ -132,6 +132,7 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.tracing import (
     acquire_shared,
     header_values,
@@ -645,6 +646,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         task_socket = SOCKET_PATH
         bridge_root = BRIDGE_ROOT
         scratch: str | None = None
+        # Every live adapter the review creates, so the draft's
+        # prompt-cache section covers each lens's own (#695). Dry-run and
+        # scripted models record none.
+        live_models: list[OpenRouterLensModel] = []
         if args.dry_run:
             fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
             if not fixtures.is_dir():
@@ -682,7 +687,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             picker_provider = provider
 
             def live_model() -> LensModel:
-                return cast(LensModel, model_for_lens(provider, limits))
+                adapter = model_for_lens(provider, limits)
+                live_models.append(adapter)
+                return cast(LensModel, adapter)
 
             lens_model = live_model()
             model_factory = live_model
@@ -782,7 +789,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 span.set("atlas.review_event", review.event.value)
         finally:
             release_shared()
-    written = _emit(render_draft(review, redactor), args.out, out, err)
+    cache = tuple(
+        session for model in live_models for session in model.cache_sessions()
+    )
+    written = _emit(render_draft(review, redactor, cache=cache), args.out, out, err)
     (out if written else err).write(
         f"{_telemetry_line(run, telemetry)}"
         f"review event: {review.event.value}; coverage_complete="
@@ -1364,8 +1374,10 @@ def _model_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=(
             "comma-separated provider slugs for provider.only (env "
-            "ATLAS_PROVIDERS; default amazon-bedrock,google-vertex/europe,"
-            "google-vertex/global,google-vertex/us). One slug pins that "
+            "ATLAS_PROVIDERS; default for an anthropic model is the single "
+            "endpoint google-vertex/global, and "
+            "amazon-bedrock,google-vertex/europe,google-vertex/global,"
+            "google-vertex/us for any other model). One slug pins that "
             "provider. A slug with no pure-ZDR endpoint for the model is "
             "refused."
         ),
