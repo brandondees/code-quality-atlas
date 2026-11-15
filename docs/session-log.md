@@ -1384,7 +1384,7 @@ lens, still not retried -- so the draft and the ledger name a policy
 refusal rather than a model failure (#664). Every change names a test
 that fails when it is reverted. D60.
 
-## 2026-11-15 — a lens retry keeps the earlier attempts' verified findings (#691, D60)
+## 2026-11-15 — a lens retry keeps the earlier attempts' verified findings (#691, D61)
 
 The Nov 14 model trials left a hole in the retry path: `QUOTES_FAILED`
 is retryable, so one unverifiable quote re-ran the whole lens, and
