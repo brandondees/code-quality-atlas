@@ -441,6 +441,54 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert "## Not verified (not reported as findings)" in draft
 
 
+def test_a_verified_finding_survives_an_empty_retry(tmp_path):
+    """#691: one unverifiable quote retries the lens; the empty retry must
+    not throw away the finding the first attempt verified."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, _, _ = review(
+        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final()]
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 2, False)
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.event is ReviewEvent.COMMENT
+    assert result.coverage_complete
+
+
+def test_a_verified_finding_survives_a_retry_that_verifies_less(tmp_path):
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, _, _ = review(
+        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final(wrong)]
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
+    # The carried finding follows the retry's own reply in the minted
+    # order, so its id is L1-F2 here.
+    assert [f.id for f in result.verified] == ["L1-F2"]
+    assert [f.id for f in result.unverified] == ["L1-F1"]
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.event is ReviewEvent.COMMENT
+
+
+def test_a_retry_that_never_attests_keeps_the_lens_failed(tmp_path):
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    bad = '{"lens": "other"'
+    result, _, _ = review(
+        tmp_path,
+        # The unparseable reply earns its one repair turn (D44); the
+        # second one is the attempt's result.
+        [READ_ALL, final(finding(), wrong), READ_ALL, final(text=bad), final(text=bad)],
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.escalated) == (LensState.FAILED, True)
+    assert Cause.UNPARSED in lens.outcome.causes
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert result.verified == ()
+
+
 def test_a_configured_turn_cap_reaches_the_loop(tmp_path):
     from atlas_reviewer.coordinator import limits_for_lens
 
