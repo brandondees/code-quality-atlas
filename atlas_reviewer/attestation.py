@@ -16,7 +16,11 @@ short, and its checked findings. The retry policy (`next_step`) reads only
 the ledger: an attempt that started and never finished is abandoned, and
 counts as used, so a crashed or restarted controller resumes the same
 attempt count instead of starting over, and a lens that already finished
-is not run again for the same head and body.
+is not run again for the same head and body. A settled lens keeps the
+verified findings of its earlier attempts (#691): the last attempt's
+outcome stands -- its attestation and causes, so a retry that still
+failed is still partial or failed -- with the earlier attested attempts'
+verified findings merged into it, deduplicated.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import json
 import os
 import threading
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -557,8 +561,10 @@ class RunAttempt:
 @dataclass(frozen=True)
 class Settled:
     """No attempt is left to run. `escalated` means the last attempt was
-    retryable and the retries ran out, so its outcome stands as partial
-    or failed."""
+    retryable and the retries ran out. `outcome` is the last attempt's,
+    with every earlier attested attempt's verified findings merged into
+    it (#691); its attestation and causes stay the last attempt's, so a
+    retry that still failed is still partial or failed, never clean."""
 
     outcome: AttemptOutcome
     attempts: int
@@ -568,15 +574,73 @@ class Settled:
 Step = RunAttempt | Settled
 
 
+def _norm(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _finding_key(finding: Finding) -> tuple[str, str, str, str, str, str]:
+    """What makes two findings the same one restated: the location, the
+    closed values that shape it, and the normalized finding and evidence
+    text. The route and the fix are not the identity: a retry may refile
+    the same issue with either changed."""
+    return (
+        str(finding.location),
+        finding.severity.value,
+        finding.valence.value,
+        finding.attribution.value,
+        _norm(finding.finding),
+        _norm(finding.evidence),
+    )
+
+
+def _merged_findings(attempts: tuple[Attempt, ...]) -> tuple[CheckedFinding, ...]:
+    """The last attempt's findings with the verified findings of every
+    earlier attested attempt kept and merged in, deduplicated (#691). The
+    retry's reply is the one that counts: a finding it restates stays its
+    copy, at its own place in the order. An earlier verified finding the
+    retry could not verify replaces the retry's unverified copy at the
+    same citation. An earlier verified finding the retry does not restate
+    is appended. Only verified findings are carried forward, and only
+    from an attested attempt; the last attempt's own duplicates are kept
+    as its reply reported them."""
+    last = attempts[-1].outcome
+    if len(attempts) == 1:
+        return last.findings
+    merged = list(last.findings)
+    for attempt in attempts[:-1]:
+        if attempt.outcome.attestation is not Attestation.ATTESTED:
+            continue
+        for checked in attempt.outcome.findings:
+            if not checked.verified:
+                continue
+            key = _finding_key(checked.finding)
+            for i, held in enumerate(merged):
+                if _finding_key(held.finding) == key:
+                    if not held.verified:
+                        merged[i] = checked
+                    break
+            else:
+                merged.append(checked)
+    return tuple(merged)
+
+
 def next_step(attempts: tuple[Attempt, ...], retries: int = RETRIES) -> Step:
     """From the ledger alone: run the first attempt; after a retryable
     outcome, run another while fewer than `1 + retries` were made; else
-    the last outcome stands."""
+    the last outcome stands with the earlier verified findings merged in
+    (#691): the retry re-verifies or replaces what failed, it does not
+    throw away what was already verified."""
     if not attempts:
         return RunAttempt(1)
     last = attempts[-1].outcome
     if not last.retryable:
-        return Settled(last, len(attempts), escalated=False)
+        return Settled(
+            replace(last, findings=_merged_findings(attempts)), len(attempts),
+            escalated=False,
+        )  # fmt: skip
     if len(attempts) >= 1 + retries:
-        return Settled(last, len(attempts), escalated=True)
+        return Settled(
+            replace(last, findings=_merged_findings(attempts)), len(attempts),
+            escalated=True,
+        )  # fmt: skip
     return RunAttempt(attempts[-1].number + 1)

@@ -1383,3 +1383,29 @@ review). The agentic loop gives a ZDR or pricing refusal its own
 lens, still not retried -- so the draft and the ledger name a policy
 refusal rather than a model failure (#664). Every change names a test
 that fails when it is reverted. D60.
+
+## 2026-11-15 — a lens retry keeps the earlier attempts' verified findings (#691, D61)
+
+The Nov 14 model trials left a hole in the retry path: `QUOTES_FAILED`
+is retryable, so one unverifiable quote re-ran the whole lens, and
+`next_step` let the last attempt's outcome stand — an empty or weaker
+retry replaced findings the quote checker had already verified (21
+verified findings lost across 12 trial runs, including a verified catch
+of a real Minor on PR #661). A settled lens's outcome is now the last
+attempt's with every earlier attested attempt's verified finding merged
+into it, deduplicated, computed from the ledger alone in `next_step` so
+every reader of a settle sees the same merge. The retry's reply is the
+one that counts: a finding it restates stays its copy, an earlier
+verified finding replaces the retry's unverified copy at the same
+citation, and one the retry does not restate is appended. The identity
+is location, severity, valence and attribution plus the normalized
+finding and evidence text; route and fix are not the identity. Honesty
+is unchanged by construction: the merged outcome keeps the last
+attempt's attestation, causes, detail, unread list and changed-file
+count, so a retry that still failed is still partial or failed, and
+coverage reads the last attempt exactly as before. Only verified
+findings from attested attempts are carried; an outcome whose last
+attempt never attested keeps them on the ledger but reports none. The
+retry prompt is unchanged — the body is still applied whole. Policy
+tests in `test_attestation.py`, end-to-end over the real bridge with the
+scripted model in `test_coordinator.py`. Offline only.

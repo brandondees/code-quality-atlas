@@ -1129,7 +1129,16 @@ D41 records the 2026-11-12 probe that did.
   append-only ledger when it starts and again when it ends, keyed by
   repository, PR, head SHA, lens and body digest. A failed attestation, an
   unparsed reply, a failed quote or an abandoned attempt is retried once
-  with the body injected again; a second one escalates. A crash leaves an
+  with the body injected again; a second one escalates. A settled lens
+  keeps what the earlier attempts verified (#691): the last attempt's
+  outcome stands -- its attestation and causes, so a retry that still
+  failed is still partial or failed -- with the earlier attested attempts'
+  verified findings merged into it, deduplicated (a finding the retry
+  restates stays the retry's copy, an earlier verified finding replaces
+  the retry's unverified copy at the same citation, and one the retry does
+  not restate is appended; the identity is the location, the severity,
+  valence and attribution, and the normalized finding and evidence text).
+  A crash leaves an
   abandoned attempt that counts as used. A lens already settled for this
   head and body is reused without a runner. A settled outcome with no
   changed-file count, from before the per-file gate, shows no coverage,
@@ -1239,7 +1248,7 @@ D41 records the 2026-11-12 probe that did.
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
-| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
+| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
