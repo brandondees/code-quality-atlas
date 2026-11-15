@@ -1421,7 +1421,7 @@ lost. A 429'd create now waits a schedule that doubles from 2s capped at
 `ATLAS_CREATE_RETRIES`), honoring a Retry-After header the 429 carries
 (read case-insensitively; a value the parser cannot read is None and the
 schedule stands in) up to 120s a wait and truncated to the deadline the
-runner has left. The coordinator passes its pooled lenses a per-review
+runner has left. The coordinator passes its pooled lenses and continuations a per-review
 gate of
 `create_concurrency` (default 4, `ATLAS_CREATE_CONCURRENCY`), so at most
 that many Sprites create at once; slot waits are telemetry events, and a
@@ -1435,7 +1435,12 @@ one degrades the runner with cleanup `NOT_CREATED` and no ledger entry
 left. A 502 during a tree upload already failed only its runner; the
 new tests pin that path too. Round 1 on the PR also pinned the
 review-level wiring and bounds (the gate size, the retry count, the env
-ranges and the literal defaults) its mutants showed unpinned. Offline
+ranges and the literal defaults) its mutants showed unpinned. Folding
+the plain positive-int limits' parser into the ranged one changed what
+those nine limits say when they refuse -- "must be an integer, not X"
+for a non-integer and "must be an integer of at least 1, not X" for a
+below-one value, was "must be a positive integer, not X" -- both texts
+pinned by test. Offline
 only: no live Sprite, model or GitHub call was made.
 
 ## 2026-11-15 — Anthropic routes pin one endpoint, and the draft counts prompt-cache misses (#695, D63)

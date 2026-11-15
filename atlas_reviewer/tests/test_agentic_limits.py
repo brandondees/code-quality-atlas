@@ -299,6 +299,21 @@ def test_the_create_limits_are_configurable_and_bad_ones_are_refused():
     assert _apply(AgenticLimits(), "create_concurrency", "64").create_concurrency == 64
 
 
+def test_the_plain_positive_int_limits_refusal_texts_are_pinned():
+    """D62 folded `_positive_int` into the ranged parser to share one
+    message shape, which changed what the nine plain positive-integer
+    limits say when they refuse. Both new texts are operator-facing; pin
+    them (kills the mutant that reverts either wording)."""
+    with pytest.raises(ValueError, match=r"max_calls must be an integer, not '12a'$"):
+        load_agentic_limits({}, max_calls="12a")
+    with pytest.raises(
+        ValueError, match=r"max_calls must be an integer of at least 1, not '0'$"
+    ):
+        load_agentic_limits({}, max_calls="0")
+    with pytest.raises(ValueError, match=r"max_turns must be an integer, not 'later'$"):
+        load_agentic_limits({"ATLAS_MAX_TURNS": "later"})
+
+
 def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
     """D64: the repair bound (0 to 3 turns per attempt) and the checker's
     window (0 to 8 lines) are limits like the others; 0 disables each.
