@@ -18,9 +18,19 @@ from pathlib import Path
 from typing import ClassVar
 
 from atlas_reviewer import cli
-from atlas_reviewer.conversation import CONVERSATION_CHARS
+from atlas_reviewer.conversation import (
+    CONVERSATION_CHARS,
+    ConversationBudget,
+)
+from atlas_reviewer.conversation import (
+    SOURCE as CONVERSATION_SOURCE,
+)
+from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.evidence import parse_pull
+from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.lens_script import LensScriptModel
-from atlas_reviewer.rounds import RoundLog, RoundRecord
+from atlas_reviewer.redact import Redactor
+from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog, RoundRecord
 from atlas_reviewer.tests.helpers import FIXTURE
 
 EVENT = str(FIXTURE / "event.json")
@@ -42,7 +52,7 @@ class Recording(LensScriptModel):
         return super().turn(request)
 
 
-def _run(tmp_path: Path, *extra: str) -> tuple[int, str, str]:
+def _run(tmp_path: Path, *extra: str, picks=None) -> tuple[int, str, str]:
     if Recording.room is not None:
         room = Recording.room
 
@@ -53,8 +63,12 @@ def _run(tmp_path: Path, *extra: str) -> tuple[int, str, str]:
     else:
         model = Recording
     Recording.first_turns = []
-    saved = cli._scripted_lens_models
+    saved_models = cli._scripted_lens_models
+    saved_picker = None
     cli._scripted_lens_models = lambda script: (model(script), lambda: model(script))
+    if picks is not None:
+        saved_picker = cli.OfflineProvider
+        cli.OfflineProvider = picks
     try:
         out, err = io.StringIO(), io.StringIO()
         code = cli.main(
@@ -75,7 +89,9 @@ def _run(tmp_path: Path, *extra: str) -> tuple[int, str, str]:
         )
         return code, out.getvalue(), err.getvalue()
     finally:
-        cli._scripted_lens_models = saved
+        cli._scripted_lens_models = saved_models
+        if saved_picker is not None:
+            cli.OfflineProvider = saved_picker
 
 
 def _lens_count(draft: str) -> int:
@@ -275,3 +291,188 @@ def test_a_conversation_over_its_d38_budget_shrinks_with_recorded_omissions(
     lines = "\n".join(_context_omission_lines(draft))
     assert f"{CONVERSATION_CHARS}-character budget" in lines
     assert "oldest review(s) and comment(s) not shown" in lines
+
+
+def _oversized_conversation_fixtures(tmp_path: Path, *, filler: str) -> Path:
+    """The shipped fixture plus enough large conversation comments that the
+    conversation block alone overflows D38's budget by a wide margin."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    comments = json.loads((fixtures / "issue-comments.json").read_text())
+    comments = [
+        *comments,
+        *(
+            {
+                "id": 9000 + i,
+                "user": {"login": "drive-by-user"},
+                "created_at": "2026-11-06T21:00:00Z",
+                "body": filler,
+            }
+            for i in range(40)
+        ),
+    ]
+    (fixtures / "issue-comments.json").write_text(json.dumps(comments))
+    return fixtures
+
+
+def test_an_unparseable_pull_is_one_named_omission_and_the_picker_falls_back(
+    tmp_path,
+):
+    """A pull whose fields do not parse must not kill the review before a
+    lens runs (mutant N1 deletes the `parse_pull` guard and the whole
+    suite stayed green): no block is built, exactly one omission names
+    it, the review cannot approve, and the picker keeps the title-only
+    view it had before the wiring. `head.ref` is the field removed: a
+    pull with no head SHA never reaches the assembly, because
+    `_require_head` refuses it first."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    pull = json.loads((fixtures / "pull.json").read_text())
+    del pull["head"]["ref"]
+    (fixtures / "pull.json").write_text(json.dumps(pull))
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt)
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    code, draft, err = _run(
+        tmp_path,
+        "--depth", "review",
+        "--fixtures", str(fixtures),
+        "--lens-script", str(FIXTURE / "scenarios" / "approve.json"),
+        picks=Picks,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert '"review_event": "COMMENT"' in draft
+    assert '"coverage_complete": false' in draft
+    lines = _context_omission_lines(draft)
+    assert len(lines) == 1, lines
+    assert "pull request fields" in lines[0]
+    assert "did not parse" in lines[0]
+    assert Recording.first_turns
+    assert all('label="pull-request"' not in turn for turn in Recording.first_turns)
+    assert len(seen) == 1
+    fenced = re.search(
+        r'label="pull-request">\n(.*)\n</untrusted-data', seen[0].user, re.DOTALL
+    )
+    assert fenced is not None
+    assert "Fix discount rounding for multi-item carts" in fenced.group(1)
+    assert "Rounds each line discount before summing." not in fenced.group(1)
+
+
+def test_a_room_that_fits_a_shrunken_conversation_sizes_the_first_build_to_it(
+    tmp_path, monkeypatch
+):
+    """The positive-fit path (M-2): with a room that holds a shrunken but
+    oversized conversation, the first build is already sized to the room
+    -- not to D38's cap -- so the block reaches every lens smaller than
+    the D38 build would be, the cuts are recorded, and the prior rounds
+    take what the conversation left (mutant N7 sizes the first build to
+    D38's cap alone and needs a second, discarded build here)."""
+    fixtures = _oversized_conversation_fixtures(
+        tmp_path, filler="please also round the shipping fees " * 120
+    )
+    log = tmp_path / "state" / "rounds.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    RoundLog(log).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            HEAD_SHA,
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            tuple(
+                f"L1-F{n} blocker calc.py:{n} {REMARK} "
+                + "the rendered record stays longer than any budget the "
+                "conversation leaves behind, so it is omitted whole " * 8
+                for n in range(1, 11)
+            ),
+            False,
+        )
+    )
+    Recording.room = 120_000
+    builds = []
+    real_build = cli.build_conversation
+
+    def counting_build(*args, **kwargs):
+        builds.append(args)
+        return real_build(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "build_conversation", counting_build)
+    try:
+        code, draft, err = _run(
+            tmp_path, "--depth", "review", "--fixtures", str(fixtures)
+        )
+    finally:
+        Recording.room = None
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert len(builds) == 1
+    assert Recording.first_turns
+    blocks = []
+    for turn in Recording.first_turns:
+        fenced = re.search(
+            r'label="pull-request">\n(.*)\n</untrusted-data', turn, re.DOTALL
+        )
+        assert fenced is not None
+        blocks.append(fenced.group(1))
+        assert "Fix discount rounding for multi-item carts" in fenced.group(1)
+    assert all(len(block) < CONVERSATION_CHARS for block in blocks)
+    lines = "\n".join(_context_omission_lines(draft))
+    assert "oldest review(s) and comment(s) not shown" in lines
+    prior = re.search(r"prior atlas reviews.*?(\d+)-character budget", lines, re.DOTALL)
+    assert prior is not None
+    assert int(prior.group(1)) < PRIOR_ROUND_CHARS
+
+
+def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget():
+    """UTF-8 encodes one to four bytes per character, so a conversation of
+    multi-byte characters whose character count fits the room still
+    overflows it in bytes; the assembly rebuilds once at a quarter of the
+    room, whose byte bound holds by construction (mutant M7 skips the
+    rebuild and ships an oversized block)."""
+    from atlas_reviewer.ports import Listing
+
+    redactor = Redactor()
+    budget = ConversationBudget()
+    pull_info = parse_pull(json.loads((FIXTURE / "pull.json").read_text()), redactor)
+    event = PrEvent("example-org/example-app", 42, HEAD_SHA)
+
+    class CjkGitHub(FixtureGitHub):
+        def list_pull_commits(self, repo: str, number: int) -> Listing:
+            return Listing((), False, 1)
+
+        def list_reviews(self, repo: str, number: int) -> Listing:
+            return Listing(
+                tuple(
+                    {
+                        "id": 100 + i,
+                        "state": "COMMENTED",
+                        "submitted_at": "2026-11-06T18:00:00Z",
+                        "user": {"login": "example-maintainer"},
+                        "commit_id": HEAD_SHA,
+                        "body": "丸小" * 2_200,
+                    }
+                    for i in range(30)
+                ),
+                False,
+                1,
+            )
+
+    block, omissions = cli._conversation_block(
+        event,
+        CjkGitHub(FIXTURE),
+        pull_info,
+        redactor,
+        lambda text: redactor(text).text,
+        budget,
+        56_000,
+    )
+    assert block is not None
+    assert len(block.content.text.encode("utf-8")) <= 56_000
+    assert len(block.content.text) < CONVERSATION_CHARS
+    assert omissions
+    assert any(o.source == CONVERSATION_SOURCE for o in omissions)

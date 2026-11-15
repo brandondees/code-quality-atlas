@@ -46,6 +46,7 @@ from atlas_reviewer.budget import (
     ReviewBudget,
 )
 from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.controller import (
     DEFAULT_DIFF_CHARS_PER_CALL,
     MAX_MODEL_CALLS,
@@ -107,7 +108,7 @@ from atlas_reviewer.lens_loop import (
     FinalReply,
     LensModel,
     TurnRequest,
-    _prefix_room,
+    input_room_tokens,
 )
 from atlas_reviewer.lens_script import (
     LensScript,
@@ -653,10 +654,6 @@ measured exactly. Like D38's and D52's budgets this is a working default
 pending the owner; bytes are counted against the token room, the
 conservative direction (a token never encodes less than one byte, D65)."""
 
-_CONTEXT_REFITS = 4
-"""How many times the conversation block is rebuilt smaller when its UTF-8
-bytes still overflow the input room, before it is left out whole."""
-
 _NONCE_PROBE = "0" * (NONCE_BYTES * 2)
 """A same-length stand-in for the per-review fence nonce, so the scaffold
 measurement counts the framing the real nonce produces."""
@@ -669,12 +666,13 @@ def _input_room_chars(
     event: PrEvent,
     diff: str,
 ) -> int | None:
-    """The characters of caller context -- the conversation block, then the
-    prior rounds -- the model's resolved per-call input room can hold next
-    to the shared diff prefix and the lens body (D67).
+    """The characters of caller context -- the prior rounds, then the
+    conversation block, in the first turn's D52 order -- that the model's
+    resolved per-call input room can hold next to the shared diff prefix
+    and the lens body (D67).
 
     The room is the same figure the loop budgets the shared prefix against
-    (`prefix_room_tokens`): the model's context minus its output reserve.
+    (`input_room_tokens`): the model's context minus its output reserve.
     From it this takes the share the prefix may take (D65), the largest
     lens body the plan loaded, the turn-1 message's own framing measured
     from the diff (the subject, the fence markers and the changed-file
@@ -685,7 +683,7 @@ def _input_room_chars(
     reviewer never does -- so D52's fixed caps stand and the per-call
     token check stays the only bound, as before this wiring.
     """
-    room = _prefix_room(model)
+    room = input_room_tokens(model)
     if room is None:
         return None
     share = limits.resolve().diff_prefix_share
@@ -709,12 +707,17 @@ def _conversation_block(
 
     `fit` is the characters the model's input room holds for the context
     blocks, or None when the model names no room and D52's fixed caps
-    stand. Under a fit, the block is rebuilt smaller until its UTF-8 bytes
-    fit the room -- the same recorded-omission trail a too-long
-    conversation leaves under D38 -- and a block that still does not fit is
-    left out whole, named, never silently truncated. A pull whose fields
-    do not parse yields no block and one omission, so the review stays
-    COMMENT instead of dying before it started."""
+    stand. Under a fit the block is first built at the room's own size,
+    not D38's cap; UTF-8 encodes one to four bytes per character, so a
+    block whose character count fits the room can still overflow it in
+    bytes, and one rebuild at a quarter of the room then fits by
+    construction -- the block's characters are capped at fit // 4, so its
+    bytes are at most 4 * (fit // 4) <= fit. What omits a block whole is
+    the fit < 1 gate: the room cannot hold the block next to the shared
+    diff prefix and the lens body, the block is never built, and the
+    omission says so. A pull whose fields do not parse yields no block
+    and one omission, so the review stays COMMENT instead of dying before
+    it started."""
     if pull_info is None:
         return None, (
             Omission(
@@ -737,35 +740,22 @@ def _conversation_block(
     collected = Collected()
     commits = pr_commits(event, github, collected)
     remarks = fetch_remarks(event, github, collected, scrub=scrub)
-    if fit is None:
-        conversation = build_conversation(
-            pull_info, commits, remarks, event.head_sha, redactor, budget
-        )
-        block, omissions = review_context(conversation)
-        return block, (*collected.omissions, *omissions)
-    attempt = min(budget.total_chars, fit)
-    fitted: UntrustedBlock | None = None
-    fitted_omissions: tuple[Omission, ...] = ()
-    size = 0
-    for _ in range(_CONTEXT_REFITS):
+
+    def build(size: int) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
         conversation = build_conversation(
             pull_info, commits, remarks, event.head_sha, redactor,
-            replace(budget, total_chars=attempt),
+            replace(budget, total_chars=size),
         )  # fmt: skip
-        fitted, fitted_omissions = review_context(conversation)
-        size = len(fitted.content.text.encode("utf-8"))
-        if size <= fit:
-            return fitted, (*collected.omissions, *fitted_omissions)
-        attempt = max(1, attempt - (size - fit))
-    detail = (
-        f"the conversation block is {size} bytes, over the {fit} the model's "
-        "input room holds next to the shared diff prefix and the lens body, "
-        "so it was left out whole"
-    )
-    return None, (
-        *collected.omissions,
-        Omission(CONVERSATION_SOURCE, "model input room", detail),
-    )  # fmt: skip
+        return review_context(conversation)
+
+    if fit is None:
+        block, omissions = build(budget.total_chars)
+        return block, (*collected.omissions, *omissions)
+    block, omissions = build(min(budget.total_chars, fit))
+    size = len(block.content.text.encode("utf-8"))
+    if size > fit:
+        block, omissions = build(fit // 4)
+    return block, (*collected.omissions, *omissions)
 
 
 def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
@@ -873,10 +863,17 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # included (D58); the text itself reaches no lens unfenced.
         body = pull.get("body")
         pr_text = body if isinstance(body, str) else ""
+        # Flagged before anything is quoted, the way the one-shot path
+        # orders it: quote_untrusted and the draft's cells encode `|`, `\`
+        # and backticks, and a scrub after that encoding cannot find the
+        # value. The scrubber the remarks' fetch errors are quoted with is
+        # the one-shot's: the redactor plus the diff's flagged secret
+        # values (D33).
+        scrubber = replace(redactor, flagged=scan_diff(diff).values)
         harness = SkillBundleHarness(picker_provider, load_bundle(), redactor)
 
         def scrub(text: str) -> str:
-            return redactor(text).text
+            return scrubber(text).text
 
         def run_picker() -> str:
             paths = diff_paths(diff)[:500]

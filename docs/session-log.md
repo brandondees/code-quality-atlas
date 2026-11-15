@@ -1721,3 +1721,37 @@ untouched. Offline only: fixture, scripted reviewer and fakes; no live
 model call, network call or secret, and no deployed service setting
 changed. The live confirmation that #661 m1 is reachable stays with S0
 (#708).
+
+## 2026-11-15 — round-1 review fixes for #718: the omits-whole gate is the mechanism, the positive-fit path is pinned, and the stale caller claims are cleared
+
+The round-1 protocol review came back COMMENT (2 Major, 1 Minor, 3 Nit),
+all fixed on the PR branch. M-1: the unparseable-pull guard had no test
+and its deletion survived the whole suite — a fixture whose pull
+carries no `head.ref` (the reachable shape; a headless pull is refused
+by `_require_head` first) now pins no crash, exactly one `pull request
+fields` omission, the COMMENT-not-approve outcome, and the picker's
+title-only fallback (kills N1). M-2: the positive-fit sizing path was
+untested and its mutant (N7, first build at D38's cap alone) survived —
+the refit loop the first wording described is gone entirely: the block
+is first built at the room's own size, and one rebuild at a quarter of
+the room follows when the UTF-8 bytes overflow, whose bound holds by
+construction (4 × (fit // 4) ≤ fit), so the omits-whole mechanism is
+exactly the fit < 1 gate and no dead exhaustion branch remains. The
+positive-fit test asserts the first build is the only build, the block
+reaches every lens smaller than D38's build, and the prior rounds take
+only what the conversation left of the room; a direct unit test at fit
+56,000 over thirty multi-byte remarks pins the byte-bound rebuild
+(kills M7, and with it the review's unreachable M6′). m-1: the README's
+two "no shipped caller builds the path yet" sentences for `rounds.py`
+are fixed here; `docs/agentic-reviewer.md`'s matching sentence is the
+follow-up for whichever PR merges second (it is in #717's edit set).
+n-1: `_input_room_chars`'s docstring states the first turn's real order
+(prior rounds, then the conversation block). n-2: the remarks' fetch
+errors are quoted with the one-shot's scrubber — the redactor augmented
+with `scan_diff`'s flagged secret values, flagged before anything is
+quoted — and D67's Correction states the one remaining difference (the
+one-shot's controller-notes channel has no agentic equivalent yet).
+n-3: the room accessor is public (`lens_loop.input_room_tokens`), no
+private import from the CLI. Offline only, as before: fixture, scripted
+reviewer and fakes; no live model call, network call or secret, and no
+deployed service setting changed.
