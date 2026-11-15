@@ -29,6 +29,8 @@ ENV = {
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
     "pool_size": "ATLAS_POOL_SIZE",
+    "create_retries": "ATLAS_CREATE_RETRIES",
+    "create_concurrency": "ATLAS_CREATE_CONCURRENCY",
 }
 
 
@@ -84,6 +86,10 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
     if name == "pool_size":
         return replace(limits, pool_size=_positive_int(name, raw))
+    if name == "create_retries":
+        return replace(limits, create_retries=_int_in_range(name, raw, 0, 24))
+    if name == "create_concurrency":
+        return replace(limits, create_concurrency=_int_in_range(name, raw, 1, 64))
     raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
 
 
@@ -97,12 +103,17 @@ def _amount(raw: str) -> Decimal:
 
 
 def _positive_int(name: str, raw: str) -> int:
+    return _int_in_range(name, raw, 1, None)
+
+
+def _int_in_range(name: str, raw: str, low: int, high: int | None) -> int:
     try:
         value = int(raw)
     except ValueError:
-        raise ValueError(f"{name} must be a positive integer, not {raw!r}") from None
-    if value < 1:
-        raise ValueError(f"{name} must be a positive integer, not {raw!r}")
+        raise ValueError(f"{name} must be an integer, not {raw!r}") from None
+    if value < low or (high is not None and value > high):
+        span = f"from {low} to {high}" if high is not None else f"of at least {low}"
+        raise ValueError(f"{name} must be an integer {span}, not {raw!r}")
     return value
 
 

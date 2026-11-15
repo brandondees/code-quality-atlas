@@ -46,11 +46,21 @@ from atlas_reviewer.lens_contract import (
     Valence,
 )
 from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError
-from atlas_reviewer.ports import ByokRefusedError, RefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    RateLimitedError,
+    RefusedError,
+)
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
 from atlas_reviewer.redact import Redactor, redact
-from atlas_reviewer.runner import CreateRefusedError, DeadlineExceededError
+from atlas_reviewer.runner import (
+    DEFAULT_CREATE_RETRIES,
+    CreateRefusedError,
+    DeadlineExceededError,
+    lens_runner_name,
+)
 from atlas_reviewer.verdict import ReviewEvent, parse_status
 
 from .agentic import (
@@ -1547,6 +1557,79 @@ def test_two_lenses_run_together_under_different_runner_names(tmp_path):
     assert {lens.lens for lens in result.lenses} == {LENS, OTHER}
     created = [call[1] for call in sprites.calls if call[0] == "create"]
     assert len(set(created)) == 2
+
+
+def test_a_rate_limited_create_degrades_only_that_lens(tmp_path, monkeypatch):
+    """#690: a Sprites 429 past the create backoff used to escape
+    `future.result()` and crash the review, losing every other lens's
+    result. Now the refused lens is NOT RUN with why, the other lens's
+    result survives into the draft, and the review cannot approve."""
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", lambda seconds: None)
+    # A runner name hashes the lens label into its suffix, so the fake
+    # refuses by the name this review gives this lens's runs.
+    refused_names = {lens_runner_name(EVENT, f"{OTHER}:{i}") for i in range(2, 8)}
+
+    class Refused(LocalSprites):
+        def create(self, name):
+            if name in refused_names:
+                with self._lock:
+                    self.calls.append(("create", name))
+                raise RateLimitedError("Sprites HTTP 429 for POST")
+            super().create(name)
+
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, sprites = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        sprites=Refused(),
+    )  # fmt: skip
+    by_lens = {lens.lens: lens for lens in result.lenses}
+    assert by_lens[LENS].state is LensState.CLEAN
+    refused = by_lens[OTHER]
+    assert refused.state is LensState.NOT_RUN and refused.outcome is None
+    assert "refused to create" in refused.reason
+    assert "429" in refused.reason
+    assert models[1].requests == []
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert sum(name in refused_names for name in created) >= DEFAULT_CREATE_RETRIES + 1
+    assert not result.coverage_complete
+    assert result.event is not ReviewEvent.APPROVE
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft
+    assert "NOT RUN" in draft and "429" in draft
+
+
+def test_a_502_during_the_base_tree_upload_leaves_that_lens_not_run(tmp_path):
+    """A 502 on one lens's tree upload fails that runner; the review keeps
+    the other lens's result and cannot approve on the gap."""
+    refused_names = {lens_runner_name(EVENT, f"{OTHER}:{i}") for i in range(2, 8)}
+
+    class Lost(LocalSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if name in refused_names and "base.tar.gz" in argv[-1]:
+                self._record("exec", name, argv[-1])
+                raise BoundaryError("Sprites HTTP 502 for POST")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    models = _pair_models(_acknowledge)
+    models.append(ScriptedLensModel([READ_ALL, _acknowledge]))
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        sprites=Lost(),
+    )  # fmt: skip
+    by_lens = {lens.lens: lens for lens in result.lenses}
+    assert by_lens[LENS].state is LensState.CLEAN
+    lost = by_lens[OTHER]
+    assert lost.state is LensState.NOT_RUN and lost.outcome is None
+    assert "502" in lost.reason
+    assert not result.coverage_complete
+    assert result.event is not ReviewEvent.APPROVE
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft
+    assert "502" in draft
 
 
 def _pair_models(first_reply):
