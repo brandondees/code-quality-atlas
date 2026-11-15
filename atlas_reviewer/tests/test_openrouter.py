@@ -257,15 +257,15 @@ def test_request_is_pinned_to_one_model_with_no_fallbacks_or_plugins():
     assert sent["max_tokens"] == 24_000
     assert sent["reasoning"] == {"max_tokens": 12_000, "exclude": True}
     assert sent["stream"] is False
+    # One endpoint, so consecutive turns share its prompt cache (#695).
     assert sent["provider"] == {
-        "only": list(PINNED_PROVIDERS),
+        "only": ["google-vertex/global"],
         "allow_fallbacks": False,
         "require_parameters": True,
         "data_collection": "deny",
         "zdr": True,
         "max_price": {"prompt": 6.0, "completion": 22.5},
     }
-    assert "google-vertex" not in sent["provider"]["only"]
 
 
 @pytest.mark.parametrize(
@@ -503,7 +503,9 @@ def test_a_response_is_accepted_only_from_the_configured_model():
 def test_the_route_reads_the_flag_before_the_environment():
     route = model_route({})
     assert route.model_id == MODEL_ID
-    assert route.providers == PINNED_PROVIDERS
+    # The default model is Anthropic-family, so its default pin is the
+    # single cache-sharing endpoint (#695), not the four-slug list.
+    assert route.providers == ("google-vertex/global",)
     assert route.allow_safety_retention is False
     assert route.require_zdr is True
 
@@ -1922,7 +1924,9 @@ def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
     assert terms.max_prompt_tokens is None
     assert (terms.context_length, terms.max_completion_tokens) == (1_000_000, 128_000)
     sent = json.loads(fake.chat_requests()[0][3])
-    assert sent["provider"]["max_price"] == {"prompt": 2.2, "completion": 11.0}
+    # The default pin is the single google-vertex/global row, so its own
+    # rates are the max price (#695).
+    assert sent["provider"]["max_price"] == {"prompt": 2.0, "completion": 10.0}
     call = resolve_per_call(AgenticLimits().resolve(), terms)
     assert call.max_output_tokens == 128_000
     assert call.max_input_tokens == 1_000_000 - 128_000
@@ -2003,3 +2007,73 @@ def test_d57_says_zdr_off_reads_both_lists():
     assert (
         "reads both `GET /api/v1/models/{id}/endpoints` and `GET /api/v1/endpoints/zdr`"
     ) in text
+
+
+# --- the Anthropic single-endpoint default (issue #695) ---------------------
+
+
+def test_the_anthropic_default_pin_is_one_endpoint_and_the_others_keep_four():
+    assert model_route({}).providers == ("google-vertex/global",)
+    assert model_route({ENV_MODEL: "anthropic/claude-haiku-4.5"}).providers == (
+        "google-vertex/global",
+    )
+    other = model_route({ENV_MODEL: "deepseek/deepseek-v4.1-flash"})
+    assert other.providers == PINNED_PROVIDERS
+
+
+def test_an_explicit_provider_list_wins_over_the_anthropic_default():
+    route = model_route({ENV_PROVIDERS: "amazon-bedrock/us-east-1"})
+    assert route.providers == ("amazon-bedrock/us-east-1",)
+    flagged = model_route({}, providers="amazon-bedrock")
+    assert flagged.providers == ("amazon-bedrock",)
+
+
+def test_the_provider_default_pin_follows_the_model():
+    fake = OpenRouterFake(reply(completion()))
+    assert OpenRouterProvider(fake, KEY)._providers == ("google-vertex/global",)
+    other_catalog = catalog()
+    other_catalog["data"]["id"] = "z-ai/glm-5.3"
+    glm = OpenRouterProvider(
+        OpenRouterFake(
+            reply(completion(model="z-ai/glm-5.3")), model=reply(other_catalog)
+        ),
+        KEY,
+        model_id="z-ai/glm-5.3",
+    )
+    assert glm._providers == PINNED_PROVIDERS
+
+
+def test_a_pinned_endpoint_the_list_lacks_is_refused_not_spread():
+    """A pin that names no eligible row fails the call before any request,
+    instead of silently falling back to a wider pin."""
+    fake = OpenRouterFake(
+        reply(completion()), zdr=reply(zdr_payload(providers=("amazon-bedrock",)))
+    )
+    adapter = OpenRouterProvider(fake, KEY)
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="google-vertex/global has no ZDR row"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_the_single_endpoint_pin_serves_the_completion_and_names_its_tag():
+    fake = OpenRouterFake(reply(completion()))
+    adapter = OpenRouterProvider(fake, KEY)
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    facts = adapter.diagnosis()
+    assert facts is not None and facts["atlas.endpoint_tags"] == "google-vertex/global"
+
+
+def test_the_pin_boundary_is_the_anthropic_prefix_not_a_substring():
+    """A model id that merely contains `anthropic` keeps the four-slug
+    default; only an `anthropic/`-prefixed id gets the single endpoint."""
+    for lookalike in ("anthropicx/claude-5", "not-anthropic/m", "xanthropic/m"):
+        assert model_route({ENV_MODEL: lookalike}).providers == PINNED_PROVIDERS
+    assert model_route({ENV_MODEL: "anthropic/claude-haiku-4.5"}).providers == (
+        "google-vertex/global",
+    )
+    lookalike_provider = OpenRouterProvider(
+        OpenRouterFake(reply(completion())), KEY, model_id="anthropicx/claude-5"
+    )
+    assert lookalike_provider._providers == PINNED_PROVIDERS

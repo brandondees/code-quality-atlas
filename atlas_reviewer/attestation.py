@@ -161,11 +161,13 @@ _RETRYABLE = frozenset(
 @dataclass(frozen=True)
 class CheckedFinding:
     """A finding with its quote check: `source` when verified, `problem`
-    when not. Exactly one is set."""
+    when not. Exactly one is set. `drift` is a verified window match's
+    line distance from the citation (D64), 0 otherwise."""
 
     finding: Finding
     source: QuoteSource | None = None
     problem: str = ""
+    drift: int = 0
 
     def __post_init__(self) -> None:
         if (self.source is None) == (not self.problem):
@@ -201,7 +203,8 @@ class AttemptOutcome:
     # Findings left out of the reply, each naming the raw severity (D54).
     dropped: tuple[str, ...] = ()
     # The harness-injected turns this attempt answered, in order:
-    # `unread-files`, `no-progress`, `duplicate-calls` (D58). Controller
+    # `unread-files`, `no-progress`, `duplicate-calls` (D58),
+    # `quote-repair` (D64). Controller
     # labels, not model text.
     nudges: tuple[str, ...] = ()
 
@@ -448,6 +451,7 @@ def _checked_json(
         "siblings": scrub(f.siblings),
         "source": None if checked.source is None else checked.source.name,
         "problem": scrub(checked.problem),
+        "drift": checked.drift,
     }
 
 
@@ -521,6 +525,9 @@ def _limit_from(data: object) -> LimitHit | None:
 
 def _checked_from(data: Mapping[str, Any]) -> CheckedFinding:
     source = data["source"]
+    drift = data.get("drift", 0)
+    if isinstance(drift, bool) or not isinstance(drift, int) or drift < 0:
+        raise TypeError("drift must be a non-negative integer")
     return CheckedFinding(
         Finding(
             parse_location(_str(data["location"])),
@@ -535,6 +542,7 @@ def _checked_from(data: Mapping[str, Any]) -> CheckedFinding:
         ),
         None if source is None else QuoteSource[source],
         _str(data["problem"]),
+        drift,
     )
 
 

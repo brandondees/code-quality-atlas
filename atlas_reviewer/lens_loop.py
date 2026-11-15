@@ -15,8 +15,13 @@ cap, the review's call cap or dollar reservation, the per-lens or review
 wall clock, the output cap when the model stops at it, a failed model
 call, or the runner's deadline. A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
-second such reply is the attempt's result. Anything but a final reply
-that meets the contract, acknowledges the body and whose quotes all
+second such reply is the attempt's result. A final reply a quote check
+rejects earns a bounded quote-repair turn in the same conversation (D64):
+the rejected quotes and their cited ranges go back, the model corrects
+the range or drops the finding, and the next final reply is the one that
+counts, with the pre-repair reply's verified findings merged in through
+D61's merge. Anything but a final reply that meets the contract,
+acknowledges the body and whose quotes all
 verify leaves the lens partial or failed, never clean. A final
 reply is clean only when every changed file's diff was read in full: a
 `diff_file` chain from offset 0 through every truncated page. A changed
@@ -54,7 +59,7 @@ from __future__ import annotations
 import json
 import math
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
@@ -63,11 +68,13 @@ from typing import Any, Protocol
 
 from atlas_reviewer.attestation import (
     RETRIES,
+    Attempt,
     AttemptOutcome,
     Attestation,
     Cause,
     CheckedFinding,
     ToolUse,
+    _merged_findings,
     check_acknowledgement,
     check_delivery,
     inject_body,
@@ -115,6 +122,13 @@ DEFAULT_REVIEW_WALL_S = 3600
 # tool calls at any coverage -- inject one finalize nudge.
 DEFAULT_NO_PROGRESS_TURNS = 6
 DEFAULT_DUPLICATE_CALLS = 3
+# The quote-repair turn (D64): one bounded repair turn per attempt when
+# the quote checker rejects a quote, and the ±-lines window the checker
+# searches around a citation. Both are guards against runaway repair
+# loops and against a window wide enough to verify a quote far from its
+# citation, not levers to make reviews cheaper.
+DEFAULT_QUOTE_REPAIRS = 1
+DEFAULT_QUOTE_TOLERANCE = 3
 
 # ------------------------------------------------------------------ limits
 
@@ -139,6 +153,8 @@ class Limits:
     pool_size: int
     no_progress_turns: int
     duplicate_calls: int
+    quote_repairs: int
+    quote_tolerance: int
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     max_input_tokens: int | None = None
@@ -162,8 +178,11 @@ class AgenticLimits:
     waits and retries before giving up (#690; the waits double from 2s,
     capped at 60s, and a Retry-After the server names is honored up to its
     own cap). `create_concurrency` is how many Sprite creates one review
-    may have in flight at once. The per-call token fields are None until
-    the endpoint terms are known:
+    may have in flight at once. `quote_repairs` bounds the quote-repair
+    turns (D64): how many repair turns a quote failure earns per attempt,
+    0 to 3, default 1; `quote_tolerance` is the window, in lines either
+    side of the citation's first line, that the quote checker searches
+    (D64), 0 to 8, default 3. The per-call token fields are None until
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -177,6 +196,8 @@ class AgenticLimits:
     duplicate_calls: int | None = DEFAULT_DUPLICATE_CALLS
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
+    quote_repairs: int = DEFAULT_QUOTE_REPAIRS
+    quote_tolerance: int = DEFAULT_QUOTE_TOLERANCE
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -250,6 +271,22 @@ def _check_limits(limits: Limits) -> None:
         and limits.reasoning_max_tokens >= limits.max_output_tokens
     ):
         raise ValueError("reasoning_max_tokens must be less than max_output_tokens")
+    _check_quote_limits(limits)
+
+
+def _check_quote_limits(limits: Limits) -> None:
+    """The quote-repair turn and window are bounded (D64): 0 disables
+    each; a value past the bound is the runaway the guard exists to
+    prevent. A non-int -- a float passes `in range(...)` -- is refused
+    here, before it can break the window search mid-review."""
+    for name, hi in (("quote_repairs", 3), ("quote_tolerance", 8)):
+        value = getattr(limits, name)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= hi
+        ):
+            raise ValueError(f"{name} must be an integer from 0 to {hi}")
 
 
 # The reasoning hint an open-weight model gets by default (D58). The
@@ -718,6 +755,18 @@ class _Progress:
     nudges: list[str] = field(default_factory=list)
     unread_nudged: bool = False
     stall_nudged: bool = False
+    # The quote-repair turns already sent this attempt, and the judgment
+    # whose failed quotes the queued repair turn is about (D64). The
+    # repair's reply is judged like any final reply, and the held
+    # outcome's verified findings merge into it through D61's merge
+    # (`_merged_findings`), so the attempt's other verified findings
+    # survive a repair that restates or drops the failed quote. The turn
+    # is counted only when its call is actually sent: `quote_repair_pending`
+    # is set when the turn is queued and flushed into `nudges` when the
+    # loop places the call (round-1 review of #703, Minor 2).
+    quote_repairs_used: int = 0
+    quote_hold: AttemptOutcome | None = None
+    quote_repair_pending: bool = False
     # The last judged outcome whose follow-up turn was queued but not yet
     # answered: any stop before that turn is placed returns it, whatever it
     # carries (D58, review M1). Once the follow-up was placed and answered
@@ -729,11 +778,19 @@ class _Progress:
     held_placed: bool = False
     finding_hold: AttemptOutcome | None = None
 
+    def unread(self) -> tuple[str, ...]:
+        """The changed files whose diff is not yet read in full. The one
+        accessor for the attempt's unread list, so every reader of it --
+        including a held outcome folded onto the current progress -- takes
+        the same bookkeeping (#704's shared prefix will skip the page
+        bookkeeping; the accessor is where that lands)."""
+        return self.pages.unread(self.changed)
+
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
     ) -> AttemptOutcome:
         self.causes.add(cause)
-        unread = self.pages.unread(self.changed)
+        unread = self.unread()
         if unread:
             self.causes.add(Cause.FILES_UNREAD)
         held = self.held_outcome
@@ -871,6 +928,7 @@ def run_attempt(
         if not isinstance(priced, Decimal):
             return p.cut(*priced)
         worst = priced
+        _flush_pending_repair(p)
         try:
             reply = model.turn(request)
         except LimitRefused as exc:
@@ -900,7 +958,7 @@ def run_attempt(
         p.turns += 1
         _mark_held_placed(p, reply)
         if isinstance(reply, FinalReply):
-            done = _accept_or_repair(job, reply.text, p, messages)
+            done = _accept_or_repair(job, reply.text, p, messages, limits)
             if done is not None:
                 return done
             continue
@@ -919,7 +977,7 @@ def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -
     that left the attempt stalled, inject one finalize nudge. One detector
     nudge per attempt, from whichever trigger fires first; the ledger and
     the completion span name it."""
-    if p.covered_at_turn is None and not p.pages.unread(p.changed):
+    if p.covered_at_turn is None and not p.unread():
         p.covered_at_turn = p.turns
     if p.stall_nudged:
         return
@@ -1048,32 +1106,72 @@ def _reads_source(result: BridgeResult, changed: frozenset[str]) -> bool:
 
 
 def _accept_or_repair(
-    job: LensJob, text: str, p: _Progress, messages: list[Message]
+    job: LensJob, text: str, p: _Progress, messages: list[Message], limits: Limits
 ) -> AttemptOutcome | None:
     """Judge a final reply. A reply outside the finding contract earns
     D44's one repair turn; an accepted reply that leaves files unread
-    earns D58's one unread-list nudge; the outcome otherwise. Each turn
-    goes back into this conversation, and the next final reply is the one
-    that counts. While a queued turn goes unanswered, the judged outcome
-    is held on the progress, so a stop before it is placed keeps the
-    reply's findings (D58, review M1); a finding-bearing judgment is also
-    kept on its own, as the evidence a later stop returns across the tool
-    work any follow-up asked for, until this function judges a newer
-    reply (review round 3, M-b; round 4, probes E and H)."""
+    earns D58's one unread-list nudge; an accepted reply a quote check
+    rejected earns D64's bounded quote-repair turn; the outcome otherwise.
+    Each turn goes back into this conversation, and the next final reply
+    is the one that counts. While a queued turn goes unanswered, the
+    judged outcome is held on the progress, so a stop before it is placed
+    keeps the reply's findings (D58, review M1); a finding-bearing
+    judgment is also kept on its own, as the evidence a later stop returns
+    across the tool work any follow-up asked for, until this function
+    judges a newer reply (review round 3, M-b; round 4, probes E and H).
+    A quote repair's reply merges the held outcome's verified findings in
+    through D61's merge when it attests; when it does not -- a second
+    contract refusal, or a reply naming another lens -- the held reply's
+    attested judgment is the attempt's evidence, with the failed repair
+    reply's causes folded onto it, so the verified findings survive
+    however the repair ends (D64)."""
     repaired = _repair(text, p)
     if repaired is not None:
-        before = set(p.causes)
-        p.held_outcome = _final(job, text, p)
+        if p.quote_hold is not None:
+            # The quote repair's reply broke the finding contract (D44
+            # repairs it once). The pre-repair reply's attested judgment
+            # stays the attempt's held evidence: keep it, with the
+            # contract refusal folded in, so a stop before the contract
+            # repair is sent returns the held findings, not an empty
+            # unparsed hold (D64).
+            p.held_outcome = _held_with(
+                p.quote_hold, p, (Cause.UNPARSED,), _unparsed_detail(text)
+            )
+        else:
+            before = set(p.causes)
+            p.held_outcome = _final(job, text, p, limits)
+            p.causes.clear()
+            p.causes |= before
         p.held_placed = False
         # D44's shape: a refused reply is not judged into this attempt's
         # causes; its own judgment is held for a stop before the repair
         # turn is placed.
-        p.causes.clear()
-        p.causes |= before
         messages += [AssistantText(text), UserText(repaired)]
         return None
     before = set(p.causes)
-    outcome = _final(job, text, p)
+    outcome = _final(job, text, p, limits)
+    if p.quote_hold is not None:
+        # The queued quote-repair turn was answered. An attested reply is
+        # the one that counts, with the pre-repair reply's verified
+        # findings merged in (D61's merge, D64). A reply that never
+        # attested contributed nothing: the held reply's attested judgment
+        # stands, with the failed reply's causes folded on, so the
+        # verified findings keep blocking approval (D64).
+        held, p.quote_hold = p.quote_hold, None
+        if outcome.attestation is Attestation.ATTESTED:
+            outcome = replace(
+                outcome,
+                findings=_merged_findings((Attempt(1, held), Attempt(2, outcome))),
+            )
+        else:
+            # A misacknowledged reply has no causes and no detail of its
+            # own; its attestation value is controller text, so it is what
+            # the fold records -- otherwise the recorded attempt reads
+            # exactly like a repair that attested and still failed its
+            # quote (round-2 review of #703, Minor 1).
+            outcome = _held_with(
+                held, p, outcome.causes, outcome.detail or outcome.attestation.value
+            )
     if outcome.findings:
         # The newest finding-bearing judgment is the evidence a later stop
         # returns, across any follow-up turns (review round 4, probe E).
@@ -1092,9 +1190,79 @@ def _accept_or_repair(
         p.held_placed = False
         messages += [UserText(_unread_nudge(outcome.unread, job.nonce))]
         return None
+    if Cause.QUOTES_FAILED in outcome.causes:
+        if p.quote_repairs_used < limits.quote_repairs:
+            # D64: the rejected quotes go back once per attempt, bounded,
+            # so one bad line range does not re-run the whole lens. The
+            # refused reply's causes are not this attempt's unless the
+            # repaired reply fails too.
+            p.causes.clear()
+            p.causes |= before
+            p.quote_repairs_used += 1
+            p.quote_repair_pending = True
+            note_nudge("quote-repair")
+            p.held_outcome = outcome
+            p.held_placed = False
+            p.quote_hold = outcome
+            messages += [
+                AssistantText(text),
+                UserText(_quote_repair_nudge(outcome, job.nonce)),
+            ]
+            return None
+        detail = "the quote-repair bound was reached"
+        outcome = replace(
+            outcome,
+            detail=f"{outcome.detail}; {detail}" if outcome.detail else detail,
+        )
     p.held_outcome = None
     p.held_placed = False
     return outcome
+
+
+def _held_with(
+    held: AttemptOutcome,
+    p: _Progress,
+    extra_causes: Iterable[Cause] = (),
+    detail: str = "",
+) -> AttemptOutcome:
+    """The held judgment as the attempt's standing outcome, with later
+    causes and detail folded on. The reply it came from is attested, so
+    its verified findings are the attempt's evidence whatever the turns
+    after it did; the tools, turns, unread list and nudges are the
+    attempt's current ones."""
+    causes = frozenset(held.causes) | frozenset(extra_causes)
+    both = (
+        f"{held.detail}; {detail}" if held.detail and detail else (detail or held.detail)
+    )  # fmt: skip
+    return replace(
+        held,
+        causes=causes,
+        tools=tuple(p.tools),
+        turns=p.turns,
+        unread=p.unread(),
+        detail=both,
+        nudges=tuple(p.nudges),
+    )
+
+
+def _unparsed_detail(text: str) -> str:
+    """The validator's message for a reply outside the finding contract,
+    or an empty string. `_repair` parses first; this re-reads the same
+    error for the held outcome's detail."""
+    try:
+        parse_reply(text)
+    except ContractError as exc:
+        return str(exc)
+    return ""
+
+
+def _flush_pending_repair(p: _Progress) -> None:
+    """The queued quote-repair turn is being sent: only now does it count
+    as one (round-1 review of #703, Minor 2). A stop or a refusal before
+    this point leaves it uncounted."""
+    if p.quote_repair_pending:
+        p.quote_repair_pending = False
+        p.nudges.append("quote-repair")
 
 
 def _alias_sentence() -> str:
@@ -1151,6 +1319,32 @@ def _unread_nudge(unread: tuple[str, ...], nonce: str) -> str:
     )
 
 
+def _quote_repair_nudge(outcome: AttemptOutcome, nonce: str) -> str:
+    """The turn a rejected quote earns (D64), bounded by
+    `quote_repairs` per attempt. The locations, the rejected quote text
+    and the checker's reason are the model's own reply reflected back, so
+    they travel fenced as data; the instruction around them is controller
+    text. The model may read the head file again to find the real range,
+    or drop the finding."""
+    failed = [c for c in outcome.findings if not c.verified]
+    lines = []
+    for c in failed:
+        quote = " ".join(c.finding.evidence.split())
+        if len(quote) > 120:
+            quote = quote[:120] + " … [cut]"
+        lines.append(f"{c.finding.location} -- {c.problem}; quote: {quote}")
+    return (
+        "Your reply is not accepted as a final review: "
+        f"{len(failed)} of your findings' quotes did not verify against "
+        "the head files. For each finding below, either give the line "
+        "range where that quoted text really sits in the head file, or "
+        "drop the finding. Read the file again if you need to. Reply once "
+        "with the full finding-contract JSON object, corrected findings "
+        "and all.\n"
+        + fence(UntrustedBlock("failed-quotes", RepoText("\n".join(lines))), nonce)
+    )
+
+
 def _finalize_nudge() -> str:
     """The one turn the no-progress detector earns (D58): finalize now
     with what you have."""
@@ -1189,8 +1383,8 @@ def _repeated(p: _Progress, threshold: int) -> bool:
     return False
 
 
-def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
-    unread = p.pages.unread(job.changed)
+def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutcome:
+    unread = p.unread()
 
     def outcome(attestation: Attestation, **kw: Any) -> AttemptOutcome:
         return AttemptOutcome(
@@ -1216,11 +1410,13 @@ def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
     if not check_acknowledgement(reply, job.lens, job.digest):
         return outcome(Attestation.MISACKNOWLEDGED)
     checked = tuple(
-        CheckedFinding(c.finding, c.source)
+        CheckedFinding(c.finding, c.source, drift=c.drift)
         if isinstance(c, Verified)
         else CheckedFinding(c.finding, problem=c.reason)
         for c in check_all(
-            reply.findings, with_head_files(job.sources, job.head_tree, p.head_reads)
+            reply.findings,
+            with_head_files(job.sources, job.head_tree, p.head_reads),
+            limits.quote_tolerance,
         )
     )
     if any(not c.verified for c in checked):

@@ -24,6 +24,7 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import BudgetRefusedError
+from atlas_reviewer.cache_stats import CacheSession, CacheTurn
 from atlas_reviewer.coordinator import (
     HALTED_REASON,
     LATE_REASON,
@@ -47,7 +48,7 @@ from atlas_reviewer.lens_contract import (
     Severity,
     Valence,
 )
-from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError
+from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError, UserText
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
@@ -428,9 +429,12 @@ def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
 def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     tmp_path,
 ):
+    """With the repair bound at 0 (D64), a failed quote is not repaired
+    in-session and the attempt stays what it was: retryable, so the retry
+    runs and the still-bad quote escalates."""
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
-    script = [READ_ALL, final(finding(), wrong)] * 2
-    result, _, _ = review(tmp_path, script)
+    script = [READ_ALL, final(finding(), wrong), final(finding(), wrong)] * 2
+    result, _, _ = review(tmp_path, script, limits=replace(LIMITS, quote_repairs=0))
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
     assert [f.id for f in result.verified] == ["L1-F1"]
@@ -441,12 +445,240 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert "## Not verified (not reported as findings)" in draft
 
 
-def test_a_verified_finding_survives_an_empty_retry(tmp_path):
-    """#691: one unverifiable quote retries the lens; the empty retry must
-    not throw away the finding the first attempt verified."""
+def test_a_failed_quote_is_repaired_in_the_session_and_the_lens_settles_clean(
+    tmp_path,
+):
+    """D64: the rejected quotes go back once in the same conversation, so
+    one bad line range does not re-run the lens; the repaired reply is
+    re-checked by the same checker and the lens settles clean in one
+    attempt."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, model, _ = review(
+        tmp_path, [READ_ALL, final(finding(), wrong), final(finding())]
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 1, False)
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.event is ReviewEvent.COMMENT
+    assert "1 quote-repair turn(s)" in render_draft(result, Redactor())
+    repair = model.requests[2].messages[-1]
+    assert isinstance(repair, UserText)
+    assert 'label="failed-quotes"' in repair.text
+    assert "drop the finding" in repair.text
+
+
+def test_a_window_correction_is_counted_in_the_lens_line(tmp_path):
+    """D64: the tolerance window's corrected citations are counted on the
+    lens line, next to the per-finding source tag."""
+    drifted = finding(location="calc.py:4")
+    result, _, _ = review(tmp_path, [READ_ALL, final(drifted)])
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    (minted,) = result.verified
+    assert minted.source == QuoteSource.HEAD_NEAR.value
+    assert str(minted.finding.location) == "calc.py:2"
+    draft = render_draft(result, Redactor())
+    assert "1 citation(s) corrected within the window" in draft
+    # The quote sits two lines from the citation, so the posted tag says
+    # two, not the window's default three (round-1 review, Minor 1).
+    assert "head within 2 lines of the citation" in draft
+
+
+def test_an_unattested_repair_reply_keeps_the_verified_findings_on_the_retry(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 1: a repair reply that is prose, and
+    a contract repair that is prose too, left the attempt's recorded
+    outcome unattested -- and the retry merge carries only from attested
+    attempts, so the verified finding was lost and an attested empty
+    retry settled the lens clean with nothing to report. The held reply's
+    attested judgment is now what the attempt records, with the failed
+    repair replies' causes folded on, and the verified finding keeps
+    blocking approval."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    prose = final(text="no schema here")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            prose,
+            prose,
+            READ_ALL,
+            final(),
+        ],
+    )
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert lens.attempts == 2
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.verdict is Verdict.BLOCK
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+    # The recorded first attempt carries the failed repair replies' trace:
+    # attested, with UNPARSED and the validator's message folded on.
+    (first,) = ledger(tmp_path).attempts(KEY)[:1]
+    assert first.outcome.attestation is Attestation.ATTESTED
+    assert first.outcome.causes == {Cause.QUOTES_FAILED, Cause.UNPARSED}
+    assert [c.verified for c in first.outcome.findings] == [True, False]
+    assert "the reply is not one JSON object" in first.outcome.detail
+
+
+def test_a_repair_reply_that_names_another_lens_keeps_the_verified_findings(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 1, second case: the repair reply
+    parses but names another lens or body; its judgment is
+    MISACKNOWLEDGED, which contributes nothing on the retry. The held
+    reply's attested judgment stands instead, so the retry carries the
+    verified finding."""
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
     result, _, _ = review(
-        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final()]
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            MISACK,
+            READ_ALL,
+            final(),
+        ],
+    )
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert lens.attempts == 2
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+    # The recorded first attempt carries the misacknowledgement: a
+    # misacknowledged reply has no causes of its own, so the fold records
+    # the attestation's controller text as the detail (round-2 review,
+    # Minor 1) -- the line is no longer identical to a repair that
+    # attested and still failed its quote.
+    (first,) = ledger(tmp_path).attempts(KEY)[:1]
+    assert first.outcome.attestation is Attestation.ATTESTED
+    assert first.outcome.causes == {Cause.QUOTES_FAILED}
+    assert [c.verified for c in first.outcome.findings] == [True, False]
+    assert "the reply named another lens or body" in first.outcome.detail
+    # The fold carries the attempt's nudges, not the held outcome's own:
+    # the held judgment was built before the repair turn was counted
+    # (round-3 review of #703, Nit 1).
+    assert first.outcome.nudges == ("quote-repair",)
+
+
+def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 2: the quote-repair reply is prose,
+    so D44 queues its own repair; the held outcome used to become the
+    unparsed judgment, which has no findings, and a stop before the
+    contract repair was sent dropped the verified finding. The hold stays
+    the quote hold's attested judgment, with the refusal folded in."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=3, retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.causes == {Cause.QUOTES_FAILED, Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+    # The fold carries the validator's message (round-2 review, Nit 1).
+    assert "the reply is not one JSON object" in outcome.detail
+    # The held outcome folds the attempt's current state, not its own:
+    # the repair turn's call is part of the counts, and the repair is
+    # counted because it was sent.
+    assert outcome.turns == 3
+    assert len(outcome.tools) == 2
+    assert outcome.nudges == ("quote-repair",)
+
+
+def test_the_held_folds_the_attempts_current_state(tmp_path):
+    """Round-2 review of #703, Nit 1: the fold takes the attempt's current
+    tools, turns and unread list, not the held outcome's own. The repair
+    turn here is answered with the diff read that closes coverage, then a
+    prose reply earns D44's contract repair and the cap lands: the
+    recorded attempt shows the read (two tool calls, five turns, no
+    unread files), not the held reply's older ones."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding(severity="blocker"), wrong),
+            final(finding(severity="blocker"), wrong),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=5, retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.unread == ()
+    assert outcome.turns == 5
+    assert len(outcome.tools) == 2
+    assert outcome.nudges == ("unread-files", "quote-repair")
+    assert Cause.QUOTES_FAILED in outcome.causes
+    assert Cause.UNPARSED in outcome.causes
+    assert Cause.TURN_CAP in outcome.causes
+
+
+def test_a_budget_stop_before_the_repair_call_leaves_it_uncounted(tmp_path):
+    """Round-2 review of #703, Nit 1: the flush sits after the call is
+    reserved, so a budget refusal in the gap counts no repair turn --
+    D64's bound claim covers the turn cap, the budget and the clocks."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding(severity="blocker"), wrong)],
+        limits=replace(LIMITS, reservation_usd=Decimal("0.13"), retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert outcome.nudges == ()
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.causes == {Cause.QUOTES_FAILED, Cause.BUDGET}
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "reservation_usd"
+    assert "quote-repair turn" not in render_draft(result, Redactor())
+
+
+def test_a_repair_turn_queued_but_never_sent_is_not_counted(tmp_path):
+    """Round-1 review of #703, Minor 2: the repair turn is counted when
+    its call is sent, not when it is queued; a turn cap in the gap leaves
+    no repair counted on the outcome or in the draft, and the held
+    findings survive the stop."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding(severity="blocker"), wrong)],
+        limits=replace(LIMITS, max_turns=2, retries=0),
+    )
+    (lens,) = result.lenses
+    assert lens.outcome.nudges == ()
+    assert [c.verified for c in lens.outcome.findings] == [True, False]
+    assert "quote-repair turn" not in render_draft(result, Redactor())
+
+
+def test_a_verified_finding_survives_an_empty_retry(tmp_path):
+    """#691: one unverifiable quote retries the lens; the empty retry must
+    not throw away the finding the first attempt verified. The repair
+    bound is 0 here, so the quote failure stays retryable and the retry
+    path itself is what runs."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding(), wrong), READ_ALL, final()],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 2, False)
@@ -460,7 +692,9 @@ def test_a_verified_finding_survives_an_empty_retry(tmp_path):
 def test_a_verified_finding_survives_a_retry_that_verifies_less(tmp_path):
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
     result, _, _ = review(
-        tmp_path, [READ_ALL, final(finding(), wrong), READ_ALL, final(wrong)]
+        tmp_path,
+        [READ_ALL, final(finding(), wrong), READ_ALL, final(wrong)],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
@@ -480,6 +714,7 @@ def test_a_retry_that_never_attests_keeps_the_lens_failed(tmp_path):
         # The unparseable reply earns its one repair turn (D44); the
         # second one is the attempt's result.
         [READ_ALL, final(finding(), wrong), READ_ALL, final(text=bad), final(text=bad)],
+        limits=replace(LIMITS, quote_repairs=0),
     )
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.FAILED, True)
@@ -1193,8 +1428,12 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
     assert TOKEN not in draft
 
 
-def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
-    drifted = CheckedFinding(checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR)
+def test_a_quote_matched_within_the_window_is_tagged_in_the_draft():
+    """The posted tag is the match's own distance, not the configured
+    window's (round-1 review of #703, Minor 1)."""
+    drifted = CheckedFinding(
+        checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR, drift=2
+    )
     result = synthesize([lens_result(clean(drifted))])
     draft = render_draft(result, Redactor())
     assert "head within 2 lines of the citation" in draft
@@ -2146,3 +2385,71 @@ def test_the_draft_names_the_picker_fallback_and_the_names_it_did_not_run():
     assert "## Lens selection" in draft
     assert "gave no usable lens list" in draft
     assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in draft
+
+
+# --- the prompt-cache section of the draft (issue #695) ---------------------
+
+
+def test_the_draft_renders_the_prompt_cache_sessions(tmp_path):
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    sessions = [
+        CacheSession(
+            "hunting-silent-failures",
+            (CacheTurn(20_000, 0, 20_000), CacheTurn(26_000, 20_000, 6_000)),
+        ),
+        CacheSession("reviewing-test-quality", (CacheTurn(30_000, 0, 30_000),)),
+    ]
+    draft = render_draft(result, Redactor(), cache=sessions)
+    assert "## Prompt cache" in draft
+    assert '"hunting-silent-failures"' in draft
+    assert '"reviewing-test-quality"' in draft
+    assert (
+        "total: 3 turn(s), 0 cache miss(es), 56000 cache-write token(s) "
+        "against 56000 token(s) of final context."
+    ) in draft
+    # CommonMark: the line after the last cache bullet must be blank, or
+    # the runner and round-log lines that follow render as lazy
+    # continuations of the total's list item (review round 1, M1).
+    lines = draft.splitlines()
+    total_index = next(i for i, line in enumerate(lines) if line.startswith("- total:"))
+    assert lines[total_index + 1] == ""
+    assert lines[total_index + 2].startswith(("Runner:", "Round log, quoted:"))
+
+
+def test_a_draft_without_cache_sessions_has_no_prompt_cache_section(tmp_path):
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    assert "## Prompt cache" not in render_draft(result, Redactor())
+
+
+def test_the_cache_section_orders_sessions_by_lens_and_keeps_attempt_order(tmp_path):
+    """The pool creates each lens's adapter when its run starts, so the
+    sessions can arrive in any order; the draft renders them by lens
+    name, and one lens's own attempts stay in run order (round-2 review,
+    Nit 1)."""
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final(finding())])
+    sessions = [
+        CacheSession(
+            "tracing-correctness-and-invariants", (CacheTurn(30_000, 0, 30_000),)
+        ),
+        CacheSession("sweeping-for-security", (CacheTurn(10_000, 0, 10_000),)),
+        CacheSession(
+            "tracing-correctness-and-invariants",
+            (CacheTurn(20_000, 0, 20_000), CacheTurn(26_000, 20_000, 6_000)),
+        ),
+        CacheSession(
+            "reviewing-concurrency-and-async", (CacheTurn(40_000, 0, 40_000),)
+        ),
+    ]
+    draft = render_draft(result, Redactor(), cache=sessions)
+    cache_lines = [line for line in draft.splitlines() if line.startswith("- session ")]
+    expected = [
+        ('"reviewing-concurrency-and-async"', "1 turn(s)"),
+        ('"sweeping-for-security"', "1 turn(s)"),
+        ('"tracing-correctness-and-invariants"', "1 turn(s)"),
+        ('"tracing-correctness-and-invariants"', "2 turn(s)"),
+    ]
+    assert len(cache_lines) == len(expected)
+    assert all(
+        label in line and counts in line
+        for line, (label, counts) in zip(cache_lines, expected, strict=True)
+    )
