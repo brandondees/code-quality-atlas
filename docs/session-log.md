@@ -1358,3 +1358,24 @@ run's attestation ledger is per run, so editing a scenario replays from
 scratch. Nothing is read from the environment and no network client is
 constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
+
+## 2026-11-15 — one lens's refused runner no longer aborts the review (D60)
+
+The 2026-11-14 trials lost three reviews to Sprites capacity: about 12
+pooled lenses created Sprites at once, the three waits of 1, 2 and 4s
+#636 left behind gave up, and the `CreateRefusedError` escaped
+`future.result()` and crashed the review with every other lens's result
+lost. A 429'd create now waits a schedule that doubles from 2s capped at
+60s, `create_retries` waits long (default 6, about two minutes;
+`ATLAS_CREATE_RETRIES`), honoring a Retry-After header the 429 carries
+up to a 120s a wait and truncated to the deadline the runner has left.
+The coordinator passes its pooled lenses a per-review gate of
+`create_concurrency` (default 4, `ATLAS_CREATE_CONCURRENCY`), so at most
+that many Sprites create at once; slot waits are telemetry events, and a
+slot that never frees degrades that runner before any create is sent. A
+create still refused after the schedule now degrades only that lens: it
+is NOT RUN with why in the draft, the other lenses' results and
+continuations run on, and coverage stays incomplete so the review cannot
+approve. A 502 during a tree upload already failed only its runner; the
+new tests pin that path too. Offline only: no live Sprite, model or
+GitHub call was made.
