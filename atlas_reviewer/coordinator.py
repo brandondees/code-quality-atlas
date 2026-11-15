@@ -248,8 +248,10 @@ class AgenticReview:
 
 
 def mint(lenses: Sequence[LensResult]) -> tuple[MintedFinding, ...]:
-    """IDs in each attested lens's reply order, verified or not. An attempt
-    that is not attested contributes nothing, whatever it carries."""
+    """IDs in each attested lens's findings order, verified or not -- the
+    last attempt's reply order, with the earlier attempts' carried
+    verified findings appended (#691). An attempt that is not attested
+    contributes nothing, whatever it carries."""
     minted = []
     for result in lenses:
         if (
