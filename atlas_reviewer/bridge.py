@@ -23,6 +23,7 @@ import base64
 import codecs
 import json
 import re
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -60,6 +61,7 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.redact import RedactedText, Redactor, SecretScan, detect_secrets
 from atlas_reviewer.runner import (
+    DEFAULT_CREATE_RETRIES,
     FIRST_FRAME_BUDGET_S,
     GUEST_TAIL_CHARS,
     Session,
@@ -737,11 +739,15 @@ def run_bridge(
     root: str = BRIDGE_ROOT,
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
     unpack: UnpackLimits = DEFAULT_UNPACK,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
+    create_gate: threading.Semaphore | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
     past `unpack` are refused before anything is created, and the runner
-    holds `unpack` again as it extracts them."""
+    holds `unpack` again as it extracts them. `create_retries` and
+    `create_gate` shape how the create behind staging is retried and
+    bounded; see `runner.run_session`."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)
@@ -764,4 +770,5 @@ def run_bridge(
     return run_session(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
+        create_retries=create_retries, create_gate=create_gate,
     )  # fmt: skip

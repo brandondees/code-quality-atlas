@@ -97,7 +97,7 @@ from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, re
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
-from atlas_reviewer.diffs import scope_text
+from atlas_reviewer.diffs import scope_text, split_files
 from atlas_reviewer.lens_contract import (
     _SEVERITY_ALIASES,
     ContractError,
@@ -116,7 +116,11 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.pricing import ModelTerms, PricingUnknownError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all, with_head_files
-from atlas_reviewer.runner import DeadlineExceededError
+from atlas_reviewer.runner import (
+    DEFAULT_CREATE_CONCURRENCY,
+    DEFAULT_CREATE_RETRIES,
+    DeadlineExceededError,
+)
 
 SYNTHESIS = BUNDLE_ROOT / "reference" / "synthesis.md"
 CONTRACT_HEADING = "## Finding contract"
@@ -173,6 +177,8 @@ class Limits:
     diff_prefix_share: float
     quote_repairs: int
     quote_tolerance: int
+    create_retries: int = DEFAULT_CREATE_RETRIES
+    create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -192,13 +198,16 @@ class AgenticLimits:
     final reply, and identical calls, before one finalize nudge is
     injected. `diff_prefix_share` is the share of the model's resolved
     per-call input cap the shared diff prefix may take (D65); 0 turns the
-    shared prefix off and every review pages. `quote_repairs` bounds the
-    quote-repair turns (D64): how
-    many repair turns a quote failure earns per attempt, 0 to 3, default
-    1; `quote_tolerance` is the window, in lines either side of the
-    citation's first line, that the quote checker searches (D64), 0 to 8,
-    default 3. The per-call token fields are None until the endpoint terms
-    are known:
+    shared prefix off and every review pages. `create_retries` is how
+    many times a 429'd Sprite create
+    waits and retries before giving up (#690; the waits double from 2s,
+    capped at 60s, and a Retry-After the server names is honored up to its
+    own cap). `create_concurrency` is how many Sprite creates one review
+    may have in flight at once. `quote_repairs` bounds the quote-repair
+    turns (D64): how many repair turns a quote failure earns per attempt,
+    0 to 3, default 1; `quote_tolerance` is the window, in lines either
+    side of the citation's first line, that the quote checker searches
+    (D64), 0 to 8, default 3. The per-call token fields are None until
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -211,6 +220,8 @@ class AgenticLimits:
     no_progress_turns: int | None = DEFAULT_NO_PROGRESS_TURNS
     duplicate_calls: int | None = DEFAULT_DUPLICATE_CALLS
     diff_prefix_share: float = DEFAULT_DIFF_PREFIX_SHARE
+    create_retries: int = DEFAULT_CREATE_RETRIES
+    create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     quote_repairs: int = DEFAULT_QUOTE_REPAIRS
     quote_tolerance: int = DEFAULT_QUOTE_TOLERANCE
     max_input_tokens: int | None = None
@@ -228,6 +239,34 @@ class AgenticLimits:
         resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
         _check_limits(resolved)
         return resolved
+
+
+def _check_in_range(limits: Limits, name: str, low: int, high: int) -> None:
+    value = getattr(limits, name)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not low <= value <= high
+    ):
+        raise ValueError(f"{name} must be an integer from {low} to {high}")
+
+
+def _check_diff_prefix_share(limits: Limits) -> None:
+    """The shared diff prefix's share of the model's input room (D65): a
+    number from 0 to 1, where 0 turns the shared prefix off and every
+    review pages. Split from `_check_limits` so each stays under the
+    complexity gate."""
+    share = limits.diff_prefix_share
+    if (
+        isinstance(share, bool)
+        or not isinstance(share, int | float)
+        or not math.isfinite(share)
+        or not 0 <= share <= 1
+    ):
+        raise ValueError(
+            "diff_prefix_share must be a number from 0 to 1 "
+            "(0 turns the shared diff prefix off)"
+        )
 
 
 def _check_limits(limits: Limits) -> None:
@@ -262,17 +301,9 @@ def _check_limits(limits: Limits) -> None:
         or not 1 <= limits.pool_size <= 16
     ):
         raise ValueError("pool_size must be an integer from 1 to 16")
-    share = limits.diff_prefix_share
-    if (
-        isinstance(share, bool)
-        or not isinstance(share, int | float)
-        or not math.isfinite(share)
-        or not 0 <= share <= 1
-    ):
-        raise ValueError(
-            "diff_prefix_share must be a number from 0 to 1 "
-            "(0 turns the shared diff prefix off)"
-        )
+    _check_diff_prefix_share(limits)
+    for name, low, high in (("create_retries", 0, 24), ("create_concurrency", 1, 64)):
+        _check_in_range(limits, name, low, high)
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:
@@ -723,6 +754,19 @@ def diff_prefix_for(
     share = limits.diff_prefix_share
     if not share:
         return None, ""
+    fenced = frozenset(f.path for f in split_files(job.diff)) & job.changed
+    missing = job.changed - fenced
+    if missing:
+        # A scope path the diff has no section for cannot be fenced, so a
+        # prefix would hold a coverage claim it cannot back: page, and
+        # let the paged path's honest bookkeeping report the gap. The
+        # note names the count only -- the paths are PR data.
+        detail = (
+            "the diff holds no section for the paths in scope"
+            if missing == job.changed
+            else f"the diff holds no section for {len(missing)} of the paths in scope"
+        )
+        return None, detail + ", so the diff pages through diff_file"
     scope = scope_text(job.diff, job.changed)
     if not scope:
         # No scope diff to fence: the prefix would hold nothing, and

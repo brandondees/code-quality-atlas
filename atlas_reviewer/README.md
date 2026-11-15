@@ -454,6 +454,8 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses a quarter of the endpoint context when the completion limit is larger than that quarter, and the completion limit otherwise. It may be set higher, up to that completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
 | `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
+| `ATLAS_CREATE_RETRIES` | agentic lens entry | Times a 429'd Sprite create waits and retries before giving up, 0 to 24 (default 6; waits double from 2s, capped at 60s, and a Retry-After is honored up to 120s a wait) |
+| `ATLAS_CREATE_CONCURRENCY` | agentic lens entry | Sprite creates one review may have in flight at once, 1 to 64 (default 4) |
 | `ATLAS_DIFF_PREFIX_SHARE` | `agentic-review` | Largest share of the model's resolved per-call input cap the shared diff prefix may take (D65). Unset is 0.5; 0 turns the shared prefix off, so every review pages through `diff_file` as before it existed. `--diff-prefix-share` wins |
 | `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is one endpoint, `google-vertex/global`, for an Anthropic-family model (`anthropic/...`), and `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us` for any other model (#695, D63). One slug pins that provider. `--providers` wins |
@@ -463,7 +465,7 @@ Environment variables (names only; never commit values):
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
-uses it. The fourteen `ATLAS_*` limit variables are not credentials.
+uses it. The sixteen `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
 accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
@@ -1080,7 +1082,16 @@ D41 records the 2026-11-12 probe that did.
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
-  `ATLAS_POOL_SIZE` is set. The per-call
+  `ATLAS_POOL_SIZE` is set. `create_retries` is how many times a 429'd
+  Sprite create waits and retries before giving up (D62): 0 to 24,
+  default 6, the waits doubling from 2s capped at 60s, so the default
+  spends about two minutes where #636's three waits spent 7. A Retry-After
+  header the 429 carries is honored up to a 120s per-wait cap, and the
+  runner's deadline bounds the whole loop sooner. `create_concurrency` is
+  how many Sprite creates one review may have in flight at once (1 to 64,
+  default 4); a pooled review passes a gate of that size to every lens
+  run, and a lens that waits for a slot has the wait in its telemetry.
+  The per-call
   input cap is the pinned model's catalog context minus the output
   reserve, and the output cap is the model's completion limit. An
   override can tighten either and cannot exceed the model. The
@@ -1089,7 +1100,7 @@ D41 records the 2026-11-12 probe that did.
   completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
   the share of the model's resolved input cap the shared diff prefix may
   take; 0 pages every review, as before the prefix existed.
-  `coordinator.limits_for_lens` reads the fourteen limits through
+  `coordinator.limits_for_lens` reads the sixteen limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
