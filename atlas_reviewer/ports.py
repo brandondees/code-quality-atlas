@@ -50,7 +50,13 @@ class RefusedError(BoundaryError):
 
 class RateLimitedError(RefusedError):
     """The server answered HTTP 429: it refused for rate, not for the
-    request itself, so the same request may succeed later."""
+    request itself, so the same request may succeed later. `retry_after`
+    is the seconds the response's Retry-After header asked for, when it
+    sent one the client could read."""
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class ResponseTooLargeError(BoundaryError):

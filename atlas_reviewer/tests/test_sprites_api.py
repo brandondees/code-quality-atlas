@@ -24,6 +24,9 @@ from .helpers import SOURCE_TARBALL, Recorder, fake_token, ok
 
 API_S = "https://api.sprites.dev"
 NAME = "cqa-rev-20261106-230000-abcdef"
+# RFC 9110 dates: one in the future the clock can read, one already past.
+_HTTP_DATE = "Wed, 21 Oct 2115 07:28:00 GMT"
+_PAST_DATE = "Wed, 21 Oct 2015 07:28:00 GMT"
 
 
 def test_sprites_client_request_shapes():
@@ -99,6 +102,57 @@ def test_a_create_answered_with_a_4xx_is_refused(status):
 def test_a_create_answered_with_429_is_a_typed_rate_limit():
     with pytest.raises(RateLimitedError, match="HTTP 429"):
         SpritesClient(Recorder(ok(status=429)), "t").create(NAME)
+
+
+def test_a_429s_retry_after_seconds_are_carried_on_the_error():
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"Retry-After": "45"})), "t"
+        ).create(NAME)  # fmt: skip
+    assert caught.value.retry_after == 45.0
+
+
+def test_a_retry_after_header_is_read_regardless_of_case():
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"retry-after": "45"})), "t"
+        ).create(NAME)  # fmt: skip
+    assert caught.value.retry_after == 45.0
+
+
+def test_a_garbage_retry_after_is_none_not_a_crash():
+    """`²` is a Latin-1 byte `http.client` decodes as-is; `isdigit` accepts
+    it and `float` refuses it, so the parser must fall back to None rather
+    than raise out of the response check."""
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"Retry-After": "²"})), "t"
+        ).create(NAME)
+    assert caught.value.retry_after is None
+
+
+def test_a_retry_after_http_date_is_read_against_the_clock():
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"Retry-After": _HTTP_DATE})), "t"
+        ).create(NAME)  # fmt: skip
+    assert caught.value.retry_after is not None and caught.value.retry_after > 0
+
+
+def test_a_retry_after_in_the_past_is_no_wait():
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(
+            Recorder(ok(status=429, headers={"Retry-After": _PAST_DATE})), "t"
+        ).create(NAME)  # fmt: skip
+    assert caught.value.retry_after == 0.0
+
+
+@pytest.mark.parametrize("header", [None, "soon", "-5", "", "²", "٤٥"])
+def test_an_unreadable_retry_after_is_none(header):
+    headers = {} if header is None else {"Retry-After": header}
+    with pytest.raises(RateLimitedError) as caught:
+        SpritesClient(Recorder(ok(status=429, headers=headers)), "t").create(NAME)
+    assert caught.value.retry_after is None
 
 
 def test_a_create_answered_with_a_5xx_is_not_a_refusal():

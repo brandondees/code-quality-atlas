@@ -40,6 +40,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
@@ -102,7 +103,12 @@ from atlas_reviewer.rounds import (
     prior_blocks,
     records_for,
 )
-from atlas_reviewer.runner import event_runner_name, lens_runner_name
+from atlas_reviewer.runner import (
+    DEFAULT_CREATE_RETRIES,
+    CreateRefusedError,
+    event_runner_name,
+    lens_runner_name,
+)
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.tracing import (
@@ -559,6 +565,11 @@ def _review_lenses(
             return _not_run(trace, lens, index, assigned, LATE_REASON, spend)
         try:
             return _run_lens(lens, assigned, index)
+        except CreateRefusedError as exc:
+            # A capacity refusal on one lens's runner is that lens's
+            # problem (#690): the review keeps every other lens's result,
+            # and this one is NOT RUN with why, so the draft cannot approve.
+            return _not_run(trace, lens, index, assigned, str(exc), spend)
         except BaseException:
             spend.halt()
             raise
@@ -591,9 +602,12 @@ def _review_lenses(
             review_deadline=deadline,
             runner_name=lens_runner_name(event, f"{lens}:{index}"),
             continuation=index > len(names),
+            create_gate=gate,
+            create_retries=resolved.create_retries,
         )
 
     names = tuple(lenses)
+    gate = threading.BoundedSemaphore(resolved.create_concurrency)
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
         futures = [
             submit_with_review_context(pool, run, lens, changed, index)
@@ -760,6 +774,8 @@ def _review_one(
     review_deadline: float | None = None,
     runner_name: str | None = None,
     continuation: bool = False,
+    create_gate: threading.Semaphore | None = None,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
     trace: ReviewTrace,
 ) -> _LensRun:
     resolved = limits.resolve()
@@ -842,6 +858,8 @@ def _review_one(
         deadline_s=max(deadline - clock.monotonic(), 0.0), clock=clock,
         telemetry=telemetry,
         root=bridge_root,
+        create_gate=create_gate,
+        create_retries=create_retries,
     )  # fmt: skip
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),

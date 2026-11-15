@@ -101,7 +101,11 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.pricing import ModelTerms, PricingUnknownError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all, with_head_files
-from atlas_reviewer.runner import DeadlineExceededError
+from atlas_reviewer.runner import (
+    DEFAULT_CREATE_CONCURRENCY,
+    DEFAULT_CREATE_RETRIES,
+    DeadlineExceededError,
+)
 
 SYNTHESIS = BUNDLE_ROOT / "reference" / "synthesis.md"
 CONTRACT_HEADING = "## Finding contract"
@@ -151,6 +155,8 @@ class Limits:
     duplicate_calls: int
     quote_repairs: int
     quote_tolerance: int
+    create_retries: int = DEFAULT_CREATE_RETRIES
+    create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -168,12 +174,15 @@ class AgenticLimits:
     is one). `no_progress_turns` and `duplicate_calls` are the no-progress
     detector's thresholds (D58): turns past full diff coverage without a
     final reply, and identical calls, before one finalize nudge is
-    injected. `quote_repairs` bounds the quote-repair turns (D64): how
-    many repair turns a quote failure earns per attempt, 0 to 3, default
-    1; `quote_tolerance` is the window, in lines either side of the
-    citation's first line, that the quote checker searches (D64), 0 to 8,
-    default 3. The per-call token fields are None until the endpoint terms
-    are known:
+    injected. `create_retries` is how many times a 429'd Sprite create
+    waits and retries before giving up (#690; the waits double from 2s,
+    capped at 60s, and a Retry-After the server names is honored up to its
+    own cap). `create_concurrency` is how many Sprite creates one review
+    may have in flight at once. `quote_repairs` bounds the quote-repair
+    turns (D64): how many repair turns a quote failure earns per attempt,
+    0 to 3, default 1; `quote_tolerance` is the window, in lines either
+    side of the citation's first line, that the quote checker searches
+    (D64), 0 to 8, default 3. The per-call token fields are None until
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -185,6 +194,8 @@ class AgenticLimits:
     pool_size: int = POOL_SIZE
     no_progress_turns: int | None = DEFAULT_NO_PROGRESS_TURNS
     duplicate_calls: int | None = DEFAULT_DUPLICATE_CALLS
+    create_retries: int = DEFAULT_CREATE_RETRIES
+    create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     quote_repairs: int = DEFAULT_QUOTE_REPAIRS
     quote_tolerance: int = DEFAULT_QUOTE_TOLERANCE
     max_input_tokens: int | None = None
@@ -202,6 +213,16 @@ class AgenticLimits:
         resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
         _check_limits(resolved)
         return resolved
+
+
+def _check_in_range(limits: Limits, name: str, low: int, high: int) -> None:
+    value = getattr(limits, name)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not low <= value <= high
+    ):
+        raise ValueError(f"{name} must be an integer from {low} to {high}")
 
 
 def _check_limits(limits: Limits) -> None:
@@ -236,6 +257,8 @@ def _check_limits(limits: Limits) -> None:
         or not 1 <= limits.pool_size <= 16
     ):
         raise ValueError("pool_size must be an integer from 1 to 16")
+    for name, low, high in (("create_retries", 0, 24), ("create_concurrency", 1, 64)):
+        _check_in_range(limits, name, low, high)
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:

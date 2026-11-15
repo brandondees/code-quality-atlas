@@ -1410,32 +1410,38 @@ retry prompt is unchanged — the body is still applied whole. Policy
 tests in `test_attestation.py`, end-to-end over the real bridge with the
 scripted model in `test_coordinator.py`. Offline only.
 
-## 2026-11-15 — a rejected quote is repaired in the session, and the checker tolerates a small offset (#697, D64)
+## 2026-11-15 — one lens's refused runner no longer aborts the review (D62)
 
-The Nov 14 trials made the retry path the most expensive failure mode:
-all 7 Sonnet retries were `QUOTES_FAILED`, one failed quote re-ran the
-whole lens from turn 1 ($2.00 on #661, $0.69 on #640), and every failed
-quote was text that really is in the head file — two one line off, two
-span mismatches, three 9–62 lines off. Two changes, on the quote checker
-and the loop only. The checker's drift search is generalized: a quote of
-whole lines may now match a window of the quote's own line count starting
-within three lines of the citation's first line (`ATLAS_QUOTE_TOLERANCE`,
-default 3, bounded 0–8), so an off-by-one citation and a span mismatch
-verify with the finding's location corrected to the lines that hold the
-quote; fragments never drift, removed-line matches still win, and nothing
-outside the window verifies. A quote that still fails earns a bounded
-repair turn in the same conversation (`ATLAS_QUOTE_REPAIRS`, default 1,
-bounded 0–3): the rejected locations, reasons and quotes go back fenced,
-the model corrects the range or drops the finding, and the answering
-reply is re-checked by the same checker, with the held reply's verified
-findings merged in through D61's `_merged_findings` — #694's merge
-reused, not duplicated. When the bound is spent and quotes still fail,
-the attempt keeps `QUOTES_FAILED` exactly as before, with the bound named
-in the detail; the ledger's `nudges` and the completion span record the
-`quote-repair` turn, and the draft's lens line counts repair turns and
-window corrections. Tests in `test_quotes.py`, `test_lens_loop.py`,
-`test_agentic_limits.py` and `test_coordinator.py`, each behavior also
-checked against a killed mutant. Offline only.
+The 2026-11-14 trials lost three reviews to Sprites capacity: about 12
+pooled lenses created Sprites at once, the three waits of 1, 2 and 4s
+that issue #636 left behind gave up, and the `CreateRefusedError` escaped
+`future.result()` and crashed the review with every other lens's result
+lost. A 429'd create now waits a schedule that doubles from 2s capped at
+60s, `create_retries` waits long (default 6, about two minutes;
+`ATLAS_CREATE_RETRIES`), honoring a Retry-After header the 429 carries
+(read case-insensitively; a value the parser cannot read is None and the
+schedule stands in) up to 120s a wait and truncated to the deadline the
+runner has left. The coordinator passes its pooled lenses and continuations a per-review
+gate of
+`create_concurrency` (default 4, `ATLAS_CREATE_CONCURRENCY`), so at most
+that many Sprites create at once; slot waits are telemetry events, and a
+slot that never frees degrades that runner before any create is sent. A
+create still refused after the schedule now degrades only that lens: it
+is NOT RUN with why in the draft, the other lenses' results and
+continuations run on, and coverage stays incomplete so the review cannot
+approve. Because a 429 means the server made nothing, the create outcome
+returns to `not started` for the wait, so a deadline that fires during
+one degrades the runner with cleanup `NOT_CREATED` and no ledger entry
+left. A 502 during a tree upload already failed only its runner; the
+new tests pin that path too. Round 1 on the PR also pinned the
+review-level wiring and bounds (the gate size, the retry count, the env
+ranges and the literal defaults) its mutants showed unpinned. Folding
+the plain positive-int limits' parser into the ranged one changed what
+those nine limits say when they refuse -- "must be an integer, not X"
+for a non-integer and "must be an integer of at least 1, not X" for a
+below-one value, was "must be a positive integer, not X" -- both texts
+pinned by test. Offline
+only: no live Sprite, model or GitHub call was made.
 
 ## 2026-11-15 — Anthropic routes pin one endpoint, and the draft counts prompt-cache misses (#695, D63)
 
@@ -1468,6 +1474,33 @@ confirming the fix on any future run. `cache_stats.py` holds the
 tracker, model-agnostic; `OpenRouterLensModel` feeds it. Offline only:
 no live model call was made for this change, and the tests pin every
 rule with fakes and recorded HTTP.
+
+## 2026-11-15 — a rejected quote is repaired in the session, and the checker tolerates a small offset (#697, D64)
+
+The Nov 14 trials made the retry path the most expensive failure mode:
+all 7 Sonnet retries were `QUOTES_FAILED`, one failed quote re-ran the
+whole lens from turn 1 ($2.00 on #661, $0.69 on #640), and every failed
+quote was text that really is in the head file — two one line off, two
+span mismatches, three 9–62 lines off. Two changes, on the quote checker
+and the loop only. The checker's drift search is generalized: a quote of
+whole lines may now match a window of the quote's own line count starting
+within three lines of the citation's first line (`ATLAS_QUOTE_TOLERANCE`,
+default 3, bounded 0–8), so an off-by-one citation and a span mismatch
+verify with the finding's location corrected to the lines that hold the
+quote; fragments never drift, removed-line matches still win, and nothing
+outside the window verifies. A quote that still fails earns a bounded
+repair turn in the same conversation (`ATLAS_QUOTE_REPAIRS`, default 1,
+bounded 0–3): the rejected locations, reasons and quotes go back fenced,
+the model corrects the range or drops the finding, and the answering
+reply is re-checked by the same checker, with the held reply's verified
+findings merged in through D61's `_merged_findings` — #694's merge
+reused, not duplicated. When the bound is spent and quotes still fail,
+the attempt keeps `QUOTES_FAILED` exactly as before, with the bound named
+in the detail; the ledger's `nudges` and the completion span record the
+`quote-repair` turn, and the draft's lens line counts repair turns and
+window corrections. Tests in `test_quotes.py`, `test_lens_loop.py`,
+`test_agentic_limits.py` and `test_coordinator.py`, each behavior also
+checked against a killed mutant. Offline only.
 
 ## 2026-11-15 — round-1 review fixes for #703: the repair's failure paths keep the verified findings
 

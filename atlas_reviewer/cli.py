@@ -1430,6 +1430,16 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
         ("--lens-wall-seconds", "lens_wall_s", "seconds per lens"),
         ("--review-wall-seconds", "review_wall_s", "seconds per review"),
         (
+            "--create-concurrency",
+            "create_concurrency",
+            "Sprites created at once across the review's lens pool",
+        ),
+        (
+            "--create-retries",
+            "create_retries",
+            "times a rate-limited Sprite create waits and retries before giving up",
+        ),
+        (
             "--max-input-tokens",
             "max_input_tokens",
             "per-call input cap; default is the model's context minus the output reserve",
