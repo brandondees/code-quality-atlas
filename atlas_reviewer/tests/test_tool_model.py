@@ -8,6 +8,8 @@ from decimal import Decimal
 import pytest
 
 from atlas_reviewer.attestation import (
+    AttemptOutcome,
+    Attestation,
     Cause,
     LensState,
     ToolUse,
@@ -22,12 +24,15 @@ from atlas_reviewer.call_facts import take_call
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     AssistantCalls,
+    SharedPrefix,
     Spend,
     ToolRequest,
     ToolResults,
     TurnRequest,
     UserText,
+    lens_skill,
     resolve_per_call,
+    shared_system,
     tool_schemas,
 )
 from atlas_reviewer.limit_stop import LimitRefused
@@ -42,13 +47,14 @@ from atlas_reviewer.pricing import PricingUnknownError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.tool_model import OpenRouterLensModel, _payload
 
-from .agentic import BODY, LIMITS, final, finding
+from .agentic import BODY, DIFF, LIMITS, final, finding
 from .helpers import FakeClock
-from .test_lens_loop import NONCE, attempt
+from .test_lens_loop import CONTRACT, LENS, NONCE, attempt, job
 from .test_openrouter import (
     KEY,
     MODEL_ID,
     OpenRouterFake,
+    catalog,
     completion,
     key_status,
     reply,
@@ -56,6 +62,23 @@ from .test_openrouter import (
 )
 
 SYSTEM = "You are one lens. Read the change with the tools."
+SECOND_LENS = "sweeping-for-security"
+SECOND_BODY = "# Sweeping for security\n\nSweep the change for risks.\n"
+
+
+def prefixed_request(*messages, lens=LENS, body=None, retry_of=None) -> TurnRequest:
+    """A turn request shaped the way the loop builds one on the shared
+    prefix path (D65): the lens skill in `system`, the shared prefix in
+    `prefix`. `lens` and `body` select which lens's skill it carries."""
+    text = body if body is not None else BODY
+    prefix = SharedPrefix(
+        shared_system(CONTRACT, nonce=NONCE),
+        fence(UntrustedBlock("pull-request-diff", RepoText(DIFF)), NONCE),
+    )
+    history = messages or (UserText(job().first_turn),)
+    return TurnRequest(
+        lens_skill(lens, text, retry_of), history, tool_schemas(), prefix
+    )
 
 
 def request(*messages, tools=None) -> TurnRequest:
@@ -1183,5 +1206,188 @@ def test_sessions_render_with_a_run_total():
     assert "1 cache miss(es)" in lines[0]
     assert lines[-1].startswith("total: 4 turn(s), 1 cache miss(es)")
     assert lines[-1].endswith(
-        "50000 cache-write token(s) against 60000 token(s) of final context."
+        "50000 cache-write token(s) against 60000 token(s) of final context, "
+        "first-turn cache reads summing to 0 token(s)."
     )
+    assert "first-turn cache reads summing to 0 token(s)" in lines[-1]
+
+
+# ---------------------------------------------------- the shared diff prefix
+
+
+def _breakpoint_index(parts: list) -> int:
+    return next(i for i, part in enumerate(parts) if "cache_control" in part)
+
+
+def cached_prefix_bytes(body: dict) -> bytes:
+    """What a prompt cache would match on: the tools and every message up
+    to and including the one content part that carries the explicit
+    breakpoint, serialized. The comparison is over bytes, not structure,
+    so a byte-level difference a structural check would miss fails here."""
+    for index, message in enumerate(body["messages"]):
+        content = message.get("content")
+        if isinstance(content, list) and any("cache_control" in p for p in content):
+            cut = _breakpoint_index(content)
+            prefix = {
+                "tools": body["tools"],
+                "messages": [
+                    *body["messages"][:index],
+                    {**message, "content": content[: cut + 1]},
+                ],
+            }
+            return json.dumps(prefix, sort_keys=True).encode()
+    raise AssertionError("the request carries no cache breakpoint")
+
+
+def test_the_shared_prefix_is_byte_identical_across_lenses_and_a_retry():
+    """Mutant M1: any lens-specific byte in the shared block -- the lens
+    name, the body, a per-lens nonce, a per-attempt preamble -- breaks the
+    byte equality across two lenses and across the same lens's retry."""
+    first, first_fake = model(reply(completion("ok")), reply(completion("ok")))
+    second, second_fake = model(reply(completion("ok")))
+    first.turn(prefixed_request())
+    second.turn(prefixed_request(lens=SECOND_LENS, body=SECOND_BODY))
+    retry = prefixed_request(
+        retry_of=AttemptOutcome(Attestation.UNACKNOWLEDGED, frozenset({Cause.UNPARSED}))
+    )
+    first.turn(retry)
+    a = cached_prefix_bytes(json.loads(first_fake.chat_requests()[0][3]))
+    b = cached_prefix_bytes(json.loads(second_fake.chat_requests()[0][3]))
+    r = cached_prefix_bytes(json.loads(first_fake.chat_requests()[1][3]))
+    assert a == b == r
+    # The cached prefix carries the real tools, not an empty list (mutant
+    # P15: an empty `tools` on both sides stays byte-identical and would
+    # cache a prefix no real request sends).
+    prefix_object = json.loads(a)
+    assert [tool["function"]["name"] for tool in prefix_object["tools"]] == [
+        "diff_stat",
+        "diff_file",
+        "list_files",
+        "read_file",
+        "grep",
+    ]
+    # The lens-specific text sits after the breakpoint: the retry's own
+    # skill text (its preamble names the refused attempt) is not in any
+    # cached prefix, and neither is the other lens's body.
+    assert body_markers(LENS, body_digest(BODY))[0].encode() not in a
+    assert body_markers(SECOND_LENS, body_digest(SECOND_BODY))[0].encode() not in a
+
+
+def test_the_first_non_system_message_differs_per_lens():
+    """Minor 2 (review round 1 of #704): OpenRouter's sticky-routing hash
+    covers the first system message and the first non-system message. The
+    layout keeps the lens skill and the turn-1 text in that first
+    non-system message, so the routing key differs per lens and the
+    locality claim rests on D63's endpoint pin; what the lenses share is
+    the breakpoint-marked part 0, the fenced diff."""
+    first, first_fake = model(reply(completion("ok")))
+    second, second_fake = model(reply(completion("ok")))
+    first.turn(prefixed_request())
+    second.turn(prefixed_request(lens=SECOND_LENS, body=SECOND_BODY))
+    a = json.loads(first_fake.chat_requests()[0][3])
+    b = json.loads(second_fake.chat_requests()[0][3])
+    assert a["messages"][0]["content"] == b["messages"][0]["content"]
+    assert a["messages"][1]["content"][0] == b["messages"][1]["content"][0]
+    assert a["messages"][1]["content"][1] != b["messages"][1]["content"][1]
+    assert a["messages"][1]["content"][2] == b["messages"][1]["content"][2]
+
+
+def test_the_explicit_breakpoint_sits_on_the_diff_part_of_the_prefix():
+    """Mutant M2: dropping the part-level `cache_control`, or marking a
+    different part, leaves the shared block uncached or caches lens
+    material with it. The top-level automatic `cache_control` stays (D57),
+    so the growing tail keeps caching as it does today."""
+    lens, fake = model(reply(completion("ok")), reply(completion("ok")))
+    lens.turn(prefixed_request())
+    body = sent(fake)
+    assert body["cache_control"] == {"type": "ephemeral"}
+    system, user = body["messages"][0], body["messages"][1]
+    assert user["role"] == "user"
+    parts = user["content"]
+    assert all(part["type"] == "text" for part in parts)
+    assert parts[0]["cache_control"] == {"type": "ephemeral"}
+    assert parts[0]["text"] == fence(
+        UntrustedBlock("pull-request-diff", RepoText(DIFF)), NONCE
+    )
+    assert parts[1]["text"] == lens_skill(LENS, BODY)
+    assert parts[2]["text"] == job().first_turn
+    assert system["role"] == "system"
+    assert system["content"] == shared_system(CONTRACT, nonce=NONCE)
+    # The rest of the conversation follows as it does without a prefix.
+    followup = prefixed_request(
+        UserText(job().first_turn),
+        AssistantCalls((ToolRequest("diff_stat", {}),)),
+        ToolResults((fence(UntrustedBlock("tool-result", RepoText("ok")), NONCE),)),
+    )
+    lens.turn(followup)
+    later = json.loads(fake.chat_requests()[-1][3])
+    assert later["messages"][1]["content"] == parts
+    assert later["messages"][2]["role"] == "assistant"
+    assert later["messages"][3]["role"] == "tool"
+
+
+def test_a_route_without_cache_control_support_gets_no_marker():
+    """Mutant M3: marking a part on a route whose endpoints do not list
+    `cache_control` would have `require_parameters` refuse the request.
+    The layout stays; the marker does not."""
+    from atlas_reviewer.openrouter import model_route
+
+    other = "z-ai/glm-5.3"
+    catalog_row = catalog()
+    catalog_row["data"]["id"] = other
+    rows = zdr_payload(other, parameters=["max_tokens", "tools"])
+    lens, fake = model(
+        reply(completion("ok", model=other)),
+        catalog_reply=reply(catalog_row),
+        zdr=reply(rows),
+        route=model_route({}, model=other),
+    )
+    lens.turn(prefixed_request())
+    body = sent(fake)
+    assert "cache_control" not in body
+    parts = body["messages"][1]["content"]
+    assert all("cache_control" not in part for part in parts)
+    assert parts[0]["text"].startswith('<untrusted-data id="')
+    assert body["messages"][0]["content"] == shared_system(CONTRACT, nonce=NONCE)
+
+
+def test_the_prefix_priced_turn_still_bounds_the_input_from_the_meter():
+    """The prefix rides the same pricing path: the byte-bound first turn
+    counts the prefix's bytes, and a later turn's bound is the reported
+    baseline plus the new messages, prefix included in both sides of that
+    difference."""
+    lens, fake = model(
+        reply(
+            completion(
+                "ok",
+                usage={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 5,
+                    "cost": "0.01",
+                    "is_byok": False,
+                },
+            )
+        ),
+        reply(
+            completion(
+                "ok",
+                usage={
+                    "prompt_tokens": 130,
+                    "completion_tokens": 5,
+                    "cost": "0.01",
+                    "is_byok": False,
+                },
+            )
+        ),
+    )
+    first = prefixed_request()
+    lens.worst_case_usd(first)
+    lens.turn(first)
+    followup = prefixed_request(
+        UserText(job().first_turn),
+        AssistantCalls((ToolRequest("diff_stat", {}),)),
+        ToolResults((fence(UntrustedBlock("tool-result", RepoText("ok")), NONCE),)),
+    )
+    bound = lens.worst_case_usd(followup)
+    assert bound > 0
+    assert len(fake.chat_requests()) == 1

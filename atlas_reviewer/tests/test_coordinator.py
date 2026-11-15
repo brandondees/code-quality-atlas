@@ -2405,7 +2405,8 @@ def test_the_draft_renders_the_prompt_cache_sessions(tmp_path):
     assert '"reviewing-test-quality"' in draft
     assert (
         "total: 3 turn(s), 0 cache miss(es), 56000 cache-write token(s) "
-        "against 56000 token(s) of final context."
+        "against 56000 token(s) of final context, first-turn cache reads "
+        "summing to 0 token(s)."
     ) in draft
     # CommonMark: the line after the last cache bullet must be blank, or
     # the runner and round-log lines that follow render as lazy
@@ -2453,3 +2454,128 @@ def test_the_cache_section_orders_sessions_by_lens_and_keeps_attempt_order(tmp_p
         label in line and counts in line
         for line, (label, counts) in zip(cache_lines, expected, strict=True)
     )
+
+
+# ------------------------------------------------ the shared diff prefix
+
+
+def _fence_id(text: str) -> str:
+    found = re.search(r'<untrusted-data id="([0-9a-f]+)"', text)
+    assert found is not None
+    return found.group(1)
+
+
+def test_one_nonce_is_minted_per_review_and_every_lens_fences_with_it(
+    tmp_path, monkeypatch
+):
+    """D65: the fence nonce is minted once per review from the CSPRNG --
+    not from PR content -- and both lenses' first turns fence with the
+    same minted id, which is what makes their prefixes byte-identical."""
+    import atlas_reviewer.coordinator as coordinator_module
+
+    minted: list[int] = []
+    real = coordinator_module.secrets.token_hex
+
+    def spy(n: int) -> str:
+        minted.append(n)
+        return real(n)
+
+    monkeypatch.setattr(coordinator_module.secrets, "token_hex", spy)
+    from .test_keepalive import TaskServer, socket_path
+
+    models = [
+        ScriptedLensModel([READ_ALL, final()]),
+        ScriptedLensModel(
+            [READ_ALL, final(finding(), lens=OTHER, digest=body_digest(OTHER_BODY))]
+        ),
+    ]
+    pending = list(models)
+    lock = threading.Lock()
+
+    def model_for():
+        with lock:
+            return pending.pop(0)
+
+    tasks = TaskServer(socket_path(tmp_path))
+    tasks.start()
+    try:
+        result = review_lenses(
+            EVENT,
+            (LENS, OTHER),
+            DIFF,
+            trees(),
+            library=StubLibrary({LENS: BODY, OTHER: OTHER_BODY}),
+            model=ScriptedLensModel([]),
+            limits=replace(LIMITS, pool_size=2),
+            ledger=ledger(tmp_path),
+            sprites=LocalSprites(),
+            runner_ledger=MemoryLedger(),
+            redactor=Redactor(),
+            clock=FakeClock(),
+            bridge_root=str(tmp_path / "bridge"),
+            task_socket=str(tasks.path),
+            model_for=model_for,
+        )
+    finally:
+        tasks.close()
+        assert tasks.tasks == {}, tasks.order
+    assert result.lenses[0].state is LensState.CLEAN
+    assert result.lenses[1].state is LensState.CLEAN
+    assert minted == [coordinator_module.NONCE_BYTES]
+    first_id = _fence_id(models[0].requests[0].messages[0].text)
+    second_id = _fence_id(models[1].requests[0].messages[0].text)
+    assert first_id == second_id
+
+
+def test_both_lenses_share_one_byte_identical_prefix(tmp_path):
+    """D65 end to end: two lenses of one review, each able to hold the
+    prefix, send byte-identical shared blocks -- same shared system text,
+    same fenced whole diff -- with their own skill text after it."""
+    from .test_lens_loop import RoomModel
+
+    models = [
+        RoomModel([READ_ALL, final()]),
+        RoomModel(
+            [READ_ALL, final(finding(), lens=OTHER, digest=body_digest(OTHER_BODY))]
+        ),
+    ]
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS, OTHER],
+        None,
+        models=models,
+        pool=2,
+        limits=replace(LIMITS, pool_size=2),
+    )
+    assert result.coverage_complete
+    first, second = (model.requests[0].prefix for model in models)
+    assert first is not None and second is not None
+    assert first == second
+    assert "diff --git a/calc.py" in first.diff
+    assert "diff --git a/config/keys.py" in first.diff
+    # Each lens's own skill text stays outside the shared block.
+    assert OTHER_BODY not in first.diff
+    assert BODY not in first.diff
+
+
+def test_a_prefix_review_is_clean_and_complete_with_no_tool_calls(tmp_path):
+    """The parity gate on the prefix path: the prefix held every changed
+    file's diff, so a lens that calls no tool still attests full coverage
+    and the review can approve."""
+    from .test_lens_loop import RoomModel
+
+    result, _sprites = _lenses(tmp_path, [LENS], RoomModel([final()]))
+    assert result.coverage_complete
+    assert result.lenses[0].state is LensState.CLEAN
+    assert result.lenses[0].outcome.changed_files == 2
+    assert result.lenses[0].outcome.unread == ()
+    assert "the shared diff prefix is inlined" in render_draft(result, Redactor())
+
+
+def test_the_fence_nonce_is_eight_bytes():
+    """Mutant P16: the nonce's width is part of the fence's unpredictability
+    guarantee (D65), pinned to the literal 8 so a change of the constant
+    cannot silently halve it."""
+    import atlas_reviewer.coordinator as coordinator_module
+
+    assert coordinator_module.NONCE_BYTES == 8

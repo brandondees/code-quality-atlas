@@ -207,6 +207,10 @@ class AttemptOutcome:
     # `quote-repair` (D64). Controller
     # labels, not model text.
     nudges: tuple[str, ...] = ()
+    # The shared diff prefix's decision for this attempt (D65), controller
+    # text: that the prefix was inlined and at what size, or why the diff
+    # pages through `diff_file` instead. Empty when the prefix is off.
+    diff_prefix: str = ""
 
     @property
     def state(self) -> LensState:
@@ -432,6 +436,7 @@ def _outcome_json(
         "limit": _limit_json(outcome.limit_hit, scrub),
         "dropped": [scrub(note) for note in outcome.dropped],
         "nudges": [scrub(nudge) for nudge in outcome.nudges],
+        "diff_prefix": scrub(outcome.diff_prefix),
     }
 
 
@@ -474,6 +479,9 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
     nudges = data.get("nudges", [])
     if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
         raise TypeError("nudges must be a list of strings")
+    diff_prefix = data.get("diff_prefix", "")
+    if not isinstance(diff_prefix, str):
+        raise TypeError("diff_prefix must be a string")
     return AttemptOutcome(
         Attestation[data["attestation"]],
         frozenset(Cause[c] for c in data["causes"]),
@@ -486,6 +494,7 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _limit_from(data.get("limit")),
         _dropped_from(data.get("dropped", ())),
         tuple(nudges),
+        diff_prefix,
     )
 
 

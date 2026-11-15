@@ -148,7 +148,8 @@ def test_one_session_renders_no_total_line():
     assert lines == (
         (
             "session 1 (lens-a): 1 turn(s), 0 cache miss(es), 20000 cache-write "
-            "token(s), final context 20000 token(s)."
+            "token(s), first-turn cache read 0 token(s), final context "
+            "20000 token(s)."
         ),
     )
 
@@ -166,16 +167,51 @@ def test_several_sessions_render_a_total_line_to_check_writes_against_context():
     )
     assert lines[0] == (
         "session 1 (lens-a): 2 turn(s), 0 cache miss(es), 26000 cache-write "
-        "token(s), final context 26000 token(s)."
+        "token(s), first-turn cache read 0 token(s), final context "
+        "26000 token(s)."
     )
     assert lines[1] == (
         "session 2 (lens-b): 1 turn(s), 0 cache miss(es), 30000 cache-write "
-        "token(s), final context 30000 token(s)."
+        "token(s), first-turn cache read 0 token(s), final context "
+        "30000 token(s)."
     )
     assert lines[2] == (
         "total: 3 turn(s), 0 cache miss(es), 56000 cache-write token(s) "
-        "against 56000 token(s) of final context."
+        "against 56000 token(s) of final context, first-turn cache reads "
+        "summing to 0 token(s)."
     )
+
+
+def test_a_session_that_read_a_prefix_shows_its_first_turn_cache_read():
+    """D65: a session whose opening turn read the shared diff prefix shows
+    the read. Nothing else in a session's first prompt can have been
+    cached, so the opening turn's cached count is the prefix's read for
+    that session; the run total sums them."""
+    lines = session_lines(
+        [
+            session("lens-a", turn(40_000, cached=0, written=40_000)),
+            session(
+                "lens-b",
+                turn(46_000, cached=40_000, written=6_000),
+                turn(50_000, cached=46_000),
+            ),
+        ]
+    )
+    assert lines[1] == (
+        "session 2 (lens-b): 2 turn(s), 0 cache miss(es), 6000 cache-write "
+        "token(s), first-turn cache read 40000 token(s), final context "
+        "50000 token(s)."
+    )
+    assert lines[-1] == (
+        "total: 3 turn(s), 0 cache miss(es), 46000 cache-write token(s) "
+        "against 90000 token(s) of final context, first-turn cache reads "
+        "summing to 40000 token(s)."
+    )
+
+
+def test_an_unreported_first_turn_cache_read_says_so():
+    lines = session_lines([session("lens-a", turn(10_000))])
+    assert "first-turn cache read no reported tokens" in lines[0]
 
 
 def test_an_unlabeled_session_keeps_its_ordinal():

@@ -1454,6 +1454,11 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "reasoning_max_tokens",
             "reasoning hint sent on the request; the reservation does not depend on it",
         ),
+        (
+            "--diff-prefix-share",
+            "diff_prefix_share",
+            "largest share of the per-call input cap the shared diff prefix may take; 0 pages every review through diff_file as before the shared prefix (D65)",
+        ),
     )
     for flag, name, meaning in flags:
         parser.add_argument(

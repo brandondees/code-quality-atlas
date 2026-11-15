@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from functools import reduce
 
@@ -159,6 +159,15 @@ class DiffSelection:
 def diff_paths(diff: str) -> tuple[str, ...]:
     """New-side path of every file in the diff, in order."""
     return tuple(f.path for f in _sections(diff))
+
+
+def scope_text(diff: str, paths: Iterable[str]) -> str:
+    """The diff text of exactly the named paths, in diff order: the
+    material a shared diff prefix for that scope fences (D65). Naming
+    every section's path gives back the whole diff, because the sections
+    concatenate to it."""
+    wanted = frozenset(paths)
+    return "".join(f.text for f in split_files(diff) if f.path in wanted)
 
 
 def _sections(diff: str) -> list[FileDiff]:

@@ -2226,8 +2226,50 @@ def test_a_live_agentic_review_renders_the_prompt_cache_section(tmp_path, monkey
     assert '"sweeping-for-security"' in draft
     assert (
         "total: 8 turn(s), 4 cache miss(es), 16028 cache-write token(s) "
-        "against 8016 token(s) of final context."
+        "against 8016 token(s) of final context, first-turn cache reads "
+        "summing to 0 token(s)."
     ) in draft
     # The adapters the run created are the ones the section came from.
     assert len(made) >= 4
     assert all(isinstance(adapter, OpenRouterLensModel) for adapter in made)
+
+
+def test_agentic_review_validates_the_diff_prefix_share_flag(tmp_path):
+    """D65: the share is a limit flag like the others -- a value outside
+    0 to 1 is a usage error, and 0 is accepted (it pages every review)."""
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--diff-prefix-share",
+        "1.5",
+    )
+    assert code == cli.EXIT_USAGE
+    assert "diff_prefix_share" in err
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--diff-prefix-share",
+        "0",
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+
+
+def test_the_agentic_command_default_pool_stays_four():
+    """Minor 1 (review round 1 of #704): D65's first-wave cost is priced
+    at this default -- the command replaces an unset pool with 4, so a
+    flagless first wave starts its lenses together and each may write the
+    shared prefix. A change to this default must revisit that claim and
+    the decision's cost sentence. Round 2, N1: the replace itself is the
+    pin -- deleting it would leave an unset pool at the dataclass default
+    of 1, and the resolved limits below would say so."""
+    assert cli.AGENTIC_POOL == 4
+    limits = cli._agentic_limits(argparse.Namespace(), {})
+    assert limits.pool_size == 4

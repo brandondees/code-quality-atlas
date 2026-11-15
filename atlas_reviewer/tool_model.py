@@ -25,6 +25,13 @@ missing. This module does not touch that tracker's rules, and it does
 not reserve on the one-shot `ReviewBudget` (that budget's ceiling is
 the one-shot 3 calls and $3).
 
+When the loop hands the adapter a shared prefix (D65), the request opens
+with it: the prefix's system text, then one user message whose first
+part is the fenced whole diff and carries the explicit `cache_control`
+breakpoint where the route takes one, then the lens skill and the first
+turn as further parts of that message. A route without `cache_control`
+support gets the same layout with no marker on any part.
+
 Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
 executes and returns that refusal, nonce-fenced, as the next tool
@@ -80,6 +87,7 @@ from atlas_reviewer.openrouter import (
     _tokens,
     optional_parameters,
     provider_preferences,
+    sends_cache_control,
 )
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -152,6 +160,16 @@ class OpenRouterLensModel:
         response's reported usage plus an estimate for the new messages, or
         from bytes when there was no usable report. The trace records it."""
         return self._bound_note
+
+    def prefix_room_tokens(self) -> int:
+        """The model's resolved per-call input cap: the room the loop
+        budgets the shared diff prefix against (D65), a share of which it
+        leaves for the lens's work. Loading the endpoint terms here is the
+        same read `worst_case_usd` makes on the first turn, and it is
+        cached on the provider."""
+        terms, _counts_byok, _selected = self._ready()
+        bounds = resolve_per_call(self.per_call, terms)
+        return bounds.max_input_tokens
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         terms, counts_byok, selected = self._ready()
@@ -326,9 +344,10 @@ def _payload(
     limits: ResolvedCall,
     selected: SelectedEndpoints,
 ) -> dict[str, Any]:
+    caching = sends_cache_control(provider.model_id, selected.supported)
     payload: dict[str, Any] = {
         "model": provider.model_id,
-        "messages": _messages(request),
+        "messages": _messages(request, caching),
         "tools": [_tool(tool) for tool in request.tools],
         # Always the configured output cap, even when the endpoint does
         # not list max_tokens. The reservation prices this cap.
@@ -359,10 +378,21 @@ def _tool(tool: ToolSchema) -> dict[str, Any]:
     }
 
 
-def _messages(request: TurnRequest) -> list[dict[str, Any]]:
+def _messages(request: TurnRequest, caching: bool) -> list[dict[str, Any]]:
     """History in OpenAI chat shape. Tool-call ids are assigned here, and
     the following tool results must line up with them. Result text is sent
-    unchanged, fence included."""
+    unchanged, fence included.
+
+    With a shared prefix, the request opens with the prefix's system text,
+    then one user message whose first part is the fenced whole diff and
+    carries the explicit `cache_control` breakpoint when the route takes
+    one, then the lens skill and the first turn as further parts of that
+    same message, so the shared block is a byte-identical prefix across
+    the review's lenses and across a lens's retry (issue #696, D65). A
+    route without `cache_control` support gets the same layout with no
+    marker on any part."""
+    if request.prefix is not None:
+        return _prefixed_messages(request, caching)
     out: list[dict[str, Any]] = [{"role": "system", "content": request.system}]
     pending: tuple[str, ...] | None = None
     for message in request.messages:
@@ -370,6 +400,38 @@ def _messages(request: TurnRequest) -> list[dict[str, Any]]:
     if pending is not None:
         raise BoundaryError("a tool result is missing")
     return out
+
+
+def _prefixed_messages(request: TurnRequest, caching: bool) -> list[dict[str, Any]]:
+    prefix = request.prefix
+    assert prefix is not None
+    parts = [_diff_part(prefix.diff, caching)]
+    head = request.messages[0] if request.messages else None
+    parts.append({"type": "text", "text": request.system})
+    rest = request.messages
+    if isinstance(head, UserText):
+        parts.append({"type": "text", "text": head.text})
+        rest = request.messages[1:]
+    out: list[dict[str, Any]] = [
+        {"role": "system", "content": prefix.system},
+        {"role": "user", "content": parts},
+    ]
+    pending: tuple[str, ...] | None = None
+    for message in rest:
+        pending = _one_message(out, message, pending)
+    if pending is not None:
+        raise BoundaryError("a tool result is missing")
+    return out
+
+
+def _diff_part(diff: str, caching: bool) -> dict[str, Any]:
+    """The fenced diff as the prefix's first content part. The breakpoint
+    sits on this part, so everything before it -- the tools, the shared
+    system text and the diff itself -- is the cached prefix."""
+    part: dict[str, Any] = {"type": "text", "text": diff}
+    if caching:
+        part["cache_control"] = {"type": "ephemeral"}
+    return part
 
 
 def _one_message(

@@ -21,6 +21,13 @@ response reports no cache counts at all, because the run cannot show
 it hit. The first turn of a session has no previous turn to hit and is
 never a miss.
 
+A session's opening turn's reported cache read is also how the shared
+diff prefix's saving is confirmed (issue #696, D65): on that path
+nothing else in a session's first prompt can have been cached, so the
+first turn's cached-token count is the shared prefix's read for that
+session -- zero (or unreported) when the session wrote the prefix, and
+near the prefix's size when it read it.
+
 The numbers are whatever the model reported. A turn with no reported
 prompt tokens contributes nothing to the final-context figure, and a
 session whose turns report no cache counts shows its misses as all of
@@ -67,6 +74,17 @@ class CacheSession:
         """The sum of the reported cache-write counts. Unreported writes
         add nothing, so this is a floor."""
         return sum(turn.cache_write_tokens or 0 for turn in self.turns)
+
+    @property
+    def prefix_read_tokens(self) -> int | None:
+        """The opening turn's reported cache read: the shared diff
+        prefix's read for this session (issue #696, D65). Nothing else in
+        a session's first prompt can have been cached, so on the
+        shared-prefix path this is that read, and None when the turn
+        reported no cached count at all."""
+        if not self.turns:
+            return None
+        return self.turns[0].cached_tokens
 
     @property
     def final_prompt_tokens(self) -> int | None:
@@ -196,7 +214,8 @@ def _default_label(session: CacheSession, number: int) -> str:
 def _session_text(session: CacheSession) -> str:
     return (
         f"{len(session.turns)} turn(s), {session.misses} cache miss(es), "
-        f"{session.cache_write_tokens} cache-write token(s), final context "
+        f"{session.cache_write_tokens} cache-write token(s), first-turn "
+        f"cache read {_counted(session.prefix_read_tokens)}, final context "
         f"{_counted(session.final_prompt_tokens)}."
     )
 
@@ -205,18 +224,28 @@ def _total_text(sessions: tuple[CacheSession, ...]) -> str:
     """The run total the #695 confirmation check reads: the sum of the
     cache writes against the sum of the sessions' final contexts. The
     misses are the sessions' own — a session's first turn never counts
-    against the previous session's last turn."""
+    against the previous session's last turn. The first-turn cache reads
+    are the shared diff prefix's reads per session (issue #696, D65):
+    their sum is the run's prefix reads."""
     finals = [
         session.final_prompt_tokens
         for session in sessions
         if session.final_prompt_tokens is not None
     ]
     context = f"{sum(finals)} token(s)" if finals else "no reported tokens"
+    reads = [
+        session.prefix_read_tokens
+        for session in sessions
+        if session.prefix_read_tokens is not None
+    ]
+    reads_text = (
+        f", first-turn cache reads summing to {sum(reads)} token(s)" if reads else ""
+    )
     return (
         f"{sum(len(session.turns) for session in sessions)} turn(s), "
         f"{sum(session.misses for session in sessions)} cache miss(es), "
         f"{sum(session.cache_write_tokens for session in sessions)} cache-write "
-        f"token(s) against {context} of final context."
+        f"token(s) against {context} of final context{reads_text}."
     )
 
 

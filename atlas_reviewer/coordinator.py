@@ -428,7 +428,7 @@ def review_lens(
             clock=clock,
             context=blocks,
             telemetry=telemetry,
-            nonce=nonce,
+            fence_nonce=nonce(),
             bridge_root=bridge_root,
             contract=contract,
             task_socket=task_socket,
@@ -485,7 +485,9 @@ def review_lenses(
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
-    `review_lens` describes."""
+    `review_lens` describes. One fence nonce covers the review (D65):
+    every lens's shared diff prefix fences the diff with it, so the
+    prefixes are byte-identical and the lenses share one cached block."""
     resolved = limits.resolve()
     return _traced_review(
         event,
@@ -553,6 +555,10 @@ def _review_lenses(
     blocks, omissions, other_pull_requests = _review_context(
         event, context, context_omissions, round_log, prior_chars, redactor
     )
+    # One fence nonce per review (D65): the shared diff prefix fences the
+    # diff with it, so every lens's prefix is byte-identical and the
+    # lenses share one cached block.
+    fence_nonce = nonce()
     spend = Spend(resolved, *picker_spend)
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
@@ -591,7 +597,7 @@ def _review_lenses(
             clock=clock,
             context=blocks,
             telemetry=telemetry,
-            nonce=nonce,
+            fence_nonce=fence_nonce,
             bridge_root=f"{bridge_root}-{index}",
             contract=contract,
             task_socket=task_socket,
@@ -763,7 +769,7 @@ def _review_one(
     clock: Clock,
     context: Sequence[UntrustedBlock],
     telemetry: Telemetry | None,
-    nonce: Callable[[], str],
+    fence_nonce: str,
     bridge_root: str,
     contract: str | None,
     task_socket: str,
@@ -824,7 +830,6 @@ def _review_one(
     lens_trace = trace.with_scrub(scrub)
     traced_model = lens_trace.wrap_model(model)
     spend = spend or Spend(resolved)
-    fence_nonce = nonce()
     job = LensJob(
         lens,
         body,
@@ -835,6 +840,7 @@ def _review_one(
         read_sources(trees.head, diff, scope),
         fence_nonce,
         trees.head,
+        diff,
     )
     started = clock.monotonic() if review_started is None else review_started
     deadline = (
@@ -1499,6 +1505,8 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append(f"{corrections} citation(s) corrected within the window")
     if o.dropped:
         parts.append(f"{len(o.dropped)} finding(s) dropped")
+    if o.diff_prefix:
+        parts.append(o.diff_prefix)
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
     return f"{head}; " + "; ".join(parts)
