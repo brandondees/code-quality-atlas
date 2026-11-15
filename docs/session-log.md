@@ -1574,8 +1574,9 @@ early, and the nonce still comes from the CSPRNG, not from PR content.
 The size threshold is `diff_prefix_share` (default 0.5,
 `ATLAS_DIFF_PREFIX_SHARE` / `--diff-prefix-share`) of the model's
 resolved per-call input cap, so it is configurable and model-aware;
-above it, a model that cannot name an input room, a scope with no diff
-section, or share 0 all page through `diff_file` exactly as before, and
+above it, a model that cannot name an input room, a scope any of whose
+paths has no section in the diff, or share 0 all page through
+`diff_file` exactly as before, and
 each names its reason in a `diff_prefix` note the ledger records and
 the draft's lens line shows. On the prefix path coverage is attested
 from what the prefix held — a lens that calls no tool is clean — and

@@ -2267,5 +2267,9 @@ def test_the_agentic_command_default_pool_stays_four():
     at this default -- the command replaces an unset pool with 4, so a
     flagless first wave starts its lenses together and each may write the
     shared prefix. A change to this default must revisit that claim and
-    the decision's cost sentence."""
+    the decision's cost sentence. Round 2, N1: the replace itself is the
+    pin -- deleting it would leave an unset pool at the dataclass default
+    of 1, and the resolved limits below would say so."""
     assert cli.AGENTIC_POOL == 4
+    limits = cli._agentic_limits(argparse.Namespace(), {})
+    assert limits.pool_size == 4
