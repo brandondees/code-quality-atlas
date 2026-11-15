@@ -213,6 +213,43 @@ def test_the_derivation_refuses_an_impossible_plan():
         derive_review_wide(AgenticLimits(), 1, picker_calls=-1)
 
 
+def test_cross_limit_relations_are_checked_against_the_derived_totals():
+    """D68: the derivation raises the review-wide totals above the
+    configured ones, so a per-lens budget above the flat defaults is a
+    valid multi-lens configuration; an explicit review-wide value below
+    its per-lens budget is still refused, against the derived totals."""
+    turns = load_agentic_limits({"ATLAS_MAX_TURNS": "60", "ATLAS_PER_LENS_CALLS": "60"})
+    derived, _ = derive_review_wide(turns, 12)
+    assert derived.max_calls == 60 * 12
+    walls = load_agentic_limits({"ATLAS_LENS_WALL_S": "4000"})
+    derived_walls, _ = derive_review_wide(walls, 12)
+    assert derived_walls.review_wall_s == 4000 * 12
+    with pytest.raises(ValueError, match="max_turns must be no greater than max_calls"):
+        derive_review_wide(
+            load_agentic_limits({"ATLAS_MAX_CALLS": "30", "ATLAS_MAX_TURNS": "40"}),
+            2,
+        )
+    with pytest.raises(
+        ValueError, match="lens_wall_s must be no greater than review_wall_s"
+    ):
+        derive_review_wide(
+            load_agentic_limits(
+                {"ATLAS_LENS_WALL_S": "3000", "ATLAS_REVIEW_WALL_S": "2000"}
+            ),
+            2,
+        )
+
+
+def test_the_single_lens_path_still_checks_the_relations_against_its_configured_totals():
+    """The relations the derivation defers are still enforced where the
+    configured review-wide values are the totals: the single-lens path
+    resolves with them on."""
+    with pytest.raises(ValueError, match="no greater than max_calls"):
+        replace(AgenticLimits(), max_turns=60, per_lens_calls=60).resolve()
+    with pytest.raises(ValueError, match="lens_wall_s must be no greater"):
+        replace(AgenticLimits(), lens_wall_s=4000).resolve()
+
+
 # ---------------------------------------------------------------- ceiling
 
 
@@ -257,6 +294,13 @@ def test_an_unusable_ceiling_value_is_ignored_not_refused():
         b"review_ceiling_usd: 5\nreview_ceiling_usd: 9\n",
     ):
         assert review_md_ceiling(_tarball({"REVIEW.md": raw})) is None, raw
+
+
+def test_an_oversized_review_md_is_not_parsed_cut():
+    """A REVIEW.md over the read bound is unparseable, not truncated
+    text: a cut inside the value could read as a number it is not."""
+    big = b"# policy\n\nreview_ceiling_usd: 15\n\n" + b"# " + b"x" * (80 * 1024)
+    assert review_md_ceiling(_tarball({"REVIEW.md": big})) is None
 
 
 def test_a_repo_ceiling_overrides_the_configured_one_in_the_derivation():
@@ -402,7 +446,32 @@ def test_the_derivation_record_is_complete_for_the_draft_and_ledger():
     assert (record.planned_lenses, record.waves) == (5, 5)
     assert (record.picker_calls, record.picker_usd) == (2, Decimal("0.25"))
     assert record.calls_derived and record.reservation_derived
+    # $5 per lens x 5 planned lenses is $25.25 with the picker, over the
+    # $10 default ceiling, so the derived reservation is the clamp.
+    assert record.clamped
     assert record.calls_configured() == (
         "252 (50 per lens x 5 planned lenses + 2 picker calls; the "
         "$10.00 per-review dollar ceiling bounds the spend)"
     )
+
+
+def test_the_clamp_is_reported_from_the_value_it_bit_on():
+    """The clamp flag comes from the value the ceiling clamped -- the
+    formula's when the reservation is derived, the configured one when it
+    is not -- so an explicit reservation clamped by the ceiling reads as
+    clamped even when the formula would sit under it."""
+    explicit = load_agentic_limits({"ATLAS_RESERVATION_USD": "40"})
+    _, clamped = derive_review_wide(explicit, 1)
+    assert clamped.clamped
+    assert clamped.reservation_configured() == (
+        "$10.00 (the configured reservation, clamped to the $10.00 per-review ceiling)"
+    )
+    _, under = derive_review_wide(
+        load_agentic_limits({"ATLAS_RESERVATION_USD": "3"}), 1
+    )
+    assert not under.clamped
+    assert under.reservation_configured() == (
+        "$3.00 (the configured reservation; the $10.00 per-review ceiling is above it)"
+    )
+    assert derive_review_wide(AgenticLimits(), 12)[1].clamped
+    assert not derive_review_wide(AgenticLimits(), 1)[1].clamped

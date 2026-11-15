@@ -365,8 +365,10 @@ def limits_for_lens(env: Mapping[str, str], **flags: str | None) -> AgenticLimit
 def model_for_lens(
     provider: OpenRouterProvider, limits: AgenticLimits
 ) -> OpenRouterLensModel:
-    """The live adapter bound to the same resolved limits as the loop."""
-    return OpenRouterLensModel(provider, per_call=limits.resolve())
+    """The live adapter bound to the same resolved limits as the loop.
+    The cross-limit relations are not the adapter's to check: the review's
+    derivation re-checks them against the totals it derives (D68)."""
+    return OpenRouterLensModel(provider, per_call=limits.resolve(cross_limits=False))
 
 
 def review_lens(
@@ -803,7 +805,10 @@ def _review_one(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     trace: ReviewTrace,
 ) -> _LensRun:
-    resolved = limits.resolve()
+    # The per-call bounds only; the cross-limit relations were checked by
+    # the entry point against the totals its review runs on (review_lens
+    # on the configured values, the derivation on the derived ones, D68).
+    resolved = limits.resolve(cross_limits=False)
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
         raise ValueError("the model's per-call limits differ from this review's limits")

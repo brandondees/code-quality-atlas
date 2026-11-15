@@ -83,7 +83,12 @@ def load_agentic_limits(
         explicit.add(name)
         limits = _apply(limits, name, raw)
     limits = replace(limits, explicit=frozenset(explicit) & _REVIEW_WIDE)
-    limits.resolve()
+    # The per-lens-against-review-wide relations are not checked here: on
+    # the multi-lens path the review-wide values are derived above the
+    # configured ones (D68), and the derivation re-checks the relations
+    # against the totals it produces. The single-lens path re-resolves
+    # with them on.
+    limits.resolve(cross_limits=False)
     return limits
 
 

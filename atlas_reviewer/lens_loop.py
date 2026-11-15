@@ -60,7 +60,9 @@ The five review limits have defaults Brandon set on 2026-11-11, for
 headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
 60 minutes per review. Each can be overridden. An override must be
 positive and finite, and a per-lens limit no greater than its
-per-review limit. Clearing one of those five back to unset still
+per-review limit -- on `agentic-review`, against the derived totals
+(D68), which the derivation re-checks after it raises the review-wide
+values. Clearing one of those five back to unset still
 refuses the run. D68: a multi-lens review no longer runs on those
 review-wide numbers flat -- a 12-lens review stopped near 50 calls with
 lenses unrun. `coordinator.review_lenses` derives its review-wide
@@ -275,7 +277,12 @@ class AgenticLimits:
     # derivation applies.
     explicit: frozenset[str] = frozenset()
 
-    def resolve(self) -> Limits:
+    def resolve(self, *, cross_limits: bool = True) -> Limits:
+        """Resolve and validate. `cross_limits=False` skips the two
+        per-lens-against-review-wide relations, for a caller that
+        re-checks them against the limits the review actually runs on:
+        the multi-lens derivation raises the review-wide totals above the
+        configured ones (D68) and re-checks there."""
         unset = [
             f.name
             for f in fields(self)
@@ -289,7 +296,7 @@ class AgenticLimits:
         resolved = Limits(
             **{f.name: getattr(self, f.name) for f in fields(self) if f.name in names}
         )
-        _check_limits(resolved)
+        _check_limits(resolved, cross_limits=cross_limits)
         return resolved
 
 
@@ -321,7 +328,7 @@ def _check_diff_prefix_share(limits: Limits) -> None:
         )
 
 
-def _check_limits(limits: Limits) -> None:
+def _check_limits(limits: Limits, *, cross_limits: bool = True) -> None:
     if not (
         isinstance(limits.reservation_usd, Decimal)
         and limits.reservation_usd.is_finite()
@@ -341,10 +348,8 @@ def _check_limits(limits: Limits) -> None:
             or value <= 0
         ):
             raise ValueError(f"{name} must be a positive finite number of seconds")
-    if limits.max_turns > limits.max_calls:
-        raise ValueError("max_turns must be no greater than max_calls")
-    if limits.lens_wall_s > limits.review_wall_s:
-        raise ValueError("lens_wall_s must be no greater than review_wall_s")
+    if cross_limits:
+        _check_cross_limits(limits)
     if isinstance(limits.retries, bool) or limits.retries not in range(2):
         raise ValueError("retries must be 0 or 1")
     if (
@@ -390,6 +395,19 @@ def _check_review_wide(limits: Limits) -> None:
             raise ValueError(f"{name} must be a positive Decimal")
 
 
+def _check_cross_limits(limits: Limits) -> None:
+    """A per-lens limit no greater than its per-review limit (D40's rule).
+    Split from `_check_limits` so the multi-lens derivation can re-check
+    the relations against the totals the review actually runs on (D68):
+    the derivation raises the review-wide values above the configured
+    ones, so the configured comparison would refuse configurations the
+    derived review accepts."""
+    if limits.max_turns > limits.max_calls:
+        raise ValueError("max_turns must be no greater than max_calls")
+    if limits.lens_wall_s > limits.review_wall_s:
+        raise ValueError("lens_wall_s must be no greater than review_wall_s")
+
+
 def _check_quote_limits(limits: Limits) -> None:
     """The quote-repair turn and window are bounded (D64): 0 disables
     each; a value past the bound is the runaway the guard exists to
@@ -417,7 +435,9 @@ class Derivation:
     waves`, where a wave is one pool-full of planned lenses. A limit whose
     operator set it explicitly (`calls_derived` or `reservation_derived`
     False) keeps the configured value instead of its formula, and the
-    ceiling clamps the reservation either way."""
+    ceiling clamps the reservation either way, which `clamped` records
+    from the value the clamp bit on -- the derived formula's value, or
+    the configured reservation."""
 
     planned_lenses: int
     waves: int
@@ -431,6 +451,7 @@ class Derivation:
     review_wall_s: float
     calls_derived: bool
     reservation_derived: bool
+    clamped: bool
 
     def calls_configured(self) -> str:
         """The configured value a `max_calls` stop names: the number, and
@@ -477,9 +498,9 @@ class Derivation:
             )
         else:
             formula = "the configured reservation"
-        if derived > self.ceiling:
+        if self.clamped:
             tail = f", clamped to the ${self.ceiling:.2f} per-review ceiling"
-        elif derived < self.ceiling:
+        elif self.reservation_usd < self.ceiling:
             tail = f"; the ${self.ceiling:.2f} per-review ceiling is above it"
         else:
             tail = f", which is the ${self.ceiling:.2f} per-review ceiling"

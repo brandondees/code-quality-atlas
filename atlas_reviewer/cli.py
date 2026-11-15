@@ -813,8 +813,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
 
 def _picker_limits(limits: AgenticLimits) -> CallLimits:
     """The picker's provider budget: no more calls or dollars than the
-    agentic review allows, and never past the one-shot D25 ceilings."""
-    resolved = limits.resolve()
+    agentic review allows, and never past the one-shot D25 ceilings. The
+    cross-limit relations are not this budget's to check: the review's
+    derivation re-checks them against the totals it derives (D68)."""
+    resolved = limits.resolve(cross_limits=False)
     return CallLimits(
         max_calls=min(resolved.max_calls, MAX_CALLS_CEILING),
         budget_usd=min(resolved.reservation_usd, BUDGET_CEILING_USD),
@@ -852,7 +854,10 @@ def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]) -> Agentic
     if flags.get("pool_size") is None and not env.get("ATLAS_POOL_SIZE"):
         limits = replace(limits, pool_size=AGENTIC_POOL)
         try:
-            limits.resolve()
+            # The multi-lens path's review-wide values are derived (D68),
+            # so the per-lens-against-review-wide relations are checked
+            # there, against the derived totals.
+            limits.resolve(cross_limits=False)
         except ValueError as exc:
             raise UsageError(str(exc)) from exc
     return limits

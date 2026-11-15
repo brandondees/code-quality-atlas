@@ -1081,7 +1081,9 @@ D41 records the 2026-11-12 probe that did.
   revisited after live runs: 50 model calls per review, 50 turns per
   lens, 20 minutes per lens and 60 minutes per review. An override must be
   positive and finite, and a per-lens limit no greater than its per-review
-  limit. Clearing one back to unset makes `resolve` raise
+  limit -- on `agentic-review`, against the totals the review runs on,
+  which D68 derives above the configured values and re-checks after the
+  derivation. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor

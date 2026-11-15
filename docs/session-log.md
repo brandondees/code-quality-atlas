@@ -1663,3 +1663,25 @@ calls or the ceiling stop with the derivation named. The mutants this
 kills are pinned: dropping either x-lenses factor fails the formula
 tests, dropping the ceiling clamp fails the clamp test, and dropping the
 wave scaling fails the wall test.
+
+Review round on this PR fixed three findings. The per-lens-against-
+review-wide relations (`max_turns` no greater than `max_calls`,
+`lens_wall_s` no greater than `review_wall_s`) were still checked inside
+`resolve` against the configured review-wide values, which on
+`agentic-review` are no longer the totals — the derivation raises them —
+so a legitimate configuration such as a 60-turn lens budget with a
+60-call per-lens budget, or a 4000-second lens wall, was refused before
+the derivation could accept it. The two relations are split into
+`_check_cross_limits` and now checked where the totals are known: the
+derivation re-checks them against the derived values (structurally
+satisfied by a derived budget and wall; refused for an explicit
+review-wide value below its per-lens budget), the loader and every
+multi-lens resolve site defer them, and the single-lens `review_lens`
+path still checks them against its configured totals. The reservation
+stop's clamp flag is taken from the value the clamp bit on — the
+formula's value when the reservation is derived, the configured
+reservation when it is not — so an explicit $40 reservation clamped to
+the $10 ceiling on a one-lens review no longer reads as "the ceiling is
+above it". And a `REVIEW.md` over the 64 KiB read bound is unparseable
+rather than parsed cut, so a truncation inside the value cannot read as
+a number it is not. All three are pinned in `test_review_wide.py`.

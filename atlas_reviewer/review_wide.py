@@ -52,6 +52,7 @@ from atlas_reviewer.lens_loop import (
     AgenticLimits,
     Derivation,
     Limits,
+    _check_cross_limits,
 )
 from atlas_reviewer.quotes import refused_archive
 
@@ -91,9 +92,10 @@ def review_md_ceiling(base_tarball: bytes) -> Decimal | None:
     """The reviewed repo's `review_ceiling_usd:` line in its base-ref
     `REVIEW.md` (D68), or None. The base ref governs, as the file's own
     policy states, so a PR cannot raise or lower its own ceiling. A
-    tarball that fails the fail-closed archive check, a missing file, or
-    a value that is not a positive dollar amount all leave None: the
-    default stands, and an unparseable override is never an error."""
+    tarball that fails the fail-closed archive check, a missing file, a
+    file over the read bound, or a value that is not a positive dollar
+    amount all leave None: the default stands, and an unparseable
+    override is never an error."""
     if not base_tarball or refused_archive(base_tarball) is not None:
         return None
     try:
@@ -105,9 +107,13 @@ def review_md_ceiling(base_tarball: bytes) -> Decimal | None:
                 raw = archive.extractfile(member)
                 if raw is None:
                     continue
-                return _ceiling_value(
-                    raw.read(MAX_CHECKED_BYTES + 1).decode("utf-8", errors="replace")
-                )
+                data = raw.read(MAX_CHECKED_BYTES + 1)
+                if len(data) > MAX_CHECKED_BYTES:
+                    # A file past the read bound is not parsed cut: a
+                    # truncation inside the value could read as a number
+                    # it is not. Unparseable, so the default stands.
+                    return None
+                return _ceiling_value(data.decode("utf-8", errors="replace"))
     except (tarfile.TarError, OSError, EOFError):
         return None
     return None
@@ -154,7 +160,7 @@ def derive_review_wide(
     the per-lens turn cap is refused before any lens runs: the limits
     guard against runaway loops and costly failures, never against
     thoroughness."""
-    resolved = limits.resolve()
+    resolved = limits.resolve(cross_limits=False)
     if (
         isinstance(planned_lenses, bool)
         or not isinstance(planned_lenses, int)
@@ -179,9 +185,9 @@ def derive_review_wide(
         max_calls = resolved.max_calls
     reservation_derived = "reservation_usd" not in limits.explicit
     derived_usd = per_lens_usd * planned_lenses + picker_usd
-    reservation = min(
-        derived_usd if reservation_derived else resolved.reservation_usd, ceiling
-    )
+    raw_reservation = derived_usd if reservation_derived else resolved.reservation_usd
+    clamped = raw_reservation > ceiling
+    reservation = min(raw_reservation, ceiling)
     wall_derived = "review_wall_s" not in limits.explicit
     review_wall_s = (
         max(resolved.review_wall_s, resolved.lens_wall_s * waves)
@@ -194,6 +200,12 @@ def derive_review_wide(
         reservation_usd=reservation,
         review_wall_s=review_wall_s,
     )
+    # The per-lens-against-review-wide relations, checked against the
+    # totals this review runs on: structurally satisfied by a derived
+    # call budget (it is at least the per-lens budget) and a derived wall
+    # (at least lens_wall_s x waves), and refused here when an explicit
+    # review-wide value sits below its per-lens budget.
+    _check_cross_limits(derived)
     record = Derivation(
         planned_lenses=planned_lenses,
         waves=waves,
@@ -207,5 +219,6 @@ def derive_review_wide(
         review_wall_s=review_wall_s,
         calls_derived=calls_derived,
         reservation_derived=reservation_derived,
+        clamped=clamped,
     )
     return derived, record

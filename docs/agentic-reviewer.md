@@ -293,7 +293,9 @@ stay provisional. A run with those defaults is accepted. Clearing one back to un
 makes `coordinator.review_lens` refuse before any model, runner or ledger
 work (`LimitsUnsetError`, naming each unset field). An override must be
 positive and finite, and a per-lens limit no greater than its per-review
-limit. The other rows are unchanged: a working default stands where one
+limit -- on `agentic-review`, against the totals the review runs on,
+which D68 derives above the configured values and re-checks after the
+derivation. The other rows are unchanged: a working default stands where one
 is named, and a row still marked none stays unset until Brandon sets it.
 Until each of those is set, the phase that needs it does not run live.
 The five are fields of
