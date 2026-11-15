@@ -256,7 +256,9 @@ def test_the_no_progress_thresholds_are_configurable_and_bad_ones_are_refused():
 
 def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
     """D64: the repair bound (0 to 3 turns per attempt) and the checker's
-    window (0 to 8 lines) are limits like the others; 0 disables each."""
+    window (0 to 8 lines) are limits like the others; 0 disables each.
+    Both layers refuse an over-bound value: the env parser and
+    `resolve` (round-1 review of #703, Nit 2)."""
     limits = load_agentic_limits(
         {"ATLAS_QUOTE_REPAIRS": "0", "ATLAS_QUOTE_TOLERANCE": "5"}
     )
@@ -264,14 +266,27 @@ def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
     assert (resolved.quote_repairs, resolved.quote_tolerance) == (0, 5)
     defaults = load_agentic_limits({}).resolve()
     assert (defaults.quote_repairs, defaults.quote_tolerance) == (1, 3)
-    with pytest.raises(ValueError, match="quote_repairs"):
+    # Both layers refuse an over-bound value, and each layer is pinned by
+    # its own message: the parser names the raw value, `resolve` does not
+    # (round-1 review of #703, Nit 2).
+    with pytest.raises(
+        ValueError, match="quote_repairs must be an integer from 0 to 3, not"
+    ):
         load_agentic_limits({"ATLAS_QUOTE_REPAIRS": "4"})
+    with pytest.raises(
+        ValueError, match="quote_repairs must be an integer from 0 to 3$"
+    ):
+        AgenticLimits(quote_repairs=4).resolve()
     with pytest.raises(ValueError, match="quote_tolerance"):
         load_agentic_limits({"ATLAS_QUOTE_TOLERANCE": "-1"})
+    with pytest.raises(ValueError, match="quote_tolerance must be an integer"):
+        AgenticLimits(quote_tolerance=9).resolve()
     with pytest.raises(ValueError, match="quote_repairs"):
         AgenticLimits(quote_repairs=True).resolve()
-    with pytest.raises(ValueError, match="quote_tolerance"):
-        AgenticLimits(quote_tolerance=9).resolve()
+    with pytest.raises(ValueError, match="quote_tolerance must be an integer"):
+        AgenticLimits(quote_tolerance=3.0).resolve()
+    with pytest.raises(ValueError, match="quote_repairs must be an integer"):
+        AgenticLimits(quote_repairs=1.0).resolve()
 
 
 def test_the_reasoning_hint_is_capped_outside_anthropic():

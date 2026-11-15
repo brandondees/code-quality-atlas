@@ -159,7 +159,7 @@ def test_a_whole_line_quote_within_the_window_is_verified_as_drifted(
     citation, so the off-by-one, the span mismatch and a two-line slip
     all verify, with the location corrected."""
     result = check(LineRange("calc.py", start, end), evidence)
-    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+    assert result.source is QuoteSource.HEAD_NEAR
 
 
 def test_a_drifted_quote_takes_the_location_of_the_matched_lines():
@@ -167,13 +167,58 @@ def test_a_drifted_quote_takes_the_location_of_the_matched_lines():
     assert result.finding.location == LineRange("calc.py", 2, 2)
 
 
+def test_the_drift_is_the_distance_the_match_moved():
+    """The posted tag is built from the match's own distance, not from
+    the configured window (round-1 review of #703, Minor 1): the
+    off-by-one says one line, the two-line slip says two, and a span
+    correction at the citation's first line says so."""
+    one = check(LineRange("calc.py", 1, 1), "return sum(round(x, 2) for x in xs)")
+    assert one.drift == 1
+    two = check(LineRange("calc.py", 4, 4), "return sum(round(x, 2) for x in xs)")
+    assert two.drift == 2
+    zero = check(LineRange("calc.py", 5, 8), "if not xs:\n    return 0")
+    assert zero.drift == 0
+    assert quotes.drift_label(0) == (
+        "head at the citation's first line, span set by the quote"
+    )
+    assert quotes.drift_label(1) == "head within 1 line of the citation"
+    assert quotes.drift_label(3) == "head within 3 lines of the citation"
+
+
 def test_a_whole_line_quote_exactly_three_lines_off_is_the_window_edge():
     at_edge = check(LineRange("calc.py", 4, 4), "return total(xs) / len(xs)")
-    assert at_edge == Verified(at_edge.finding, QuoteSource.HEAD_NEAR)
+    assert at_edge.source is QuoteSource.HEAD_NEAR
+    assert at_edge.drift == 3
     assert at_edge.finding.location == LineRange("calc.py", 7, 7)
     beyond = check(LineRange("calc.py", 1, 1), "return total(xs) / len(xs)")
     assert isinstance(beyond, Unverified)
     assert "not at that range" in beyond.reason
+
+
+def test_the_nearest_match_wins_and_the_positive_direction_breaks_a_tie():
+    """Both candidate lines hold the quote; the nearest start wins, and
+    at equal distance the positive direction wins (deltas are tried 0,
+    +1, -1, +2, -2, ...)."""
+    files = {"m.py": b"a\ntarget line\nb\ntarget line\nc\n"}
+    found = read_sources(source_tarball(files, "t"), "", ["m.py"])
+    tie = check_quote(finding(LineRange("m.py", 3, 3), "target line"), found)
+    assert tie.finding.location == LineRange("m.py", 4, 4)
+    near = check_quote(finding(LineRange("m.py", 1, 1), "target line"), found)
+    assert near.finding.location == LineRange("m.py", 2, 2)
+
+
+def test_a_removed_line_match_wins_over_a_head_line_within_the_window():
+    """The removed side has no head line, so it is checked before the
+    window -- including when the same text is also in the head file
+    within the window of the citation."""
+    files = {"m.py": b"a = 1\nkeep me now\nkeep me now\nb = 2\n"}
+    diff = (
+        "diff --git a/m.py b/m.py\n--- a/m.py\n+++ b/m.py\n"
+        "@@ -1,4 +1,3 @@\n a = 1\n-keep me now\n keep me now\n b = 2\n"
+    )
+    found = read_sources(source_tarball(files, "t"), diff, ["m.py"])
+    result = check_quote(finding(LineRange("m.py", 1, 1), "keep me now"), found)
+    assert result.source is QuoteSource.REMOVED
 
 
 def test_a_span_mismatch_lets_the_quote_set_the_span():
@@ -184,7 +229,8 @@ def test_a_span_mismatch_lets_the_quote_set_the_span():
     # A two-line quote cited as three lines (6-8), starting one above the
     # citation's first line.
     short = check(LineRange("calc.py", 6, 8), "if not xs:\n    return 0")
-    assert short == Verified(short.finding, QuoteSource.HEAD_NEAR)
+    assert short.source is QuoteSource.HEAD_NEAR
+    assert short.drift == 1
     assert short.finding.location == LineRange("calc.py", 5, 6)
     # A four-line quote cited at one line, whose first line sits one above
     # the cited one.
@@ -192,7 +238,7 @@ def test_a_span_mismatch_lets_the_quote_set_the_span():
         LineRange("calc.py", 6, 6),
         "if not xs:\n    return 0\n    return total(xs) / len(xs)\n}",
     )
-    assert long == Verified(long.finding, QuoteSource.HEAD_NEAR)
+    assert long.source is QuoteSource.HEAD_NEAR
     assert long.finding.location == LineRange("calc.py", 5, 8)
     # The same four-line quote whose citation is nowhere near it.
     far = check(
@@ -207,10 +253,28 @@ def test_the_window_is_configurable():
     zero = check_quote(finding(LineRange("calc.py", 4, 4), quote), sources(), 0)
     assert isinstance(zero, Unverified)
     one = check_quote(finding(LineRange("calc.py", 3, 3), quote), sources(), 1)
-    assert one == Verified(one.finding, QuoteSource.HEAD_NEAR)
+    assert one.source is QuoteSource.HEAD_NEAR
     assert one.finding.location == LineRange("calc.py", 2, 2)
     tight = check_quote(finding(LineRange("calc.py", 4, 4), quote), sources(), 1)
     assert isinstance(tight, Unverified)
+
+
+def test_a_match_at_the_configured_window_is_tagged_with_its_distance():
+    """The posted tag names the match's own distance even at a
+    non-default window (round-1 review of #703, Minor 1): with the
+    tolerance at 8, a quote eight lines from its citation verifies and
+    the tag says eight."""
+    files = {"m.py": b"a = 1\n" + b"\n" * 7 + b"value = 12345678\nother = 12345678\n"}
+    found = read_sources(source_tarball(files, "t"), "", ["m.py"])
+    # value = 12345678 sits on line 9; other = 12345678 on line 10.
+    at_eight = check_quote(
+        finding(LineRange("m.py", 1, 1), "value = 12345678"), found, 8
+    )
+    assert at_eight.source is QuoteSource.HEAD_NEAR
+    assert at_eight.drift == 8
+    assert quotes.drift_label(8) == "head within 8 lines of the citation"
+    beyond = check_quote(finding(LineRange("m.py", 1, 1), "other = 12345678"), found, 8)
+    assert isinstance(beyond, Unverified)
 
 
 def test_the_window_zero_still_corrects_a_span_mismatch():
@@ -222,7 +286,8 @@ def test_the_window_zero_still_corrects_a_span_mismatch():
         sources(),
         0,
     )
-    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+    assert result.source is QuoteSource.HEAD_NEAR
+    assert result.drift == 0
     assert result.finding.location == LineRange("calc.py", 5, 6)
 
 
@@ -351,7 +416,8 @@ def test_a_multi_line_quote_cited_over_a_wider_span_is_corrected():
     corrected to it (D64)."""
     evidence = "if not xs:\n    return 0"
     wide = check(LineRange("calc.py", 4, 7), evidence)
-    assert wide == Verified(wide.finding, QuoteSource.HEAD_NEAR)
+    assert wide.source is QuoteSource.HEAD_NEAR
+    assert wide.drift == 1
     assert wide.finding.location == LineRange("calc.py", 5, 6)
     exact = check(LineRange("calc.py", 5, 6), evidence)
     assert exact == Verified(exact.finding, QuoteSource.HEAD)

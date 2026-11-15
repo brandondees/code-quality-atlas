@@ -469,7 +469,112 @@ def test_a_window_correction_is_counted_in_the_lens_line(tmp_path):
     assert str(minted.finding.location) == "calc.py:2"
     draft = render_draft(result, Redactor())
     assert "1 citation(s) corrected within the window" in draft
-    assert "head within 3 lines of the citation" in draft
+    # The quote sits two lines from the citation, so the posted tag says
+    # two, not the window's default three (round-1 review, Minor 1).
+    assert "head within 2 lines of the citation" in draft
+
+
+def test_an_unattested_repair_reply_keeps_the_verified_findings_on_the_retry(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 1: a repair reply that is prose, and
+    a contract repair that is prose too, left the attempt's recorded
+    outcome unattested -- and the retry merge carries only from attested
+    attempts, so the verified finding was lost and an attested empty
+    retry settled the lens clean with nothing to report. The held reply's
+    attested judgment is now what the attempt records, with the failed
+    repair replies' causes folded on, and the verified finding keeps
+    blocking approval."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    prose = final(text="no schema here")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            prose,
+            prose,
+            READ_ALL,
+            final(),
+        ],
+    )
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert lens.attempts == 2
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.verdict is Verdict.BLOCK
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+
+
+def test_a_repair_reply_that_names_another_lens_keeps_the_verified_findings(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 1, second case: the repair reply
+    parses but names another lens or body; its judgment is
+    MISACKNOWLEDGED, which contributes nothing on the retry. The held
+    reply's attested judgment stands instead, so the retry carries the
+    verified finding."""
+    wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            MISACK,
+            READ_ALL,
+            final(),
+        ],
+    )
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert lens.attempts == 2
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.unverified == ()
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+
+
+def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
+    tmp_path,
+):
+    """Round-1 review of #703, Major 2: the quote-repair reply is prose,
+    so D44 queues its own repair; the held outcome used to become the
+    unparsed judgment, which has no findings, and a stop before the
+    contract repair was sent dropped the verified finding. The hold stays
+    the quote hold's attested judgment, with the refusal folded in."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_ALL,
+            final(finding(severity="blocker"), wrong),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=3, retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.causes == {Cause.QUOTES_FAILED, Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+
+
+def test_a_repair_turn_queued_but_never_sent_is_not_counted(tmp_path):
+    """Round-1 review of #703, Minor 2: the repair turn is counted when
+    its call is sent, not when it is queued; a turn cap in the gap leaves
+    no repair counted on the outcome or in the draft, and the held
+    findings survive the stop."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding(severity="blocker"), wrong)],
+        limits=replace(LIMITS, max_turns=2, retries=0),
+    )
+    (lens,) = result.lenses
+    assert lens.outcome.nudges == ()
+    assert [c.verified for c in lens.outcome.findings] == [True, False]
+    assert "quote-repair turn" not in render_draft(result, Redactor())
 
 
 def test_a_verified_finding_survives_an_empty_retry(tmp_path):
@@ -1232,10 +1337,14 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
 
 
 def test_a_quote_matched_within_the_window_is_tagged_in_the_draft():
-    drifted = CheckedFinding(checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR)
+    """The posted tag is the match's own distance, not the configured
+    window's (round-1 review of #703, Minor 1)."""
+    drifted = CheckedFinding(
+        checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR, drift=2
+    )
     result = synthesize([lens_result(clean(drifted))])
     draft = render_draft(result, Redactor())
-    assert "head within 3 lines of the citation" in draft
+    assert "head within 2 lines of the citation" in draft
     assert result.event is ReviewEvent.COMMENT
 
 

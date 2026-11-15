@@ -59,7 +59,7 @@ from __future__ import annotations
 import json
 import math
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
@@ -254,13 +254,16 @@ def _check_limits(limits: Limits) -> None:
 def _check_quote_limits(limits: Limits) -> None:
     """The quote-repair turn and window are bounded (D64): 0 disables
     each; a value past the bound is the runaway the guard exists to
-    prevent."""
-    if isinstance(limits.quote_repairs, bool) or limits.quote_repairs not in range(4):
-        raise ValueError("quote_repairs must be an integer from 0 to 3")
-    if isinstance(limits.quote_tolerance, bool) or limits.quote_tolerance not in range(
-        9
-    ):
-        raise ValueError("quote_tolerance must be an integer from 0 to 8")
+    prevent. A non-int -- a float passes `in range(...)` -- is refused
+    here, before it can break the window search mid-review."""
+    for name, hi in (("quote_repairs", 3), ("quote_tolerance", 8)):
+        value = getattr(limits, name)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= hi
+        ):
+            raise ValueError(f"{name} must be an integer from 0 to {hi}")
 
 
 # The reasoning hint an open-weight model gets by default (D58). The
@@ -734,9 +737,13 @@ class _Progress:
     # repair's reply is judged like any final reply, and the held
     # outcome's verified findings merge into it through D61's merge
     # (`_merged_findings`), so the attempt's other verified findings
-    # survive a repair that restates or drops the failed quote.
+    # survive a repair that restates or drops the failed quote. The turn
+    # is counted only when its call is actually sent: `quote_repair_pending`
+    # is set when the turn is queued and flushed into `nudges` when the
+    # loop places the call (round-1 review of #703, Minor 2).
     quote_repairs_used: int = 0
     quote_hold: AttemptOutcome | None = None
+    quote_repair_pending: bool = False
     # The last judged outcome whose follow-up turn was queued but not yet
     # answered: any stop before that turn is placed returns it, whatever it
     # carries (D58, review M1). Once the follow-up was placed and answered
@@ -890,6 +897,7 @@ def run_attempt(
         if not isinstance(priced, Decimal):
             return p.cut(*priced)
         worst = priced
+        _flush_pending_repair(p)
         try:
             reply = model.turn(request)
         except LimitRefused as exc:
@@ -1081,31 +1089,51 @@ def _accept_or_repair(
     across the tool work any follow-up asked for, until this function
     judges a newer reply (review round 3, M-b; round 4, probes E and H).
     A quote repair's reply merges the held outcome's verified findings in
-    through D61's merge, so the attempt keeps them however the repair
-    goes."""
+    through D61's merge when it attests; when it does not -- a second
+    contract refusal, or a reply naming another lens -- the held reply's
+    attested judgment is the attempt's evidence, with the failed repair
+    reply's causes folded onto it, so the verified findings survive
+    however the repair ends (D64)."""
     repaired = _repair(text, p)
     if repaired is not None:
-        before = set(p.causes)
-        p.held_outcome = _final(job, text, p, limits)
+        if p.quote_hold is not None:
+            # The quote repair's reply broke the finding contract (D44
+            # repairs it once). The pre-repair reply's attested judgment
+            # stays the attempt's held evidence: keep it, with the
+            # contract refusal folded in, so a stop before the contract
+            # repair is sent returns the held findings, not an empty
+            # unparsed hold (D64).
+            p.held_outcome = _held_with(
+                p.quote_hold, p, (Cause.UNPARSED,), _unparsed_detail(text)
+            )
+        else:
+            before = set(p.causes)
+            p.held_outcome = _final(job, text, p, limits)
+            p.causes.clear()
+            p.causes |= before
         p.held_placed = False
         # D44's shape: a refused reply is not judged into this attempt's
         # causes; its own judgment is held for a stop before the repair
         # turn is placed.
-        p.causes.clear()
-        p.causes |= before
         messages += [AssistantText(text), UserText(repaired)]
         return None
     before = set(p.causes)
     outcome = _final(job, text, p, limits)
     if p.quote_hold is not None:
-        # The queued quote-repair turn was answered: its reply is the one
-        # that counts, with the pre-repair reply's verified findings
-        # merged in (D61's merge, D64).
+        # The queued quote-repair turn was answered. An attested reply is
+        # the one that counts, with the pre-repair reply's verified
+        # findings merged in (D61's merge, D64). A reply that never
+        # attested contributed nothing: the held reply's attested judgment
+        # stands, with the failed reply's causes folded on, so the
+        # verified findings keep blocking approval (D64).
         held, p.quote_hold = p.quote_hold, None
-        outcome = replace(
-            outcome,
-            findings=_merged_findings((Attempt(1, held), Attempt(2, outcome))),
-        )
+        if outcome.attestation is Attestation.ATTESTED:
+            outcome = replace(
+                outcome,
+                findings=_merged_findings((Attempt(1, held), Attempt(2, outcome))),
+            )
+        else:
+            outcome = _held_with(held, p, outcome.causes, outcome.detail)
     if outcome.findings:
         # The newest finding-bearing judgment is the evidence a later stop
         # returns, across any follow-up turns (review round 4, probe E).
@@ -1133,7 +1161,7 @@ def _accept_or_repair(
             p.causes.clear()
             p.causes |= before
             p.quote_repairs_used += 1
-            p.nudges.append("quote-repair")
+            p.quote_repair_pending = True
             note_nudge("quote-repair")
             p.held_outcome = outcome
             p.held_placed = False
@@ -1151,6 +1179,52 @@ def _accept_or_repair(
     p.held_outcome = None
     p.held_placed = False
     return outcome
+
+
+def _held_with(
+    held: AttemptOutcome,
+    p: _Progress,
+    extra_causes: Iterable[Cause] = (),
+    detail: str = "",
+) -> AttemptOutcome:
+    """The held judgment as the attempt's standing outcome, with later
+    causes and detail folded on. The reply it came from is attested, so
+    its verified findings are the attempt's evidence whatever the turns
+    after it did; the tools, turns, unread list and nudges are the
+    attempt's current ones."""
+    causes = frozenset(held.causes) | frozenset(extra_causes)
+    both = (
+        f"{held.detail}; {detail}" if held.detail and detail else (detail or held.detail)
+    )  # fmt: skip
+    return replace(
+        held,
+        causes=causes,
+        tools=tuple(p.tools),
+        turns=p.turns,
+        unread=p.pages.unread(p.changed),
+        detail=both,
+        nudges=tuple(p.nudges),
+    )
+
+
+def _unparsed_detail(text: str) -> str:
+    """The validator's message for a reply outside the finding contract,
+    or an empty string. `_repair` parses first; this re-reads the same
+    error for the held outcome's detail."""
+    try:
+        parse_reply(text)
+    except ContractError as exc:
+        return str(exc)
+    return ""
+
+
+def _flush_pending_repair(p: _Progress) -> None:
+    """The queued quote-repair turn is being sent: only now does it count
+    as one (round-1 review of #703, Minor 2). A stop or a refusal before
+    this point leaves it uncounted."""
+    if p.quote_repair_pending:
+        p.quote_repair_pending = False
+        p.nudges.append("quote-repair")
 
 
 def _alias_sentence() -> str:
@@ -1218,7 +1292,9 @@ def _quote_repair_nudge(outcome: AttemptOutcome, nonce: str) -> str:
     lines = []
     for c in failed:
         quote = " ".join(c.finding.evidence.split())
-        lines.append(f"{c.finding.location} -- {c.problem}; quote: {quote[:120]}")
+        if len(quote) > 120:
+            quote = quote[:120] + " … [cut]"
+        lines.append(f"{c.finding.location} -- {c.problem}; quote: {quote}")
     return (
         "Your reply is not accepted as a final review: "
         f"{len(failed)} of your findings' quotes did not verify against "
@@ -1296,7 +1372,7 @@ def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutc
     if not check_acknowledgement(reply, job.lens, job.digest):
         return outcome(Attestation.MISACKNOWLEDGED)
     checked = tuple(
-        CheckedFinding(c.finding, c.source)
+        CheckedFinding(c.finding, c.source, drift=c.drift)
         if isinstance(c, Verified)
         else CheckedFinding(c.finding, problem=c.reason)
         for c in check_all(

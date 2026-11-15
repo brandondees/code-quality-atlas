@@ -439,6 +439,10 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_TURNS` | agentic lens entry | Turns of one lens attempt (default 50) |
 | `ATLAS_LENS_WALL_S` | agentic lens entry | Seconds for one lens attempt (default 1200) |
 | `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
+| `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Turns past full diff coverage without a final reply before one finalize nudge is injected (D58; default 6) |
+| `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
+| `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
+| `ATLAS_QUOTE_TOLERANCE` | agentic lens entry | Lines either side of a citation's first line that the quote checker searches, 0 to 8 (D64; default 3) |
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses a quarter of the endpoint context when the completion limit is larger than that quarter, and the completion limit otherwise. It may be set higher, up to that completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
@@ -451,7 +455,7 @@ Environment variables (names only; never commit values):
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
-uses it. The eight `ATLAS_*` limit variables are not credentials.
+uses it. The twelve `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
 accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and

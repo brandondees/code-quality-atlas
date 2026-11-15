@@ -1468,3 +1468,30 @@ confirming the fix on any future run. `cache_stats.py` holds the
 tracker, model-agnostic; `OpenRouterLensModel` feeds it. Offline only:
 no live model call was made for this change, and the tests pin every
 rule with fakes and recorded HTTP.
+
+## 2026-11-15 — round-1 review fixes for #703: the repair's failure paths keep the verified findings
+
+The round-1 protocol review of #703 traced two failure paths the happy-
+path tests did not cover. A repair reply that never attests — a second
+contract refusal, or one naming another lens — used to become the
+attempt's recorded outcome, and D61's attested-only merge then dropped
+the held reply's verified findings on the retry: an attested empty retry
+settled the lens clean with nothing to report and the review approved.
+The held reply's attested judgment is now what the attempt records, with
+the failed repair reply's causes and detail folded on, so the verified
+findings report, block approval, and carry to the retry. A contract
+repair queued after a quote repair used to overwrite the held judgment
+with the unparsed one, so a stop before it was sent dropped the findings
+too; the hold stays the quote hold's with the refusal folded in. The
+repair turn is counted — `nudges`, the span, the draft's lens line —
+only when its call is sent, so a stop in the gap no longer counts a turn
+that never ran (the unread and no-progress labels keep D58's queue-time
+recording, which their tests pin). The posted source tag is built from
+the match's own distance instead of the configured window, so it stays
+true at any setting, and `QuoteSource.HEAD_NEAR` no longer hardcodes the
+number; a float is refused at the quote-limit check before it could
+break the window mid-review; the repair message marks a quote cut at 120
+characters; and the three mutants the round-1 review found surviving —
+the equal-distance tie-break, removed-lines-wins over an in-window head
+match, and the `resolve()`-layer bound rejection — are pinned by tests.
+D64's update paragraph carries the same record. Offline only.

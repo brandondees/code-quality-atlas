@@ -61,7 +61,7 @@ _HUNK_START = "@@ "
 
 class QuoteSource(StrEnum):
     HEAD = "head"
-    HEAD_NEAR = f"head within {QUOTE_TOLERANCE} lines of the citation"
+    HEAD_NEAR = "head near the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
 
@@ -70,6 +70,11 @@ class QuoteSource(StrEnum):
 class Verified:
     finding: Finding
     source: QuoteSource
+    # For a window match (HEAD_NEAR): how many lines sit between the
+    # citation's first line and the matched lines' first one (D64). The
+    # posted tag is built from this, not from the configured window, so
+    # it stays true for every setting. 0 elsewhere.
+    drift: int = 0
 
 
 @dataclass(frozen=True)
@@ -230,7 +235,8 @@ def _check_range(
         return Verified(finding, QuoteSource.REMOVED)
     near = None if head is None else _drifted(quote, head, where, tolerance)
     if near is not None:
-        return Verified(replace(finding, location=near), QuoteSource.HEAD_NEAR)
+        drift = abs(near.start - where.start)
+        return Verified(replace(finding, location=near), QuoteSource.HEAD_NEAR, drift)
     if head is None and sources.unreadable:
         return Unverified(finding, sources.unreadable)
     if head is not None and window is None:
@@ -318,6 +324,17 @@ def _window_deltas(tolerance: int) -> Iterable[int]:
     for distance in range(1, tolerance + 1):
         yield distance
         yield -distance
+
+
+def drift_label(drift: int) -> str:
+    """The posted tag for a window match (D64): how far the matched lines
+    sit from the citation, in the match's own words. A span correction at
+    the citation's first line names itself; anything else says how many
+    lines away the match was."""
+    if drift == 0:
+        return "head at the citation's first line, span set by the quote"
+    plural = "" if drift == 1 else "s"
+    return f"head within {drift} line{plural} of the citation"
 
 
 def check_all(

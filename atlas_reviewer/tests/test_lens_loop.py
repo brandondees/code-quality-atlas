@@ -11,6 +11,7 @@ from atlas_reviewer.attestation import (
     AttemptOutcome,
     Attestation,
     Cause,
+    CheckedFinding,
     LensState,
     body_digest,
 )
@@ -33,6 +34,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     _DiffPages,
     _Progress,
+    _quote_repair_nudge,
     _repair,
     _time_up,
     finding_contract,
@@ -1126,7 +1128,8 @@ def test_the_repair_bound_is_configurable_and_zero_disables_the_turn(tmp_path):
 def test_a_quote_repair_turn_that_never_runs_keeps_the_rejected_reply(tmp_path):
     """The repair turn is queued behind the turn cap: the rejected reply's
     own judgment stands, with its failed quotes and the stop named, as
-    D58's review M1 holds for every queued turn."""
+    D58's review M1 holds for every queued turn -- and the turn that never
+    ran is not counted as one (round-1 review of #703, Minor 2)."""
     bad = finding(evidence="not in the head file")
     outcome, _, _ = attempt(
         tmp_path,
@@ -1136,6 +1139,36 @@ def test_a_quote_repair_turn_that_never_runs_keeps_the_rejected_reply(tmp_path):
     assert [c.verified for c in outcome.findings] == [True, False]
     assert outcome.causes == {Cause.QUOTES_FAILED, Cause.TURN_CAP}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.nudges == ()
+
+
+def test_the_repair_message_marks_a_cut_quote():
+    """The rejected quote text is cut at 120 characters, and the cut is
+    marked (round-1 review of #703, Nit 3); a quote that fits is not."""
+    from atlas_reviewer.lens_contract import (
+        Attribution,
+        Finding,
+        LineRange,
+        Route,
+        Severity,
+        Valence,
+    )
+
+    def outcome_with(evidence):
+        f = Finding(
+            LineRange("calc.py", 2, 2), Severity.MAJOR, Valence.DEFECT, Route.ENG,
+            Attribution.INTRODUCED, "something", "fix it", evidence,
+        )  # fmt: skip
+        return AttemptOutcome(
+            Attestation.ATTESTED,
+            frozenset({Cause.QUOTES_FAILED}),
+            findings=(CheckedFinding(f, problem="the quote is not at that range"),),
+        )
+
+    cut = _quote_repair_nudge(outcome_with("x" * 200), NONCE)
+    assert "[cut]" in cut
+    whole = _quote_repair_nudge(outcome_with("short quote"), NONCE)
+    assert "[cut]" not in whole
 
 
 def test_the_configured_window_reaches_the_quote_checker(tmp_path):
