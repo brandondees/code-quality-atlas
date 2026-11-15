@@ -28,7 +28,7 @@ from atlas_reviewer.review_wide import (
 )
 from atlas_reviewer.verdict import parse_status
 
-from .agentic import BODY, DIFF, LIMITS, READ_ALL, final, tools, trees
+from .agentic import BODY, DIFF, LIMITS, NOTHING, READ_ALL, final, tools, trees
 from .helpers import FakeClock, LocalSprites, StubLibrary, source_tarball
 from .test_coordinator import EVENT
 
@@ -438,6 +438,48 @@ def test_a_twelve_lens_scripted_review_with_fifteen_turns_a_lens_finishes(tmp_pa
     # The simulated spend settled at $0.02 a call, under the derived
     # reservation.
     assert Decimal(result.committed_usd) == Decimal("3.60")
+
+
+def test_a_stalled_lens_nudge_turn_fits_the_derived_budget(tmp_path):
+    """The merged D66 window and D68's derivation compose: a lens that
+    stalls into the no-progress nudge spends one more counted call on the
+    nudge turn before it finalizes, and the derived call budget -- per
+    lens times planned lenses -- has room for it on every lens. On the
+    flat review-wide cap the same review would have stopped mid-lens."""
+    names = [f"lens-{i}" for i in range(1, 13)]
+    models = [
+        ScriptedLensModel(
+            [
+                READ_ALL,
+                NOTHING,
+                NOTHING,
+                NOTHING,
+                NOTHING,
+                NOTHING,
+                NOTHING,
+                final(lens=name),
+            ]
+        )
+        for name in names
+    ]
+    result = run(
+        tmp_path,
+        names,
+        models,
+        limits=replace(LIMITS, per_lens_calls=8, max_turns=8),
+    )
+    assert len(result.lenses) == 12
+    assert all(
+        lens.state is LensState.CLEAN
+        and lens.outcome.attestation is Attestation.ATTESTED
+        and lens.outcome.limit_hit is None
+        and "no-progress" in lens.outcome.nudges
+        for lens in result.lenses
+    )
+    # 8 calls per lens x 12 planned lenses: the nudge turn included.
+    assert result.model_calls == 96
+    assert result.coverage_complete
+    assert parse_status(status_line(result))["limit_stop"] is None
 
 
 def test_the_derivation_record_is_complete_for_the_draft_and_ledger():
