@@ -1409,3 +1409,30 @@ attempt never attested keeps them on the ledger but reports none. The
 retry prompt is unchanged — the body is still applied whole. Policy
 tests in `test_attestation.py`, end-to-end over the real bridge with the
 scripted model in `test_coordinator.py`. Offline only.
+
+## 2026-11-15 — a rejected quote is repaired in the session, and the checker tolerates a small offset (#697, D64)
+
+The Nov 14 trials made the retry path the most expensive failure mode:
+all 7 Sonnet retries were `QUOTES_FAILED`, one failed quote re-ran the
+whole lens from turn 1 ($2.00 on #661, $0.69 on #640), and every failed
+quote was text that really is in the head file — two one line off, two
+span mismatches, three 9–62 lines off. Two changes, on the quote checker
+and the loop only. The checker's drift search is generalized: a quote of
+whole lines may now match a window of the quote's own line count starting
+within three lines of the citation's first line (`ATLAS_QUOTE_TOLERANCE`,
+default 3, bounded 0–8), so an off-by-one citation and a span mismatch
+verify with the finding's location corrected to the lines that hold the
+quote; fragments never drift, removed-line matches still win, and nothing
+outside the window verifies. A quote that still fails earns a bounded
+repair turn in the same conversation (`ATLAS_QUOTE_REPAIRS`, default 1,
+bounded 0–3): the rejected locations, reasons and quotes go back fenced,
+the model corrects the range or drops the finding, and the answering
+reply is re-checked by the same checker, with the held reply's verified
+findings merged in through D61's `_merged_findings` — #694's merge
+reused, not duplicated. When the bound is spent and quotes still fail,
+the attempt keeps `QUOTES_FAILED` exactly as before, with the bound named
+in the detail; the ledger's `nudges` and the completion span record the
+`quote-repair` turn, and the draft's lens line counts repair turns and
+window corrections. Tests in `test_quotes.py`, `test_lens_loop.py`,
+`test_agentic_limits.py` and `test_coordinator.py`, each behavior also
+checked against a killed mutant. Offline only.

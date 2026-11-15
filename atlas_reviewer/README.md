@@ -1108,11 +1108,19 @@ D41 records the 2026-11-12 probe that did.
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
   checked against the head file at the cited lines. The cited span is the
   quote's own line count, so a wider range does not verify. A quote of
-  whole lines (8 or more non-space characters) may also match within two
-  lines of the citation, and the finding's location then names the lines
-  that hold it; whitespace inside a line is collapsed. A removed line of
-  that file still verifies, and so does a quote from an unchanged file the
-  lens read at HEAD (D47; `quotes.py`).
+  whole lines (8 or more non-space characters) may also match a window of
+  the quote's own line count starting within three lines of the citation
+  (D64; configurable, `ATLAS_QUOTE_TOLERANCE`), and the finding's location
+  then names the lines that hold it; whitespace inside a line is
+  collapsed. A removed line of that file still verifies, and so does a
+  quote from an unchanged file the lens read at HEAD (D47; `quotes.py`).
+  A quote that verifies neither way earns the bounded quote-repair turn
+  (D64): the rejected quotes, their cited locations and the checker's
+  reasons go back once per attempt (`ATLAS_QUOTE_REPAIRS`, default 1), the
+  model corrects the range or drops the finding, the next reply is
+  re-checked by the same checker, and the held reply's verified findings
+  merge into it through the retry merge; a still-bad quote leaves the
+  attempt as it was, and the bound hit is named in the lens line.
 - **Partial results.** No findings counts as clean only after every
   changed file's diff was read in full: a `diff_file` chain from offset
   0 through every truncated page (D42). A HEAD `read_file` does not
@@ -1247,9 +1255,9 @@ D41 records the 2026-11-12 probe that did.
 | `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
-| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
-| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
+| `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
