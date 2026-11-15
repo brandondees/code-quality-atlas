@@ -48,10 +48,12 @@ unread-file veto below still applies -- while a model error is not. A
 provider that refuses the call before any request -- a zero-data-retention
 or pricing refusal -- is its own `MODEL_REFUSED` cause, also not retried. A
 timed-out request is retried once as its own reserved, counted call, only
-while the clocks leave room for one more timeout. Once every changed diff
-is read, or once a tool call is
-repeated, one finalize-now nudge is injected (D58's detector), bounded by
-`no_progress_turns` and `duplicate_calls`. A final reply the harness has
+while the clocks leave room for one more timeout. Once `no_progress_turns`
+consecutive turns have brought the lens nothing new -- no successful call
+the attempt has not made before, no new verified finding -- or once a tool
+call is repeated `duplicate_calls` times, one finalize-now nudge is
+injected (D58's detector as D66 amends it), by the same window on the
+paged and the shared-prefix path alike. A final reply the harness has
 already judged is kept when the follow-up turn it earned can never run,
 and -- when it carried findings -- across the tool work the nudge asked
 for, until a newer final reply is judged.
@@ -132,9 +134,11 @@ DEFAULT_MAX_CALLS = 50
 DEFAULT_MAX_TURNS = 50
 DEFAULT_LENS_WALL_S = 1200
 DEFAULT_REVIEW_WALL_S = 3600
-# The no-progress detector's thresholds (D58): after full diff coverage,
-# this many more turns without a final reply -- or this many identical
-# tool calls at any coverage -- inject one finalize nudge.
+# The no-progress detector's thresholds (D58, D66): `no_progress_turns`
+# consecutive turns that brought the lens nothing new -- no successful
+# call the attempt has not made before, no new verified finding -- or
+# `duplicate_calls` identical calls at any coverage, inject one finalize
+# nudge. The window is the same on the paged and the shared-prefix path.
 DEFAULT_NO_PROGRESS_TURNS = 6
 DEFAULT_DUPLICATE_CALLS = 3
 # The share of the resolved per-call input cap the shared diff prefix may
@@ -194,8 +198,9 @@ class AgenticLimits:
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
     is one). `no_progress_turns` and `duplicate_calls` are the no-progress
-    detector's thresholds (D58): turns past full diff coverage without a
-    final reply, and identical calls, before one finalize nudge is
+    detector's thresholds (D58, D66): consecutive turns without new
+    content -- a successful call the attempt has not made before, or a new
+    verified finding -- and identical calls, before one finalize nudge is
     injected. `diff_prefix_share` is the share of the model's resolved
     per-call input cap the shared diff prefix may take (D65); 0 turns the
     shared prefix off and every review pages. `create_retries` is how
@@ -969,10 +974,32 @@ class _Progress:
     pages: _DiffPages = field(default_factory=_DiffPages)
     repair_sent: bool = False
     head_reads: set[str] = field(default_factory=set)
-    covered_at_turn: int | None = None
     nudges: list[str] = field(default_factory=list)
     unread_nudged: bool = False
     stall_nudged: bool = False
+    # The no-progress detector's window (D58, D66): consecutive turns that
+    # brought the lens nothing new, counted by the same rule on the paged
+    # and the shared-prefix path. A turn with new content -- a successful
+    # call whose (tool, validated args) the attempt has not run before, or
+    # a judged final reply carrying a verified finding the attempt has not
+    # recorded -- resets the count to zero; nothing here is seeded by the
+    # path the diff arrived on.
+    stall_turns: int = 0
+    # The turn of the attempt's last progress, 0 before any, so the nudge
+    # can say when the stall began.
+    last_progress_turn: int = 0
+    # The successful (tool, validated-args) pairs already run this
+    # attempt. A repeat returns content the lens has already seen, so it
+    # is not progress; outright repetition stays the duplicate-calls
+    # detector's territory.
+    seen_calls: set[tuple[str, str]] = field(default_factory=set)
+    # Set by `_tool` when one of the turn's calls delivered first-time
+    # content. The loop clears it at the turn boundary, before the turn's
+    # calls run, so it stays scoped to the turn being accounted.
+    new_content: bool = False
+    # Signatures of the verified findings the attempt has already had
+    # judged, so a repeat finding is not progress (D66).
+    finding_sigs: set[str] = field(default_factory=set)
     # True on the shared-prefix path: the diff the lens was given arrived
     # whole in turn 1's prefix, so coverage is attested from what the
     # prefix held and the `diff_file` page bookkeeping and the unread-list
@@ -1141,7 +1168,6 @@ def run_attempt(
         prefixed=prefix is not None,
         prefix_note=prefix_note,
         read_source=prefix is not None,
-        covered_at_turn=0 if prefix is not None else None,
     )
     retry_request: TurnRequest | None = None
     retried_request: TurnRequest | None = None
@@ -1200,6 +1226,7 @@ def run_attempt(
             if done is not None:
                 return done
             continue
+        p.new_content = False
         try:
             results = tuple(_tool(job, bridge, call, p) for call in reply.calls)
         except DeadlineExceededError as exc:
@@ -1211,15 +1238,21 @@ def run_attempt(
 
 
 def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -> None:
-    """The no-progress detector (D58): after the tool results of a turn
-    that left the attempt stalled, inject one finalize nudge. One detector
-    nudge per attempt, from whichever trigger fires first; the ledger and
-    the completion span name it. On the shared-prefix path the attempt's
-    coverage was complete before turn 1 (the prefix held the diff), so
-    `_Progress.covered_at_turn` starts at 0 and only the duplicate-call
-    trigger and the no-progress window apply."""
-    if p.covered_at_turn is None and not p.unread():
-        p.covered_at_turn = p.turns
+    """The no-progress detector (D58, D66): after the tool results of a
+    stalled turn, inject one finalize nudge once `no_progress_turns`
+    consecutive turns have brought the lens nothing new. A turn with new
+    content -- a successful call whose (tool, validated args) the attempt
+    has not run before -- resets the count, and a judged final reply
+    carrying a new verified finding resets it too (`_accept_or_repair`).
+    The count and the trigger are the same on the paged and the
+    shared-prefix path (D66): no path seeds the window, and only progress
+    resets it. One detector nudge per attempt, from whichever trigger
+    fires first; the ledger and the completion span name it."""
+    if p.new_content:
+        p.stall_turns = 0
+        p.last_progress_turn = p.turns
+    else:
+        p.stall_turns += 1
     if p.stall_nudged:
         return
     trigger = _stall(p, limits)
@@ -1227,7 +1260,7 @@ def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -
         p.stall_nudged = True
         p.nudges.append(trigger)
         note_nudge(trigger)
-        messages.append(UserText(_finalize_nudge()))
+        messages.append(UserText(_finalize_nudge(trigger, p)))
 
 
 def _mark_held_placed(p: _Progress, reply: ModelTurn) -> None:
@@ -1326,6 +1359,13 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
     p.secrets.extend(result.secrets)
     if result.status in GAP_STATUSES:
         p.causes.add(Cause.TOOL_GAP)
+    if result.status is Status.OK and (result.tool, result.args) not in p.seen_calls:
+        # First-time content: a call the attempt has not successfully run
+        # before returned something the lens has not seen (D66's progress
+        # signal). A repeat is not progress, and a failed call returned
+        # nothing.
+        p.seen_calls.add((result.tool, result.args))
+        p.new_content = True
     p.read_source = p.read_source or _reads_source(result, job.changed)
     if not p.prefixed:
         # The shared-prefix path attests coverage from what the prefix
@@ -1394,6 +1434,12 @@ def _accept_or_repair(
         return None
     before = set(p.causes)
     outcome = _final(job, text, p, limits)
+    if _new_findings(outcome, p):
+        # A judged reply carrying a verified finding the attempt has not
+        # recorded is progress (D66): the stall window starts over from
+        # this turn.
+        p.stall_turns = 0
+        p.last_progress_turn = p.turns
     if p.quote_hold is not None:
         # The queued quote-repair turn was answered. An attested reply is
         # the one that counts, with the pre-repair reply's verified
@@ -1591,42 +1637,68 @@ def _quote_repair_nudge(outcome: AttemptOutcome, nonce: str) -> str:
     )
 
 
-def _finalize_nudge() -> str:
-    """The one turn the no-progress detector earns (D58): finalize now
-    with what you have."""
+def _finalize_nudge(trigger: str, p: _Progress) -> str:
+    """The one turn the no-progress detector earns (D58, D66): finalize
+    now with what you have. The text names why the trigger fired and the
+    turns it counted, so the conversation and the traces show it."""
+    if trigger == "duplicate-calls":
+        why = (
+            f"The same tool call has now been made {_max_repeat(p)} times, "
+            f"as of turn {p.turns}."
+        )
+    else:
+        since = (
+            f"since turn {p.last_progress_turn}"
+            if p.last_progress_turn
+            else "since the attempt began"
+        )
+        why = (
+            f"No turn {since} has brought new content or a new finding: "
+            f"{p.stall_turns} turns without progress, as of turn {p.turns}."
+        )
     return (
-        "You have made no progress for several turns. Finalize now with "
-        "what you have: reply with exactly one JSON object, in the shape "
-        "the Finding contract defines, and nothing else."
+        f"{why} Finalize now with what you have: reply with exactly one "
+        "JSON object, in the shape the Finding contract defines, and "
+        "nothing else."
     )
 
 
 def _stall(p: _Progress, limits: Limits) -> str | None:
     """The no-progress detector's trigger, or None. Three identical calls
     are a stall at any coverage; otherwise the trigger is the configured
-    number of turns past full diff coverage without a final reply."""
-    if _repeated(p, limits.duplicate_calls):
+    number of consecutive turns that brought the lens nothing new (D58,
+    D66)."""
+    if _max_repeat(p) >= limits.duplicate_calls:
         return "duplicate-calls"
-    if (
-        p.covered_at_turn is not None
-        and p.turns - p.covered_at_turn >= limits.no_progress_turns
-    ):
+    if p.stall_turns >= limits.no_progress_turns:
         return "no-progress"
     return None
 
 
-def _repeated(p: _Progress, threshold: int) -> bool:
-    """Whether any one (tool, validated arguments) pair has been called
-    `threshold` times this attempt. The bridge canonicalizes arguments, so
+def _max_repeat(p: _Progress) -> int:
+    """How many times the attempt's most-repeated (tool, validated args)
+    pair has been called. The bridge canonicalizes arguments, so
     identical calls have identical `args` text."""
     counts: dict[tuple[str, str], int] = {}
     for use in p.tools:
         key = (use.tool, use.args)
-        count = counts.get(key, 0) + 1
-        if count >= threshold:
-            return True
-        counts[key] = count
-    return False
+        counts[key] = counts.get(key, 0) + 1
+    return max(counts.values(), default=0)
+
+
+def _new_findings(outcome: AttemptOutcome, p: _Progress) -> bool:
+    """Whether the judged reply carried a verified finding the attempt has
+    not recorded before (D66's second progress signal), recording the new
+    ones as it answers. A repeat finding is not progress."""
+    fresh = False
+    for checked in outcome.findings:
+        if not checked.verified:
+            continue
+        sig = repr(checked.finding)
+        if sig not in p.finding_sigs:
+            p.finding_sigs.add(sig)
+            fresh = True
+    return fresh
 
 
 def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutcome:
