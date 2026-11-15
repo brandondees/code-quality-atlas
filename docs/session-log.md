@@ -1358,6 +1358,7 @@ run's attestation ledger is per run, so editing a scenario replays from
 scratch. Nothing is read from the environment and no network client is
 constructed; the deny-all read-back is asserted from the telemetry in
 the end-to-end suite. The one-shot `review --dry-run` is unchanged.
+
 ## 2026-11-14 — #663, #664: redaction hardening and pre-request refusal bookkeeping
 
 `redact` gains a `sprites-token` pattern in the shape the operator
