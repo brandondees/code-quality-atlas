@@ -79,6 +79,7 @@ from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
+    Derivation,
     LensJob,
     LensModel,
     Limits,
@@ -94,6 +95,7 @@ from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesA
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import QuoteSource, drift_label, read_sources
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
     SOURCE,
@@ -487,8 +489,21 @@ def review_lenses(
     continuation, is a lens span under it. Spans are recorded as
     `review_lens` describes. One fence nonce covers the review (D65):
     every lens's shared diff prefix fences the diff with it, so the
-    prefixes are byte-identical and the lenses share one cached block."""
-    resolved = limits.resolve()
+    prefixes are byte-identical and the lenses share one cached block.
+
+    D68: the review-wide limits are derived from the planned lens count
+    (`len(lenses)`) and the picker's committed spend, under the absolute
+    per-review dollar ceiling -- the reviewed repo's `REVIEW.md` value
+    when it sets one, else the configured ceiling, else the default. The
+    derivation happens before any lens runs, so a configuration it
+    refuses stops the review before any model call."""
+    derived, derivation = derive_review_wide(
+        limits,
+        len(lenses),
+        picker_spend[0],
+        picker_spend[1],
+        repo_ceiling=review_md_ceiling(trees.base),
+    )
     return _traced_review(
         event,
         trace,
@@ -517,7 +532,8 @@ def review_lenses(
             contract=contract,
             task_socket=task_socket,
             model_for=model_for,
-            resolved=resolved,
+            resolved=derived,
+            derivation=derivation,
             picker_spend=picker_spend,
         ),
     )
@@ -549,6 +565,7 @@ def _review_lenses(
     task_socket: str,
     model_for: Callable[[], LensModel] | None,
     resolved: Limits,
+    derivation: Derivation,
     picker_spend: tuple[int, Decimal],
 ) -> AgenticReview:
     changed = frozenset(f.path for f in split_files(diff))
@@ -559,7 +576,9 @@ def _review_lenses(
     # diff with it, so every lens's prefix is byte-identical and the
     # lenses share one cached block.
     fence_nonce = nonce()
-    spend = Spend(resolved, *picker_spend)
+    # `resolved` is D68's derived review-wide limits: the Spend and the
+    # review deadline run on them, and a limit stop names their derivation.
+    spend = Spend(resolved, *picker_spend, derivation=derivation)
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []

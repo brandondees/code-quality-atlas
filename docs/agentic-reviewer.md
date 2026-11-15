@@ -223,7 +223,12 @@ itself, and a timeout is a coverage gap.
   list). Agentic mode has
   Brandon's provisional defaults (2026-11-11), for headroom and
   configurable. The $5 reservation is D43's decision; the other four
-  limits stay provisional. The per-call input cap is the pinned
+  limits stay provisional. D68 re-scopes the review-wide side on
+  `agentic-review`: the call cap, reservation and review wall are
+  derived from the planned lens count under one absolute per-review
+  dollar ceiling (default $10), and the per-lens values stay the knobs;
+  an explicitly set review-wide limit still wins, and the ceiling
+  clamps the reservation even then. The per-call input cap is the pinned
   endpoints' context minus the output reserve. The output cap is those
   endpoints' completion limit, unless that limit is more than a quarter
   of the context, in which case the default is the quarter.
@@ -299,9 +304,10 @@ the call.
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
-| OpenRouter key hard limit for agentic runs | the preflight requires at most the key ceiling: $5 unless `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it (D44) | Must cover the agentic reservation. The reservation is $5 (D43), the same as the default ceiling. |
-| Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
+| Agentic per-review dollar reservation | $5 per lens (D43's figure, re-scoped per lens by D68); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`; on a multi-lens review the review-wide reservation is derived from it and clamped to the D68 ceiling. |
+| OpenRouter key hard limit for agentic runs | the preflight requires at most the key ceiling: $5 unless `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it (D44) | Must cover the agentic spend. The derived reservation can now reach the D68 ceiling ($10 default), so a deployment that expects to run at the ceiling raises both. |
+| Agentic per-review model-call cap | derived (D68): the per-lens call budget times the planned lenses plus the picker's calls; per-lens default 50 | Headroom, configurable through `--per-lens-calls`. An explicit `--max-calls` sets the review total outright. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than the derived total. |
+| Agentic per-review dollar ceiling | $10, absolute (`--review-ceiling-usd` or `ATLAS_REVIEW_CEILING_USD`; D68) | The runaway guard the derived reservation clamps to, never a budget: limits stop runaway loops and costly failures, and never size a review cheaper than thoroughness needs. The reviewed repo's `REVIEW.md` may set it with a `review_ceiling_usd:` line, read from the PR's base ref. A later per-run policy adjusts it through `review_wide.resolve_ceiling`, the documented seam. |
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
 | Per-call input cap | the pinned model's `context_length` minus the output reserve | An override (`--max-input-tokens` or `ATLAS_MAX_INPUT_TOKENS`) can tighten it and cannot exceed the model's context. Unknown context fails closed. The one-shot path stays at 200,000. |

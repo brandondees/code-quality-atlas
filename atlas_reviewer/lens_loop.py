@@ -61,7 +61,19 @@ headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
 60 minutes per review. Each can be overridden. An override must be
 positive and finite, and a per-lens limit no greater than its
 per-review limit. Clearing one of those five back to unset still
-refuses the run. The per-call input and output values default to the
+refuses the run. D68: a multi-lens review no longer runs on those
+review-wide numbers flat -- a 12-lens review stopped near 50 calls with
+lenses unrun. `coordinator.review_lenses` derives its review-wide
+limits from the planned lens count under one absolute per-review
+dollar ceiling (`review_wide.derive_review_wide`): `max_calls` from
+the per-lens call budget times the planned lenses plus the picker's
+calls, `reservation_usd` from the per-lens dollar budget times the
+planned lenses plus the picker's committed dollars, clamped to the
+ceiling, and `review_wall_s` raised to the lens wall times the planned
+waves when that is higher. An explicit `--max-calls`,
+`--reservation-usd` or `--review-wall-seconds` still wins for that one
+limit, and the ceiling clamps the reservation even then. The per-call
+input and output values default to the
 pinned model's own context and completion limit. The reasoning hint
 defaults to half that output cap, so the reply has the other half. An
 override can tighten a bound and cannot exceed the model. Load them with
@@ -104,7 +116,7 @@ from atlas_reviewer.lens_contract import (
     parse_reply,
 )
 from atlas_reviewer.lenses import BUNDLE_ROOT
-from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
+from atlas_reviewer.limit_stop import SETTINGS, LimitHit, LimitRefused, hit
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -151,6 +163,16 @@ DIFF_PREFIX_LABEL = "pull-request-diff"
 DEFAULT_QUOTE_REPAIRS = 1
 DEFAULT_QUOTE_TOLERANCE = 3
 
+# D68: the per-lens values a multi-lens review's review-wide limits
+# derive from, and the absolute per-review dollar ceiling they clamp to.
+# The per-lens defaults are the 2026-11-11 review-wide defaults
+# re-scoped per lens, so an unconfigured one-lens review keeps the same
+# numbers it always had. None on the `AgenticLimits` field means the
+# default here applies.
+DEFAULT_PER_LENS_CALLS = DEFAULT_MAX_CALLS
+DEFAULT_PER_LENS_USD = DEFAULT_RESERVATION_USD
+DEFAULT_REVIEW_CEILING_USD = Decimal("10.00")
+
 # ------------------------------------------------------------------ limits
 
 
@@ -160,7 +182,10 @@ class LimitsUnsetError(ValueError):
 
 # None on these three means "derive from the endpoint terms at the call".
 # None on the five review limits means unset, which `resolve` refuses.
+# None on the three D68 knobs means "the default applies", which the
+# review-wide derivation substitutes.
 _DERIVED = frozenset({"max_input_tokens", "max_output_tokens", "reasoning_max_tokens"})
+_DEFAULTED = frozenset({"per_lens_calls", "per_lens_usd", "review_ceiling_usd"})
 
 
 @dataclass(frozen=True)
@@ -182,6 +207,11 @@ class Limits:
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
+    # The D68 knobs as configured: None keeps that knob's default, which
+    # `review_wide.derive_review_wide` substitutes.
+    per_lens_calls: int | None = None
+    per_lens_usd: Decimal | None = None
+    review_ceiling_usd: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -207,7 +237,16 @@ class AgenticLimits:
     turns (D64): how many repair turns a quote failure earns per attempt,
     0 to 3, default 1; `quote_tolerance` is the window, in lines either
     side of the citation's first line, that the quote checker searches
-    (D64), 0 to 8, default 3. The per-call token fields are None until
+    (D64), 0 to 8, default 3. D68: a multi-lens review derives its three
+    review-wide limits from the planned lens count
+    (`review_wide.derive_review_wide`), and the knobs are `per_lens_calls`
+    and `per_lens_usd` -- the per-lens call and dollar budgets -- under
+    `review_ceiling_usd`, the absolute per-review dollar ceiling. None on
+    any of the three keeps that default. An explicit `max_calls`,
+    `reservation_usd` or `review_wall_s` still wins for that one limit,
+    which is what `explicit` records: the review-wide limit names the
+    operator set through a flag or an `ATLAS_*` variable, which the
+    derivation leaves alone. The per-call token fields are None until
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -224,19 +263,32 @@ class AgenticLimits:
     create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     quote_repairs: int = DEFAULT_QUOTE_REPAIRS
     quote_tolerance: int = DEFAULT_QUOTE_TOLERANCE
+    per_lens_calls: int | None = None
+    per_lens_usd: Decimal | None = None
+    review_ceiling_usd: Decimal | None = None
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
+    # The review-wide limit names the operator set through a flag or an
+    # `ATLAS_*` variable (D68), which the review-wide derivation leaves
+    # alone. Empty when the limits were built directly, so every
+    # derivation applies.
+    explicit: frozenset[str] = frozenset()
 
     def resolve(self) -> Limits:
         unset = [
             f.name
             for f in fields(self)
-            if f.name not in _DERIVED and getattr(self, f.name) is None
-        ]
+            if f.name not in _DERIVED
+            and f.name not in _DEFAULTED
+            and getattr(self, f.name) is None
+        ]  # fmt: skip
         if unset:
             raise LimitsUnsetError("agentic limits are not set: " + ", ".join(unset))
-        resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
+        names = {f.name for f in fields(Limits)}
+        resolved = Limits(
+            **{f.name: getattr(self, f.name) for f in fields(self) if f.name in names}
+        )
         _check_limits(resolved)
         return resolved
 
@@ -317,6 +369,25 @@ def _check_limits(limits: Limits) -> None:
     ):
         raise ValueError("reasoning_max_tokens must be less than max_output_tokens")
     _check_quote_limits(limits)
+    _check_review_wide(limits)
+
+
+def _check_review_wide(limits: Limits) -> None:
+    """The D68 knobs, validated when set: a positive per-lens call budget
+    and positive per-lens and ceiling dollar amounts. Split from
+    `_check_limits` so each stays under the complexity gate. None keeps
+    the knob's default, which the review-wide derivation substitutes."""
+    calls = limits.per_lens_calls
+    if calls is not None and (
+        isinstance(calls, bool) or not isinstance(calls, int) or calls < 1
+    ):
+        raise ValueError("per_lens_calls must be a positive integer")
+    for name in ("per_lens_usd", "review_ceiling_usd"):
+        value = getattr(limits, name)
+        if value is not None and not (
+            isinstance(value, Decimal) and value.is_finite() and value > 0
+        ):
+            raise ValueError(f"{name} must be a positive Decimal")
 
 
 def _check_quote_limits(limits: Limits) -> None:
@@ -332,6 +403,102 @@ def _check_quote_limits(limits: Limits) -> None:
             or not 0 <= value <= hi
         ):
             raise ValueError(f"{name} must be an integer from 0 to {hi}")
+
+
+@dataclass(frozen=True)
+class Derivation:
+    """D68's derivation record: what a multi-lens review's review-wide
+    limits were derived from, so a limit stop can name the derived values,
+    the absolute ceiling, the observed value and the knob. The formulas
+    are the published ones: `max_calls` is `per_lens_calls x planned
+    lenses + picker calls`, `reservation_usd` is `per_lens_usd x planned
+    lenses + the picker's committed dollars` clamped to `ceiling`, and
+    `review_wall_s` is the standing review wall raised to `lens_wall_s x
+    waves`, where a wave is one pool-full of planned lenses. A limit whose
+    operator set it explicitly (`calls_derived` or `reservation_derived`
+    False) keeps the configured value instead of its formula, and the
+    ceiling clamps the reservation either way."""
+
+    planned_lenses: int
+    waves: int
+    per_lens_calls: int
+    per_lens_usd: Decimal
+    picker_calls: int
+    picker_usd: Decimal
+    ceiling: Decimal
+    max_calls: int
+    reservation_usd: Decimal
+    review_wall_s: float
+    calls_derived: bool
+    reservation_derived: bool
+
+    def calls_configured(self) -> str:
+        """The configured value a `max_calls` stop names: the number, and
+        where it came from when it was derived."""
+        if not self.calls_derived:
+            return str(self.max_calls)
+        picker = (
+            f" + {self.picker_calls} picker call"
+            + ("s" if self.picker_calls != 1 else "")
+            if self.picker_calls
+            else ""
+        )
+        lens = "lens" if self.planned_lenses == 1 else "lenses"
+        return (
+            f"{self.max_calls} ({self.per_lens_calls} per lens x "
+            f"{self.planned_lenses} planned {lens}{picker}; the "
+            f"${self.ceiling:.2f} per-review dollar ceiling bounds the spend)"
+        )
+
+    def calls_setting(self) -> str:
+        """The knob a `max_calls` stop names: the per-lens budget when the
+        total was derived, the review-wide override when it was not."""
+        if not self.calls_derived:
+            return SETTINGS["max_calls"]
+        return (
+            "--per-lens-calls or ATLAS_PER_LENS_CALLS (D68 derives the review "
+            "total from the planned lens count; --max-calls sets it outright)"
+        )
+
+    def reservation_configured(self) -> str:
+        """The configured value a `reservation_usd` stop names: the effective
+        reservation, with its derivation and the absolute ceiling."""
+        derived = self.per_lens_usd * self.planned_lenses + self.picker_usd
+        lens = "lens" if self.planned_lenses == 1 else "lenses"
+        if self.reservation_derived:
+            formula = (
+                f"derived ${derived:.2f} = ${self.per_lens_usd:.2f} per lens x "
+                f"{self.planned_lenses} planned {lens}"
+                + (
+                    f" + ${self.picker_usd:.2f} the picker committed"
+                    if self.picker_usd
+                    else ""
+                )
+            )
+        else:
+            formula = "the configured reservation"
+        if derived > self.ceiling:
+            tail = f", clamped to the ${self.ceiling:.2f} per-review ceiling"
+        elif derived < self.ceiling:
+            tail = f"; the ${self.ceiling:.2f} per-review ceiling is above it"
+        else:
+            tail = f", which is the ${self.ceiling:.2f} per-review ceiling"
+        return f"${self.reservation_usd:.2f} ({formula}{tail})"
+
+    def reservation_setting(self) -> str:
+        """The knob a `reservation_usd` stop names: the per-lens budget when
+        the total was derived, the review-wide override when it was not;
+        the ceiling is named either way."""
+        ceiling = (
+            "--review-ceiling-usd or ATLAS_REVIEW_CEILING_USD, or the reviewed "
+            "repo's REVIEW.md"
+        )
+        if not self.reservation_derived:
+            return f"{SETTINGS['reservation_usd']}; the ceiling: {ceiling}"
+        return (
+            "--per-lens-usd or ATLAS_PER_LENS_USD (D68 derives the review total "
+            f"from the planned lens count); the ceiling: {ceiling}"
+        )
 
 
 # The reasoning hint an open-weight model gets by default (D58). The
@@ -841,11 +1008,15 @@ class Spend:
     """The review's model calls and committed dollars, across every lens
     attempt. A call is reserved at its worst case before it is sent and
     settled at its reported cost; a failed call, or one whose reported cost
-    is not a cost, stays at its worst case."""
+    is not a cost, stays at its worst case. `derivation` carries D68's
+    review-wide derivation when the coordinator derived this review's
+    limits, and the two review-wide stops then name the derived values and
+    the ceiling."""
 
     limits: Limits
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
+    derivation: Derivation | None = None
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
@@ -868,17 +1039,44 @@ class Spend:
 
     def _reserve(self, worst_usd: Decimal) -> LimitHit | None:
         if self.calls >= self.limits.max_calls:
-            return hit(
-                "max_calls", self.limits.max_calls, f"next call {self.calls + 1}"
-            )
+            return self._calls_stop()
         projected = self.committed_usd + worst_usd
         if projected > self.limits.reservation_usd:
-            return hit(
-                "reservation_usd", f"${self.limits.reservation_usd}", f"${projected}"
-            )
+            return self._reservation_stop(projected)
         self.calls += 1
         self.committed_usd += worst_usd
         return None
+
+    def _calls_stop(self) -> LimitHit:
+        """The call cap's stop. With D68's derivation the configured value
+        names the formula it came from and the knob is the per-lens
+        budget; without it both are the plain review-wide cap."""
+        observed = f"next call {self.calls + 1}"
+        if self.derivation is None:
+            return hit("max_calls", self.limits.max_calls, observed)
+        return LimitHit(
+            "max_calls",
+            self.derivation.calls_configured(),
+            observed,
+            self.derivation.calls_setting(),
+        )
+
+    def _reservation_stop(self, projected: Decimal) -> LimitHit:
+        """The dollar cap's stop, same split: the derivation's configured
+        text names the formula, the clamp and the absolute ceiling, and
+        its setting names the per-lens knob and the ceiling's own."""
+        if self.derivation is None:
+            return hit(
+                "reservation_usd",
+                f"${self.limits.reservation_usd}",
+                f"${projected}",
+            )
+        return LimitHit(
+            "reservation_usd",
+            self.derivation.reservation_configured(),
+            f"${projected}",
+            self.derivation.reservation_setting(),
+        )
 
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
         with self._lock:

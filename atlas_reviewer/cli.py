@@ -1424,11 +1424,23 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
     `review` command does not accept them."""
     note = "This command applies it."
     flags = (
-        ("--reservation-usd", "reservation_usd", "per-review dollar reservation"),
-        ("--max-calls", "max_calls", "model calls per agentic review"),
+        (
+            "--reservation-usd",
+            "reservation_usd",
+            "per-review dollar reservation; unset, a multi-lens review derives it from the per-lens budget and the planned lens count (D68)",
+        ),
+        (
+            "--max-calls",
+            "max_calls",
+            "model calls per agentic review; unset, a multi-lens review derives it from the per-lens budget and the planned lens count (D68)",
+        ),
         ("--max-turns", "max_turns", "model turns per lens"),
         ("--lens-wall-seconds", "lens_wall_s", "seconds per lens"),
-        ("--review-wall-seconds", "review_wall_s", "seconds per review"),
+        (
+            "--review-wall-seconds",
+            "review_wall_s",
+            "seconds per review; unset, a multi-lens review raises it to the lens wall times the planned waves when that is higher (D68)",
+        ),
         (
             "--create-concurrency",
             "create_concurrency",
@@ -1458,6 +1470,21 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "--diff-prefix-share",
             "diff_prefix_share",
             "largest share of the per-call input cap the shared diff prefix may take; 0 pages every review through diff_file as before the shared prefix (D65)",
+        ),
+        (
+            "--per-lens-calls",
+            "per_lens_calls",
+            "per-lens model-call budget a multi-lens review's call cap derives from (D68)",
+        ),
+        (
+            "--per-lens-usd",
+            "per_lens_usd",
+            "per-lens dollar budget a multi-lens review's reservation derives from (D68)",
+        ),
+        (
+            "--review-ceiling-usd",
+            "review_ceiling_usd",
+            "the absolute per-review dollar ceiling the derived reservation clamps to (D68); the reviewed repo's REVIEW.md may override it",
         ),
     )
     for flag, name, meaning in flags:

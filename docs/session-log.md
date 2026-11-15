@@ -1609,3 +1609,57 @@ prefix read. The README's limit counts count every `agentic_config.ENV`
 entry — the command-scoped pool and the prefix share included — which
 is why the merged total reads sixteen after the #698 merge, where
 main's earlier count left the pool out.
+
+## 2026-11-15 — the review-wide limits derive from the planned lens count, under a $10 ceiling (issue #710, D68)
+
+The flat review-wide defaults — 50 calls and a $5 reservation shared by
+every lens, the picker and the continuations (D44) — stopped a 12-lens
+review near 50 calls with lenses unrun: a missing-lens failure under the
+parity gate, not a cheap review. `review_lenses` now derives its
+review-wide limits from the planned lens count before any lens runs
+(`review_wide.derive_review_wide`), and the per-lens values stay the
+knobs: the call cap is the per-lens call budget
+(`ATLAS_PER_LENS_CALLS` / `--per-lens-calls`, default 50) times the
+planned lenses plus the picker's calls; the reservation is the per-lens
+dollar budget (`ATLAS_PER_LENS_USD` / `--per-lens-usd`, default $5)
+times the planned lenses plus the picker's committed dollars, clamped to
+the absolute per-review dollar ceiling; and the review wall is the
+configured wall raised to the lens wall times the planned waves — a wave
+is one pool-full of planned lenses — raised, never lowered, so no review
+loses wall clock it ran on before. The per-lens defaults are the
+2026-11-11 review-wide defaults re-scoped per lens, so an unconfigured
+one-lens review keeps the numbers it always had, and a review whose
+planned lenses fit one wave of the default pool keeps its 60-minute
+wall. The ceiling's default is $10 (`ATLAS_REVIEW_CEILING_USD` /
+`--review-ceiling-usd`); the reviewed repo's own `REVIEW.md` overrides
+it with a `review_ceiling_usd:` line read from the PR's base ref — the
+file's own rule that the base copy governs, so a PR cannot raise or
+lower its own ceiling — and precedence is repo, then configured, then
+default, resolved by the one pure function `resolve_ceiling`, which is
+the documented seam a later per-run policy adjusts the ceiling through.
+No policy engine is built. An operator-set `--max-calls`,
+`--reservation-usd` or `--review-wall-seconds` keeps the review-wide
+meaning it always had and wins for that one limit;
+`agentic_config.load_agentic_limits` records which in the new
+`AgenticLimits.explicit` field, and the ceiling clamps the reservation
+even when it is explicit. A derived call budget below the per-lens turn
+cap is refused before any lens runs. A stop on a derived limit names the
+derived values, the ceiling, the observed value and the knob —
+`lens_loop.Derivation` builds the `LimitHit` texts and the ledger stores
+the same fields — and the picker's calls are now added on top of the
+derived lens budget instead of eating into it, so the flat cap's other
+failure mode (one busy picker starving the lenses) is gone by
+construction. The single-lens `review_lens` path and the one-shot
+`review` command are unchanged; the service switch onto `agentic-review`
+is #712 and waits on this. D66 is #707's and D67 is #709's (both open at
+authoring time), so the decision is recorded as D68. Offline only: the
+tests run the real bridge through `LocalSprites` with scripted models
+and fakes — no live model call, network call or secret read — and pin
+the formulas, the clamp, the ceiling precedence, the `REVIEW.md` line's
+fail-open parsing, both derived limit stops' texts, and the acceptance
+run: a 12-lens scripted review with 15 turns per lens finishes with no
+limit stop and complete coverage, while reviews pushed past the derived
+calls or the ceiling stop with the derivation named. The mutants this
+kills are pinned: dropping either x-lenses factor fails the formula
+tests, dropping the ceiling clamp fails the clamp test, and dropping the
+wave scaling fails the wall test.
