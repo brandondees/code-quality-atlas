@@ -755,11 +755,19 @@ class _Progress:
     held_placed: bool = False
     finding_hold: AttemptOutcome | None = None
 
+    def unread(self) -> tuple[str, ...]:
+        """The changed files whose diff is not yet read in full. The one
+        accessor for the attempt's unread list, so every reader of it --
+        including a held outcome folded onto the current progress -- takes
+        the same bookkeeping (#704's shared prefix will skip the page
+        bookkeeping; the accessor is where that lands)."""
+        return self.pages.unread(self.changed)
+
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
     ) -> AttemptOutcome:
         self.causes.add(cause)
-        unread = self.pages.unread(self.changed)
+        unread = self.unread()
         if unread:
             self.causes.add(Cause.FILES_UNREAD)
         held = self.held_outcome
@@ -946,7 +954,7 @@ def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -
     that left the attempt stalled, inject one finalize nudge. One detector
     nudge per attempt, from whichever trigger fires first; the ledger and
     the completion span name it."""
-    if p.covered_at_turn is None and not p.pages.unread(p.changed):
+    if p.covered_at_turn is None and not p.unread():
         p.covered_at_turn = p.turns
     if p.stall_nudged:
         return
@@ -1133,7 +1141,14 @@ def _accept_or_repair(
                 findings=_merged_findings((Attempt(1, held), Attempt(2, outcome))),
             )
         else:
-            outcome = _held_with(held, p, outcome.causes, outcome.detail)
+            # A misacknowledged reply has no causes and no detail of its
+            # own; its attestation value is controller text, so it is what
+            # the fold records -- otherwise the recorded attempt reads
+            # exactly like a repair that attested and still failed its
+            # quote (round-2 review of #703, Minor 1).
+            outcome = _held_with(
+                held, p, outcome.causes, outcome.detail or outcome.attestation.value
+            )
     if outcome.findings:
         # The newest finding-bearing judgment is the evidence a later stop
         # returns, across any follow-up turns (review round 4, probe E).
@@ -1201,7 +1216,7 @@ def _held_with(
         causes=causes,
         tools=tuple(p.tools),
         turns=p.turns,
-        unread=p.pages.unread(p.changed),
+        unread=p.unread(),
         detail=both,
         nudges=tuple(p.nudges),
     )
@@ -1346,7 +1361,7 @@ def _repeated(p: _Progress, threshold: int) -> bool:
 
 
 def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutcome:
-    unread = p.pages.unread(job.changed)
+    unread = p.unread()
 
     def outcome(attestation: Attestation, **kw: Any) -> AttemptOutcome:
         return AttemptOutcome(

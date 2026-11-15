@@ -505,6 +505,13 @@ def test_an_unattested_repair_reply_keeps_the_verified_findings_on_the_retry(
     assert result.unverified == ()
     assert result.verdict is Verdict.BLOCK
     assert result.event is ReviewEvent.REQUEST_CHANGES
+    # The recorded first attempt carries the failed repair replies' trace:
+    # attested, with UNPARSED and the validator's message folded on.
+    (first,) = ledger(tmp_path).attempts(KEY)[:1]
+    assert first.outcome.attestation is Attestation.ATTESTED
+    assert first.outcome.causes == {Cause.QUOTES_FAILED, Cause.UNPARSED}
+    assert [c.verified for c in first.outcome.findings] == [True, False]
+    assert "the reply is not one JSON object" in first.outcome.detail
 
 
 def test_a_repair_reply_that_names_another_lens_keeps_the_verified_findings(
@@ -532,6 +539,16 @@ def test_a_repair_reply_that_names_another_lens_keeps_the_verified_findings(
     assert [f.id for f in result.verified] == ["L1-F1"]
     assert result.unverified == ()
     assert result.event is ReviewEvent.REQUEST_CHANGES
+    # The recorded first attempt carries the misacknowledgement: a
+    # misacknowledged reply has no causes of its own, so the fold records
+    # the attestation's controller text as the detail (round-2 review,
+    # Minor 1) -- the line is no longer identical to a repair that
+    # attested and still failed its quote.
+    (first,) = ledger(tmp_path).attempts(KEY)[:1]
+    assert first.outcome.attestation is Attestation.ATTESTED
+    assert first.outcome.causes == {Cause.QUOTES_FAILED}
+    assert [c.verified for c in first.outcome.findings] == [True, False]
+    assert "the reply named another lens or body" in first.outcome.detail
 
 
 def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
@@ -558,6 +575,65 @@ def test_a_contract_repair_after_the_quote_repair_keeps_the_held_findings(
     assert outcome.causes == {Cause.QUOTES_FAILED, Cause.UNPARSED, Cause.TURN_CAP}
     assert outcome.state is LensState.FAILED
     assert outcome.retryable
+    # The fold carries the validator's message (round-2 review, Nit 1).
+    assert "the reply is not one JSON object" in outcome.detail
+    # The held outcome folds the attempt's current state, not its own:
+    # the repair turn's call is part of the counts, and the repair is
+    # counted because it was sent.
+    assert outcome.turns == 3
+    assert len(outcome.tools) == 2
+    assert outcome.nudges == ("quote-repair",)
+
+
+def test_the_held_folds_the_attempts_current_state(tmp_path):
+    """Round-2 review of #703, Nit 1: the fold takes the attempt's current
+    tools, turns, unread list and nudges, not the held outcome's own. The
+    repair turn here is answered with the diff read that closes coverage,
+    then a prose reply earns D44's contract repair and the cap lands: the
+    recorded attempt shows the read (three tool calls, five turns, no
+    unread files, both nudges), not the held reply's older ones."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding(severity="blocker"), wrong),
+            final(finding(severity="blocker"), wrong),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=5, retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.unread == ()
+    assert outcome.turns == 5
+    assert len(outcome.tools) == 2
+    assert outcome.nudges == ("unread-files", "quote-repair")
+    assert Cause.QUOTES_FAILED in outcome.causes
+    assert Cause.UNPARSED in outcome.causes
+    assert Cause.TURN_CAP in outcome.causes
+
+
+def test_a_budget_stop_before_the_repair_call_leaves_it_uncounted(tmp_path):
+    """Round-2 review of #703, Nit 1: the flush sits after the call is
+    reserved, so a budget refusal in the gap counts no repair turn --
+    D64's bound claim covers the turn cap, the budget and the clocks."""
+    wrong = finding(evidence="not in the head file", severity="blocker")
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding(severity="blocker"), wrong)],
+        limits=replace(LIMITS, reservation_usd=Decimal("0.13"), retries=0),
+    )
+    (lens,) = result.lenses
+    outcome = lens.outcome
+    assert outcome.nudges == ()
+    assert [c.verified for c in outcome.findings] == [True, False]
+    assert outcome.causes == {Cause.QUOTES_FAILED, Cause.BUDGET}
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "reservation_usd"
+    assert "quote-repair turn" not in render_draft(result, Redactor())
 
 
 def test_a_repair_turn_queued_but_never_sent_is_not_counted(tmp_path):

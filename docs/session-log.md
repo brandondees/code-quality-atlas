@@ -1495,3 +1495,27 @@ characters; and the three mutants the round-1 review found surviving —
 the equal-distance tie-break, removed-lines-wins over an in-window head
 match, and the `resolve()`-layer bound rejection — are pinned by tests.
 D64's update paragraph carries the same record. Offline only.
+
+## 2026-11-15 — round-2 review fixes for #703: the misacknowledged repair leaves a trace
+
+Round 2 verified every round-1 fix and left one Minor: a repair reply
+that named another lens folds nothing onto the held judgment (a
+misacknowledged outcome has no causes and no detail), so the recorded
+attempt read character-for-character like a repair that attested and
+still failed its quote. The fold now records the attestation's
+controller text as the detail on that path, and both round-1 Major
+tests assert the recorded first attempt through the ledger, not only
+the lens after the retry — so the fold's causes and detail are pinned,
+along with the contract-repair fold's validator message. The held
+outcome's fold is pinned to the attempt's current tools, turns, unread
+list and nudges (a scenario where the repair turn's tool work closes
+coverage before the cap lands), a budget refusal before the repair call
+is pinned uncounted, the ledger's `drift` validation is pinned by a
+damaged line that fails closed, and the env parser's tolerance cap is
+pinned by its own message. The unread list now flows through one
+`_Progress.unread()` accessor, which is where #704's shared-prefix path
+will land its bookkeeping (the accessor takes no different value today).
+D64's Telemetry and Reversibility sentences were corrected to the
+`drift_label` tag, the "head near the citation" value and the
+backward-readable `drift` ledger field, and the README's other limit
+count now says twelve. Offline only.

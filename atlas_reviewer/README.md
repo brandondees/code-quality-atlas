@@ -1079,7 +1079,7 @@ D41 records the 2026-11-12 probe that did.
   reasoning hint defaults to half the output cap, so the reply has the
   other half. The reservation prices the whole output cap at the
   completion rate plus the reasoning rate.
-  `coordinator.limits_for_lens` reads the eight limits through
+  `coordinator.limits_for_lens` reads the twelve limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.

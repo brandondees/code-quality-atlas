@@ -279,6 +279,12 @@ def test_the_quote_repair_bound_and_window_are_configurable_and_bounded():
         AgenticLimits(quote_repairs=4).resolve()
     with pytest.raises(ValueError, match="quote_tolerance"):
         load_agentic_limits({"ATLAS_QUOTE_TOLERANCE": "-1"})
+    # The parser layer is pinned by its own message: it names the raw
+    # value, which `resolve`'s rejection does not (round-2 review, Nit 1).
+    with pytest.raises(
+        ValueError, match="quote_tolerance must be an integer from 0 to 8, not"
+    ):
+        load_agentic_limits({"ATLAS_QUOTE_TOLERANCE": "9"})
     with pytest.raises(ValueError, match="quote_tolerance must be an integer"):
         AgenticLimits(quote_tolerance=9).resolve()
     with pytest.raises(ValueError, match="quote_repairs"):
@@ -363,6 +369,39 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
     assert outcome.retryable is False
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.setting == "the pinned endpoints' max_completion_tokens"
+
+
+def test_a_damaged_drift_value_abandons_the_ledger_line(tmp_path):
+    """Round-2 review of #703, Nit 1: the ledger validates a finding's
+    `drift` as a non-negative integer; a damaged value abandons the line,
+    and the attempt reads as abandoned, which fails closed."""
+    from atlas_reviewer.attestation import AttemptOutcome, Attestation, CheckedFinding
+    from atlas_reviewer.quotes import QuoteSource
+    from atlas_reviewer.tests.test_attestation import finding as attested_finding
+
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(
+            CheckedFinding(
+                attested_finding("return sum(round(x, 2) for x in xs)"),
+                QuoteSource.HEAD_NEAR,
+                drift=2,
+            ),
+        ),
+    )
+    path = tmp_path / "ledger.jsonl"
+    book = AttemptLedger(path, FakeClock())
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome, scrub=str)
+    lines = path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    finished["outcome"]["findings"][0]["drift"] = "two"
+    lines[-1] = json.dumps(finished)
+    path.write_text("\n".join(lines) + "\n")
+    again = AttemptLedger(path, FakeClock())
+    (attempt,) = again.attempts(KEY)
+    assert attempt.outcome.attestation is Attestation.UNRECORDED
+    assert again.damaged == 1
 
 
 def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
