@@ -1897,6 +1897,21 @@ def test_agentic_review_puts_the_picker_fallback_note_in_the_draft(tmp_path):
     assert "the lens picker gave no usable lens list" in out
 
 
+def test_a_derivation_refusal_is_a_usage_error_before_the_picker(tmp_path):
+    """Round-1 review of #717, m-3: the derivation's refusals are
+    planned-count independent and are validated before the picker runs,
+    so a misconfiguration is a clean usage exit, not a traceback after a
+    billed picker call."""
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", EVENT, "--depth", "review",
+        env={"ATLAS_MAX_TURNS": "80"},
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "per_lens_calls" in err
+    assert out == ""
+
+
 def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
     tmp_path, monkeypatch
 ):

@@ -4,6 +4,7 @@ the absolute per-review dollar ceiling. Offline: fakes only, no model,
 network or secret."""
 
 import threading
+import time
 from dataclasses import replace
 from decimal import Decimal
 
@@ -11,7 +12,8 @@ import pytest
 
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import AttemptLedger, Attestation, LensState
-from atlas_reviewer.coordinator import review_lenses, status_line
+from atlas_reviewer.bridge_staging import SourceTrees
+from atlas_reviewer.coordinator import render_draft, review_lenses, status_line
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     DEFAULT_PER_LENS_CALLS,
@@ -19,6 +21,7 @@ from atlas_reviewer.lens_loop import (
     DEFAULT_REVIEW_CEILING_USD,
     AgenticLimits,
     Derivation,
+    Spend,
 )
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.review_wide import (
@@ -28,12 +31,26 @@ from atlas_reviewer.review_wide import (
 )
 from atlas_reviewer.verdict import parse_status
 
-from .agentic import BODY, DIFF, LIMITS, NOTHING, READ_ALL, final, tools, trees
-from .helpers import FakeClock, LocalSprites, StubLibrary, source_tarball
+from .agentic import (
+    BASE_FILES,
+    BODY,
+    DIFF,
+    HEAD_FILES,
+    LIMITS,
+    NOTHING,
+    READ_ALL,
+    TOP,
+    final,
+    tools,
+    trees,
+)
+from .helpers import HEAD, OLD, FakeClock, LocalSprites, StubLibrary, source_tarball
 from .test_coordinator import EVENT
 
 
-def run(tmp_path, names, models, *, limits=None, picker_spend=(0, Decimal(0))):
+def run(
+    tmp_path, names, models, *, limits=None, picker_spend=(0, Decimal(0)), trees_=None
+):
     """A multi-lens review over the real bridge through `LocalSprites`,
     one scripted model per lens. No model, Sprite or GitHub call is made."""
     from .test_keepalive import TaskServer, socket_path
@@ -55,7 +72,7 @@ def run(tmp_path, names, models, *, limits=None, picker_spend=(0, Decimal(0))):
             EVENT,
             tuple(names),
             DIFF,
-            trees(),
+            trees() if trees_ is None else trees_,
             library=StubLibrary({name: BODY for name in names}),
             model=models[0],
             limits=limits or LIMITS,
@@ -130,6 +147,16 @@ def test_the_derived_review_wall_scales_with_the_planned_waves():
     # whose 2400s would otherwise shrink the 3600s the review runs on.
     small, _ = derive_review_wide(replace(AgenticLimits(), pool_size=4), 8)
     assert small.review_wall_s == 3600
+
+
+def test_waves_round_up_when_planned_is_not_a_pool_multiple():
+    """Kills the ceil-division mutant (round-1 review of #717, m-4): 7
+    lenses at pool 4 need 2 waves, whose 8000s the second wave runs in;
+    the floor mutant derives 1 wave and the second dies at the wall."""
+    limits = replace(AgenticLimits(), pool_size=4, lens_wall_s=4000)
+    derived, record = derive_review_wide(limits, 7)
+    assert record.waves == 2
+    assert derived.review_wall_s == 8000
 
 
 def test_an_explicit_review_wide_override_wins_and_the_ceiling_still_clamps():
@@ -266,21 +293,28 @@ def _tarball(files: dict[str, bytes]) -> bytes:
 
 def test_the_reviewed_repos_review_md_sets_the_ceiling():
     tarball = _tarball({"REVIEW.md": b"# policy\n\nreview_ceiling_usd: 15\n"})
-    assert review_md_ceiling(tarball) == Decimal(15)
+    read = review_md_ceiling(tarball)
+    assert read.value == Decimal(15)
+    assert read.note == ""
 
 
 def test_a_commented_or_spaced_ceiling_line_is_honored():
     tarball = _tarball(
         {"REVIEW.md": b"review_ceiling_usd:  7.25  # room for two big lenses\n"}
     )
-    assert review_md_ceiling(tarball) == Decimal("7.25")
+    assert review_md_ceiling(tarball).value == Decimal("7.25")
 
 
 def test_no_review_md_or_no_line_leaves_the_default_standing():
-    assert review_md_ceiling(_tarball({})) is None
-    assert review_md_ceiling(_tarball({"README.md": b"review_ceiling_usd: 15"})) is None
-    assert review_md_ceiling(_tarball({"REVIEW.md": b"no setting here"})) is None
-    assert review_md_ceiling(b"") is None
+    assert review_md_ceiling(_tarball({})).value is None
+    assert (
+        review_md_ceiling(_tarball({"README.md": b"review_ceiling_usd: 15"})).value
+        is None
+    )
+    absent = review_md_ceiling(_tarball({"REVIEW.md": b"no setting here"}))
+    assert absent.value is None
+    assert absent.note == ""  # no line: silent, like no override at all
+    assert review_md_ceiling(b"").value is None
 
 
 def test_an_unusable_ceiling_value_is_ignored_not_refused():
@@ -293,20 +327,87 @@ def test_an_unusable_ceiling_value_is_ignored_not_refused():
         b"review_ceiling_usd:\n",
         b"review_ceiling_usd: 5\nreview_ceiling_usd: 9\n",
     ):
-        assert review_md_ceiling(_tarball({"REVIEW.md": raw})) is None, raw
+        read = review_md_ceiling(_tarball({"REVIEW.md": raw}))
+        assert read.value is None, raw
+        assert "review_ceiling_usd" in read.note
+        assert "ignored" in read.note
 
 
 def test_an_oversized_review_md_is_not_parsed_cut():
     """A REVIEW.md over the read bound is unparseable, not truncated
     text: a cut inside the value could read as a number it is not."""
     big = b"# policy\n\nreview_ceiling_usd: 15\n\n" + b"# " + b"x" * (80 * 1024)
-    assert review_md_ceiling(_tarball({"REVIEW.md": big})) is None
+    read = review_md_ceiling(_tarball({"REVIEW.md": big}))
+    assert read.value is None
+    assert "read bound" in read.note
 
 
 def test_a_repo_ceiling_overrides_the_configured_one_in_the_derivation():
     limits = load_agentic_limits({"ATLAS_REVIEW_CEILING_USD": "8"})
     derived, record = derive_review_wide(limits, 12, repo_ceiling=Decimal("20.00"))
     assert derived.reservation_usd == Decimal("20.00") == record.ceiling
+
+
+def _mixed_trees(base_review: bytes | None, head_review: bytes | None) -> SourceTrees:
+    base_files = {**BASE_FILES}
+    head_files = {**HEAD_FILES}
+    if base_review is not None:
+        base_files["REVIEW.md"] = base_review
+    if head_review is not None:
+        head_files["REVIEW.md"] = head_review
+    return SourceTrees(
+        source_tarball(base_files, top=TOP),
+        source_tarball(head_files, top=TOP),
+        OLD,
+        HEAD,
+    )
+
+
+def test_the_ceiling_is_read_from_the_merge_base_tree(tmp_path):
+    """The ceiling comes from the merge-base tree the review already
+    fetches (D68; round-1 review of #717, m-1), not the base-ref tip and
+    never the head: a head REVIEW.md naming a different ceiling does not
+    move it, and the merge-base copy is the one the stop names."""
+    models = [ScriptedLensModel([READ_ALL, final()], worst_usd=Decimal("3.00"))]
+    result = run(
+        tmp_path,
+        ["lens-1"],
+        models,
+        trees_=_mixed_trees(b"review_ceiling_usd: 2\n", b"review_ceiling_usd: 50\n"),
+    )
+    stopped = [
+        r
+        for r in result.lenses
+        if r.outcome is not None and r.outcome.limit_hit is not None
+    ]
+    assert stopped
+    assert "$2.00 per-review ceiling" in stopped[0].outcome.limit_hit.configured
+
+
+def test_an_unusable_ceiling_line_is_named_in_the_draft(tmp_path):
+    """A ceiling line present but unusable fails open to the default, and
+    the draft says so, so a meant ceiling that silently fell back is
+    visible (round-1 review of #717, m-5); with no line at all the draft
+    stays silent."""
+    (tmp_path / "unusable").mkdir()
+    unusable = run(
+        tmp_path / "unusable",
+        ["lens-1"],
+        [ScriptedLensModel([READ_ALL, final(lens="lens-1")])],
+        trees_=_mixed_trees(b"review_ceiling_usd: later\n", None),
+    )
+    draft = render_draft(unusable, Redactor())
+    assert "review_ceiling_usd" in draft
+    assert "ignored" in draft
+    assert unusable.coverage_complete
+
+    (tmp_path / "quiet").mkdir()
+    quiet = run(
+        tmp_path / "quiet",
+        ["lens-1"],
+        [ScriptedLensModel([READ_ALL, final(lens="lens-1")])],
+    )
+    assert "review_ceiling_usd" not in render_draft(quiet, Redactor())
 
 
 # ------------------------------------------------------- the limit stops
@@ -406,6 +507,110 @@ def test_a_derived_reservation_stops_the_review_under_a_repo_ceiling(tmp_path):
 
 
 # ------------------------------------------------- the scripted parity run
+
+
+def test_a_pool_of_concurrent_worst_case_first_calls_waits_not_stops(tmp_path):
+    """M-1's acceptance variant (round-1 review of #717): the scripted
+    per-call worst case is the recorded catalog's -- about $2.90, the
+    pinned Sonnet terms' output reserve priced at completion plus
+    reasoning -- so a 12-lens review at pool 4 projects concurrent worst
+    cases against the $10 clamped reservation. Each first turn holds its
+    worst case in flight briefly, the overflow waits for a settle instead
+    of stopping a lens, and the review completes with full coverage. The
+    deterministic kill for the revert-to-stop mutant is
+    `test_the_fourth_concurrent_reservation_waits_for_a_settle`."""
+    names = [f"lens-{i}" for i in range(1, 13)]
+    models = []
+    for name in names:
+        first = READ_ALL
+
+        def slow(request, _first=first):
+            time.sleep(0.2)
+            return _first
+
+        models.append(
+            ScriptedLensModel([slow, final(lens=name)], worst_usd=Decimal("2.90"))
+        )
+    result = run(
+        tmp_path,
+        names,
+        models,
+        limits=replace(LIMITS, pool_size=4, lens_wall_s=300, review_wall_s=600),
+    )
+    assert result.coverage_complete
+    assert result.model_calls == 24
+    assert all(lens.outcome.limit_hit is None for lens in result.lenses)
+    # Every call settled at $0.02; the reservations' worst cases came down
+    # as the turns completed, which is what the waits waited for.
+    assert Decimal(result.committed_usd) == Decimal("0.48")
+
+
+def test_the_fourth_concurrent_reservation_waits_for_a_settle():
+    """The deterministic pin of M-1's fix (round-1 review of #717): three
+    worst cases in flight against a $10 cap overflow the fourth
+    reservation, which waits for a settle instead of stopping -- and a
+    stop still comes when nothing in flight could free room. The mutant
+    that reverts to the immediate stop dies here: the fourth reserve is
+    refused while the settle is still held back."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    assert spend.reserve(Decimal("2.90")) is None
+    assert spend.reserve(Decimal("2.90")) is None
+    assert spend.reserve(Decimal("2.90")) is None
+    results: list[object] = []
+
+    def fourth():
+        results.append(
+            spend.reserve(Decimal("2.90"), clock=FakeClock(), wait_until=10**9)
+        )
+
+    waiting = threading.Thread(target=fourth)
+    waiting.start()
+    time.sleep(0.2)  # the fourth reservation is parked in its wait
+    spend.settle(Decimal("2.90"), Decimal("0.02"))
+    waiting.join(timeout=5)
+    assert results == [None]
+    assert spend.calls == 4
+    # 3 x $2.90 in flight, one settled to $0.02, then the fourth's $2.90.
+    assert spend.committed_usd == Decimal("8.72")
+
+
+def test_a_backpressure_wait_runs_out_at_the_wall():
+    """A wait bounded by the review wall stops at the wall: the projected
+    overflow is refused once the deadline has passed, and spend never
+    passes the ceiling."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    hit = spend.reserve(Decimal("2.90"), clock=FakeClock(start=1000), wait_until=900)
+    assert hit is not None
+    assert hit.limit == "reservation_usd"
+    assert spend.calls == 3
+
+
+def test_a_reservation_still_stops_when_nothing_in_flight_could_free_room(tmp_path):
+    """The backpressure's other half: when the settled spend plus the
+    call's own worst case cannot fit the ceiling even with nothing in
+    flight, the stop is immediate -- spend never passes the ceiling."""
+    models = [
+        ScriptedLensModel([READ_ALL, final()], worst_usd=Decimal("11.00")),
+        ScriptedLensModel([READ_ALL, final()], worst_usd=Decimal("11.00")),
+    ]
+    result = run(
+        tmp_path,
+        ["lens-1", "lens-2"],
+        models,
+        limits=replace(LIMITS, pool_size=2),
+    )
+    stopped = [
+        r
+        for r in result.lenses
+        if r.outcome is not None and r.outcome.limit_hit is not None
+    ]
+    assert stopped
+    assert stopped[0].outcome.limit_hit.limit == "reservation_usd"
+    assert not result.coverage_complete
 
 
 def test_a_twelve_lens_scripted_review_with_fifteen_turns_a_lens_finishes(tmp_path):

@@ -448,7 +448,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600). On `agentic-review`, unset raises it to the lens wall times the planned waves when that is higher (D68); a set value wins |
 | `ATLAS_PER_LENS_CALLS` | `agentic-review` | Per-lens model-call budget the review-wide call cap derives from (D68; default 50) |
 | `ATLAS_PER_LENS_USD` | `agentic-review` | Per-lens dollar budget the review-wide reservation derives from (D68; default 5) |
-| `ATLAS_REVIEW_CEILING_USD` | `agentic-review` | The absolute per-review dollar ceiling the derived reservation clamps to (D68; default 10). The reviewed repo's `REVIEW.md` may override it with a `review_ceiling_usd:` line |
+| `ATLAS_REVIEW_CEILING_USD` | `agentic-review` | The absolute per-review dollar ceiling the derived reservation clamps to (D68; default 10). The reviewed repo's merge-base `REVIEW.md` may override it with a `review_ceiling_usd:` line |
 | `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Consecutive turns that bring a lens nothing new -- no successful tool call the attempt has not made before, no new verified finding -- before one finalize nudge is injected, on the paged and the shared-prefix path alike (D58, D66; default 6) |
 | `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
 | `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
@@ -1126,7 +1126,18 @@ D41 records the 2026-11-12 probe that did.
   clamps the reservation even then; a limit stop names the derived
   values, the ceiling, the observed value and the knob. The reviewed
   repo's `REVIEW.md` may set the ceiling with a `review_ceiling_usd:`
-  line, read from the PR's base ref like the rest of that file's policy.
+  line, read from the merge-base tree the review already fetches — the
+  tree the PR branched from, not the base-ref tip — so a PR cannot move
+  its own ceiling, and a ceiling changed on the base tip takes effect
+  for pull requests branched after it. The clamp has one edge the
+  backpressure closes (round-1 review of #717, M-1): a pool of
+  concurrent first turns projects several worst-case reservations at
+  once, so a clamped reservation can be smaller than one wave's
+  worst-case reservations; a reservation that would pass the cap only on
+  other calls' in-flight worst cases waits, bounded by the review wall,
+  for one of them to settle instead of stopping its lens, and stops
+  outright only when the settled spend plus its own worst case cannot
+  fit even with nothing in flight. Spend never passes the ceiling.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*

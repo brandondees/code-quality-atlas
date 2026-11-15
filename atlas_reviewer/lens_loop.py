@@ -89,6 +89,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
@@ -457,6 +458,7 @@ class Derivation:
     calls_derived: bool
     reservation_derived: bool
     clamped: bool
+    ceiling_note: str = ""
 
     def calls_configured(self) -> str:
         """The configured value a `max_calls` stop names: the number, and
@@ -1028,6 +1030,13 @@ def retry_reasons(outcome: AttemptOutcome) -> tuple[str, ...]:
 
 # ----------------------------------------------------------------- spend
 
+# The in-flight backpressure's waits (round-1 review of #717, M-1): how
+# long one wake of the settle wait sleeps in real time, and the real-time
+# backstop on the whole wait for a clock that cannot advance. The bound
+# that matters is the caller's wall deadline on its own clock.
+BACKPRESSURE_SLICE_S = 0.05
+BACKPRESSURE_REAL_LIMIT_S = 10.0
+
 
 @dataclass
 class Spend:
@@ -1037,18 +1046,32 @@ class Spend:
     is not a cost, stays at its worst case. `derivation` carries D68's
     review-wide derivation when the coordinator derived this review's
     limits, and the two review-wide stops then name the derived values and
-    the ceiling."""
+    the ceiling.
+
+    A reservation that would pass the dollar cap only because other calls'
+    worst cases are still in flight waits, bounded by the review wall
+    (round-1 review of #717, M-1), for one of them to settle -- the pool's
+    concurrent first turns otherwise refused the last lens of a wave its
+    first call, the missing-lens failure. A reservation whose settled spend
+    plus its own worst case cannot fit even with nothing in flight still
+    stops, and a wait that runs out of wall stops too: spend never passes
+    the cap."""
 
     limits: Limits
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
     derivation: Derivation | None = None
+    settled_usd: Decimal = Decimal(0)
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
     _halted: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False, compare=False
     )
+    _settled: threading.Condition = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self._settled = threading.Condition(self._lock)
 
     @property
     def halted(self) -> bool:
@@ -1057,21 +1080,72 @@ class Spend:
         return self._halted.is_set()
 
     def halt(self) -> None:
-        self._halted.set()
-
-    def reserve(self, worst_usd: Decimal) -> LimitHit | None:
         with self._lock:
-            return self._reserve(worst_usd)
+            self._halted.set()
+            self._settled.notify_all()
 
-    def _reserve(self, worst_usd: Decimal) -> LimitHit | None:
+    def reserve(
+        self,
+        worst_usd: Decimal,
+        *,
+        clock: Clock | None = None,
+        wait_until: float | None = None,
+    ) -> LimitHit | None:
+        """Reserve the call's worst case, or return the limit that refused
+        it. `clock` and `wait_until` enable the in-flight backpressure:
+        the caller's wall deadline bounds the wait."""
+        with self._lock:
+            return self._reserve(worst_usd, clock, wait_until)
+
+    def _reserve(
+        self,
+        worst_usd: Decimal,
+        clock: Clock | None,
+        wait_until: float | None,
+    ) -> LimitHit | None:
         if self.calls >= self.limits.max_calls:
             return self._calls_stop()
+        cap = self.limits.reservation_usd
         projected = self.committed_usd + worst_usd
-        if projected > self.limits.reservation_usd:
-            return self._reservation_stop(projected)
+        if projected > cap:
+            if self.settled_usd + worst_usd > cap:
+                # Even with nothing in flight this call cannot fit: the
+                # genuine stop.
+                return self._reservation_stop(projected)
+            if clock is None or wait_until is None:
+                return self._reservation_stop(projected)
+            self._wait_for_settle(worst_usd, clock, wait_until)
+            projected = self.committed_usd + worst_usd
+            if projected > cap:
+                # Out of wait: either the wall ran out with settles still
+                # owing, or the review halted. Spend never passes the cap.
+                return self._reservation_stop(projected)
         self.calls += 1
         self.committed_usd += worst_usd
         return None
+
+    def _wait_for_settle(
+        self, worst_usd: Decimal, clock: Clock, wait_until: float
+    ) -> None:
+        """Wait for an in-flight call to settle, until the wall deadline
+        passes. A settle (or a halt) wakes the wait; each wake re-checks
+        the room under the held lock. The wall deadline is on `clock`'s
+        scale, and a real-time backstop bounds the wait when a clock
+        cannot advance -- a stopped test clock, or a clock that lies --
+        so a wait cannot outlive the review that waits in it."""
+        real_deadline = time.monotonic() + BACKPRESSURE_REAL_LIMIT_S
+        while True:
+            if self._halted.is_set():
+                return
+            if self.committed_usd + worst_usd <= self.limits.reservation_usd:
+                return
+            if self.settled_usd + worst_usd > self.limits.reservation_usd:
+                return
+            if clock.monotonic() >= wait_until:
+                return
+            if time.monotonic() >= real_deadline:
+                return
+            self._settled.wait(BACKPRESSURE_SLICE_S)
 
     def _calls_stop(self) -> LimitHit:
         """The call cap's stop. With D68's derivation the configured value
@@ -1105,9 +1179,18 @@ class Spend:
         )
 
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
+        """Settle a sent call: to its reported cost when that is a cost,
+        else to its reservation, kept as spent (D43) -- a call that will
+        never report an actual is not in flight waiting to come down.
+        Every settle frees the in-flight worst case the reservation held
+        and wakes the backpressure waits."""
         with self._lock:
             if _valid_cost(actual_usd):
                 self.committed_usd += actual_usd - worst_usd
+                self.settled_usd += actual_usd
+            else:
+                self.settled_usd += worst_usd
+            self._settled.notify_all()
 
 
 def _valid_cost(value: Any) -> bool:
@@ -1407,7 +1490,9 @@ def run_attempt(
             # completion span names it.
             request, retry_request = retry_request, None
             note_timeout_retry()
-        priced = _reserve_call(model, request, spend)
+        priced = _reserve_call(
+            model, request, spend, clock, min(lens_deadline, review_deadline)
+        )
         if not isinstance(priced, Decimal):
             return p.cut(*priced)
         worst = priced
@@ -1415,16 +1500,24 @@ def run_attempt(
         try:
             reply = model.turn(request)
         except LimitRefused as exc:
+            # The turn completed at the output cap: billed, kept at its
+            # reservation.
+            spend.settle(worst, None)
             return p.cut(*_stopped(exc.hit))
         except ByokRefusedError as exc:
             # The refusal still leaves the loop. The turns and tool calls
             # already completed travel with it, so the ledger records them.
             # No other lens in this review makes another model call.
+            spend.settle(worst, None)
             spend.halt()
             exc.turns = p.turns
             exc.tools = tuple(p.tools)
             raise
         except TransportTimeoutError as first:
+            # The timed-out request keeps its full reservation as spent
+            # (D58 item 5); it may still have been billed, and it will
+            # never report an actual, so it is not in flight.
+            spend.settle(worst, None)
             if not _retry_earned(
                 request, retried_request, model, clock, lens_deadline,
                 review_deadline,
@@ -1434,8 +1527,10 @@ def run_attempt(
             retry_request = request
             continue
         except TransportError as exc:
+            spend.settle(worst, None)
             return p.cut(Cause.TRANSPORT_ERROR, str(exc))
         except BoundaryError as exc:
+            spend.settle(worst, None)
             return p.cut(_refusal_cause(exc), str(exc))
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
@@ -1538,9 +1633,15 @@ def _room_for_one_more_timeout(
 
 
 def _reserve_call(
-    model: LensModel, request: TurnRequest, spend: Spend
+    model: LensModel,
+    request: TurnRequest,
+    spend: Spend,
+    clock: Clock,
+    wait_until: float,
 ) -> Decimal | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
-    """The call's reserved worst case, or why it is not sent."""
+    """The call's reserved worst case, or why it is not sent. The
+    reservation may wait, bounded by `wait_until` on `clock`, for an
+    in-flight call to settle (round-1 review of #717, M-1)."""
     if spend.halted:
         return Cause.MODEL_ERROR, HALTED_CALL
     try:
@@ -1556,7 +1657,7 @@ def _reserve_call(
         return Cause.MODEL_ERROR, HALTED_CALL
     if not _valid_cost(worst):
         return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
-    refused = spend.reserve(worst)
+    refused = spend.reserve(worst, clock=clock, wait_until=wait_until)
     if refused is not None:
         return _stopped(refused)
     return worst

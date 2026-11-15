@@ -113,6 +113,7 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
@@ -708,6 +709,16 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         if not isinstance(ref, str) or not ref:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
+        # The derivation's refusals are planned-count independent (D68;
+        # round-1 review of #717, m-3): validate them here, before the
+        # picker can spend, so a misconfiguration is a clean usage error
+        # and not a traceback after a billed picker call.
+        try:
+            derive_review_wide(
+                limits, 1, repo_ceiling=review_md_ceiling(trees.base).value
+            )
+        except ValueError as exc:
+            raise UsageError(str(exc)) from exc
         library = LensLibrary()
         depth = Depth(args.depth)
         # The PR body decides only whether the process-hygiene lens is

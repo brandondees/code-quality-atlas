@@ -17,13 +17,25 @@ planned lens count, so scaling the review scales its limits:
   review that stops because its limits were not scaled is the
   missing-lens failure this exists to prevent.
 
-The ceiling is the runaway guard, not a budget: limits only stop
-runaway loops and costly failures, and never size a review cheaper
-than thoroughness needs. Its default is $10
+The ceiling is the runaway guard, not a budget -- with one qualification
+the clamp forces (round-1 review of #717, M-1): the reservation bounds
+the review's worst-case *projections*, and a pool of concurrent first
+turns projects several worst cases at once, so a clamped reservation can
+be smaller than one wave's worst-case reservations. It does not stop a
+lens for that: `Spend.reserve` waits, bounded by the review wall, for an
+in-flight call to settle, and only stops when the settled spend plus the
+call's own worst case cannot fit even with nothing in flight. Total
+spend never passes the ceiling. What the limits never do is size a
+review cheaper than thoroughness needs. The default ceiling is $10
 (`DEFAULT_REVIEW_CEILING_USD`); `ATLAS_REVIEW_CEILING_USD` or
 `--review-ceiling-usd` sets it for the deployment, and the reviewed
-repo's own `REVIEW.md` (read from the PR's base ref, like the rest of
-that file's policy) overrides both with a `review_ceiling_usd:` line.
+repo's own `REVIEW.md` overrides both with a `review_ceiling_usd:` line,
+read from the **merge-base** tree the review already fetches -- the tree
+the PR branched from, not the base-ref tip -- so a PR cannot raise or
+lower its own ceiling, and a ceiling the repo changes on the base tip
+takes effect for pull requests branched after it. A line that is present
+but not a positive dollar amount fails open to the default, with a note
+the draft carries so it can be told apart from no line at all.
 The resolution is one pure function (`resolve_ceiling`) that takes the
 configured value and the repo override and returns the ceiling: a later
 per-run policy adjusts the ceiling by computing the value it passes
@@ -43,7 +55,7 @@ from __future__ import annotations
 import io
 import re
 import tarfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 
 from atlas_reviewer.lens_loop import (
@@ -65,9 +77,17 @@ DEFAULT_REVIEW_CEILING_USD = Decimal("10.00")
 
 # The `REVIEW.md` line the reviewed repo sets its ceiling with. The value
 # runs to a `#` comment or the end of the line, as the file's other
-# settings do.
-CEILING_LINE = re.compile(r"^review_ceiling_usd:\s*(\S+?)\s*(?:#.*)?$")
+# settings do; a bare `review_ceiling_usd:` with no value matches too --
+# a line present with nothing usable in it.
+CEILING_LINE = re.compile(r"^review_ceiling_usd:(?:[ \t]+([^#]*?))?[ \t]*(?:#.*)?$")
 REVIEW_MD = "REVIEW.md"
+# What a seen-but-unusable ceiling line says (round-1 review of #717,
+# m-5): the fail-open fallback is not silent.
+_UNUSABLE_NOTE = (
+    f"the reviewed repo's merge-base {REVIEW_MD} carries a "
+    "review_ceiling_usd: line that is not a positive dollar amount; it is "
+    "ignored and the configured ceiling stands"
+)
 # Bound the file the ceiling line is read from, as `quotes` bounds the
 # files it checks.
 MAX_CHECKED_BYTES = 64 * 1024
@@ -88,16 +108,20 @@ def resolve_ceiling(
     return DEFAULT_REVIEW_CEILING_USD
 
 
-def review_md_ceiling(base_tarball: bytes) -> Decimal | None:
-    """The reviewed repo's `review_ceiling_usd:` line in its base-ref
-    `REVIEW.md` (D68), or None. The base ref governs, as the file's own
-    policy states, so a PR cannot raise or lower its own ceiling. A
-    tarball that fails the fail-closed archive check, a missing file, a
-    file over the read bound, or a value that is not a positive dollar
-    amount all leave None: the default stands, and an unparseable
-    override is never an error."""
+def review_md_ceiling(base_tarball: bytes) -> CeilingRead:
+    """The reviewed repo's `review_ceiling_usd:` line in its **merge-base**
+    `REVIEW.md` (D68) -- the base tarball the review already fetches, the
+    tree the PR branched from, not the base-ref tip; a ceiling the repo
+    changes on the base tip takes effect for pull requests branched after
+    it, and a PR cannot raise or lower its own ceiling either way. A
+    tarball that fails the fail-closed archive check, a missing file, or
+    no ceiling line read as `CeilingRead(None, "")` -- the default stands,
+    silently, exactly as no override at all. A line that is present but
+    not a positive dollar amount, more than one, or a file over the read
+    bound read as `CeilingRead(None, note)`: the default still stands,
+    fail-open, and the note says the line was seen and ignored."""
     if not base_tarball or refused_archive(base_tarball) is not None:
-        return None
+        return CeilingRead(None, "")
     try:
         with tarfile.open(fileobj=io.BytesIO(base_tarball), mode="r:gz") as archive:
             for member in archive:
@@ -112,31 +136,57 @@ def review_md_ceiling(base_tarball: bytes) -> Decimal | None:
                     # A file past the read bound is not parsed cut: a
                     # truncation inside the value could read as a number
                     # it is not. Unparseable, so the default stands.
-                    return None
+                    return CeilingRead(
+                        None,
+                        f"the reviewed repo's merge-base {REVIEW_MD} is over the "
+                        f"{MAX_CHECKED_BYTES}-byte read bound, so its "
+                        "review_ceiling_usd: line, if any, was not read; the "
+                        "configured ceiling stands",
+                    )
                 return _ceiling_value(data.decode("utf-8", errors="replace"))
     except (tarfile.TarError, OSError, EOFError):
-        return None
-    return None
+        return CeilingRead(None, "")
+    return CeilingRead(None, "")
 
 
-def _ceiling_value(text: str) -> Decimal | None:
-    """The `review_ceiling_usd:` line's value, or None. One line, one
-    value; anything else -- no line, more than one, a non-number, zero or
-    less -- leaves None."""
+@dataclass(frozen=True)
+class CeilingRead:
+    """What the reviewed repo's merge-base `REVIEW.md` said about the
+    ceiling: `value` is the override, None when there is none; `note` is
+    controller text, non-empty only when a ceiling line was seen and
+    ignored, so "line present but unusable" can be told apart from "no
+    line" (round-1 review of #717, m-5)."""
+
+    value: Decimal | None
+    note: str
+
+
+def _ceiling_value(text: str) -> CeilingRead:
+    """The `review_ceiling_usd:` line's value. One line, one value; no
+    line reads as absent (empty note); a line that is present but not a
+    positive dollar amount -- or more than one -- reads as unusable, with
+    the note that says so."""
     found: Decimal | None = None
+    seen_line = False
     for line in text.splitlines():
         match = CEILING_LINE.match(line)
         if match is None:
             continue
         if found is not None:
-            return None
+            return CeilingRead(None, _UNUSABLE_NOTE)
+        seen_line = True
+        raw = match.group(1)
+        if raw is None or not raw.strip():
+            return CeilingRead(None, _UNUSABLE_NOTE)
         try:
-            found = Decimal(match.group(1))
+            found = Decimal(raw)
         except InvalidOperation:
-            return None
+            return CeilingRead(None, _UNUSABLE_NOTE)
     if found is None or not found.is_finite() or found <= 0:
-        return None
-    return found
+        if seen_line:
+            return CeilingRead(None, _UNUSABLE_NOTE)
+        return CeilingRead(None, "")
+    return CeilingRead(found, "")
 
 
 def derive_review_wide(
@@ -145,6 +195,7 @@ def derive_review_wide(
     picker_calls: int = 0,
     picker_usd: Decimal = Decimal(0),
     repo_ceiling: Decimal | None = None,
+    repo_ceiling_note: str = "",
 ) -> tuple[Limits, Derivation]:
     """The review-wide limits a multi-lens review runs on (D68), derived
     from `limits`' per-lens values and `planned_lenses`, with the picker's
@@ -159,7 +210,10 @@ def derive_review_wide(
     clamped to the ceiling, which is absolute. A derived call budget below
     the per-lens turn cap is refused before any lens runs: the limits
     guard against runaway loops and costly failures, never against
-    thoroughness."""
+    thoroughness. Every refusal this function can raise is planned-count
+    independent -- the same refusal a one-planned-lens derivation raises
+    -- so a caller can validate before its picker spends (round-1 review
+    of #717, m-3)."""
     resolved = limits.resolve(cross_limits=False)
     if (
         isinstance(planned_lenses, bool)
@@ -220,5 +274,6 @@ def derive_review_wide(
         calls_derived=calls_derived,
         reservation_derived=reservation_derived,
         clamped=clamped,
+        ceiling_note=repo_ceiling_note,
     )
     return derived, record

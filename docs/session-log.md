@@ -1759,4 +1759,44 @@ the $10 ceiling on a one-lens review no longer reads as "the ceiling is
 above it". And a `REVIEW.md` over the 64 KiB read bound is unparseable
 rather than parsed cut, so a truncation inside the value cannot read as
 a number it is not. All three are pinned in `test_review_wide.py`.
-n
+
+## 2026-11-15 — round-1 fixes for #717: the in-flight backpressure, the merge-base ceiling, and the refusal's exit path
+
+The round-1 protocol review of #717 came back COMMENT (1 Major, 5 Minor,
+2 Nit). The Major was the clamp's own edge: with the recorded catalog
+terms a Sonnet call's worst-case reservation is about $2.72-$2.90, so at
+defaults a 12-lens review at pool 4 projects four concurrent first-turn
+worst cases ($11.60) against the $10 clamped reservation, and the fourth
+lens's first call took a non-retryable BUDGET stop — the missing-lens
+failure this slice exists to close, now from the clamp instead of the
+flat cap. `Spend` now separates settled spend from in-flight worst cases
+(`settled_usd`; every sent call settles, to its actual when that is a
+cost and to its reservation kept as spent when it is not — D43's rule,
+now also the timed-out and failed paths), and a reservation that would
+pass the cap only because of other calls' in-flight worst cases waits,
+bounded by the review wall, for one of them to settle instead of
+stopping; it stops outright only when the settled spend plus its own
+worst case cannot fit even with nothing in flight, or the wall runs out,
+and spend never passes the ceiling. The picker's committed dollars are
+settled from the start. The acceptance variant runs 12 lenses at pool 4
+with the scripted worst case at $2.90 — it completes with full coverage —
+and the deterministic kill for the revert-to-stop mutant is a unit test
+that parks a fourth reservation against three in-flight worst cases and
+settles one under it. The REVIEW.md ceiling is now stated as read from
+the **merge-base** tree the review already fetches — the tree the PR
+branched from, not the base-ref tip, which the code always read and the
+docs overstated — with a coordinator test pinning that the merge-base
+copy governs and a head copy does not; a seen-but-unusable ceiling line
+still fails open but now carries a note through `Derivation` and the
+draft's Model calls line, so a meant ceiling that silently fell back is
+visible; the derivation's refusals are planned-count independent and the
+CLI validates them before the picker spends, exiting EXIT_USAGE instead
+of trace-backing after a billed picker call; the wave count gained its
+non-multiple case (7 lenses at pool 4 derive 2 waves, killing the
+ceil-division mutant the review found alive); D68 now carries an "amends
+D55" clause for the coordinator's REVIEW.md read, D55 an appended
+Correction, and the record that the #654 retry composition's per-lens
+call share is a conscious acceptance; and the "the ceiling is never a
+budget" prose now describes what actually binds — settled spend plus a
+call's own worst case against the ceiling, with in-flight waits in
+between. Offline only.

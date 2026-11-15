@@ -211,6 +211,12 @@ class AgenticReview:
     other_pull_requests: int = 0
     trace_id: str = ""
     round_log_note: str = ""
+    ceiling_note: str = ""
+    """Controller text about the review's dollar ceiling (D68), non-empty
+    only when the reviewed repo's merge-base REVIEW.md carried a
+    `review_ceiling_usd:` line that could not be used (round-1 review of
+    #717, m-5), so a meant ceiling that silently fell back to the default
+    is visible in the draft."""
 
     @property
     def unreviewed_paths(self) -> tuple[str, ...]:
@@ -323,6 +329,7 @@ def synthesize(
     flagged: Sequence[str] = (),
     context_omissions: Sequence[Omission] = (),
     other_pull_requests: int = 0,
+    ceiling_note: str = "",
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -336,6 +343,7 @@ def synthesize(
         tuple(dict.fromkeys(flagged)),
         context_omissions=tuple(context_omissions),
         other_pull_requests=other_pull_requests,
+        ceiling_note=ceiling_note,
     )
 
 
@@ -495,16 +503,19 @@ def review_lenses(
 
     D68: the review-wide limits are derived from the planned lens count
     (`len(lenses)`) and the picker's committed spend, under the absolute
-    per-review dollar ceiling -- the reviewed repo's `REVIEW.md` value
-    when it sets one, else the configured ceiling, else the default. The
-    derivation happens before any lens runs, so a configuration it
-    refuses stops the review before any model call."""
+    per-review dollar ceiling -- the reviewed repo's merge-base `REVIEW.md`
+    value when it sets one, else the configured ceiling, else the default.
+    The derivation happens before any lens runs, so a configuration it
+    refuses stops the review before any lens runs; the CLI validates the
+    same refusals before its picker spends (round-1 review of #717, m-3)."""
+    read = review_md_ceiling(trees.base)
     derived, derivation = derive_review_wide(
         limits,
         len(lenses),
         picker_spend[0],
         picker_spend[1],
-        repo_ceiling=review_md_ceiling(trees.base),
+        repo_ceiling=read.value,
+        repo_ceiling_note=read.note,
     )
     return _traced_review(
         event,
@@ -580,7 +591,16 @@ def _review_lenses(
     fence_nonce = nonce()
     # `resolved` is D68's derived review-wide limits: the Spend and the
     # review deadline run on them, and a limit stop names their derivation.
-    spend = Spend(resolved, *picker_spend, derivation=derivation)
+    # The picker's committed dollars are settled spend -- real dollars, not
+    # a worst case waiting to come down -- so the in-flight backpressure
+    # does not wait on them.
+    spend = Spend(
+        resolved,
+        picker_spend[0],
+        picker_spend[1],
+        derivation=derivation,
+        settled_usd=picker_spend[1],
+    )
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []
@@ -680,6 +700,7 @@ def _review_lenses(
         flagged,
         context_omissions=omissions,
         other_pull_requests=other_pull_requests,
+        ceiling_note=derivation.ceiling_note,
     )
     return _record_round(
         round_log, event, replace(review, changed=changed, runners=reports), redactor
@@ -1249,6 +1270,10 @@ def render_draft(
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    if review.ceiling_note:
+        # Controller text about the ceiling (D68): no PR data in it, so it
+        # needs no quoting.
+        lines.append(review.ceiling_note)
     if cache:
         lines += ["", "## Prompt cache", ""]
         lines += _cache_lines(cache, scrub)
