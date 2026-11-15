@@ -16,6 +16,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import BridgeResult, SessionLimits, Status, run_bridge
 from atlas_reviewer.bridge_args import TOOLS, RejectedError, Rev, validate
+from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
 from atlas_reviewer.lens_loop import (
@@ -46,6 +47,7 @@ from atlas_reviewer.ports import (
     TransportError,
     TransportTimeoutError,
 )
+from atlas_reviewer.pricing import PricingUnknownError
 from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
@@ -176,6 +178,60 @@ def test_a_halt_while_the_call_is_priced_stops_the_call():
     assert Cause.MODEL_ERROR in outcome.causes
     assert model.requests == []
     assert spend.calls == 0
+
+
+def test_a_zdr_refusal_while_pricing_is_its_own_cause_and_not_retried():
+    """Issue #664: an agentic ZDR or pricing refusal was labeled
+    `MODEL_ERROR`, so a report and the parity gate could not tell a policy
+    refusal the provider raised before any request from a model failure.
+    The refusal has its own cause, still fails the lens, and is still not
+    retried."""
+
+    class Model:
+        name = "zdr-refused"
+
+        def worst_case_usd(self, request):
+            raise BudgetRefusedError(
+                "refusing inference: no eligible zero-data-retention endpoint"
+            )
+
+        def turn(self, request):
+            raise AssertionError("a refused call is not sent")
+
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), Model(), Spend(LIMITS.resolve()), clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_REFUSED in outcome.causes
+    assert Cause.MODEL_ERROR not in outcome.causes
+    assert outcome.state is LensState.FAILED
+    assert not outcome.retryable
+    assert "zero-data-retention" in outcome.detail
+
+
+def test_a_pricing_refusal_on_the_turn_is_its_own_cause():
+    class Model:
+        name = "pricing-refused"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise PricingUnknownError("endpoint row 0 has no pricing object")
+
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), Model(), Spend(LIMITS.resolve()), clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_REFUSED in outcome.causes
+    assert Cause.MODEL_ERROR not in outcome.causes
+    assert outcome.state is LensState.FAILED
+    assert not outcome.retryable
+    assert "no pricing object" in outcome.detail
 
 
 def test_concurrent_reservations_never_pass_the_call_cap():

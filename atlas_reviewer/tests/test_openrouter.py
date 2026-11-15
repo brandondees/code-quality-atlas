@@ -29,7 +29,12 @@ from atlas_reviewer.openrouter import (
     OpenRouterProvider,
     model_route,
 )
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    TransportError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.pricing import (
     PricingUnknownError,
     parse_key_status,
@@ -600,6 +605,57 @@ def test_a_non_200_zdr_list_and_a_timeout_send_no_completion():
     with pytest.raises(BoundaryError, match="timed out"):
         waiting.complete(SMALL)
     assert timed.chat_requests() == []
+
+
+@pytest.mark.parametrize("failure", [TransportTimeoutError, TransportError])
+def test_a_zdr_list_transport_failure_is_recorded_as_a_refusal(failure):
+    """Issue #664: a ZDR-list transport timeout fails closed -- no
+    completion is sent -- but it was not recorded in `budget.refusals`, so
+    the budget report did not say why no call was made."""
+
+    class Timeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if str(url).endswith("/endpoints/zdr"):
+                self.requests.append((method, url, dict(headers), body))
+                raise failure(
+                    "GET https://openrouter.ai/api/v1/endpoints/zdr failed: timed out"
+                )
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    timed = Timeout(reply(completion()))
+    waiting = provider(timed)
+    with pytest.raises(BoundaryError, match="timed out"):
+        waiting.complete(SMALL)
+    assert timed.chat_requests() == []
+    assert waiting.budget.calls == []
+    assert waiting.budget.refusals == [
+        "GET https://openrouter.ai/api/v1/endpoints/zdr failed: timed out"
+    ]
+
+
+def test_a_catalog_transport_timeout_is_recorded_as_a_refusal():
+    """Issue #664: the `/model` catalog GET has the same gap as the ZDR
+    list -- it fails closed without a recorded refusal."""
+
+    class CatalogTimeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if "/model/" in str(url):
+                self.requests.append((method, url, dict(headers), body))
+                raise TransportTimeoutError(
+                    "GET https://openrouter.ai/api/v1/model/"
+                    f"{MODEL_ID} failed: timed out"
+                )
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    timed = CatalogTimeout(reply(completion()))
+    waiting = provider(timed)
+    with pytest.raises(TransportTimeoutError, match="timed out"):
+        waiting.complete(SMALL)
+    assert timed.chat_requests() == []
+    assert waiting.budget.calls == []
+    assert waiting.budget.refusals == [
+        f"GET https://openrouter.ai/api/v1/model/{MODEL_ID} failed: timed out"
+    ]
 
 
 def test_max_tokens_is_sent_when_the_endpoint_does_not_advertise_it():
