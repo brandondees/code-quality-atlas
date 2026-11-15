@@ -8,6 +8,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,8 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     CLEANUP_BUDGET_S,
+    CREATE_RETRY_AFTER_CAP_S,
+    DEFAULT_CREATE_RETRIES,
     FIRST_FRAME_BUDGET_S,
     PROBE_BUDGET_S,
     PROBE_TAG,
@@ -59,7 +62,7 @@ from atlas_reviewer.runner import (
     sweep,
 )
 from atlas_reviewer.source_archive import UnpackLimits
-from atlas_reviewer.telemetry import Telemetry
+from atlas_reviewer.telemetry import ERROR, Telemetry
 
 from .helpers import SOURCE_TARBALL, CallbackRule, FakeClock, fake_token, source_tarball
 
@@ -308,10 +311,13 @@ def test_a_rate_limited_create_is_retried_and_then_runs(monkeypatch):
     report = run(api, MemoryLedger()).report
     assert report.status is RunnerStatus.COMPLETED, report.note
     assert ops(api)[:2] == ["create", "create"]
-    assert len(slept) == 1 and 0.5 <= slept[0] <= 1.0
+    assert len(slept) == 1 and 1.0 <= slept[0] <= 2.0
 
 
-def test_a_create_that_stays_rate_limited_gives_up_after_three_waits(monkeypatch):
+def test_a_create_that_stays_rate_limited_gives_up_after_its_waits(monkeypatch):
+    """The default schedule waits six times, doubling from 2s capped at
+    60s -- about two minutes, not the 7s the three waits of #636's day
+    spent before giving up (#690)."""
     slept = []
     monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
 
@@ -323,8 +329,169 @@ def test_a_create_that_stays_rate_limited_gives_up_after_three_waits(monkeypatch
     api = Always(rules=OK_RULES)
     with pytest.raises(CreateRefusedError, match="refused to create"):
         run(api, MemoryLedger())
-    assert ops(api) == ["create"] * 4
-    assert len(slept) == 3
+    assert ops(api) == ["create"] * (DEFAULT_CREATE_RETRIES + 1)
+    assert len(slept) == DEFAULT_CREATE_RETRIES
+    assert slept[0] <= 2.0 and 30.0 <= slept[-1] <= 60.0
+
+
+def test_a_retry_after_the_server_names_is_honored_over_the_schedule(monkeypatch):
+    """A 429 carrying Retry-After is waited at least that long, whatever
+    the schedule's own wait would have been."""
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Told(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT", retry_after=45.0)
+
+    api = Told(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError, match="refused to create"):
+        run(api, MemoryLedger())
+    assert len(slept) == DEFAULT_CREATE_RETRIES
+    assert all(wait >= 45.0 for wait in slept)
+
+
+def test_a_retry_after_is_capped_so_one_value_cannot_park_the_deadline(monkeypatch):
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Told(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT", retry_after=10_000.0)
+
+    api = Told(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError, match="refused to create"):
+        run_disposable(
+            api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, TOOLS),
+            name=NAME, deadline_s=600.0, clock=FakeClock(),
+        )  # fmt: skip
+    assert slept == [CREATE_RETRY_AFTER_CAP_S] * DEFAULT_CREATE_RETRIES
+
+
+def test_a_retry_after_past_the_deadline_starts_no_create(monkeypatch):
+    """A Retry-After longer than the runner has left is truncated to what
+    is left, and the deadline check ends the run before another create."""
+    clock = FakeClock()
+    slept = []
+    monkeypatch.setattr(
+        "atlas_reviewer.runner._sleep",
+        lambda seconds: (slept.append(seconds), clock.advance(seconds)),
+    )
+
+    class Told(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT", retry_after=90.0)
+
+    api = Told(rules=OK_RULES)
+    outcome = run_disposable(
+        api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, TOOLS),
+        name=NAME, deadline_s=60.0, clock=clock,
+    )  # fmt: skip
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert ops(api) == ["create"]
+    assert slept == [60.0]
+
+
+def test_a_rate_limited_create_names_its_waits_and_its_give_up_in_telemetry(
+    monkeypatch,
+):
+    clock = FakeClock()
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", clock.advance)
+    telemetry = Telemetry(clock)
+
+    class Always(FakeSprites):
+        def create(self, name):
+            self._record("create", name)
+            raise RateLimitedError("Sprites HTTP 429 for PUT", retry_after=30.0)
+
+    api = Always(rules=OK_RULES)
+    with pytest.raises(CreateRefusedError):
+        run_disposable(
+            api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, TOOLS),
+            name=NAME, deadline_s=600.0, clock=clock, telemetry=telemetry,
+        )  # fmt: skip
+    waits = [
+        e for e in telemetry.events if e.phase == "create" and e.step == "rate limited"
+    ]
+    assert [e.fields["attempt"] for e in waits] == list(
+        range(1, DEFAULT_CREATE_RETRIES + 1)
+    )
+    assert all(e.fields["retry_after_s"] == 30.0 for e in waits)
+    assert all(e.fields["wait_s"] == 30.0 for e in waits)
+    gave_up = [
+        e for e in telemetry.events if e.phase == "create" and e.step == "gave up"
+    ]
+    assert len(gave_up) == 1
+    assert gave_up[0].status is ERROR
+    assert "429" in gave_up[0].error
+
+
+def test_a_create_gate_limits_how_many_creates_run_at_once():
+    """The #690 runs of 2026-11-14 had about 12 pooled lenses creating
+    Sprites together; with a gate of one, the second create waits its turn
+    and its telemetry names the wait."""
+    gate = threading.BoundedSemaphore(1)
+    entered = threading.Event()
+    release = threading.Event()
+    seen = []
+    lock = threading.Lock()
+
+    class One(FakeSprites):
+        def create(self, name):
+            with lock:
+                seen.append(name)
+            entered.set()
+            release.wait(_SYNC_WAIT_S)
+            FakeSprites.create(self, name)
+
+    api = One(rules=OK_RULES)
+    reports = {}
+
+    def start(name, telemetry=None):
+        reports[name] = run_session(
+            api, MemoryLedger(), lambda session: "ok",
+            name=name, deadline_s=60.0, clock=SystemClock(), create_gate=gate,
+            telemetry=telemetry,
+        )  # fmt: skip
+
+    first = threading.Thread(target=start, args=(NAME,))
+    second_telemetry = Telemetry(SystemClock())
+    second = threading.Thread(target=start, args=(NAME + "-b", second_telemetry))
+    first.start()
+    assert entered.wait(_SYNC_WAIT_S)
+    second.start()
+    time.sleep(0.3)
+    with lock:
+        assert seen == [NAME], seen
+    release.set()
+    first.join(_SYNC_WAIT_S)
+    second.join(_SYNC_WAIT_S)
+    assert not first.is_alive() and not second.is_alive()
+    assert seen == [NAME, NAME + "-b"]
+    assert reports[NAME].status is RunnerStatus.COMPLETED
+    assert reports[NAME + "-b"].status is RunnerStatus.COMPLETED
+    queued = [
+        e
+        for e in second_telemetry.events
+        if e.phase == "create" and e.step == "waited for a create slot"
+    ]
+    assert len(queued) == 1 and queued[0].fields["waited_s"] >= 0.1
+
+
+def test_a_create_slot_that_never_frees_degrades_before_any_create():
+    gate = threading.BoundedSemaphore(1)
+    gate.acquire()
+    ledger = MemoryLedger()
+    outcome = run_session(
+        FakeSprites(rules=OK_RULES), ledger, lambda session: "ok",
+        name=NAME, deadline_s=0.5, clock=SystemClock(), create_gate=gate,
+    )  # fmt: skip
+    assert outcome.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.cleanup is CleanupStatus.NOT_CREATED
+    assert ledger.pending() == ()
 
 
 def test_a_plain_refusal_on_a_retry_is_final(monkeypatch):

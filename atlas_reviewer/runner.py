@@ -155,6 +155,22 @@ PYTHON_BINARY = "python3"
 MINIMAL_ENV = ("PATH=/usr/bin:/bin", "HOME=/tmp", "LANG=C.UTF-8")
 STDIN_CHECK_BYTES = 3 * 1024 * 1024
 _FRAMING_BYTES = dict.fromkeys(range(0x05))
+# How a refused create is retried (#636, #690): Sprites answers 429 when
+# several creates arrive together, so the waits double from 2s and are
+# capped at 60s -- `DEFAULT_CREATE_RETRIES` waits spend about two minutes
+# before the create gives up, against the old three waits of 1, 2 and 4s
+# that gave up inside seven. The runner's deadline bounds it sooner. A
+# Retry-After the server names is honored up to `CREATE_RETRY_AFTER_CAP_S`,
+# so one huge value cannot park a lens's whole deadline in a single wait.
+CREATE_BACKOFF_BASE_S = 2.0
+CREATE_BACKOFF_MAX_S = 60.0
+CREATE_RETRY_AFTER_CAP_S = 120.0
+DEFAULT_CREATE_RETRIES = 6
+# How many creates one review may have in flight at once. The 2026-11-14
+# trials saw about 12 Sprites starting together draw 429s the short backoff
+# could not wait out; the coordinator passes a gate of this size
+# (`ATLAS_CREATE_CONCURRENCY`), so the burst is spread instead.
+DEFAULT_CREATE_CONCURRENCY = 4
 
 
 class DeadlineExceededError(RuntimeError):
@@ -373,6 +389,8 @@ class _Run:
     first_frame_s: float = FIRST_FRAME_BUDGET_S
     create: _Create = field(default_factory=_Create)
     exec_lock: threading.Lock = field(default_factory=threading.Lock)
+    create_retries: int = DEFAULT_CREATE_RETRIES
+    create_gate: threading.Semaphore | None = None
 
 
 @dataclass(frozen=True)
@@ -412,7 +430,9 @@ def lens_runner_name(event: PrEvent, lens: str) -> str:
     return f"{event_runner_name(event)}-{extra}"
 
 
-_CREATE_BACKOFF_S = (1.0, 2.0, 4.0)
+# A slot wait is only noted in telemetry once it took this long: a gate
+# with room records nothing.
+_QUEUED_NOTE_S = 0.1
 
 
 def _sleep(seconds: float) -> None:
@@ -709,10 +729,15 @@ def _disposable(
     clock: Clock,
     telemetry: Telemetry,
     first_frame_s: float,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
+    create_gate: threading.Semaphore | None = None,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
-    run = _Run(api, name, deadline, telemetry, first_frame_s)
+    run = _Run(
+        api, name, deadline, telemetry, first_frame_s,
+        create_retries=create_retries, create_gate=create_gate,
+    )  # fmt: skip
     destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
     telemetry.record("ledger", "record runner name", {"runner": name})
@@ -796,15 +821,20 @@ def run_session(
     clock: Clock,
     telemetry: Telemetry | None = None,
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
+    create_gate: threading.Semaphore | None = None,
 ) -> RunnerReport:
     """`body` on a fresh disposable runner with the same lifecycle as a
     review: recorded in the ledger, provisioned deny-all and verified,
     bounded by the deadline and its watchdog, always destroyed. The body's
-    return value is the report's note."""
+    return value is the report's note. `create_gate`, when given, is how
+    many creates may be in flight at once across the callers sharing it;
+    `create_retries` is how many times a 429'd create waits and retries."""
     return _disposable(
         api, ledger, lambda run: body(Session(run)), name=name,
         deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+        create_retries=create_retries, create_gate=create_gate,
     )  # fmt: skip
 
 
@@ -818,6 +848,8 @@ def run_disposable(
     clock: Clock,
     telemetry: Telemetry | None = None,
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
+    create_gate: threading.Semaphore | None = None,
 ) -> RunnerOutcome:
     """The review's exec sequence: tool check, upload, unpack, then each
     available tool. An archive the one-exec upload cannot carry, or one
@@ -856,6 +888,7 @@ def run_disposable(
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
+        create_retries=create_retries, create_gate=create_gate,
     )  # fmt: skip
     scrub = telemetry.scrub
     return RunnerOutcome(
@@ -1055,30 +1088,98 @@ def _stdin_roundtrip(run: _Run) -> str:
     return f"{verdict}: sent {sent} bytes, runner received {got}"
 
 
+def _create_waits(retries: int) -> tuple[float, ...]:
+    """`retries` waits, doubling from `CREATE_BACKOFF_BASE_S` and capped at
+    `CREATE_BACKOFF_MAX_S`. The default six spend at most about two minutes
+    waiting a 429 out; the runner's deadline bounds the whole loop sooner."""
+    return tuple(
+        min(CREATE_BACKOFF_BASE_S * 2**i, CREATE_BACKOFF_MAX_S)
+        for i in range(max(retries, 0))
+    )
+
+
+def _wait_s(retry_after: float | None, scheduled: float) -> float:
+    """At least the server's Retry-After, capped so one huge value cannot
+    park the deadline in a single wait; otherwise the scheduled wait,
+    jittered so pooled lenses do not retry in step."""
+    if retry_after is None:
+        return scheduled * random.uniform(0.5, 1.0)
+    return min(max(retry_after, 0.0), CREATE_RETRY_AFTER_CAP_S)
+
+
 def _create_with_backoff(run: _Run) -> None:
     """Sprites answers HTTP 429 when several creates arrive together.
     The #636 live run refused two of ten creates before anything existed,
-    so a 429 is waited out and tried again, with jitter so pooled lenses
-    do not retry in step, and only while the runner's deadline has time
-    left. Any other refusal is final."""
+    and the #690 runs of 2026-11-14 crashed three reviews when about 12
+    pooled lenses started at once, so a 429 is waited out and tried again
+    on a longer, bounded schedule (`_create_waits`), honoring the server's
+    Retry-After when it names one, with jitter so pooled lenses do not
+    retry in step, and only while the runner's deadline has time left.
+    When the review passes a `create_gate`, this runner waits its turn
+    before the first create, so at most that many Sprites start together.
+    Any other refusal is final."""
+    gate = run.create_gate
+    if gate is None:
+        _create_attempts(run)
+        return
+    left = run.deadline.check("create")
+    queued_at = run.deadline.clock.monotonic()
+    if not gate.acquire(timeout=max(left, 0.0)):
+        raise DeadlineExceededError(
+            f"deadline of {run.deadline.seconds:g}s reached waiting for a create slot"
+        )
+    try:
+        waited = run.deadline.clock.monotonic() - queued_at
+        if waited >= _QUEUED_NOTE_S:
+            run.telemetry.record(
+                "create", "waited for a create slot", {"waited_s": round(waited, 1)}
+            )
+        _create_attempts(run)
+    finally:
+        gate.release()
+
+
+def _create_attempts(run: _Run) -> None:
+    """The create itself, with the 429 waits. `unknown` is set only once a
+    create call is actually sent: a slot wait or a deadline that ends the
+    run first leaves the outcome `not started`, so cleanup deletes nothing
+    and need not guess."""
     api, name, t = run.api, run.name, run.telemetry
-    waits = 0
+    waits = _create_waits(run.create_retries)
+    waits_done = 0
     while True:
         try:
+            run.create.outcome = "unknown"
             t.span("create", "create sprite", lambda: api.create(name))
             return
-        except RateLimitedError:
-            if waits >= len(_CREATE_BACKOFF_S):
+        except RateLimitedError as exc:
+            if waits_done >= len(waits):
+                t.record(
+                    "create", "gave up",
+                    {"attempts": waits_done + 1},
+                    status=ERROR, error=str(exc),
+                )  # fmt: skip
                 raise
-            _sleep(_CREATE_BACKOFF_S[waits] * random.uniform(0.5, 1.0))
+            delay = _wait_s(exc.retry_after, waits[waits_done])
+            t.record(
+                "create", "rate limited",
+                {
+                    "attempt": waits_done + 1,
+                    "wait_s": round(delay, 1),
+                    "retry_after_s": (
+                        None if exc.retry_after is None else round(exc.retry_after, 1)
+                    ),
+                },
+            )  # fmt: skip
             run.deadline.check("create retry")
-            waits += 1
+            _sleep(min(delay, max(run.deadline.remaining(), 0.0)))
+            run.deadline.check("create retry")
+            waits_done += 1
 
 
 def _provision(run: _Run) -> None:
     api, name, t = run.api, run.name, run.telemetry
     run.deadline.check("create")
-    run.create.outcome = "unknown"
     try:
         _create_with_backoff(run)
     except (RefusedError, NotFoundError) as exc:

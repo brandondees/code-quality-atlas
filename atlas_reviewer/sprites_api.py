@@ -40,6 +40,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.parse import quote, urlencode
 
 from atlas_reviewer.http import (
@@ -96,11 +98,37 @@ def exec_request(
     )
 
 
+def parse_retry_after(value: str | None) -> float | None:
+    """The seconds a Retry-After header asks the client to wait, or None
+    when it is absent or unreadable. RFC 9110 allows a delay in seconds or
+    an HTTP-date; an HTTP-date is read against the clock this process sees,
+    and a date in the past is no wait at all. A negative or unparseable
+    value is None, so a caller falls back to its own schedule rather than
+    trusting what it cannot read."""
+    if value is None:
+        return None
+    text = value.strip()
+    if text.isdigit():
+        return max(float(text), 0.0)
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max((when - datetime.now(UTC)).total_seconds(), 0.0)
+
+
 def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
     if resp.status == 404:
         raise NotFoundError(f"Sprites 404 for {method} {safe_url(url)}")
     if resp.status == 429:
-        raise RateLimitedError(f"Sprites HTTP 429 for {method} {safe_url(url)}")
+        raise RateLimitedError(
+            f"Sprites HTTP 429 for {method} {safe_url(url)}",
+            retry_after=parse_retry_after(resp.headers.get("Retry-After")),
+        )
     if 400 <= resp.status < 500:
         raise RefusedError(f"Sprites HTTP {resp.status} for {method} {safe_url(url)}")
     if not 200 <= resp.status < 300:
