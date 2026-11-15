@@ -132,7 +132,12 @@ class CacheLedger:
             )
 
     def sessions(self) -> tuple[CacheSession, ...]:
-        """Every session so far, in order, with the open one closed."""
+        """Every session so far, in order, with the open one closed.
+
+        End-of-run reading: the call closes the open session, so a read
+        mid-run would split the conversation still running, and a later
+        turn would open an unlabeled session after it. `OpenRouterLensModel`
+        reads it once, when the review's draft is rendered."""
         with self._lock:
             self._close_locked()
             return tuple(self._closed)

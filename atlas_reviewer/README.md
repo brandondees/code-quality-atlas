@@ -507,9 +507,15 @@ defaults by model: an Anthropic-family route (`anthropic/...`) pins the
 single endpoint `google-vertex/global`, so one conversation's
 consecutive turns share that endpoint's prompt cache instead of
 spreading across every eligible Bedrock and Vertex endpoint (#695, D63
-— picked from the ZDR list fetched 2026-11-15: ZDR with
-`safety_retention: false` for both default Sonnet and Haiku, and the
-cheapest cache write among those rows). Any other model keeps the slugs
+— of the three tags with a `safety_retention: false` ZDR row for both
+default Sonnet and Haiku on the list fetched 2026-11-15, it is the
+cheapest, at $0.10 cache read and $2.50 cache write per million against
+$0.11/$2.75 on `google-vertex/europe` and `amazon-bedrock/eu-west-1`,
+and the only region-unbound one; the bare `amazon-bedrock` tag prices
+the same for Sonnet but has no Haiku row and expands to regional
+endpoints). The old four-slug default refused Haiku outright against
+that list, so the single-endpoint default is also what makes a
+default-config Haiku route runnable. Any other model keeps the slugs
 the 2026-11-07 read of the public provider list named:
 `amazon-bedrock`, `google-vertex/global`, `google-vertex/us`, and
 `google-vertex/europe`. `ATLAS_PROVIDERS` or `--providers` replaces

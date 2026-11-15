@@ -2007,3 +2007,17 @@ def test_the_single_endpoint_pin_serves_the_completion_and_names_its_tag():
     assert adapter.complete(SMALL) == "review text"
     facts = adapter.diagnosis()
     assert facts is not None and facts["atlas.endpoint_tags"] == "google-vertex/global"
+
+
+def test_the_pin_boundary_is_the_anthropic_prefix_not_a_substring():
+    """A model id that merely contains `anthropic` keeps the four-slug
+    default; only an `anthropic/`-prefixed id gets the single endpoint."""
+    for lookalike in ("anthropicx/claude-5", "not-anthropic/m", "xanthropic/m"):
+        assert model_route({ENV_MODEL: lookalike}).providers == PINNED_PROVIDERS
+    assert model_route({ENV_MODEL: "anthropic/claude-haiku-4.5"}).providers == (
+        "google-vertex/global",
+    )
+    lookalike_provider = OpenRouterProvider(
+        OpenRouterFake(reply(completion())), KEY, model_id="anthropicx/claude-5"
+    )
+    assert lookalike_provider._providers == PINNED_PROVIDERS

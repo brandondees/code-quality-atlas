@@ -790,7 +790,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         finally:
             release_shared()
     cache = tuple(
-        session for model in live_models for session in model.cache_sessions()
+        sorted(
+            (session for model in live_models for session in model.cache_sessions()),
+            # The pool starts adapters in completion order; naming a
+            # session by its ordinal in the draft needs a deterministic
+            # order, so group the sessions by lens and keep each lens's
+            # own attempt order (the sort is stable).
+            key=lambda session: session.label,
+        )
     )
     written = _emit(render_draft(review, redactor, cache=cache), args.out, out, err)
     (out if written else err).write(

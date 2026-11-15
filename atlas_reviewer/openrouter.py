@@ -21,12 +21,21 @@
   2026-11-14 trials, 72 of 146 Sonnet turns on #661 and 46 of 179 on
   #640 missed the previous turn's cache while all 358 Sonnet calls
   went to Bedrock under the bare-slug pin, and Haiku on Google Vertex
-  missed none of its 217 turns). The slug was picked from the ZDR
-  endpoint list (fetched 2026-11-15): it is the one tag with a
-  `safety_retention: false` row for both `anthropic/claude-sonnet-5.5`
-  and `anthropic/claude-haiku-4.5` that already sat in the pin, and
-  its rows carry `input_cache_read` and `input_cache_write` rates, the
-  cheapest cache write of those rows. Any other model keeps the slugs
+  missed none of its 217 turns). Three tags had a `safety_retention:
+  false` ZDR row for both that Sonnet and that Haiku on the list
+  fetched 2026-11-15: `google-vertex/global`, `google-vertex/europe`,
+  and `amazon-bedrock/eu-west-1`. `google-vertex/global` is the
+  cheapest of the three (cache read $0.10 and cache write $2.50 per
+  million, against $0.11/$2.75 on both others), and it is region-unbound,
+  where the other two are residency-bound. A cheaper or equal row
+  outside that set does not qualify: the bare `amazon-bedrock` tag
+  prices the same as `google-vertex/global` for Sonnet but has no
+  Haiku row at all, and a bare slug expands to every eligible regional
+  endpoint of that provider — the spreading this pin removes. The old
+  four-slug default refused Haiku outright against that list (the bare
+  `amazon-bedrock` and `google-vertex/us` slugs have no Haiku row), so
+  the single-endpoint default is also what makes a default-config
+  Haiku route runnable. Any other model keeps the slugs
   named by the 2026-11-07 public-list check (`PINNED_PROVIDERS`).
   `ATLAS_PROVIDERS` or `--providers` replaces either default, and a
   single slug is a valid pin. That page's "Base Slug
@@ -180,10 +189,11 @@ PINNED_PROVIDERS = (
 # One endpoint for every Anthropic-family route (issue #695): a bare
 # provider slug matches every eligible endpoint of that provider and each
 # endpoint keeps its own prompt cache, so the four-slug pin let a lens's
-# turns alternate between independent caches. Picked from the ZDR endpoint
-# list (fetched 2026-11-15): `google-vertex/global` is the one tag with a
-# `safety_retention: false` row for both default Sonnet and Haiku that
-# already sat in the pin, and its rows carry cache read and write rates.
+# turns alternate between independent caches. Of the three tags with a
+# ZDR `safety_retention: false` row for both default Sonnet and Haiku on
+# the list fetched 2026-11-15 (this one, `google-vertex/europe`, and
+# `amazon-bedrock/eu-west-1`), this is the cheapest (read $0.10, write
+# $2.50 per million against $0.11/$2.75) and the only region-unbound one.
 ANTHROPIC_PINNED_PROVIDERS = ("google-vertex/global",)
 _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._+-]*/[a-z0-9][a-z0-9._+-]*$")
 _PROVIDER_SLUG = re.compile(r"^[a-z0-9][a-z0-9._+-]*(?:/[a-z0-9][a-z0-9._+-]*)*$")

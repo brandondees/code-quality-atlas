@@ -1198,6 +1198,10 @@ def render_draft(
     if cache:
         lines += ["", "## Prompt cache", ""]
         lines += _cache_lines(cache, scrub)
+        # The lines that follow (the round log and the runner note) are
+        # prose, not list items; without the blank line CommonMark folds
+        # them into the last cache bullet (review round 1, M1).
+        lines.append("")
     if review.round_log_note:
         lines.append(
             "Round log, quoted: "

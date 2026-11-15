@@ -1886,6 +1886,13 @@ def test_the_draft_renders_the_prompt_cache_sessions(tmp_path):
         "total: 3 turn(s), 0 cache miss(es), 56000 cache-write token(s) "
         "against 56000 token(s) of final context."
     ) in draft
+    # CommonMark: the line after the last cache bullet must be blank, or
+    # the runner and round-log lines that follow render as lazy
+    # continuations of the total's list item (review round 1, M1).
+    lines = draft.splitlines()
+    total_index = next(i for i, line in enumerate(lines) if line.startswith("- total:"))
+    assert lines[total_index + 1] == ""
+    assert lines[total_index + 2].startswith(("Runner:", "Round log, quoted:"))
 
 
 def test_a_draft_without_cache_sessions_has_no_prompt_cache_section(tmp_path):

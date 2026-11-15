@@ -540,6 +540,13 @@ step 8 (#607).
   `google-vertex/us-east5` and `amazon-bedrock/eu-west-1`, is refused
   before any request.
 
+  **Superseded on the default (2026-11-15, D63, #695):** the default pin
+  is now model-dependent — an Anthropic-family route pins the single
+  endpoint `google-vertex/global` so consecutive turns share one prompt
+  cache, and any other model keeps the four slugs above. `ATLAS_PROVIDERS`
+  or `--providers` still replaces the default. This plan's paragraph
+  records the 2026-11-07 state; the decision log is current.
+
 ## Explicitly out of scope
 
 Each item below is left out of the operator CLI on purpose rather than
