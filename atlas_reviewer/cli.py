@@ -136,7 +136,7 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
-from atlas_reviewer.redact import MIN_FIT_CHARS, TRUNCATION_MARKER_CHARS, Redactor
+from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -659,18 +659,14 @@ _NONCE_PROBE = "0" * (NONCE_BYTES * 2)
 """A same-length stand-in for the per-review fence nonce, so the scaffold
 measurement counts the framing the real nonce produces."""
 
-_MARKER_CHARS = TRUNCATION_MARKER_CHARS
+_MARKER_CHARS = len(TRUNCATION_MARKER)
 """The characters a truncated build appends after its cap (`_truncate`),
-which every byte bound below must count. The figure lives beside
-`TRUNCATION_MARKER` in `redact`, the one home both this module's and
-`ci_block`'s sizing derive from (`TRUNCATION_MARKER_CHARS`); the local
-name stays for #717's in-flight edit of this block."""
+which every byte bound below must count."""
 
-_MIN_FIT_CHARS = MIN_FIT_CHARS
+_MIN_FIT_CHARS = 4 + _MARKER_CHARS
 """The smallest input room a provably-fitting block can fill: one
 worst-case UTF-8 character (four bytes) plus the truncation marker. A
-room below this cannot hold any block, and the omit-whole gate fires.
-The figure lives in `redact.MIN_FIT_CHARS` for the same reason."""
+room below this cannot hold any block, and the omit-whole gate fires."""
 
 
 def _input_room_chars(
@@ -951,7 +947,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 # first turn's budget order is conversation, then CI, then
                 # the prior rounds), so the two blocks together cannot
                 # exceed the fit and the invariant holds by construction.
-                conversation_chars = (
+                conversation_bytes = (
                     len(block.content.text.encode("utf-8")) if block else 0
                 )
                 ci, ci_omissions = ci_block(
@@ -959,7 +955,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     github,
                     redactor,
                     clock,
-                    None if fit is None else fit - conversation_chars,
+                    None if fit is None else fit - conversation_bytes,
                 )
                 context = tuple(b for b in (block, ci) if b is not None)
                 context_omissions = (*context_omissions, *ci_omissions)

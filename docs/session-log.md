@@ -1862,10 +1862,11 @@ D73 and the session-log entry are new in this PR, so both say the
 exception first in place; the first commit message repeats the false
 clause and stays as written, since history is not rewritten. Nit 4: the
 marker and minimum-fit figures now live beside `redact.TRUNCATION_MARKER`
-(`TRUNCATION_MARKER_CHARS`, `MIN_FIT_CHARS`), imported by both `cli.py`
-and `ci_block.py`; `cli.py` keeps its two local names as one-line
-aliases with their docstrings intact, so #717's in-flight docstring edit
-of that block still merges. Nit 5: D73 now states the asymmetry once —
+(`TRUNCATION_MARKER_CHARS`, `MIN_FIT_CHARS`), imported by `ci_block.py`;
+round 2 replaced this round's alias arrangement in `cli.py` — which
+conflicted with #717's edits of the same lines — with `cli.py` keeping
+its own main-side derivation of the same figures and a test holding the
+two copies equal. Nit 5: D73 now states the asymmetry once —
 the conversation block rebuilds once smaller on a multi-byte overflow
 because `build_conversation` can drop the oldest remarks, while
 `render_evidence` has no refit, so the CI block omits whole instead.
@@ -1879,3 +1880,31 @@ file and #717 both append at EOF, so whichever merges second conflicts
 mechanically — keep both dated entries. Offline only, as before:
 fixture, scripted reviewer and fakes; no live model call, network call
 or secret, and no deployed service setting changed.
+
+## 2026-11-16 — round-2 review fixes for #724: the sizing constants go back to cli.py's main-side lines, and the byte measure is named and pinned
+
+The round-2 protocol review came back COMMENT (2 Minor, 1 Nit), all
+addressed on the PR branch. Minor R2-1: round 1's Nit-4 alias arrangement
+in `cli.py` — renaming the `redact` import line and rewriting the
+`_MARKER_CHARS`/`_MIN_FIT_CHARS` block #717 also edits — had moved
+`cli.py` into conflict with #717's head (`git merge-tree --write-tree`
+against `70d9110b` confirmed two hunks: the import line and the
+constants block). `cli.py` now keeps its import line and both constant
+definitions exactly as main has them, `redact`'s shared constants serve
+`ci_block.py` alone, and
+`test_the_cli_sizing_copies_agree_with_their_shared_home` holds the two
+copies equal (kills M10, a drifting copy); the PR body states the real
+merge-tree result and that whoever merges second keeps #717's
+40-to-42-character margin note, which is content, not noise. Minor
+R2-2: the CLI's conversation measure is named `conversation_bytes` (it
+was `conversation_chars` while holding UTF-8 bytes), and
+`test_the_ci_block_takes_the_room_the_conversation_leaves` gains a
+four-byte parametrization — the multi-byte remark bodies the
+conversation byte-budget tests use — under which the chars-instead-of-
+bytes mutant M9 fails while both ASCII parametrizations pass under it,
+which is exactly why the mutant had survived round 1's test. Nit R2-3
+(D73 amended in place rather than by a Corrections append): no change —
+D73 has never landed on main, the session-log preserves what changed
+and why, and the amendment is flagged in the entry itself. Offline only,
+as before: fixture, scripted reviewer and fakes; no live model call,
+network call or secret, and no deployed service setting changed.

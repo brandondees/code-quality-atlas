@@ -44,7 +44,7 @@ from atlas_reviewer.gather import Collected, IngestConfig, gather_head_ci
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.lens_script import LensScriptModel
 from atlas_reviewer.ports import Listing
-from atlas_reviewer.redact import Redactor
+from atlas_reviewer.redact import MIN_FIT_CHARS, TRUNCATION_MARKER_CHARS, Redactor
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog, RoundRecord
 from atlas_reviewer.tests.helpers import FIXTURE
 
@@ -863,6 +863,10 @@ def test_a_ci_block_bigger_than_what_the_room_has_left_is_omitted_by_name(
             "please also round the shipping fees " * 120,
             id="conversation-nearly-fills-the-room",
         ),
+        pytest.param(
+            "😀" * 2_200,
+            id="multi-byte-conversation",
+        ),
     ],
 )
 def test_the_ci_block_takes_the_room_the_conversation_leaves(
@@ -878,7 +882,13 @@ def test_the_ci_block_takes_the_room_the_conversation_leaves(
     the remainder; a shrunken conversation's slack decides which of the
     two outcomes the big filler lands in, so the test asserts the
     invariant whichever way it falls, and the approve scenario makes the
-    clean-approval end observable."""
+    clean-approval end observable. The multi-byte parametrization carries
+    the four-byte remark bodies the conversation byte-budget tests use
+    (`_block_at_fit`'s WideGitHub shape), and kills M9, the
+    characters-instead-of-bytes measure of the conversation block: on
+    ASCII conversations chars and bytes agree, so only a four-byte
+    conversation separates the two and catches the mutant that would hand
+    the CI block a room up to three bytes-per-character too large."""
     fixtures = tmp_path / "fixtures"
     shutil.copytree(FIXTURE, fixtures)
     comments = json.loads((fixtures / "issue-comments.json").read_text())
@@ -935,3 +945,13 @@ def test_the_ci_block_takes_the_room_the_conversation_leaves(
         assert '"review_event": "COMMENT"' in draft
         assert "CI evidence" in lines
         assert "model input room" in lines
+
+
+def test_the_cli_sizing_copies_agree_with_their_shared_home():
+    """Nit 4's shared home without the #717 conflict: `ci_block.py`
+    imports `redact`'s sizing constants, while `cli.py` keeps the
+    main-side derivation #717's in-flight edit rewrites -- so a test
+    holds the two copies equal, and the copy that drifts from the other
+    fails here."""
+    assert cli._MARKER_CHARS == TRUNCATION_MARKER_CHARS
+    assert cli._MIN_FIT_CHARS == MIN_FIT_CHARS
