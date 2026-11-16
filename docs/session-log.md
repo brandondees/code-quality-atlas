@@ -2287,6 +2287,7 @@ are set is pinned with a mint-attempt guard, killing the mutant that
 mints whenever the App id is present. The deploy runbook now names the
 issues read in the child token's grant; `docs/agentic-reviewer.md` puts
 the App key on the controller, unchanged; no new D number. Offline only.
+
 ## 2026-11-16 — the lens picker chooses any number of lenses, and a repo preference overrides the guideline (issue #711, D69)
 
 The picker was hard-capped at 8 names at review depth (40 at
