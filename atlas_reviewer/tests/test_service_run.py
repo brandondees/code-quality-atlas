@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from atlas_reviewer import cli
+from atlas_reviewer.coordinator import render_draft
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.service_post import comment_payload, post_key, render_comment
 from atlas_reviewer.service_run import (
@@ -304,12 +305,136 @@ def test_the_default_mode_is_agentic_and_an_unknown_mode_fails_closed():
 
 
 def test_the_service_deadline_is_configurable_and_bounded():
-    assert service_deadline({}) == REVIEW_DEADLINE_S
-    assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}) == 3600.0
+    assert service_deadline({}, mode=MODE_ONESHOT) == REVIEW_DEADLINE_S
+    assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_ONESHOT) == 3600.0
     for raw in ("0", "-5", "30", "abc", "20000", "nan", "inf"):
         with pytest.raises(ValueError) as refused:
-            service_deadline({SERVICE_DEADLINE_ENV: raw})
+            service_deadline({SERVICE_DEADLINE_ENV: raw}, mode=MODE_ONESHOT)
     assert SERVICE_DEADLINE_ENV in str(refused.value)
+
+
+def test_the_agentic_deadline_defaults_to_the_childs_wall_plus_teardown():
+    from atlas_reviewer.lens_loop import DEFAULT_REVIEW_WALL_S
+
+    assert (
+        service_deadline({}, mode=MODE_AGENTIC)
+        == DEFAULT_REVIEW_WALL_S + CLEANUP_WAIT_S
+    )
+    assert service_deadline({}, mode=MODE_AGENTIC) > REVIEW_DEADLINE_S
+    # An operator-raised child wall raises the default with it: the
+    # figure comes from the same configuration the child reads.
+    raised = service_deadline({"ATLAS_REVIEW_WALL_S": "7200"}, mode=MODE_AGENTIC)
+    assert raised == 7200.0 + CLEANUP_WAIT_S
+
+
+def test_an_agentic_deadline_below_the_child_wall_refuses_at_boot():
+    from atlas_reviewer.lens_loop import DEFAULT_REVIEW_WALL_S
+
+    with pytest.raises(ValueError) as refused:
+        service_deadline({SERVICE_DEADLINE_ENV: "1200"}, mode=MODE_AGENTIC)
+    assert "review wall" in str(refused.value)
+    assert str(int(DEFAULT_REVIEW_WALL_S)) in str(refused.value)
+    # At or above the wall is accepted, and the ceiling still holds.
+    assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_AGENTIC) == 3600.0
+    with pytest.raises(ValueError):
+        service_deadline({SERVICE_DEADLINE_ENV: "20000"}, mode=MODE_AGENTIC)
+    # A child wall the ceiling cannot cover refuses too.
+    with pytest.raises(ValueError) as refused:
+        service_deadline({"ATLAS_REVIEW_WALL_S": "20000"}, mode=MODE_AGENTIC)
+    assert "ceiling" in str(refused.value)
+
+
+def test_a_draft_from_the_other_mode_is_a_labeled_parse_failure(tmp_path):
+    config = RunConfig("offline", False, tmp_path, MODE_AGENTIC)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(DRAFT, encoding="utf-8")
+        return _Proc(0)
+
+    result = make_runner(config, {}, popen=popen)(event, threading.Event())
+    assert result.ok is False
+    assert "draft parse failed" in result.error
+    assert "no agentic status line" in result.error
+
+    agentic_draft = (
+        '<!-- atlas-review-status: {"mode": "agentic", "review_event": "COMMENT"} -->\n'
+    )
+
+    def popen_agentic(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(agentic_draft, encoding="utf-8")
+        return _Proc(0)
+
+    oneshot = make_runner(
+        RunConfig("offline", False, tmp_path, MODE_ONESHOT), {}, popen=popen_agentic
+    )(event, threading.Event())
+    assert oneshot.ok is False
+    assert "draft parse failed" in oneshot.error
+
+
+def test_an_unreadable_draft_fails_with_a_label(tmp_path):
+    config = RunConfig("offline", False, tmp_path, MODE_AGENTIC)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(
+            "<!-- atlas-review-status: {not json", encoding="utf-8"
+        )
+        return _Proc(0)
+
+    result = make_runner(config, {}, popen=popen)(event, threading.Event())
+    assert result.ok is False
+    assert result.report is None
+    assert "draft parse failed" in result.error
+
+
+def _renderer_draft(runner: object | None = None):
+    """A draft from the real `coordinator.render_draft`, in the state the
+    review flags: one selected lens that never ran, so coverage is
+    incomplete with no unread file, and optionally a runner that did not
+    complete and reported why."""
+    from atlas_reviewer.coordinator import AgenticReview, LensResult, Verdict
+    from atlas_reviewer.redact import Redactor
+
+    lens = LensResult(
+        "tracing-correctness-and-invariants",
+        1,
+        None,
+        None,
+        reason="the review ended first",
+    )
+    review = AgenticReview(
+        lenses=(lens,),
+        findings=(),
+        verdict=Verdict.APPROVE,
+        runner=runner,
+    )
+    return render_draft(review, Redactor())
+
+
+def test_the_runners_failure_note_is_not_a_limit_stop():
+    from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+
+    runner = RunnerReport(
+        RunnerStatus.FAILED,
+        CleanupStatus.DESTROYED_VERIFIED,
+        "cqa-rev-pr7-abcdef",
+        "the model refused the lens body",
+    )
+    draft = _renderer_draft(runner)
+    assert "Runner: failed" in draft
+    assert "Runner reported, quoted:" in draft
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.limit_stops == ()
+    assert all("Runner" not in stop for stop in report.limit_stops)
+
+
+def test_an_incomplete_coverage_with_no_unread_file_names_no_cause():
+    draft = _renderer_draft()
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.files_note == (
+        "Agentic coverage incomplete; see the draft's coverage and omission notes."
+    )
 
 
 def test_the_agentic_runner_runs_the_agentic_command_with_the_limits(tmp_path):
@@ -318,7 +443,12 @@ def test_the_agentic_runner_runs_the_agentic_command_with_the_limits(tmp_path):
     def popen(argv, env, stdout, stderr):
         seen["argv"] = list(argv)
         seen["env"] = dict(env)
-        Path(argv[argv.index("--out") + 1]).write_text(DRAFT, encoding="utf-8")
+        Path(argv[argv.index("--out") + 1]).write_text(
+            '<!-- atlas-review-status: {"mode": "agentic", "review_event": "COMMENT",'
+            ' "coverage_complete": true, "changed_files": 1, "unreviewed_files": 0}'
+            " -->\n",
+            encoding="utf-8",
+        )
         return _Proc(0)
 
     parent = {
@@ -502,7 +632,7 @@ def test_cancel_stops_the_child(tmp_path):
 
 
 def test_exits_0_4_and_5_are_postable_and_3_is_not(tmp_path):
-    config = RunConfig("offline", False, tmp_path)
+    config = RunConfig("offline", False, tmp_path, MODE_ONESHOT)
     event = PrEvent(REPO, 7, SHA)
 
     def popen_for(code):
@@ -544,7 +674,7 @@ def test_the_child_is_stopped_at_the_deadline(tmp_path):
 
 
 def test_a_finished_child_becomes_a_report_and_a_failure_does_not(tmp_path):
-    config = RunConfig("offline", False, tmp_path)
+    config = RunConfig("offline", False, tmp_path, MODE_ONESHOT)
     event = PrEvent(REPO, 7, SHA)
 
     def popen(argv, env, stdout, stderr):

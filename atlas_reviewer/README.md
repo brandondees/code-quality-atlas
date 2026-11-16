@@ -82,9 +82,18 @@ callable command — D25's ceilings apply: 3 calls, $3, and 200,000 input
 tokens — while the agentic child reads
 the agentic limits and derives its review-wide limits from the planned
 lens count under the per-review dollar ceiling (D68). The parent's
-wall-clock deadline around one child is 1,200 seconds by default and
-`ATLAS_SERVICE_DEADLINE_S` sets it between 60 and 14,400 seconds, because
-a slower model needs more time than the one-shot budget. The child
+wall-clock deadline around one child follows the mode: oneshot keeps
+1,200 seconds; agentic defaults to the child's own review wall
+(`ATLAS_REVIEW_WALL_S`, which D68's derivation raises for a multi-wave
+plan, never lowers) plus the SIGTERM teardown wait — 3,690 seconds at
+defaults — because the one-shot budget is a third of that wall and would
+kill a healthy multi-lens review into a silent no-post.
+`ATLAS_SERVICE_DEADLINE_S` sets it between 60 and 14,400 seconds; in
+agentic mode a value below the child's review wall refuses to start, and
+so does a child wall the ceiling cannot cover. A review the parent kills
+at the deadline posts nothing: the job fails, the failure is a telemetry
+event, and the review child's own stop has already destroyed its Sprite.
+A later push of the same head can queue it again. The child
 process receives only an allowlist: the OpenRouter key, because it calls
 the model, the Sprites token, because it creates and destroys the Sprite,
 a read-only installation token, `ATLAS_MODEL`, `ATLAS_PROVIDERS`,

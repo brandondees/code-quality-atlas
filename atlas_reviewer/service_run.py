@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from atlas_reviewer.agentic_config import ENV as AGENTIC_LIMIT_ENV
+from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.limit_stop import LimitHit
@@ -102,7 +103,10 @@ _CHILD_ALLOWED = frozenset(
 # around a child that never hits them. ATLAS_SERVICE_DEADLINE_S raises or
 # lowers it between these bounds: an agentic review of a slower model can
 # need more than the one-shot budget, and a value below a minute cannot
-# even start a runner.
+# even start a runner. The default follows the mode: oneshot keeps this
+# figure; agentic derives its default from the child's own review wall
+# (`service_deadline`), because this number is a third of that wall and
+# would SIGTERM healthy multi-lens reviews into a silent no-post.
 REVIEW_DEADLINE_S = 1200.0
 SERVICE_DEADLINE_ENV = "ATLAS_SERVICE_DEADLINE_S"
 MIN_SERVICE_DEADLINE_S = 60.0
@@ -157,30 +161,81 @@ def service_mode(env: Mapping[str, str]) -> str:
     return raw
 
 
-def service_deadline(env: Mapping[str, str]) -> float:
-    """The parent's wall clock around one child, in seconds: the
-    ``ATLAS_SERVICE_DEADLINE_S`` value, or the 1,200-second default. A
-    value outside the bounds raises, so a mistyped setting stops the
-    service instead of silently clipping or unbounding every review."""
+def agentic_child_wall_s(env: Mapping[str, str]) -> float:
+    """The review wall the agentic child runs on under this configuration:
+    the configured ``ATLAS_REVIEW_WALL_S`` (``agentic_config`` reads it;
+    D68's derivation raises the multi-lens wall above it, never below it).
+    A healthy review always runs at least this long, so it is the floor
+    the parent's wall must clear."""
+    return load_agentic_limits(env).resolve(cross_limits=False).review_wall_s
+
+
+def service_deadline(
+    env: Mapping[str, str], *, mode: str = DEFAULT_SERVICE_MODE
+) -> float:
+    """The parent's wall clock around one child, in seconds.
+
+    Oneshot keeps the D53 1,200-second default. Agentic derives its
+    default from the child's own review wall plus the SIGTERM teardown
+    wait, because the one-shot budget is a third of that wall and would
+    kill healthy multi-lens reviews into a silent no-post. An explicit
+    value below the child's wall refuses at boot for the same reason, as
+    does a child wall the ceiling cannot cover. A value outside the
+    bounds or not a number raises in both modes, so a mistyped setting
+    stops the service instead of silently clipping or unbounding every
+    review."""
     raw = env.get(SERVICE_DEADLINE_ENV, "")
+    if mode == MODE_AGENTIC:
+        wall = agentic_child_wall_s(env)
+        if not raw:
+            default = wall + CLEANUP_WAIT_S
+            if default > MAX_SERVICE_DEADLINE_S:
+                raise ValueError(
+                    f"the agentic child's review wall ({wall:.0f} s) plus "
+                    f"the teardown wait is past the "
+                    f"{MAX_SERVICE_DEADLINE_S:.0f} s deadline ceiling; "
+                    "lower ATLAS_REVIEW_WALL_S"
+                )
+            return default
+        value = _deadline_value(raw)
+        if not math.isfinite(value):
+            raise ValueError(_deadline_bounds_message(raw))
+        if value < wall:
+            raise ValueError(
+                f"{SERVICE_DEADLINE_ENV} must be at least the agentic "
+                f"child's review wall ({wall:.0f} s, ATLAS_REVIEW_WALL_S), "
+                f"not {raw!r}: a shorter parent wall SIGTERMs a healthy "
+                "review and posts nothing"
+            )
+        if value > MAX_SERVICE_DEADLINE_S:
+            raise ValueError(_deadline_bounds_message(raw))
+        return value
     if not raw:
         return REVIEW_DEADLINE_S
-    try:
-        value = float(raw)
-    except ValueError:
-        raise ValueError(
-            f"{SERVICE_DEADLINE_ENV} must be a number of seconds, not {raw!r}"
-        ) from None
+    value = _deadline_value(raw)
     if (
         not math.isfinite(value)
         or not MIN_SERVICE_DEADLINE_S <= value <= MAX_SERVICE_DEADLINE_S
     ):
-        raise ValueError(
-            f"{SERVICE_DEADLINE_ENV} must be between "
-            f"{MIN_SERVICE_DEADLINE_S:.0f} and {MAX_SERVICE_DEADLINE_S:.0f} "
-            f"seconds, not {raw!r}"
-        )
+        raise ValueError(_deadline_bounds_message(raw))
     return value
+
+
+def _deadline_value(raw: str) -> float:
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{SERVICE_DEADLINE_ENV} must be a number of seconds, not {raw!r}"
+        ) from None
+
+
+def _deadline_bounds_message(raw: str) -> str:
+    return (
+        f"{SERVICE_DEADLINE_ENV} must be between "
+        f"{MIN_SERVICE_DEADLINE_S:.0f} and {MAX_SERVICE_DEADLINE_S:.0f} "
+        f"seconds, not {raw!r}"
+    )
 
 
 @dataclass(frozen=True)
@@ -292,7 +347,14 @@ def make_runner(
             return ReviewRun(
                 False, error=f"could not read the draft: {type(exc).__name__}"
             )
-        return ReviewRun(True, summarize_draft(draft))
+        try:
+            report = summarize_draft(draft, expect=config.mode)
+        except Exception as exc:  # noqa: BLE001 -- a draft this service cannot read must not post
+            return ReviewRun(
+                False,
+                error=f"draft parse failed: {type(exc).__name__}: {exc}",
+            )
+        return ReviewRun(True, report)
 
     return run
 
@@ -336,7 +398,7 @@ def run_process(
         handle.close()
 
 
-def summarize_draft(draft: str) -> ReviewReport:
+def summarize_draft(draft: str, *, expect: str | None = None) -> ReviewReport:
     """Lenses, coverage, limit rows and cost lines from a controller draft.
 
     The one-shot draft does not list every path a model call saw. The
@@ -347,11 +409,31 @@ def summarize_draft(draft: str) -> ReviewReport:
     and the attestation-ledger lens lines, the status line's coverage
     counts and limit stop, the context omissions, and the model-usage
     line.
+
+    ``expect`` is the service mode that ran the child. A draft whose
+    status line disagrees with it -- an agentic child's draft with no
+    mode field, or a one-shot draft under an agentic parent -- is a
+    labeled parse failure, never a silent parse as the other mode's
+    shape (the version-skew shape: only a mismatched parent/child pair
+    produces it, and one deploy ships them together).
     """
     status = parse_status(draft) or {}
     if status.get("mode") == "agentic":
+        if expect == MODE_ONESHOT:
+            raise DraftParseError(
+                "the draft is an agentic draft but the service ran oneshot"
+            )
         return _agentic_report(draft, status)
+    if expect == MODE_AGENTIC:
+        raise DraftParseError(
+            "the draft has no agentic status line; the child and the "
+            "service disagree about the service mode"
+        )
     return _oneshot_report(draft, status)
+
+
+class DraftParseError(ValueError):
+    """A draft the service cannot map to a report for the mode it ran."""
 
 
 def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
@@ -392,8 +474,14 @@ _AGENTIC_RUN_STATES = frozenset({"clean", "partial"})
 _NOT_RUN_BULLET = "- NOT RUN: "
 # Coverage-section prose that is not a limit: the runner report and the
 # round-log note sit in that section whenever the draft has no prompt-cache
-# section between them.
-_AGENTIC_NON_LIMITS = ("Runner:", "Runner delete", "Round log, quoted:")
+# section between them, and a runner that did not complete adds its own
+# quoted note line (`Runner reported, quoted:`).
+_AGENTIC_NON_LIMITS = (
+    "Runner:",
+    "Runner delete",
+    "Runner reported, quoted:",
+    "Round log, quoted:",
+)
 
 
 def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
@@ -506,8 +594,9 @@ def _agentic_coverage(
 
 def _agentic_coverage_note(status: Mapping[str, object]) -> str:
     """The file-coverage note, from the status line's controller counts.
-    An incomplete note with no unread file says so: the coverage gate can
-    also fail on lens coverage, which no file count shows."""
+    An incomplete note with no unread file names no cause: the counts do
+    not say whether lens coverage, a missing count or an omission is the
+    gap, so the note points at the draft instead of guessing."""
 
     def count(raw: object) -> int | None:
         return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
@@ -523,7 +612,10 @@ def _agentic_coverage_note(status: Mapping[str, object]) -> str:
             f"Agentic file coverage incomplete: {unreviewed} of {total} "
             "changed file(s) were not read in full."
         )
-    return "Agentic file coverage incomplete: lens coverage is not complete."
+    # No unread file: the gap is lens coverage, a missing count, or a
+    # context omission, and the status line does not say which. Name no
+    # cause the counts do not show; the draft's own sections do.
+    return "Agentic coverage incomplete; see the draft's coverage and omission notes."
 
 
 def section(text: str, heading: str) -> str:

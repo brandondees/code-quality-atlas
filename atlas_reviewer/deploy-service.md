@@ -83,8 +83,17 @@ D70) runs `agentic-review`, whose review-wide limits derive from the
 planned lens count under the per-review dollar ceiling (D68), and
 `oneshot` runs the one-shot `review` command — D25's ceilings apply: 3
 calls, $3, and 200,000 input tokens; an unknown value refuses to start the
-service. `ATLAS_SERVICE_DEADLINE_S` sets the parent's wall clock around
-one review child, 60 to 14,400 seconds, default 1,200. Flipping either
+service. `ATLAS_SERVICE_DEADLINE_S` sets the parent's wall clock around one
+review child, 60 to 14,400 seconds. The default follows the mode:
+oneshot keeps 1,200 seconds; agentic defaults to the child's own review
+wall (`ATLAS_REVIEW_WALL_S`, which D68's derivation only raises) plus
+the SIGTERM teardown wait — 3,690 seconds at defaults — because the
+one-shot budget would kill a healthy multi-lens review into a silent
+no-post. In agentic mode a set value below the child's review wall
+refuses to start, and so does a child wall the ceiling cannot cover. A
+review the parent kills at the deadline posts nothing: the job fails,
+the failure is a telemetry event, and the child's own stop has already
+destroyed its Sprite. Flipping either
 setting on the running app is a separate, approved deploy step and is
 not part of the change that introduces them; this runbook only names
 them. The

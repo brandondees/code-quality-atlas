@@ -48,7 +48,6 @@ from atlas_reviewer.service_run import (
     MIN_SERVICE_DEADLINE_S,
     MODE_AGENTIC,
     MODE_ONESHOT,
-    REVIEW_DEADLINE_S,
     WEBHOOK_SECRET_ENV,
     ReviewReport,
     ReviewRun,
@@ -135,7 +134,10 @@ class ServiceConfig:
     allow_live_inference: bool = False
     max_body_bytes: int = MAX_BODY_BYTES
     mode: str = DEFAULT_SERVICE_MODE
-    deadline_s: float = REVIEW_DEADLINE_S
+    # None: resolve from the mode in `serve` (`service_deadline`), whose
+    # agentic default is the child's own review wall plus the teardown
+    # wait, not the one-shot figure.
+    deadline_s: float | None = None
 
     def __post_init__(self) -> None:
         if len(self.secret) < 16:
@@ -161,7 +163,7 @@ class ServiceConfig:
                 f"service mode must be {MODE_AGENTIC} or {MODE_ONESHOT}, "
                 f"not {self.mode!r}"
             )
-        if (
+        if self.deadline_s is not None and (
             isinstance(self.deadline_s, bool)
             or not isinstance(self.deadline_s, (int, float))
             or not math.isfinite(self.deadline_s)
@@ -827,7 +829,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     state = Path(env.get("ATLAS_REVIEWER_STATE_DIR", ".atlas-reviewer-state"))
     try:
         mode = service_mode(env)
-        deadline_s = service_deadline(env)
+        deadline_s = service_deadline(env, mode=mode)
     except ValueError as exc:
         raise ServiceError(str(exc)) from exc
     return ServiceConfig(
@@ -916,6 +918,11 @@ def serve(
             sink=_LoggingSink(sink, log),
         )
         if runner is None:
+            deadline = (
+                config.deadline_s
+                if config.deadline_s is not None
+                else service_deadline(env, mode=config.mode)
+            )
             runner = make_runner(
                 RunConfig(
                     config.provider,
@@ -924,7 +931,7 @@ def serve(
                     config.mode,
                 ),
                 env,
-                deadline_s=config.deadline_s,
+                deadline_s=deadline,
             )
         worker = Worker(
             board, runner, telemetry, publisher, config.concurrency, config.state_dir

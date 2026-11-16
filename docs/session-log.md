@@ -2010,3 +2010,38 @@ parity test runs the real `agentic-review` dry run through the faked
 `Lenses not run: None.`, and the coverage note. The mode flip on the
 running app is a separate approved deploy and was not made here. Offline
 only.
+
+## 2026-11-16 (same day) — round-1 fixes for #727: the deadline covers the child's wall, and the runner's failure note is not a limit stop
+
+Round 1 of #727's protocol review returned COMMENT with one Major: the
+shipped default left the parent's wall at the D53 one-shot 1,200 s, a
+third of the agentic child's default derived review wall (3,600 s), so a
+healthy multi-lens review was SIGTERMed mid-run and posted nothing —
+silently, on every push. `service_deadline` is now mode-aware: oneshot
+keeps 1,200 s; agentic derives its default from the child's own
+configured review wall (`agentic_child_wall_s` reads `ATLAS_REVIEW_WALL_S`
+through `agentic_config.load_agentic_limits`, the same configuration the
+child reads; D68's derivation only raises the multi-lens wall above it)
+plus the SIGTERM teardown wait — 3,690 s at defaults, following an
+operator-raised child wall. An explicit `ATLAS_SERVICE_DEADLINE_S` below
+the child's wall refuses at boot rather than warning: the service already
+refuses to start on a bad port, secret, concurrency or provider, the boot
+refusal is what the deploy's readiness checks see, and the alternative is
+a service that starts and then silently kills every review it queues. A
+child wall the 14,400 s ceiling cannot cover refuses too. The README and
+deploy-service.md state the pairing and say plainly that a deadline kill
+posts nothing (job FAILED, telemetry event, Sprite already destroyed, a
+later push can requeue). The runner's `Runner reported, quoted:` note —
+a real `coordinator.render_draft` shape the round-1 review caught landing
+in Limit stops when no prompt-cache section precedes it — joins
+`_AGENTIC_NON_LIMITS`, with the test built from the real renderer in the
+runner-failed state. The incomplete-coverage note with no unread file is
+cause-neutral now (the status counts do not name the gap). `make_runner`
+labels every draft-parse failure — including a status line that will not
+parse, and the version-skew shape of a draft whose status line disagrees
+with the service's mode (`summarize_draft`'s new `expect=` keyword) — as
+`draft parse failed`, still posting nothing. Recorded in D70 and the PR
+body: issue #712's `REVIEW_DEADLINE_S` is implemented as the env var
+`ATLAS_SERVICE_DEADLINE_S` (no alias), and the service's agentic round
+log is per-head until #728 lands. The session-log rotation nit is
+pre-existing debt and untouched. Offline only.
