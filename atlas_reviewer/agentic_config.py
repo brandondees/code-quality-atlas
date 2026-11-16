@@ -9,9 +9,13 @@ not name them; `resolve_per_call` then takes them from the model.
 shared diff prefix may take; 0 turns the shared prefix off. The
 quote-repair bound and the quote-checker window (D64) are bounded here
 too: `ATLAS_QUOTE_REPAIRS` is 0 to 3 repair turns per attempt, and
-`ATLAS_QUOTE_TOLERANCE` is the window in lines, 0 to 8. The
-one-shot review does not read this: its 3 calls, $3 and 200k input cap
-stay D25's.
+`ATLAS_QUOTE_TOLERANCE` is the window in lines, 0 to 8. D68 adds the
+three review-wide derivation knobs: `ATLAS_PER_LENS_CALLS` and
+`ATLAS_PER_LENS_USD` are the per-lens call and dollar budgets a
+multi-lens review's review-wide limits derive from, and
+`ATLAS_REVIEW_CEILING_USD` is the absolute per-review dollar ceiling
+the derived reservation clamps to. The one-shot review does not read
+this: its 3 calls, $3 and 200k input cap stay D25's.
 """
 
 from __future__ import annotations
@@ -39,7 +43,14 @@ ENV = {
     "diff_prefix_share": "ATLAS_DIFF_PREFIX_SHARE",
     "create_retries": "ATLAS_CREATE_RETRIES",
     "create_concurrency": "ATLAS_CREATE_CONCURRENCY",
+    "per_lens_calls": "ATLAS_PER_LENS_CALLS",
+    "per_lens_usd": "ATLAS_PER_LENS_USD",
+    "review_ceiling_usd": "ATLAS_REVIEW_CEILING_USD",
 }
+
+# The review-wide limits whose configured value wins over D68's
+# derivation when the operator set it here (`review_wide` reads this).
+_REVIEW_WIDE = frozenset({"max_calls", "reservation_usd", "review_wall_s"})
 
 
 def load_agentic_limits(
@@ -50,11 +61,14 @@ def load_agentic_limits(
     the flag was omitted, so the environment variable is read. An empty
     flag is a value and is refused, so it cannot fall through to the
     variable. An empty variable is still omitted. `resolve` then refuses
-    a value that is not a usable limit."""
+    a value that is not a usable limit. The returned limits carry in
+    `explicit` the review-wide limit names that were set here, so
+    `review_wide.derive_review_wide` leaves those alone (D68)."""
     unknown = set(flags) - set(ENV)
     if unknown:
         raise ValueError("unknown agentic limit: " + ", ".join(sorted(unknown)))
     limits = AgenticLimits()
+    explicit: set[str] = set()
     for name, variable in ENV.items():
         if name in flags:
             raw = flags[name]
@@ -66,14 +80,25 @@ def load_agentic_limits(
             raw = env.get(variable)
         if raw is None or raw == "":
             continue
+        explicit.add(name)
         limits = _apply(limits, name, raw)
-    limits.resolve()
+    limits = replace(limits, explicit=frozenset(explicit) & _REVIEW_WIDE)
+    # The per-lens-against-review-wide relations are not checked here: on
+    # the multi-lens path the review-wide values are derived above the
+    # configured ones (D68), and the derivation re-checks the relations
+    # against the totals it produces. The single-lens path re-resolves
+    # with them on.
+    limits.resolve(cross_limits=False)
     return limits
 
 
 def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
     if name == "reservation_usd":
-        return replace(limits, reservation_usd=_amount(raw))
+        return replace(limits, reservation_usd=_amount(name, raw))
+    if name == "per_lens_usd":
+        return replace(limits, per_lens_usd=_amount(name, raw))
+    if name == "review_ceiling_usd":
+        return replace(limits, review_ceiling_usd=_amount(name, raw))
     applied = _apply_positive_int(limits, name, raw)
     if applied is not None:
         return applied
@@ -115,16 +140,16 @@ def _apply_positive_int(
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
     if name == "pool_size":
         return replace(limits, pool_size=_positive_int(name, raw))
+    if name == "per_lens_calls":
+        return replace(limits, per_lens_calls=_positive_int(name, raw))
     return None
 
 
-def _amount(raw: str) -> Decimal:
+def _amount(name: str, raw: str) -> Decimal:
     try:
         return Decimal(raw)
     except InvalidOperation:
-        raise ValueError(
-            f"reservation_usd must be a positive amount, not {raw!r}"
-        ) from None
+        raise ValueError(f"{name} must be a positive amount, not {raw!r}") from None
 
 
 def _positive_int(name: str, raw: str) -> int:

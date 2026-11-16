@@ -2346,13 +2346,35 @@ def test_the_picker_calls_count_toward_the_review_spend(tmp_path):
     )
 
 
-def test_a_picker_that_used_every_call_leaves_none_for_the_lenses(tmp_path):
+def test_a_pickers_calls_leave_the_lenses_their_derived_budget(tmp_path):
+    """D68: the picker's calls are added on top of the derived lens budget
+    instead of eating into it -- the flat review-wide cap let one busy
+    picker starve the lenses, and that was the missing-lens failure."""
     model = ScriptedLensModel([READ_ALL, _acknowledge])
     result, _ = _lenses(
         tmp_path, [LENS], model, picker_spend=(LIMITS.max_calls, Decimal(0))
     )
+    assert len(model.requests) == 2
+    assert result.model_calls == LIMITS.max_calls + 2
+    assert result.coverage_complete
+
+
+def test_a_picker_that_spent_past_the_ceiling_leaves_the_lenses_nothing(tmp_path):
+    """D68: the ceiling is absolute. A picker whose committed dollars
+    already pass it leaves the review a reservation below its committed
+    spend, so the first lens call is refused and the lens cannot run --
+    the draft cannot approve."""
+    model = ScriptedLensModel([READ_ALL, _acknowledge])
+    result, _ = _lenses(tmp_path, [LENS], model, picker_spend=(1, Decimal("15.00")))
     assert model.requests == []
-    assert result.model_calls == LIMITS.max_calls
+    stopped = [
+        r
+        for r in result.lenses
+        if r.outcome is not None and r.outcome.limit_hit is not None
+    ]
+    assert stopped
+    assert stopped[0].outcome.limit_hit.limit == "reservation_usd"
+    assert "$10.00 per-review ceiling" in stopped[0].outcome.limit_hit.configured
     assert not result.coverage_complete
 
 

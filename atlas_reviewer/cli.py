@@ -136,6 +136,7 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
+from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -663,9 +664,13 @@ _MARKER_CHARS = len(TRUNCATION_MARKER)
 which every byte bound below must count."""
 
 _MIN_FIT_CHARS = 4 + _MARKER_CHARS
-"""The smallest input room a provably-fitting block can fill: one
+"""The smallest input room the omit-whole gate admits a block at: one
 worst-case UTF-8 character (four bytes) plus the truncation marker. A
-room below this cannot hold any block, and the omit-whole gate fires."""
+conservative margin, not the minimum: a one-content-character block
+needs only `1 + _MARKER_CHARS` (an ASCII character), so a room of 40 to
+42 characters could hold one and the gate omits it anyway -- the
+conservative direction for a gate that exists to keep the block next to
+the shared diff prefix and the lens body."""
 
 
 def _input_room_chars(
@@ -729,7 +734,10 @@ def _conversation_block(
     and the lens body, so the block is never built and the omission says
     so. A pull whose fields do not parse yields no block and one
     omission, so the review stays COMMENT instead of dying before it
-    started."""
+    started. The 43-character gate is a conservative margin, not the
+    minimum: a one-content-character block needs only
+    `1 + _MARKER_CHARS` (an ASCII character), so rooms of 40 to 42
+    characters could hold one and the gate omits them anyway."""
     if pull_info is None:
         return None, (
             Omission(
@@ -858,6 +866,16 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         if not isinstance(ref, str) or not ref:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
+        # The derivation's refusals are planned-count independent (D68;
+        # round-1 review of #717, m-3): validate them here, before the
+        # picker can spend, so a misconfiguration is a clean usage error
+        # and not a traceback after a billed picker call.
+        try:
+            derive_review_wide(
+                limits, 1, repo_ceiling=review_md_ceiling(trees.base).value
+            )
+        except ValueError as exc:
+            raise UsageError(str(exc)) from exc
         library = LensLibrary()
         depth = Depth(args.depth)
         conversation_budget = ConversationBudget()
@@ -1006,8 +1024,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
 
 def _picker_limits(limits: AgenticLimits) -> CallLimits:
     """The picker's provider budget: no more calls or dollars than the
-    agentic review allows, and never past the one-shot D25 ceilings."""
-    resolved = limits.resolve()
+    agentic review allows, and never past the one-shot D25 ceilings. The
+    cross-limit relations are not this budget's to check: the review's
+    derivation re-checks them against the totals it derives (D68)."""
+    resolved = limits.resolve(cross_limits=False)
     return CallLimits(
         max_calls=min(resolved.max_calls, MAX_CALLS_CEILING),
         budget_usd=min(resolved.reservation_usd, BUDGET_CEILING_USD),
@@ -1045,7 +1065,10 @@ def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]) -> Agentic
     if flags.get("pool_size") is None and not env.get("ATLAS_POOL_SIZE"):
         limits = replace(limits, pool_size=AGENTIC_POOL)
         try:
-            limits.resolve()
+            # The multi-lens path's review-wide values are derived (D68),
+            # so the per-lens-against-review-wide relations are checked
+            # there, against the derived totals.
+            limits.resolve(cross_limits=False)
         except ValueError as exc:
             raise UsageError(str(exc)) from exc
     return limits
@@ -1617,11 +1640,23 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
     `review` command does not accept them."""
     note = "This command applies it."
     flags = (
-        ("--reservation-usd", "reservation_usd", "per-review dollar reservation"),
-        ("--max-calls", "max_calls", "model calls per agentic review"),
+        (
+            "--reservation-usd",
+            "reservation_usd",
+            "per-review dollar reservation; unset, a multi-lens review derives it from the per-lens budget and the planned lens count (D68)",
+        ),
+        (
+            "--max-calls",
+            "max_calls",
+            "model calls per agentic review; unset, a multi-lens review derives it from the per-lens budget and the planned lens count (D68)",
+        ),
         ("--max-turns", "max_turns", "model turns per lens"),
         ("--lens-wall-seconds", "lens_wall_s", "seconds per lens"),
-        ("--review-wall-seconds", "review_wall_s", "seconds per review"),
+        (
+            "--review-wall-seconds",
+            "review_wall_s",
+            "seconds per review; unset, a multi-lens review raises it to the lens wall times the planned waves when that is higher (D68)",
+        ),
         (
             "--create-concurrency",
             "create_concurrency",
@@ -1651,6 +1686,21 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "--diff-prefix-share",
             "diff_prefix_share",
             "largest share of the per-call input cap the shared diff prefix may take; 0 pages every review through diff_file as before the shared prefix (D65)",
+        ),
+        (
+            "--per-lens-calls",
+            "per_lens_calls",
+            "per-lens model-call budget a multi-lens review's call cap derives from (D68)",
+        ),
+        (
+            "--per-lens-usd",
+            "per_lens_usd",
+            "per-lens dollar budget a multi-lens review's reservation derives from (D68)",
+        ),
+        (
+            "--review-ceiling-usd",
+            "review_ceiling_usd",
+            "the absolute per-review dollar ceiling the derived reservation clamps to (D68); the reviewed repo's REVIEW.md may override it",
         ),
     )
     for flag, name, meaning in flags:

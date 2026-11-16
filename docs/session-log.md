@@ -1783,3 +1783,198 @@ Correction's false unreachability claim: the deleted loop's exhaustion
 branch WAS reachable for fit 1 through 39, because of that same marker
 — the old code omitted whole there, which was correct. Offline only,
 as before.
+
+## 2026-11-15 — the review-wide limits derive from the planned lens count, under a $10 ceiling (issue #710, D68)
+
+The flat review-wide defaults — 50 calls and a $5 reservation shared by
+every lens, the picker and the continuations (D44) — stopped a 12-lens
+review near 50 calls with lenses unrun: a missing-lens failure under the
+parity gate, not a cheap review. `review_lenses` now derives its
+review-wide limits from the planned lens count before any lens runs
+(`review_wide.derive_review_wide`), and the per-lens values stay the
+knobs: the call cap is the per-lens call budget
+(`ATLAS_PER_LENS_CALLS` / `--per-lens-calls`, default 50) times the
+planned lenses plus the picker's calls; the reservation is the per-lens
+dollar budget (`ATLAS_PER_LENS_USD` / `--per-lens-usd`, default $5)
+times the planned lenses plus the picker's committed dollars, clamped to
+the absolute per-review dollar ceiling; and the review wall is the
+configured wall raised to the lens wall times the planned waves — a wave
+is one pool-full of planned lenses — raised, never lowered, so no review
+loses wall clock it ran on before. The per-lens defaults are the
+2026-11-11 review-wide defaults re-scoped per lens, so an unconfigured
+one-lens review keeps the numbers it always had, and a review whose
+planned lenses fit one wave of the default pool keeps its 60-minute
+wall. The ceiling's default is $10 (`ATLAS_REVIEW_CEILING_USD` /
+`--review-ceiling-usd`); the reviewed repo's own `REVIEW.md` overrides
+it with a `review_ceiling_usd:` line read from the PR's base ref — the
+file's own rule that the base copy governs, so a PR cannot raise or
+lower its own ceiling — and precedence is repo, then configured, then
+default, resolved by the one pure function `resolve_ceiling`, which is
+the documented seam a later per-run policy adjusts the ceiling through.
+No policy engine is built. An operator-set `--max-calls`,
+`--reservation-usd` or `--review-wall-seconds` keeps the review-wide
+meaning it always had and wins for that one limit;
+`agentic_config.load_agentic_limits` records which in the new
+`AgenticLimits.explicit` field, and the ceiling clamps the reservation
+even when it is explicit. A derived call budget below the per-lens turn
+cap is refused before any lens runs. A stop on a derived limit names the
+derived values, the ceiling, the observed value and the knob —
+`lens_loop.Derivation` builds the `LimitHit` texts and the ledger stores
+the same fields — and the picker's calls are now added on top of the
+derived lens budget instead of eating into it, so the flat cap's other
+failure mode (one busy picker starving the lenses) is gone by
+construction. The single-lens `review_lens` path and the one-shot
+`review` command are unchanged; the service switch onto `agentic-review`
+is #712 and waits on this. D66 is #707's (it merged into main while this
+PR was open) and D67 is #709's, so the decision is recorded as D68. Offline only: the
+tests run the real bridge through `LocalSprites` with scripted models
+and fakes — no live model call, network call or secret read — and pin
+the formulas, the clamp, the ceiling precedence, the `REVIEW.md` line's
+fail-open parsing, both derived limit stops' texts, and the acceptance
+run: a 12-lens scripted review with 15 turns per lens finishes with no
+limit stop and complete coverage, while reviews pushed past the derived
+calls or the ceiling stop with the derivation named. The mutants this
+kills are pinned: dropping either x-lenses factor fails the formula
+tests, dropping the ceiling clamp fails the clamp test, and dropping the
+wave scaling fails the wall test.
+
+Review round on this PR fixed three findings. The per-lens-against-
+review-wide relations (`max_turns` no greater than `max_calls`,
+`lens_wall_s` no greater than `review_wall_s`) were still checked inside
+`resolve` against the configured review-wide values, which on
+`agentic-review` are no longer the totals — the derivation raises them —
+so a legitimate configuration such as a 60-turn lens budget with a
+60-call per-lens budget, or a 4000-second lens wall, was refused before
+the derivation could accept it. The two relations are split into
+`_check_cross_limits` and now checked where the totals are known: the
+derivation re-checks them against the derived values (structurally
+satisfied by a derived budget and wall; refused for an explicit
+review-wide value below its per-lens budget), the loader and every
+multi-lens resolve site defer them, and the single-lens `review_lens`
+path still checks them against its configured totals. The reservation
+stop's clamp flag is taken from the value the clamp bit on — the
+formula's value when the reservation is derived, the configured
+reservation when it is not — so an explicit $40 reservation clamped to
+the $10 ceiling on a one-lens review no longer reads as "the ceiling is
+above it". And a `REVIEW.md` over the 64 KiB read bound is unparseable
+rather than parsed cut, so a truncation inside the value cannot read as
+a number it is not. All three are pinned in `test_review_wide.py`.
+
+## 2026-11-15 — round-1 fixes for #717: the in-flight backpressure, the merge-base ceiling, and the refusal's exit path
+
+The round-1 protocol review of #717 came back COMMENT (1 Major, 5 Minor,
+2 Nit). The Major was the clamp's own edge: with the recorded catalog
+terms a Sonnet call's worst-case reservation is about $2.72-$2.90, so at
+defaults a 12-lens review at pool 4 projects four concurrent first-turn
+worst cases ($11.60) against the $10 clamped reservation, and the fourth
+lens's first call took a non-retryable BUDGET stop — the missing-lens
+failure this slice exists to close, now from the clamp instead of the
+flat cap. `Spend` now separates settled spend from in-flight worst cases
+(`settled_usd`; every sent call settles, to its actual when that is a
+cost and to its reservation kept as spent when it is not — D43's rule,
+now also the timed-out and failed paths), and a reservation that would
+pass the cap only because of other calls' in-flight worst cases waits,
+bounded by the review wall, for one of them to settle instead of
+stopping; it stops outright only when the settled spend plus its own
+worst case cannot fit even with nothing in flight, or the wall runs out,
+and spend never passes the ceiling. The picker's committed dollars are
+settled from the start. The acceptance variant runs 12 lenses at pool 4
+with the scripted worst case at $2.90 — it completes with full coverage —
+and the deterministic kill for the revert-to-stop mutant is a unit test
+that parks a fourth reservation against three in-flight worst cases and
+settles one under it. The REVIEW.md ceiling is now stated as read from
+the **merge-base** tree the review already fetches — the tree the PR
+branched from, not the base-ref tip, which the code always read and the
+docs overstated — with a coordinator test pinning that the merge-base
+copy governs and a head copy does not; a seen-but-unusable ceiling line
+still fails open but now carries a note through `Derivation` and the
+draft's Model calls line, so a meant ceiling that silently fell back is
+visible; the derivation's refusals are planned-count independent and the
+CLI validates them before the picker spends, exiting EXIT_USAGE instead
+of trace-backing after a billed picker call; the wave count gained its
+non-multiple case (7 lenses at pool 4 derive 2 waves, killing the
+ceil-division mutant the review found alive); D68 now carries an "amends
+D55" clause for the coordinator's REVIEW.md read, D55 an appended
+Correction, and the record that the #654 retry composition's per-lens
+call share is a conscious acceptance; and the "the ceiling is never a
+budget" prose now describes what actually binds — settled spend plus a
+call's own worst case against the ceiling, with in-flight waits in
+between. Offline only.
+
+## 2026-11-15 — round-2 fixes for #717: the backstop arms only on a stalled clock, the exception-path settles are pinned, and the tight ceiling line parses
+
+The round-2 protocol review of #717 came back COMMENT (1 Major, 2 Minor,
+4 Nit) with the round-1 Major re-opened by the backstop itself:
+`BACKPRESSURE_REAL_LIMIT_S` (10 s) armed on every wait, and 10 wall
+seconds is shorter than the pinned model's typical first turn (31–46 s in
+the D58 trials), so the fourth lens at pool 4 could still take a BUDGET
+stop in production — the acceptance run had passed only because its
+scripted turns take 0.2 s. The backstop now arms only when the review
+clock shows no progress across wakeups — recorded at wait start,
+re-checked each wake, disarmed the moment the clock moves — so on a
+healthy clock the review wall is the bound however long a turn takes,
+and a stalled clock (a stopped test clock, one that lies) still ends its
+wait on the backstop. Two tests pin it: a freeing settle arriving after
+22 seconds of clock advance — with the backstop shrunk to a quarter
+second so the unconditional-backstop mutant dies in a second, not in
+ten — still reserves; and a wait on a moving clock stops at the wall,
+with the clock's reading at the stop naming the wall as what ended it.
+The exception-path settles are pinned per exit — a turn stopped at the
+output cap, a transport timeout with its retry, a transport failure, and
+a model error each settle at their reservation (`settled_usd` equals
+`committed_usd`), which kills the dropped-settle mutants C4 and C5 whose
+survival had left the wall-bounded guarantee resting on an unpinned
+invariant. The tight `review_ceiling_usd:15` form parses now (the
+separator after the colon is optional; the round-2 regex had required a
+space and silently dropped the tight form), a no-space unusable value
+still routes to the note, and `_UNUSABLE_NOTE` (and the oversized-file
+note) now say "the configured ceiling (default $10) stands", which reads
+true when nothing is configured. A reservation parked in the wait when
+the review halts comes back from `_reserve_call` as the halt outcome
+(`HALTED_CALL`), not as a dollar stop. The timing-level pins for the
+round-2 survivors: the wall-ignored mutant C9 and the halt-ignored
+mutant C10 die on thread-and-join pins (a parked waiter must return
+within two wall-seconds of the wall passing or of the halt), and C8 —
+the genuine-stop check disabled — is left recorded as equivalent by
+construction: the wait's own settled re-check returns immediately in the
+same case, so the branch is a fast path, not a distinct behavior, and no
+test can tell them apart without reshaping the code to kill a mutant.
+C1/C7 (a dropped notify) stand as the round-2 review found them: the
+0.05 s polling slice is the correctness mechanism and now carries a
+comment saying so, with the C2 hazard (removing the slice because a
+notify looks reliable) named in it. Offline only.
+
+## 2026-11-15 — #717 merges #718 and pays D67's follow-ups; the frozen-clock wait is pinned (round 3)
+
+Round 3 of #717's review APPROVED at `a2beea96`, and #718 (D67) merged
+into main first, so the branch merged main (`5e39bd04`) with three
+conflicts, all mechanical: `cli.py`'s import block keeps both sides
+(#718's `TRUNCATION_MARKER`/`rounds` imports beside this PR's
+`review_wide` import); the decision list reads D65, D66, D67, D68 with
+both entries whole; and the session log lands main's three #718 entries
+before this PR's three. `lens_loop.py` auto-merged — #718's public
+`input_room_tokens` rename lives in the shared-prefix area, this PR's
+backpressure in the `Spend` area — and both slices' suites pass
+together. This PR merges second, so it owes #718's recorded follow-ups:
+`docs/agentic-reviewer.md`'s "No shipped caller builds one yet" sentence
+for `rounds.py` now names the shipped caller (`agentic-review` keeps
+`rounds.jsonl` under its state directory and passes the log into every
+review it runs); D67 carries an appended Correction — never editing
+earlier text — withdrawing the four-byte rebuild test's kill claim for
+the marker-blind `fit // 4` rebuild (equivalent-safe, by the
+ASCII-prefix argument: the block's leading framing is ASCII, so a
+build's bytes sit below the four-bytes-per-character bound by more than
+the marker-blind size's few extra characters can consume — run on the
+merged tree, the whole of `test_agentic_context.py` passes with the
+mutant in), correcting the round-2 oversize band's extent to fit 50 (not
+42), and stating that the 43-character omit-whole gate is a conservative
+margin, not the minimum, since one content character plus the marker
+needs only fit >= 40; `_MIN_FIT_CHARS`'s and `_conversation_block`'s
+docstrings now state the margin as a margin. The round's one new test
+pins the frozen-clock wait (m-8): a reservation parked on a frozen
+FakeClock — no settle, no halt, a far wall, the backstop monkeypatched
+to 0.3 s — returns with the reservation stop, killing the
+progress-comparison mutant A9 (`now >= last_seen` reads every wake as
+progress, never arms the backstop, and the parked wait never comes
+back). The healthy-clock pin's ticker steps coarser (five seconds of
+clock a tenth-second, n-9). Offline only.
