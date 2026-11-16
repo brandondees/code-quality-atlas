@@ -203,7 +203,11 @@ already do. The payload URL is then `https://<that-name>.fly.dev/webhook`.
 Set the webhook secret to the same value as
 `ATLAS_GITHUB_WEBHOOK_SECRET`. Content type JSON. Subscribe to
 **Pull requests** and nothing else. The installation must include
-`brandondees/code-quality-atlas`.
+`brandondees/code-quality-atlas`, and the App itself must grant read on
+contents, checks, actions, pull requests and issues: the parent's
+read-token mint requests all five, so an installation whose App is
+missing any of them fails every mint at review start and no review
+posts.
 
 `ATLAS_REVIEW_REPOS` defaults to that repository. Leave it unset until a
 second repository is an explicit decision. One installation id cannot

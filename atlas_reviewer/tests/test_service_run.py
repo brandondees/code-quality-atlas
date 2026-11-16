@@ -330,6 +330,30 @@ def test_the_read_token_mints_issues_read_too(monkeypatch):
     }
 
 
+def test_a_failed_mint_names_the_permissions_it_asked_for(monkeypatch):
+    """A mint refused by GitHub is self-diagnosing: the error names every
+    read permission the mint requested and hints that the installation
+    may be missing one, and it never carries the key."""
+
+    class Refusing:
+        def __init__(self, *a, **k):
+            raise RuntimeError("403 from the installation")
+
+    monkeypatch.setattr("atlas_reviewer.github_auth.AppInstallationTokens", Refusing)
+    _token, error = _read_token(
+        {
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_INSTALLATION_ID": "12345",
+        },
+        PrEvent(REPO, 7, SHA),
+    )
+    for permission in ("contents", "checks", "actions", "pull_requests", "issues"):
+        assert f"{permission} read" in error
+    assert "is a permission missing" in error
+    assert "pem-secret-value" not in error
+
+
 def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):
     started: list[object] = []
 

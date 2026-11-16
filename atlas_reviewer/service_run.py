@@ -704,6 +704,12 @@ def _read_token(env: Mapping[str, str], event: PrEvent) -> tuple[str, str]:
     from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
     from atlas_reviewer.http import UrllibTransport
 
+    # Issues read rides along on every mint: the mint happens before the
+    # child exists and `review_argv` builds no --include-issues flag the
+    # parent could key on, so a conditional mint would never mint it. The
+    # token stays read-only over the one repository.
+    permissions = {**READ_PERMISSIONS, "issues": "read"}
+    wanted = ", ".join(f"{name} read" for name in permissions)
     try:
         tokens = AppInstallationTokens(
             UrllibTransport(),
@@ -711,17 +717,15 @@ def _read_token(env: Mapping[str, str], event: PrEvent) -> tuple[str, str]:
             app_id=app_id,
             private_key=key.replace("\\n", "\n") if "\n" not in key else key,
             installation_id=int(installation),
-            # Issues read rides along on every mint: the mint happens
-            # before the child exists and `review_argv` builds no
-            # --include-issues flag the parent could key on, so a
-            # conditional mint would never mint it. The token stays
-            # read-only over the one repository.
-            permissions={**READ_PERMISSIONS, "issues": "read"},
+            permissions=permissions,
             repositories=(event.repo.split("/", 1)[1],),
         )
         return tokens.token(), ""
     except (OSError, ValueError, RuntimeError) as exc:
-        return "", f"could not mint a read token ({type(exc).__name__})"
+        return "", (
+            f"could not mint a read token ({type(exc).__name__}): the "
+            f"installation must grant {wanted}; is a permission missing?"
+        )
 
 
 def _write_event(path: Path, event: PrEvent) -> None:

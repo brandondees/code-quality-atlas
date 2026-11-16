@@ -2286,7 +2286,15 @@ permissions. Precedence when both the fixed token and App credentials
 are set is pinned with a mint-attempt guard, killing the mutant that
 mints whenever the App id is present. The deploy runbook now names the
 issues read in the child token's grant; `docs/agentic-reviewer.md` puts
-the App key on the controller, unchanged; no new D number. Offline only.
+the App key on the controller, unchanged; no new D number. Round 2 of
+the PR's own review: the runbook's installation paragraph now also
+states the App itself must grant read on contents, checks, actions,
+pull requests and issues, because an installation missing any of them
+fails every mint at review start and no review posts; the
+wiring-with-`--include-issues` pin is parametrized over the one-shot and
+agentic paths; and a failed mint's error names the five read
+permissions it requested and hints that the installation may be missing
+one, without ever carrying the key. Offline only.
 
 ## 2026-11-16 — the lens picker chooses any number of lenses, and a repo preference overrides the guideline (issue #711, D69)
 

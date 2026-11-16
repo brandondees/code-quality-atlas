@@ -1881,11 +1881,14 @@ def test_the_agentic_command_without_any_github_credential_names_the_missing_one
     assert cli.ENV_APP_ID in err.getvalue()
 
 
-def test_include_issues_under_a_fixed_token_wires_and_does_not_refuse(monkeypatch):
+@pytest.mark.parametrize("path", ["agentic", "one-shot"])
+def test_include_issues_under_a_fixed_token_wires_and_does_not_refuse(
+    path, monkeypatch, tmp_path
+):
     """The fixed token's grant is whatever the parent minted -- under the
     service that now includes issues read -- and an optional read it
     cannot serve is refused by GitHub and degrades to a recorded gap,
-    never an up-front refusal here."""
+    never an up-front refusal here. Pinned on both live wirings."""
     token = "ghs_readonly_token_value"
     seen = {}
 
@@ -1897,13 +1900,37 @@ def test_include_issues_under_a_fixed_token_wires_and_does_not_refuse(monkeypatc
     monkeypatch.setattr(
         cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
     )
-    env = {cli.ENV_INSTALLATION_TOKEN: token}
-    cli._live_github(
-        argparse.Namespace(include_issues=True),
-        env,
-        cli.load_event(Path(EVENT)),
-        cli._Credentials(env),
-    )
+
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.providers import OfflineProvider
+    from atlas_reviewer.telemetry import Telemetry
+
+    if path == "agentic":
+        env = {cli.ENV_INSTALLATION_TOKEN: token}
+        cli._live_github(
+            argparse.Namespace(include_issues=True),
+            env,
+            cli.load_event(Path(EVENT)),
+            cli._Credentials(env),
+        )
+    else:
+        env = {
+            cli.ENV_INSTALLATION_TOKEN: token,
+            cli.ENV_SPRITES_TOKEN: "sprite-token-value",
+        }
+        cli._live_wiring(
+            argparse.Namespace(
+                include_issues=True,
+                state_dir=tmp_path,
+                sprites_factory=lambda _env: FakeSprites(),
+            ),
+            env,
+            cli.load_event(Path(EVENT)),
+            OfflineProvider(),
+            Telemetry(SystemClock()),
+            "cqa-rev-pr7-aaaaaaaaaaaa-deadbeef",
+            cli._Credentials(env),
+        )
     assert isinstance(seen["tokens"], cli._FixedToken)
     assert seen["tokens"].token() == token
 
