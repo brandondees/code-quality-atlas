@@ -25,8 +25,6 @@ from atlas_reviewer.prompt import LoadedLens
 
 _COLLAPSED = Path(__file__).resolve().parent.parent / "collapsed" / "skills"
 BUNDLE_ROOT = _COLLAPSED / "reviewing-a-change"
-# The top of review mode's 3-8 breadth (skills/manifest.yaml `modes:`).
-MAX_LENSES = 8
 LENS_BUDGET_CHARS = 60_000
 
 
@@ -117,19 +115,41 @@ class LensLibrary:
 def plan_lenses(
     library: LensLibrary,
     ranked: Iterable[LensChoice],
-    max_lenses: int = MAX_LENSES,
+    max_lenses: int | None = None,
     budget_chars: int = LENS_BUDGET_CHARS,
 ) -> LensPlan:
     """Walk `ranked` in order, inlining each whole body that fits what is
     left of `budget_chars` until `max_lenses` have run; any other lens is NOT
-    RUN with its reason. A name with no body takes no slot."""
+    RUN with its reason. A name with no body takes no slot. `max_lenses`
+    None (D69: review and comprehensive run uncapped) leaves the character
+    budget the only bound on how many lenses run; an integer caps the
+    count, as triage's critical-tier cap does."""
     uses: list[LensUse] = []
     loaded: list[LoadedLens] = []
     left = budget_chars
+    chosen: set[str] = set()
     for choice in ranked:
+        if choice.name in chosen:
+            # No path may plan a lens twice (D69 round-1 F1): a repeated
+            # name is reported NOT RUN, never loaded a second time.
+            uses.append(
+                LensUse(
+                    choice.name,
+                    LensStatus.NOT_RUN,
+                    0,
+                    choice.why,
+                    "already chosen earlier in this plan",
+                )
+            )
+            continue
+        chosen.add(choice.name)
         body = library.body(choice.name)
         skip = _skip_reason(
-            body, len(loaded) >= max_lenses, left, max_lenses, budget_chars
+            body,
+            max_lenses is not None and len(loaded) >= max_lenses,
+            left,
+            max_lenses,
+            budget_chars,
         )
         if body is not None and skip is None:
             uses.append(LensUse(choice.name, LensStatus.RUN, len(body), choice.why))
@@ -147,15 +167,17 @@ def plan_agentic_lenses(library: LensLibrary, ranked: Iterable[LensChoice]) -> L
     """Every chosen lens that has a body. The 60,000-character budget is
     for a one-shot prompt that inlines every body. An agentic lens is its
     own conversation, so that budget does not apply and does not drop the
-    critical tier."""
+    critical tier, and the lens count is uncapped (D69)."""
     choices = tuple(ranked)
-    return plan_lenses(
-        library, choices, max_lenses=max(len(choices), 1), budget_chars=10**9
-    )
+    return plan_lenses(library, choices, budget_chars=10**9)
 
 
 def _skip_reason(
-    body: str | None, past_cap: bool, left: int, max_lenses: int, budget_chars: int
+    body: str | None,
+    past_cap: bool,
+    left: int,
+    max_lenses: int | None,
+    budget_chars: int,
 ) -> str | None:
     if body is None:
         return "no body.md in the bundle"

@@ -6,18 +6,20 @@ import time
 
 import pytest
 
-from atlas_reviewer.lenses import MAX_LENSES, LensLibrary, LensStatus, plan_lenses
+from atlas_reviewer.lenses import LensLibrary, LensStatus, plan_lenses
 from atlas_reviewer.picker import (
-    COMPREHENSIVE_LIMIT,
     CRITICAL_TIER,
     PICKER_PATH,
     PR_HYGIENE,
     Depth,
+    LensPreferences,
     PickerOutputError,
     body_states_verification,
+    guideline_shapes,
     load_picker,
     parse_picks,
     picker_instructions,
+    preferences_directive,
     select_agentic_lenses,
     select_lenses,
 )
@@ -39,29 +41,61 @@ def test_the_picker_is_this_repos_own_choosing_review_lenses_skill():
     assert "## Routes" in text and "## Depth modes" in text
 
 
-def test_instructions_name_the_operator_depth_and_its_breadth():
+def test_instructions_name_the_operator_depth_and_the_guidelines_breadth():
+    """D69: no depth but triage names a lens count. Review's instructions
+    carry the guideline's breadth as a default, not a cap, its
+    auto-includes, and the explicit no-fixed-cap sentence; comprehensive
+    is uncapped by its own definition."""
     text = picker_instructions(Depth.REVIEW)
     assert "Depth mode: review, set by the operator." in text
-    assert f"at most {MAX_LENSES} names" in text
+    assert "its 3-8 default breadth is a starting recommendation, not a cap" in text
+    assert "There is no fixed cap on how many lenses you name." in text
+    assert "at most" not in text
     assert '{"lenses": ["<lens-name>", ...]}' in text
-    assert f"at most {COMPREHENSIVE_LIMIT} names" in picker_instructions(
-        Depth.COMPREHENSIVE
+    comprehensive = picker_instructions(Depth.COMPREHENSIVE)
+    assert "every relevant lens, uncapped" in comprehensive
+    assert "at most" not in comprehensive
+    triage = picker_instructions(Depth.TRIAGE)
+    assert "Triage runs the critical tier only" in triage
+
+
+def test_instructions_ask_for_the_guidelines_auto_includes():
+    """#711 criterion 4, pinned at the instructions: the picker is asked to
+    follow the guideline's auto-includes, and the summary agrees with the
+    guideline it cites (round-1 F5) -- the decision route's second lens is
+    named, the rename pair is attributed to the restructuring route
+    rather than to an auto-include, and the enumeration claims to be a
+    sample ("include"), not the whole set."""
+    text = picker_instructions(Depth.REVIEW)
+    assert "its auto-includes include" in text
+    assert "name every lens the guideline says rides along" not in text
+    assert (
+        "for a decision-record or decisions-log change, "
+        "reviewing-decision-lifecycle (the guideline adds "
+        "auditing-decision-record-currency when the change touches an "
+        "existing record rather than authoring a new one)" in text
+    )
+    assert "for a docs-only change, auditing-documentation-health" in text
+    assert (
+        "for a rename or restructuring, the guideline's restructuring "
+        "route runs reviewing-module-design and "
+        "reviewing-naming-and-readability, among others" in text
     )
 
 
-def test_instructions_say_the_critical_tier_always_runs_and_extras_are_dropped():
+def test_instructions_say_the_critical_tier_always_runs_and_never_spends_a_slot():
     """The 2026-11-13 trials: the picker spent 2-4 of its slots naming
     critical-tier lenses the controller adds anyway, and one model
     corrected an over-long list with a second JSON object, which the
-    parser refused. The instructions now say the tier does not spend the
-    slots and that extra names are dropped, not an error (D58)."""
+    parser refused. The instructions still say the tier does not spend the
+    slots and that one reply is one list (D58); D69 removes the slot
+    economy the correction answered to."""
     text = picker_instructions(Depth.REVIEW)
     assert "always runs before your picks" in text
     assert "does not spend your" in text
     for name in CRITICAL_TIER:
         assert name in text
-    assert "the extra names are dropped, not an" in text
-    assert "do not correct yourself with a second list" in text
+    assert "Do not correct yourself with a second list" in text
 
 
 def test_the_last_json_object_in_a_reply_is_parsed():
@@ -199,24 +233,52 @@ def test_a_thin_pick_cannot_drop_the_critical_tier():
 
 
 def test_names_past_the_breadth_are_not_run_and_body_less_names_take_no_slot():
-    extras = [f"lens-{i}" for i in range(MAX_LENSES)]
+    """A name with no body is NOT RUN with its reason and takes no slot;
+    nothing is cut by count (D69)."""
+    extras = [f"lens-{i}" for i in range(8)]
     library = small_bundle(*extras)
     chosen = select_lenses(
         Depth.REVIEW, lambda: picks("ghost", *extras), library, scrub=str
     )
     plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
     by = {u.name: u for u in plan.uses}
-    room = MAX_LENSES - len(CRITICAL_TIER)
     ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
-    assert ran == [*CRITICAL_TIER, *extras[:room]]
+    assert ran == [*CRITICAL_TIER, *extras]
     assert by["ghost"].reason == "no body.md in the bundle"
-    for name in extras[room:]:
-        assert by[name].status is LensStatus.NOT_RUN
-        assert by[name].reason.startswith(f"below the cap of {MAX_LENSES} lenses")
-        assert f"{name} (below the cap" in plan.coverage()
     assert (
-        f"ranked {MAX_LENSES + 1} lens name(s), {MAX_LENSES} with a body" in chosen.note
+        f"ranked {len(extras) + 1} lens name(s), {len(extras)} with a body"
+        in chosen.note
     )
+
+
+def test_more_than_eight_picks_survive_review_depth():
+    """#711's headline criterion: a reply naming more than 8 lenses is not
+    cut -- every named lens with a body is chosen, and the one-shot
+    plan's character budget, not a lens count, decides what runs."""
+    picks_beyond_the_old_cap = [f"lens-{i}" for i in range(12)]
+    library = small_bundle(*picks_beyond_the_old_cap)
+    chosen = select_lenses(
+        Depth.REVIEW, lambda: picks(*picks_beyond_the_old_cap), library, scrub=str
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [*CRITICAL_TIER, *picks_beyond_the_old_cap]
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
+    assert ran == [*CRITICAL_TIER, *picks_beyond_the_old_cap]
+    assert not any("cap" in u.reason for u in plan.uses)
+
+
+def test_more_than_eight_picks_survive_the_agentic_path():
+    """D69 on the agentic path: every ranked lens with a body runs, no
+    matter how many the picker names."""
+    ranked = [f"lens-{i}" for i in range(12)]
+    library = small_bundle(*ranked)
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW, lambda: picks(*ranked), library, scrub=str
+    )
+    names = [c.name for c in selection.choices]
+    assert names == [*CRITICAL_TIER, *ranked]
+    assert [u.name for u in plan.uses if u.status is LensStatus.RUN] == names
 
 
 def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
@@ -320,6 +382,558 @@ def test_an_agentic_pick_of_pr_hygiene_survives_a_quiet_body_too():
     names = [c.name for c in selection.choices]
     assert names.count(PR_HYGIENE) == 1
     assert {u.name for u in plan.loaded} >= {PR_HYGIENE, "checking-restraint"}
+
+
+def test_hygiene_does_not_use_a_guideline_slot():
+    """#711: the process-hygiene lens rides on top of the picks and never
+    spends one of the guideline's slots. A pick whose guideline would have
+    included hygiene -- here, twelve named picks with a body that states
+    verification results -- still yields the full set of non-hygiene picks
+    plus hygiene, every one of them running."""
+    ranked = [f"lens-{i}" for i in range(12)]
+    library = small_bundle(*ranked, PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks(*ranked),
+        library,
+        scrub=str,
+        pr_text="Tests: 2105 passed, coverage 96.78%; CI run 43493645208 green.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [*CRITICAL_TIER, PR_HYGIENE, *ranked]
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
+    assert ran == [*CRITICAL_TIER, PR_HYGIENE, *ranked]
+
+
+def test_hygiene_does_not_use_a_guideline_slot_on_the_agentic_path():
+    ranked = [f"lens-{i}" for i in range(12)]
+    library = small_bundle(*ranked, PR_HYGIENE)
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks(*ranked),
+        library,
+        scrub=str,
+        pr_text="Tests: 2105 passed, coverage 96.78%; CI run 43493645208 green.",
+    )
+    names = [c.name for c in selection.choices]
+    assert names == [*CRITICAL_TIER, PR_HYGIENE, *ranked]
+    assert {u.name for u in plan.loaded} == set(names)
+
+
+def test_the_picker_naming_hygiene_displaces_no_pick():
+    """A guideline-following picker names hygiene among its auto-includes;
+    the controller's own hygiene include and the ranked name are one lens,
+    and every other pick survives beside it."""
+    ranked = [f"lens-{i}" for i in range(12)]
+    library = small_bundle(*ranked, PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks(PR_HYGIENE, *ranked),
+        library,
+        scrub=str,
+        pr_text="Tests: 2105 passed, coverage 96.78%; CI run 43493645208 green.",
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.count(PR_HYGIENE) == 1
+    assert names == [*CRITICAL_TIER, PR_HYGIENE, *ranked]
+
+
+PREFERENCES = LensPreferences(
+    include=("reviewing-threat-model",),
+    exclude=("checking-restraint",),
+)
+
+
+def test_a_repo_preference_exclude_drops_a_ranked_pick_and_is_recorded():
+    library = small_bundle(
+        "checking-restraint", "reviewing-test-quality", "reviewing-threat-model"
+    )
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint", "reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=PREFERENCES,
+    )
+    names = [c.name for c in chosen.choices]
+    assert "checking-restraint" not in names
+    assert names == [
+        *CRITICAL_TIER,
+        "reviewing-test-quality",
+        "reviewing-threat-model",
+    ]
+    assert (
+        "The reviewed repo's merge-base REVIEW.md overrides the guideline "
+        "(include: reviewing-threat-model; exclude: checking-restraint): "
+        "dropped from the picks: checking-restraint; "
+        "added: reviewing-threat-model." in chosen.note
+    )
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
+    assert "checking-restraint" not in ran
+    assert "reviewing-threat-model" in ran
+
+
+def test_a_repo_preference_include_runs_even_when_the_picker_missed_it():
+    """The override is honored against the model, not only suggested to
+    it: an include the picker never ranked still runs (and the one-shot
+    note records it), closing the shape #640 died of."""
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=PREFERENCES,
+    )
+    names = [c.name for c in chosen.choices]
+    assert "reviewing-threat-model" in names
+    assert chosen.choices[-1].why == (
+        "included by the reviewed repo's merge-base REVIEW.md (D69)"
+    )
+    assert "added: reviewing-threat-model." in chosen.note
+
+
+def test_a_repo_preference_include_is_honored_when_the_picker_falls_back():
+    """The override is a repo directive, not a picker hint: a fallback
+    (here, an unusable reply) still runs the included lens and records
+    it."""
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        preferences=PREFERENCES,
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [*CRITICAL_TIER, "reviewing-threat-model"]
+    assert "added: reviewing-threat-model." in chosen.note
+    assert "gave no usable lens list" in chosen.note
+
+
+def test_a_repo_preference_include_is_honored_when_no_call_is_available():
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        None,
+        library,
+        scrub=str,
+        preferences=PREFERENCES,
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [*CRITICAL_TIER, "reviewing-threat-model"]
+    assert not chosen.used_call
+
+
+def test_a_repo_preference_never_touches_the_critical_tier():
+    """The critical tier is the controller's own floor, not the
+    guideline's: an exclude naming a critical lens leaves the tier whole,
+    and an include naming one adds no duplicate."""
+    preferences = LensPreferences(
+        include=("sweeping-for-security", "reviewing-threat-model"),
+        exclude=("tracing-correctness-and-invariants",),
+    )
+    library = small_bundle("reviewing-test-quality", "reviewing-threat-model")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=preferences,
+    )
+    names = [c.name for c in chosen.choices]
+    assert names[: len(CRITICAL_TIER)] == list(CRITICAL_TIER)
+    assert names.count("sweeping-for-security") == 1
+    assert "reviewing-threat-model" in names
+    assert "dropped from the picks" not in chosen.note
+    assert "added: reviewing-threat-model." in chosen.note
+    assert chosen.choices[-1].why == (
+        "included by the reviewed repo's merge-base REVIEW.md (D69)"
+    )
+
+
+def test_a_repo_preference_include_of_an_unbundled_lens_is_not_run_not_dropped():
+    """A directive naming a lens that matches nothing is surfaced, never
+    silently guessed away: the include reaches the plan and its NOT RUN
+    line names it."""
+    preferences = LensPreferences(include=("not-a-real-lens",))
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=preferences,
+    )
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    by = {u.name: u for u in plan.uses}
+    assert by["not-a-real-lens"].status is LensStatus.NOT_RUN
+    assert by["not-a-real-lens"].reason == "no body.md in the bundle"
+    assert "added: not-a-real-lens." in chosen.note
+
+
+def test_triage_is_not_widened_by_a_repo_preference():
+    """A preference re-ranks within its depth mode's breadth and never
+    widens the mode: triage's breadth is the critical tier alone, so an
+    include changes nothing there."""
+    library = small_bundle("reviewing-test-quality")
+
+    def never():
+        raise AssertionError("triage must not call the picker")
+
+    chosen = select_lenses(
+        Depth.TRIAGE, never, library, scrub=str, preferences=PREFERENCES
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == list(CRITICAL_TIER)
+    assert chosen.note.startswith("Lens selection: triage depth makes no picker call")
+
+
+def test_the_preference_directive_reaches_the_instructions():
+    """The picker is told the override so it does not fight it; the names
+    it carries are lens-shaped, validated at parse, so the trusted
+    instructions cannot be injected into from REVIEW.md."""
+    text = picker_instructions(Depth.REVIEW, PREFERENCES)
+    assert (
+        "The reviewed repo's merge-base REVIEW.md overrides the guideline: "
+        "run reviewing-threat-model; do not run checking-restraint. The "
+        "controller applies this override to your picks itself." in text
+    )
+    assert picker_instructions(Depth.REVIEW).endswith(
+        "Do not correct yourself with a second list."
+    )
+
+
+def test_an_empty_preference_directive_adds_nothing():
+    assert preferences_directive(None) == ""
+    assert preferences_directive(LensPreferences()) == ""
+
+
+# --- round 1 (F1): hygiene and the preference, and structural dedupe ----
+
+
+def test_a_repo_preference_include_of_hygiene_does_not_run_it_twice():
+    """Round-1 F1: the controller-added hygiene choice is inside the
+    covered set, so an include naming it adds no second choice and the
+    plan loads the body once, not twice."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(include=(PR_HYGIENE,)),
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.count(PR_HYGIENE) == 1
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    assert [lens.name for lens in plan.loaded].count(PR_HYGIENE) == 1
+    assert "nothing needed changing" in chosen.note
+
+
+def test_a_repo_preference_exclude_removes_the_controller_added_hygiene():
+    """Round-1 F1: the controller-added hygiene lens is neither
+    critical-tier nor a cap, so a repo exclude declines it -- it does not
+    run, and the note says so. Kills the mutant that re-adds the
+    controller-added choice in `_with_critical` whatever the exclude
+    says."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(exclude=(PR_HYGIENE,)),
+    )
+    names = [c.name for c in chosen.choices]
+    assert PR_HYGIENE not in names
+    assert f"dropped the controller-added {PR_HYGIENE} lens" in chosen.note
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    assert PR_HYGIENE not in [lens.name for lens in plan.loaded]
+
+
+def test_the_selection_never_carries_a_duplicate_name():
+    """Round-1 F1, structurally: however hygiene, the ranked picks and a
+    repo preference combine, no lens is chosen twice and no body loads
+    twice."""
+    library = small_bundle("checking-restraint", "reviewing-test-quality", PR_HYGIENE)
+    verification = "Tests: 2105 passed, coverage 96.78%."
+    cases: tuple[dict, ...] = (
+        {},
+        {"pr_text": verification},
+        {"preferences": LensPreferences(include=(PR_HYGIENE,))},
+        {
+            "pr_text": verification,
+            "preferences": LensPreferences(include=(PR_HYGIENE,)),
+        },
+        {
+            "pr_text": verification,
+            "preferences": LensPreferences(exclude=(PR_HYGIENE,)),
+        },
+        {
+            "preferences": LensPreferences(
+                include=("reviewing-test-quality",),
+                exclude=("checking-restraint",),
+            )
+        },
+        {
+            "run": lambda: "not json",
+            "pr_text": verification,
+            "preferences": LensPreferences(include=("reviewing-test-quality",)),
+        },
+        {
+            "run": lambda: picks(
+                PR_HYGIENE, "checking-restraint", "reviewing-test-quality"
+            ),
+            "pr_text": verification,
+        },
+    )
+    for case in cases:
+        run = case.pop(
+            "run", lambda: picks("checking-restraint", "reviewing-test-quality")
+        )
+        chosen = select_lenses(Depth.REVIEW, run, library, scrub=str, **case)
+        names = [c.name for c in chosen.choices]
+        assert len(names) == len(set(names)), (names, case)
+        plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+        loaded = [lens.name for lens in plan.loaded]
+        assert len(loaded) == len(set(loaded)), loaded
+
+
+# --- round 1 (F2): exclude wins on every path ---------------------------
+
+
+def test_exclude_wins_over_include_on_the_success_path():
+    preferences = LensPreferences(
+        include=("checking-restraint",), exclude=("checking-restraint",)
+    )
+    library = small_bundle("checking-restraint")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        library,
+        scrub=str,
+        preferences=preferences,
+    )
+    names = [c.name for c in chosen.choices]
+    assert "checking-restraint" not in names
+    assert "dropped from the picks: checking-restraint" in chosen.note
+    assert "added: checking-restraint" not in chosen.note
+
+
+def test_exclude_wins_over_include_on_the_fallback_path():
+    """Round-1 F2: the precedence is the repo's config, not the picker's
+    luck -- a name in both lists does not run when the picker fell back
+    either."""
+    preferences = LensPreferences(
+        include=("reviewing-test-quality",), exclude=("reviewing-test-quality",)
+    )
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        preferences=preferences,
+    )
+    assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
+    assert "added: reviewing-test-quality" not in chosen.note
+    assert "overrides the guideline" in chosen.note
+
+
+def test_a_fallback_exclude_removes_the_controller_added_hygiene():
+    """Round-1 F2, with something the fallback exclude can actually drop:
+    the controller-added hygiene choice is excludable when the picker fell
+    back, exactly as on the success path."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(exclude=(PR_HYGIENE,)),
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == list(CRITICAL_TIER)
+    assert f"dropped the controller-added {PR_HYGIENE} lens" in chosen.note
+
+
+def test_a_fallback_hygiene_exclude_is_recorded_once():
+    """Round-2 N3: a fallback has no picks, so the hygiene drop is
+    recorded once, as the controller-added drop -- never also as a
+    dropped pick, which would mislabel a controller-added choice and say
+    the same thing twice."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(exclude=(PR_HYGIENE,)),
+    )
+    note = chosen.note
+    assert note.count(f"dropped the controller-added {PR_HYGIENE} lens") == 1
+    assert "dropped from the picks" not in note
+
+
+# --- round 1 (F4): the controller's shape facts -------------------------
+
+
+def test_the_decisions_log_shape_is_a_controller_fact_in_the_instructions():
+    shapes = guideline_shapes(("docs/open-questions.md",), scrub=str)
+    assert len(shapes) == 1
+    assert "reviewing-decision-lifecycle" in shapes[0]
+    assert "auditing-decision-record-currency" in shapes[0]
+    text = picker_instructions(Depth.REVIEW, shapes=shapes)
+    assert "The controller read the changed paths itself:" in text
+    assert shapes[0] in text
+    assert picker_instructions(Depth.REVIEW).endswith(
+        "Do not correct yourself with a second list."
+    )
+
+
+def test_an_adr_directory_shape_is_detected():
+    shapes = guideline_shapes(
+        ("docs/adr/0007-store-money-as-minor-units.md",), scrub=str
+    )
+    assert "reviewing-decision-lifecycle" in shapes[0]
+
+
+def test_the_rename_shape_names_the_restructuring_route_lenses():
+    diff = (
+        "diff --git a/old_calc.py b/new_calc.py\n"
+        "similarity index 100%\n"
+        "rename from old_calc.py\n"
+        "rename to new_calc.py\n"
+    )
+    shapes = guideline_shapes(("new_calc.py",), scrub=str, diff=diff)
+    assert len(shapes) == 1
+    assert "the guideline's restructuring route runs" in shapes[0]
+    assert "reviewing-module-design" in shapes[0]
+    assert "reviewing-naming-and-readability, among others" in shapes[0]
+    assert '"old_calc.py"` to `"new_calc.py"' in shapes[0]
+
+
+def test_a_rename_record_inside_diff_content_is_not_a_shape():
+    """A content line never starts with `rename`, so a PR body or an added
+    line cannot state a shape into the controller's facts."""
+    diff = (
+        "diff --git a/calc.py b/calc.py\n"
+        "--- a/calc.py\n"
+        "+++ b/calc.py\n"
+        "@@ -1 +1 @@\n"
+        "+rename from docs/open-questions.md\n"
+    )
+    assert guideline_shapes(("calc.py",), scrub=str, diff=diff) == ()
+
+
+def test_a_docs_only_shape_names_documentation_health():
+    assert guideline_shapes(("README.md", "docs/guide.md"), scrub=str) == (
+        (
+            "every changed path is documentation: the guideline "
+            "auto-includes auditing-documentation-health"
+        ),
+    )
+
+
+def test_a_docs_only_diff_with_code_is_not_docs_only():
+    assert guideline_shapes(("README.md", "calc.py"), scrub=str) == ()
+
+
+def test_a_pure_decision_record_diff_states_no_docs_only_shape():
+    """The guideline's own rule: a spec/ADR/RFC under docs/** is a design
+    doc first, so the docs-only row's auto-include is not stated for a
+    diff that is only decision records."""
+    shapes = guideline_shapes(
+        ("docs/adr/0007-store-money-as-minor-units.md",), scrub=str
+    )
+    assert len(shapes) == 1
+    assert "auditing-documentation-health" not in shapes[0]
+
+
+def test_shape_paths_are_quoted_as_data():
+    def scrub(text):
+        return text.replace("sek|ret", "[REDACTED]")
+
+    shapes = guideline_shapes(("sek|ret/adr-0007.md",), scrub=scrub)
+    assert "sek|ret" not in shapes[0]
+    assert '`"[REDACTED]/adr-0007.md"`' in shapes[0]
+
+
+def test_the_selection_note_carries_the_shape_facts():
+    shapes = guideline_shapes(("docs/open-questions.md",), scrub=str)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle("checking-restraint"),
+        scrub=str,
+        shapes=shapes,
+    )
+    assert "The controller's shape facts from the changed paths:" in chosen.note
+    assert shapes[0] in chosen.note
+
+
+def test_the_fallback_note_carries_the_shape_facts():
+    """The request stays auditable even when the picker left it out: the
+    fallback note still names the shapes the instructions asked for."""
+    shapes = guideline_shapes(("docs/open-questions.md",), scrub=str)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        small_bundle(),
+        scrub=str,
+        shapes=shapes,
+    )
+    assert shapes[0] in chosen.note
+    assert "only the critical tier was considered" in chosen.note
+
+
+# --- round 1 (F6): an override that changed nothing is still recorded ---
+
+
+def test_a_preference_that_changes_nothing_is_still_recorded():
+    """Round-1 F6: an operator reading the draft can tell "applied and
+    already satisfied" from "ignored"."""
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=LensPreferences(include=("reviewing-test-quality",)),
+    )
+    assert (
+        "The reviewed repo's merge-base REVIEW.md overrides the guideline "
+        "(include: reviewing-test-quality; exclude: none): nothing needed "
+        "changing." in chosen.note
+    )
+
+
+# --- round 1 (F7): the fallback note's "only" ---------------------------
+
+
+def test_the_fallback_note_drops_only_when_the_preference_changes_the_set():
+    """Round-1 F7: "only the critical tier was considered" stays true only
+    while the preference has added nothing and dropped nothing."""
+    library = small_bundle("reviewing-test-quality")
+    plain = select_lenses(Depth.REVIEW, lambda: "not json", library, scrub=str)
+    assert "only the critical tier was considered" in plain.note
+    changed = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        preferences=LensPreferences(include=("reviewing-test-quality",)),
+    )
+    assert "only the critical tier was considered" not in changed.note
+    assert "the critical tier was considered" in changed.note
+    assert "added: reviewing-test-quality" in changed.note
 
 
 def test_the_fallback_paths_add_pr_hygiene_when_the_body_states_results():

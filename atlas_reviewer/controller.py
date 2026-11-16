@@ -61,6 +61,7 @@ from atlas_reviewer.notes import ControllerFacts, controller_notes, quote_untrus
 from atlas_reviewer.picker import (
     Depth,
     LensSelection,
+    guideline_shapes,
     picker_instructions,
     select_lenses,
 )
@@ -753,21 +754,33 @@ def _pick_lenses(
 ) -> LensSelection:
     if diff is None:
         return LensSelection((), "", used_call=False, skipped="no diff to pick for")
+    paths = diff_paths(diff.text)
+    # The controller's own shape facts (D69 round-1 F4), computed from the
+    # changed paths this function already holds; the paths are quoted as
+    # data inside the sentences, so the forwarded `scrub` stays the only
+    # reader of PR-controlled text here.
+    shapes = guideline_shapes(paths[:MAX_PICKER_PATHS], scrub=scrub, diff=diff.text)
     if config.model_calls < 2:
         # `run_picker` is the literal `None` here, so `select_lenses`
         # (picker.py) always returns at its own `Depth.TRIAGE` or
-        # `run_picker is None` guard, before it ever reads `scrub`. No
-        # `depth`/`config` combination reaching this branch can make the
-        # forwarded `scrub` observable -- #624.
+        # `run_picker is None` guard, and that call itself never reads
+        # `scrub`: no `depth`/`config` combination reaching this branch
+        # can make the forwarded `scrub` observable through it -- #624.
+        # `guideline_shapes` above does read `scrub`, before the branch,
+        # and what it quotes reaches the review only through the note.
         return select_lenses(
-            config.depth, None, deps.lenses, scrub=scrub, pr_text=pull.body.text
+            config.depth,
+            None,
+            deps.lenses,
+            scrub=scrub,
+            pr_text=pull.body.text,
+            shapes=shapes,
         )
-    paths = diff_paths(diff.text)
     request = PickRequest(
         event.repo,
         event.pr_number,
         event.head_sha,
-        picker_instructions(config.depth),
+        picker_instructions(config.depth, shapes=shapes),
         (_pull_block(pull, deps), _paths_block(paths)),
     )
     return select_lenses(
@@ -781,6 +794,7 @@ def _pick_lenses(
         deps.lenses,
         scrub=scrub,
         pr_text=pull.body.text,
+        shapes=shapes,
     )
 
 

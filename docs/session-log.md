@@ -2241,3 +2241,119 @@ the comparison. The docs name the case in one line each. The round-3
 review also flagged commit `3a7f66f4`'s message as garbled (a pasted
 shell line embedded twice); noted in the PR body for cleanup at merge
 rather than a history rewrite. Offline only.
+
+## 2026-11-16 — the lens picker chooses any number of lenses, and a repo preference overrides the guideline (issue #711, D69)
+
+The picker was hard-capped at 8 names at review depth (40 at
+comprehensive, one-shot), with instructions that said extras "are
+dropped" — contradicting the guideline's own "not a strict cap" — and
+hygiene, added ahead of the picks since D58, could spend one of the 8
+slots because the picker was never told it was already in. Auto-includes
+depended on the model under that slot economy, which is how the #640
+module-design Major went missing. Brandon had settled the direction on
+Nov 15: the picker chooses any number of lenses, the skill bundle's
+guideline (default selection and auto-includes) governs, repo
+preferences override it, and the $10 review ceiling (D68), not a lens
+count, is the runaway guard.
+
+`Depth.limit` is now `int | None`: triage keeps its critical-tier cap
+(its depth mode), review and comprehensive are uncapped, and
+`plan_lenses` treats None as uncapped — the one-shot 60,000-character
+body budget decides what a one-shot review inlines, and the agentic path
+stays bounded by D68's derived limits. `MAX_LENSES` and
+`COMPREHENSIVE_LIMIT` are gone. The picker's instructions now carry the
+guideline's breadth as a default, name the auto-includes explicitly
+(decision-lifecycle on a decision-record or decisions-log change,
+documentation-health on a docs-only change, module-design and naming on
+a rename), and say there is no fixed cap. Hygiene spends no slot: twelve
+named picks plus a verification-stating body yield all twelve picks plus
+hygiene, every one running.
+
+The reviewed repo's merge-base `REVIEW.md` — the same tree the D68
+ceiling line is read from — may carry `review_lens_include:` and
+`review_lens_exclude:` lines (comma-separated lens names). The
+controller applies the override to the picks itself: an exclude drops a
+ranked pick, an include runs even when the picker fell back or made no
+call, triage is never widened, and the critical tier — the controller's
+own floor, not the guideline's — is untouched either way. The selection
+note records the override and the draft carries it; an unusable line
+fails open with a note, the way the ceiling's unusable line does, and a
+name matching no bundle lens surfaces as its own NOT RUN line rather
+than being guessed away. The auto-includes stay model-applied per the
+guideline: the slice removes what forced their drops, and the parity
+gate's missing-lens failure stays scoped to a leftover cap or a
+hygiene-spent slot. `agentic-review` reads the preference (it fetches
+the merge-base tree); the one-shot `review` command runs on the
+guideline alone, recorded in D69 rather than given a second preference
+source. Mutants applied by hand and killed: the cap of 8 back at review
+depth and on the agentic plan, the `max_lenses` default back at 8, the
+exclude ignored, the includes silently dropped, the exclude reaching the
+critical tier, includes applied at triage, a numeric cap back in the
+instructions, the lens-name validation dropped, and the unusable-line
+note dropped from the draft. Offline only.
+
+## 2026-11-16 (same day) — round-1 fixes for #729: hygiene is excludable and undeletable no more, exclude wins everywhere, and the controller states its shape facts
+
+Round 1 verified the D69 implementation (mutants M4 and M9 re-run and
+confirmed killed) and returned one Major: `_apply_preferences` did not
+know the D58 controller-added hygiene choice `_with_critical` inserts
+after it, so `review_lens_include: reviewing-pr-and-process-hygiene` with
+a verification-stating body ran hygiene twice — the body inlined twice
+one-shot, two conversations and a doubled reservation agentic — and
+`review_lens_exclude:` naming hygiene silently did nothing. The hygiene
+choices now reach `_apply_preferences`, join the covered set, and an
+exclude naming hygiene removes the controller-added lens (hygiene is
+neither critical-tier nor a cap, so the repo may decline it), recorded in
+the note; `plan_lenses` refuses a repeated name structurally ("already
+chosen earlier in this plan"), so no path can plan a lens twice, and a
+loop test holds the selection duplicate-free across the
+hygiene/preference/fallback combinations. Exclude wins over include on
+every path — the fallback applies the exclude filter too. Cheap
+hardening, not a redesign: the controller computes the auto-include
+shapes from the changed paths it already holds (`guideline_shapes`: a
+decision record or the decisions log touched, an all-documentation diff
+with at least one non-record path, a git rename record), states them in
+the picker's instructions and the draft's selection note with every path
+quoted as data, and adds no lens itself — stated, not enforced; the
+recorded owner decision that the model applies the auto-includes stands.
+The instructions' enumeration no longer claims completeness ("its
+auto-includes include"), names the decision route's second lens, and
+attributes the rename pair to the restructuring route where the
+guideline carries it. A preference that changes nothing is now still
+recorded ("nothing needed changing"), and the fallback note no longer
+says "only the critical tier" once the preference changed the set.
+`LensPreferences.source` is dropped. Killed there, by hand: the
+covered-set mutant omitting hygiene, the structural dedupe removed, the
+fallback exclude filter removed, the nothing-changed record suppressed,
+and the "only" reword removed. Overlap noted in the PR body: #652's
+`test_lenses.py` imports `_NAME`, which this PR renamed to `LENS_NAME`;
+whoever merges second updates the import. Offline only.
+
+## 2026-11-16 (same day) — round-2 fixes for #729: the doc claims stated as they are, and the fallback's hygiene drop recorded once
+
+Round 2 verified all eight round-1 fixes fixed — its reviewer re-ran all
+seven claimed mutants by hand and confirmed each killed — and returned
+two Minors and four Nits, all fixed: the `_pick_lenses` #624 comment now
+states its current truth (the branch's `select_lenses` call never reads
+`scrub`; `guideline_shapes` does, before the branch, and only through
+the note); the stray 4-space indent in `review_wide.py`'s module
+docstring is gone; a fallback's hygiene exclude is recorded once, as the
+controller-added drop, never also mislabeled as a dropped pick
+(`test_a_fallback_hygiene_exclude_is_recorded_once`; the
+revert-to-dropped-pick mutant dies on it); the rename sentences in the
+instructions and in the shape facts are marked "among others" — the
+same partial-list pattern swept from `_BREADTH` into `guideline_shapes`
+per the standing authoring rules — pinned by both rename tests (the
+qualifier-removal mutant dies on the instructions test); the
+`_DECISION_DIRS` comment no longer claims coverage it does not have (a
+root-level log under another name matches no heuristic, and a missed
+shape costs one sentence, as the function's docstring already says); and
+the D69 Update gained a write-once Correction splitting the
+killed-mutant attribution: the covered-set mutant kills only the
+include-duplicate test, while the exclude tests die to the separate
+`hygiene_dropped` mutant. One process slip, caught and recovered: the
+mutant revert's `git checkout` wiped the still-uncommitted N3/N4/N5
+edits, which the full-suite run caught as three failures; the edits were
+re-applied, committed, and only then were the two mutants applied
+against the commit and killed. 3,040 reviewer tests at 96.68% coverage.
+Offline only.
