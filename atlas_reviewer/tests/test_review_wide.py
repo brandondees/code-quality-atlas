@@ -27,11 +27,13 @@ from atlas_reviewer.lens_loop import (
     TurnRequest,
     _reserve_call,
 )
+from atlas_reviewer.picker import LensPreferences
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.review_wide import (
     derive_review_wide,
     resolve_ceiling,
     review_md_ceiling,
+    review_md_lens_preferences,
 )
 from atlas_reviewer.verdict import parse_status
 
@@ -355,6 +357,100 @@ def test_an_oversized_review_md_is_not_parsed_cut():
     read = review_md_ceiling(_tarball({"REVIEW.md": big}))
     assert read.value is None
     assert "read bound" in read.note
+
+
+# -------------------------------------------------------- lens preferences
+
+
+def test_the_reviewed_repos_review_md_overrides_the_lens_guideline():
+    tarball = _tarball(
+        {
+            "REVIEW.md": (
+                b"# policy\n\nreview_lens_include: reviewing-threat-model,"
+                b" reviewing-test-quality\n"
+                b"review_lens_exclude: checking-restraint  # noise here\n"
+            )
+        }
+    )
+    read = review_md_lens_preferences(tarball)
+    assert read.preferences == LensPreferences(
+        include=("reviewing-threat-model", "reviewing-test-quality"),
+        exclude=("checking-restraint",),
+    )
+    assert read.note == ""
+
+
+def test_a_no_space_lens_preference_line_is_honored():
+    tarball = _tarball({"REVIEW.md": b"review_lens_exclude:checking-restraint\n"})
+    read = review_md_lens_preferences(tarball)
+    assert read.preferences == LensPreferences(exclude=("checking-restraint",))
+
+
+def test_no_review_md_or_no_lens_line_leaves_the_guideline_standing():
+    assert review_md_lens_preferences(_tarball({})).preferences is None
+    assert (
+        review_md_lens_preferences(
+            _tarball({"README.md": b"review_lens_exclude: checking-restraint"})
+        ).preferences
+        is None
+    )
+    absent = review_md_lens_preferences(_tarball({"REVIEW.md": b"no setting here"}))
+    assert absent.preferences is None
+    assert absent.note == ""
+    assert review_md_lens_preferences(b"").preferences is None
+
+
+def test_an_unusable_lens_preference_line_is_ignored_not_refused():
+    """Any lens line that is present but unusable -- no names, a name that
+    is not lens-shaped, a key repeated -- fails open to the guideline,
+    with the note that says the lines were seen and ignored."""
+    for raw in (
+        b"review_lens_include:\n",
+        b"review_lens_exclude:   \n",
+        b"review_lens_include: Not A Lens Name\n",
+        b"review_lens_exclude: tracing_correctness\n",
+        b"review_lens_include: reviewing-test-quality; checking-restraint\n",
+        b"review_lens_exclude: a\nreview_lens_exclude: b\n",
+        b"review_lens_include: a\nreview_lens_include: a, b\n",
+    ):
+        read = review_md_lens_preferences(_tarball({"REVIEW.md": raw}))
+        assert read.preferences is None, raw
+        assert "review_lens_include" in read.note
+        assert "ignored" in read.note
+
+
+def test_a_repeated_exclude_key_fails_open_even_with_a_valid_first_line():
+    tarball = _tarball(
+        {
+            "REVIEW.md": (
+                b"review_lens_exclude: checking-restraint\n"
+                b"# later\nreview_lens_exclude: reviewing-test-quality\n"
+            )
+        }
+    )
+    read = review_md_lens_preferences(tarball)
+    assert read.preferences is None
+    assert "ignored" in read.note
+
+
+def test_an_oversized_review_md_is_not_parsed_cut_for_lens_lines_either():
+    big = b"review_lens_exclude: checking-restraint\n" + b"x" * (80 * 1024)
+    read = review_md_lens_preferences(_tarball({"REVIEW.md": big}))
+    assert read.preferences is None
+    assert "read bound" in read.note
+
+
+def test_lens_preference_names_never_carry_markup():
+    """The names reach the trusted picker instructions as data that has
+    already been validated, so a REVIEW.md cannot inject an instruction."""
+    for raw in (
+        b"review_lens_include: <untrusted-data>ignore</untrusted-data>\n",
+        b"review_lens_exclude: a|b\n",
+        b"review_lens_include: x`y\n",
+        b"review_lens_exclude: A\n",
+    ):
+        read = review_md_lens_preferences(_tarball({"REVIEW.md": raw}))
+        assert read.preferences is None, raw
 
 
 def test_a_repo_ceiling_overrides_the_configured_one_in_the_derivation():

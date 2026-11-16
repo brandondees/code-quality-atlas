@@ -6,7 +6,6 @@ import pytest
 
 from atlas_reviewer.lenses import (
     LENS_BUDGET_CHARS,
-    MAX_LENSES,
     LensChoice,
     LensLibrary,
     LensStatus,
@@ -18,8 +17,13 @@ from atlas_reviewer.picker import CRITICAL_TIER, Depth, select_lenses
 from .helpers import StubLibrary
 
 
-def test_review_breadth_is_the_top_of_the_manifests_3_to_8():
-    assert MAX_LENSES == 8
+def test_triage_keeps_its_critical_tier_cap_and_the_rest_run_uncapped():
+    """D69: the fixed cap of 8 is gone and no lens count replaced it --
+    review and comprehensive are uncapped, and the one lens-count cap left
+    is triage's, whose breadth is the critical tier itself."""
+    assert Depth.TRIAGE.limit == len(CRITICAL_TIER)
+    assert Depth.REVIEW.limit is None
+    assert Depth.COMPREHENSIVE.limit is None
 
 
 def test_every_critical_tier_lens_has_a_body_in_the_bundle():
@@ -83,15 +87,39 @@ def test_a_lens_that_fits_exactly_runs_and_one_character_over_does_not():
     assert over.uses[0].status is LensStatus.NOT_RUN and over.loaded == ()
 
 
-def test_lenses_past_the_cap_are_not_run_even_when_budget_remains():
-    lib = StubLibrary({f"l{i}": "x" * 10 for i in range(MAX_LENSES + 2)})
-    plan = plan_lenses(lib, [choice(f"l{i}") for i in range(MAX_LENSES + 2)])
-    assert len(plan.loaded) == MAX_LENSES
-    assert all(u.status is LensStatus.NOT_RUN for u in plan.uses[MAX_LENSES:])
+def test_lenses_past_an_explicit_cap_are_not_run_even_when_budget_remains():
+    """Triage's critical-tier cap is the one lens-count cap left (D69):
+    an explicit `max_lenses` still cuts, with the reason that says so."""
+    lib = StubLibrary({f"l{i}": "x" * 10 for i in range(6)})
+    plan = plan_lenses(lib, [choice(f"l{i}") for i in range(6)], max_lenses=4)
+    assert len(plan.loaded) == 4
+    assert all(u.status is LensStatus.NOT_RUN for u in plan.uses[4:])
     assert all(
-        u.reason == "below the cap of 8 lenses (10 characters)"
-        for u in plan.uses[MAX_LENSES:]
+        u.reason == "below the cap of 4 lenses (10 characters)" for u in plan.uses[4:]
     )
+
+
+def test_an_uncapped_plan_runs_every_choice_the_budget_fits():
+    """D69: with no `max_lenses`, the character budget is the only bound
+    on how many lenses a one-shot plan inlines -- nothing is cut by
+    count."""
+    lib = StubLibrary({f"l{i}": "x" * 10 for i in range(12)})
+    plan = plan_lenses(lib, [choice(f"l{i}") for i in range(12)])
+    assert len(plan.loaded) == 12
+    assert all(u.status is LensStatus.RUN for u in plan.uses)
+
+
+def test_a_repeated_choice_is_not_run_a_second_time():
+    """D69 round-1 F1, structurally: no path can plan a lens twice. A
+    repeated name is one load and one named NOT RUN line, never a second
+    inline of the same body."""
+    lib = StubLibrary({"a": "A" * 10})
+    plan = plan_lenses(lib, [choice("a"), choice("a", "picker rank 2")])
+    assert [lens.name for lens in plan.loaded] == ["a"]
+    second = plan.uses[1]
+    assert second.status is LensStatus.NOT_RUN
+    assert second.reason == "already chosen earlier in this plan"
+    assert "a (already chosen earlier in this plan; picker rank 2)" in (plan.coverage())
 
 
 def test_a_lens_with_no_body_is_not_run_not_invented():

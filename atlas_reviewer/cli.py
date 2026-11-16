@@ -125,7 +125,13 @@ from atlas_reviewer.openrouter import (
     OpenRouterProvider,
     model_route,
 )
-from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_lenses
+from atlas_reviewer.picker import (
+    Depth,
+    LensSelection,
+    guideline_shapes,
+    picker_instructions,
+    select_agentic_lenses,
+)
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
@@ -137,7 +143,12 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
-from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
+from atlas_reviewer.review_wide import (
+    LensPreferencesRead,
+    derive_review_wide,
+    review_md_ceiling,
+    review_md_lens_preferences,
+)
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -892,6 +903,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             )
         except ValueError as exc:
             raise UsageError(str(exc)) from exc
+        # D69: the reviewed repo's lens-selection preference, read from the
+        # same merge-base tree the ceiling is read from, so a PR cannot
+        # move its own override either.
+        lens_preferences = review_md_lens_preferences(trees.base)
         library = LensLibrary()
         depth = Depth(args.depth)
         conversation_budget = ConversationBudget()
@@ -921,9 +936,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         def scrub(text: str) -> str:
             return scrubber(text).text
 
+        picker_paths = diff_paths(diff)[:500]
+        # The controller's own shape facts (D69 round-1 F4), from the
+        # changed paths this command already holds; the paths are quoted
+        # as data inside the sentences.
+        shapes = guideline_shapes(picker_paths, scrub=scrub, diff=diff)
+
         def run_picker() -> str:
-            paths = diff_paths(diff)[:500]
-            shown = "\n".join(paths) or "(no changed paths)"
+            shown = "\n".join(picker_paths) or "(no changed paths)"
             # The picker's view of the PR is the one-shot path's: title and
             # body, redacted, fenced as untrusted, never instructions (D38).
             pull_view = (
@@ -936,7 +956,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     event.repo,
                     event.pr_number,
                     event.head_sha,
-                    picker_instructions(depth),
+                    picker_instructions(depth, lens_preferences.preferences, shapes),
                     (
                         pull_view,
                         UntrustedBlock("changed-paths", RepoText(shown)),
@@ -955,7 +975,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     library,
                     scrub=scrub,
                     pr_text=pr_text,
+                    preferences=lens_preferences.preferences,
+                    shapes=shapes,
                 )
+                selection = _with_preference_note(selection, lens_preferences)
                 names = tuple(loaded.name for loaded in plan.loaded)
                 budget = getattr(picker_provider, "budget", None)
                 picker_spend = (
@@ -1052,6 +1075,22 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     if review.proposed_event is ReviewEvent.REQUEST_CHANGES:
         return EXIT_CHANGES_REQUESTED
     return EXIT_OK
+
+
+def _with_preference_note(
+    selection: LensSelection, read: LensPreferencesRead
+) -> LensSelection:
+    """The selection with a seen-but-unusable preference line's note
+    appended (D69): "lines present but ignored" is recorded, the way the
+    ceiling's unusable line is, so it can be told apart from no lines."""
+    if not read.note:
+        return selection
+    return LensSelection(
+        selection.choices,
+        f"{selection.note} {read.note}",
+        selection.used_call,
+        selection.skipped,
+    )
 
 
 def _picker_limits(limits: AgenticLimits) -> CallLimits:
