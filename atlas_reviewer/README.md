@@ -71,16 +71,27 @@ A head whose review failed can be queued again. A newer head SHA
 cancels the review of the previous one, and that cancelled review is not
 posted.
 
-The review itself is the existing `review` command, one at a time unless
+The review child follows the service mode, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
-so a bad value cannot start an unbounded pool, not a cost cap). The child
+so a bad value cannot start an unbounded pool, not a cost cap).
+`ATLAS_SERVICE_MODE` selects the command: `agentic` (the default, D70)
+runs `python -m atlas_reviewer agentic-review`, and `oneshot` runs the
+one-shot `review` command. An unknown value refuses to start the service
+instead of silently picking one. The one-shot mode stays a complete,
+callable command — D25's ceilings apply: 3 calls, $3, and 200,000 input
+tokens — while the agentic child reads
+the agentic limits and derives its review-wide limits from the planned
+lens count under the per-review dollar ceiling (D68). The parent's
+wall-clock deadline around one child is 1,200 seconds by default and
+`ATLAS_SERVICE_DEADLINE_S` sets it between 60 and 14,400 seconds, because
+a slower model needs more time than the one-shot budget. The child
 process receives only an allowlist: the OpenRouter key, because it calls
 the model, the Sprites token, because it creates and destroys the Sprite,
 a read-only installation token, `ATLAS_MODEL`, `ATLAS_PROVIDERS`,
 `ATLAS_ALLOW_SAFETY_RETENTION`, `ATLAS_REQUIRE_ZDR`,
-`ATLAS_KEY_CEILING_USD`, and the process basics. It does not receive the
-agentic limit variables. This child is the one-shot `review` command, so
-D25's ceilings apply: 3 calls, $3, and 200,000 input tokens.
+`ATLAS_KEY_CEILING_USD`, the agentic limit variables (D68's per-lens
+knobs and `ATLAS_REVIEW_CEILING_USD` included; the one-shot command
+ignores them), and the process basics.
 It does not receive the webhook secret, the App private key, or a Fly API
 token. Exit 0, 4 and 5 are finished
 reviews and are posted. Any other exit posts nothing; the failure is a
@@ -474,8 +485,9 @@ accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
 `ATLAS_REQUIRE_ZDR` are not credentials either. The live OpenRouter
 path reads them; a dry run does not. The webhook review child receives
-those route variables and `ATLAS_KEY_CEILING_USD`. It does not receive
-the agentic limit variables, the webhook secret, or the App private key. The redactor also scrubs the exact
+those route variables, `ATLAS_KEY_CEILING_USD`, and the agentic limit
+variables (the one-shot command ignores those). It does not receive
+the webhook secret or the App private key. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
@@ -1387,7 +1399,7 @@ D41 records the 2026-11-12 probe that did.
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
 | `service_admit.py` | webhook signature, event and allowlist admission | no |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |
-| `service_run.py` | one queued commit through the existing `review` command | the review child |
+| `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70) | the review child |
 | `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
 | `service.py` | webhook HTTP server and the review worker | network |
 

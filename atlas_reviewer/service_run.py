@@ -1,15 +1,23 @@
 # SPDX-License-Identifier: MIT
-"""Run one queued commit through the existing ``review`` command.
+"""Run one queued commit through the service's review child command.
 
-The child is ``python -m atlas_reviewer review``. It receives an allowlist
-of environment variables: the model key, the Sprites token, a read-only
-installation token, ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``,
-``ATLAS_ALLOW_SAFETY_RETENTION``, ``ATLAS_REQUIRE_ZDR``,
-``ATLAS_KEY_CEILING_USD``, and the process basics (``PATH``, ``HOME``,
-language and CA paths). The one-shot review reads those. It does not
-read the agentic limit variables, so they are not passed, and D25's
-ceilings stay. The webhook secret, the App private key, and anything
-else the parent holds, including a Fly API token, are not passed on. When the queue cancels the job, or the
+The service mode selects the child: ``ATLAS_SERVICE_MODE=agentic`` (the
+default) runs ``python -m atlas_reviewer agentic-review``, and
+``ATLAS_SERVICE_MODE=oneshot`` runs the one-shot ``review`` command
+(D53, D70). The one-shot mode stays a complete, callable command; nothing
+here stubs it. The child receives an allowlist of environment variables:
+the model key, the Sprites token, a read-only installation token,
+``ATLAS_MODEL``, ``ATLAS_PROVIDERS``, ``ATLAS_ALLOW_SAFETY_RETENTION``,
+``ATLAS_REQUIRE_ZDR``, ``ATLAS_KEY_CEILING_USD``, and the agentic limit
+variables (``agentic_config.ENV``, D68's derived limits and the $10
+per-review ceiling included). The one-shot command reads the route
+variables and does not read the agentic limits, so passing them in that
+mode costs nothing; the agentic child reads them. The webhook secret, the
+App private key, and anything else the parent holds, including a Fly API
+token, are not passed on. The parent's wall-clock deadline defaults to
+1,200 seconds and is set with ``ATLAS_SERVICE_DEADLINE_S``, between 60
+and 14,400 seconds, because a slower model needs more time than the
+one-shot budget. When the queue cancels the job, or the
 wall-clock deadline passes, the child is signalled SIGTERM, which the CLI
 turns into the stop that deletes its Sprite. The parent waits out the
 Sprite cleanup budget plus one Sprites call before SIGKILL, and the
@@ -22,6 +30,7 @@ a failure and produces no report.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import signal
@@ -34,8 +43,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from atlas_reviewer.agentic_config import ENV as AGENTIC_LIMIT_ENV
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.limit_stop import LimitHit
 from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
     ENV_KEY_CEILING_USD,
@@ -79,11 +90,28 @@ _CHILD_ALLOWED = frozenset(
         ENV_REQUIRE_ZDR,
         ENV_KEY_CEILING_USD,
     }
+    # The agentic limits (D68's per-lens knobs and the per-review dollar
+    # ceiling included) ride along in both modes: the agentic child reads
+    # them, and the one-shot `review` command ignores variables it does
+    # not read, so passing them costs it nothing. They are settings, not
+    # credentials.
+    | set(AGENTIC_LIMIT_ENV.values())
 )
 # The parent stops the child after this long even if the child is still
 # running. The controller has its own shorter caps; this is the wall
-# around a child that never hits them.
+# around a child that never hits them. ATLAS_SERVICE_DEADLINE_S raises or
+# lowers it between these bounds: an agentic review of a slower model can
+# need more than the one-shot budget, and a value below a minute cannot
+# even start a runner.
 REVIEW_DEADLINE_S = 1200.0
+SERVICE_DEADLINE_ENV = "ATLAS_SERVICE_DEADLINE_S"
+MIN_SERVICE_DEADLINE_S = 60.0
+MAX_SERVICE_DEADLINE_S = 14400.0
+_SERVICE_MODES = ("agentic", "oneshot")
+SERVICE_MODE_ENV = "ATLAS_SERVICE_MODE"
+MODE_AGENTIC = "agentic"
+MODE_ONESHOT = "oneshot"
+DEFAULT_SERVICE_MODE = MODE_AGENTIC
 _DEADLINE_EXIT = -1
 # The CLI's review exits. 4 is incomplete file coverage and 5 is a finished
 # review that requests changes. Both still wrote a draft.
@@ -105,6 +133,54 @@ class RunConfig:
     provider: str
     allow_live_inference: bool
     state_root: Path
+    mode: str = DEFAULT_SERVICE_MODE
+
+    def __post_init__(self) -> None:
+        if self.mode not in _SERVICE_MODES:
+            raise ValueError(
+                f"service mode must be {MODE_AGENTIC} or {MODE_ONESHOT}, "
+                f"not {self.mode!r}"
+            )
+
+
+def service_mode(env: Mapping[str, str]) -> str:
+    """The child command the service runs: ``ATLAS_SERVICE_MODE``, agentic
+    when unset. An unknown value raises instead of silently picking one."""
+    raw = env.get(SERVICE_MODE_ENV, "")
+    if not raw:
+        return DEFAULT_SERVICE_MODE
+    if raw not in _SERVICE_MODES:
+        raise ValueError(
+            f"{SERVICE_MODE_ENV} must be {_SERVICE_MODES[0]} or "
+            f"{_SERVICE_MODES[1]}, not {raw!r}"
+        )
+    return raw
+
+
+def service_deadline(env: Mapping[str, str]) -> float:
+    """The parent's wall clock around one child, in seconds: the
+    ``ATLAS_SERVICE_DEADLINE_S`` value, or the 1,200-second default. A
+    value outside the bounds raises, so a mistyped setting stops the
+    service instead of silently clipping or unbounding every review."""
+    raw = env.get(SERVICE_DEADLINE_ENV, "")
+    if not raw:
+        return REVIEW_DEADLINE_S
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(
+            f"{SERVICE_DEADLINE_ENV} must be a number of seconds, not {raw!r}"
+        ) from None
+    if (
+        not math.isfinite(value)
+        or not MIN_SERVICE_DEADLINE_S <= value <= MAX_SERVICE_DEADLINE_S
+    ):
+        raise ValueError(
+            f"{SERVICE_DEADLINE_ENV} must be between "
+            f"{MIN_SERVICE_DEADLINE_S:.0f} and {MAX_SERVICE_DEADLINE_S:.0f} "
+            f"seconds, not {raw!r}"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -133,13 +209,16 @@ def run_dir(root: Path, event: PrEvent) -> Path:
 
 
 def review_argv(config: RunConfig, directory: Path) -> list[str]:
+    """The child command the mode names: ``agentic-review`` by default,
+    the one-shot ``review`` in oneshot mode. Both take the same
+    ``--event``, ``--out``, ``--events`` and ``--provider`` wiring."""
     argv = [
         sys.executable,
         "-m",
         "atlas_reviewer",
         "--state-dir",
         str(directory / "state"),
-        "review",
+        "review" if config.mode == MODE_ONESHOT else "agentic-review",
         "--event",
         str(directory / "event.json"),
         "--out",
@@ -262,9 +341,20 @@ def summarize_draft(draft: str) -> ReviewReport:
 
     The one-shot draft does not list every path a model call saw. The
     files section is the controller's coverage note, plus any path the
-    draft's opening warning quotes as not reviewed in full.
+    draft's opening warning quotes as not reviewed in full. An agentic
+    draft -- its status line says ``"mode": "agentic"`` -- carries the
+    same report from its own sections: the selection's NOT RUN bullets
+    and the attestation-ledger lens lines, the status line's coverage
+    counts and limit stop, the context omissions, and the model-usage
+    line.
     """
     status = parse_status(draft) or {}
+    if status.get("mode") == "agentic":
+        return _agentic_report(draft, status)
+    return _oneshot_report(draft, status)
+
+
+def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
     recommended = status.get("review_event")
     run: list[str] = []
     skipped: list[str] = []
@@ -294,6 +384,146 @@ def summarize_draft(draft: str) -> ReviewReport:
         tuple(_bullets(section(draft, "Model usage"))),
         recommended if isinstance(recommended, str) else "",
     )
+
+
+# The agentic draft's ledger line: `- L1 <lens>: **<state>**; <rest>`.
+_AGENTIC_COVERAGE = re.compile(r"^- L\d+ (.+?): \*\*(.+?)\*\*(?:; (.*))?$")
+_AGENTIC_RUN_STATES = frozenset({"clean", "partial"})
+_NOT_RUN_BULLET = "- NOT RUN: "
+# Coverage-section prose that is not a limit: the runner report and the
+# round-log note sit in that section whenever the draft has no prompt-cache
+# section between them.
+_AGENTIC_NON_LIMITS = ("Runner:", "Runner delete", "Round log, quoted:")
+
+
+def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
+    """The posted report from an agentic draft. A lens counts as run when
+    its ledger line says it ran with its body (``clean`` or ``partial``);
+    ``failed`` and ``NOT RUN`` are not run, the way the parity gate reads
+    them. The coverage note is built from the status line's controller
+    counts, and the limit stops are the status line's first stop, the
+    context omissions, and the ceiling note the coverage section carries."""
+    skipped: list[str] = []
+    named: set[str] = set()
+
+    def skip(name: str, why: str) -> None:
+        if name in named:
+            return
+        named.add(name)
+        skipped.append(f"{name}: {why}" if why else name)
+
+    for name, why in _agentic_selection_skips(draft):
+        skip(name, why)
+    stops = [
+        line[2:].strip()
+        for line in section(draft, "Context omissions").splitlines()
+        if line.startswith("- ")
+    ]
+    run_names, not_run, cost, notes = _agentic_coverage(draft)
+    for name, why in not_run:
+        skip(name, why)
+    stops.extend(notes)
+    stop = status.get("limit_stop")
+    if isinstance(stop, dict) and all(
+        isinstance(stop.get(field), str) and stop.get(field)
+        for field in ("limit", "configured", "observed", "setting")
+    ):
+        stops.insert(
+            0,
+            LimitHit(
+                str(stop["limit"]),
+                str(stop["configured"]),
+                str(stop["observed"]),
+                str(stop["setting"]),
+            ).message(),
+        )
+    preamble = draft.split("\n## ", 1)[0]
+    recommended = status.get("review_event")
+    return ReviewReport(
+        tuple(run_names),
+        tuple(skipped),
+        _agentic_coverage_note(status),
+        _quoted_strings(preamble),
+        tuple(stops),
+        tuple(cost),
+        recommended if isinstance(recommended, str) else "",
+    )
+
+
+def _agentic_selection_skips(draft: str) -> list[tuple[str, str]]:
+    """The selection section's NOT RUN bullets as (lens, why) pairs. The
+    lens name is the bullet's first quoted string; the why is the
+    parenthetical after it."""
+    pairs: list[tuple[str, str]] = []
+    for line in section(draft, "Lens selection").splitlines():
+        if not line.startswith(_NOT_RUN_BULLET):
+            continue
+        rest = line[len(_NOT_RUN_BULLET) :]
+        quoted = _quoted_strings(rest)
+        name = quoted[0] if quoted else rest
+        why = ""
+        if rest.endswith(")"):
+            _, sep, tail = rest.rpartition(" (")
+            if sep:
+                why = tail[:-1]
+        pairs.append((name, why))
+    return pairs
+
+
+def _agentic_coverage(
+    draft: str,
+) -> tuple[list[str], list[tuple[str, str]], list[str], list[str]]:
+    """From the coverage section: the lens names that ran, the (lens, why)
+    pairs that did not, the cost lines, and the section's other prose as
+    limit notes. A not-run line carries its reason only when the line is
+    exactly the state and one quoted reason -- the shape a lens that was
+    never attempted renders; a failed lens with an outcome has parts, not
+    a reason, and stays name-only."""
+    run: list[str] = []
+    not_run: list[tuple[str, str]] = []
+    cost: list[str] = []
+    notes: list[str] = []
+    for line in section(draft, "Lens coverage (attestation ledger)").splitlines():
+        match = _AGENTIC_COVERAGE.match(line)
+        if match is not None:
+            name, state, rest = match.group(1), match.group(2), match.group(3) or ""
+            if state in _AGENTIC_RUN_STATES:
+                run.append(name)
+            elif "body sha256" not in rest:
+                quoted = _quoted_strings(rest)
+                not_run.append((name, quoted[0] if quoted else ""))
+            else:
+                not_run.append((name, ""))
+            continue
+        if not line or line.startswith("- "):
+            continue
+        if line.startswith("Model calls:"):
+            cost.append(line)
+        elif not line.startswith(_AGENTIC_NON_LIMITS):
+            notes.append(line)
+    return run, not_run, cost, notes
+
+
+def _agentic_coverage_note(status: Mapping[str, object]) -> str:
+    """The file-coverage note, from the status line's controller counts.
+    An incomplete note with no unread file says so: the coverage gate can
+    also fail on lens coverage, which no file count shows."""
+
+    def count(raw: object) -> int | None:
+        return raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+
+    changed = count(status.get("changed_files"))
+    unreviewed = count(status.get("unreviewed_files"))
+    if status.get("coverage_complete") is True:
+        files = f" ({changed})" if changed is not None else ""
+        return f"Agentic file coverage complete: every changed file{files} was read in full."
+    if unreviewed:
+        total = str(changed) if changed is not None else "?"
+        return (
+            f"Agentic file coverage incomplete: {unreviewed} of {total} "
+            "changed file(s) were not read in full."
+        )
+    return "Agentic file coverage incomplete: lens coverage is not complete."
 
 
 def section(text: str, heading: str) -> str:

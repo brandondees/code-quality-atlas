@@ -1978,3 +1978,35 @@ progress-comparison mutant A9 (`now >= last_seen` reads every wake as
 progress, never arms the backstop, and the parked wait never comes
 back). The healthy-clock pin's ticker steps coarser (five seconds of
 clock a tenth-second, n-9). Offline only.
+
+## 2026-11-16 — the webhook service's child follows a service mode: agentic by default, one-shot kept (issue #712, D70)
+
+The deployed Fly webhook app had started the one-shot `review` command
+since D53, so every posted review ran only tracing and security —
+migration, concurrency and pr-hygiene were skipped and the picker was
+never called. Brandon's Nov 15 decision moves the service onto
+`agentic-review` and keeps one-shot as a selectable mode. `service_run`
+now resolves `ATLAS_SERVICE_MODE` (`agentic` unset; unknown refuses
+startup through `config_from_env`), `review_argv` builds the matching
+argv — same `--event`/`--out`/`--events`/`--provider` wiring for both —
+and `RunConfig` validates the mode, so nothing can silently pick a
+command. The agentic `ATLAS_*` limits (`agentic_config.ENV`, D68's
+`ATLAS_PER_LENS_CALLS`/`ATLAS_PER_LENS_USD` and the $10
+`ATLAS_REVIEW_CEILING_USD` included) join the child allowlist; the
+one-shot child ignores variables it does not read, and token-like names
+(`FLY_API_TOKEN`, the webhook secret) still stay in the parent. The
+parent's hard 1,200-second wall becomes `ATLAS_SERVICE_DEADLINE_S`
+(60–14,400 seconds, startup-refused outside the bounds) because a slower
+model needs more time. The posted body stays COMMENT-only (D46);
+`summarize_draft` dispatches on the status line's `"mode": "agentic"` and
+maps the agentic draft — selection NOT RUN bullets, ledger lens lines
+(`clean`/`partial` run; `failed`/`NOT RUN` not), a coverage note from the
+status line's controller counts, and the status line's limit stop, the
+context omissions and the ceiling note as Limit stops — with the
+`Model calls:` line as Cost; runner and round-log prose that shares the
+coverage section when no cache section follows is excluded. The fixture
+parity test runs the real `agentic-review` dry run through the faked
+`popen` and asserts the posted COMMENT lists every planned lens as run,
+`Lenses not run: None.`, and the coverage note. The mode flip on the
+running app is a separate approved deploy and was not made here. Offline
+only.

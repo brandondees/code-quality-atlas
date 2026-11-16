@@ -77,12 +77,24 @@ Machine. They are not secrets, and they do not belong in `service.env`.
 `ATLAS_ALLOW_SAFETY_RETENTION` opts into provider retention.
 `ATLAS_REQUIRE_ZDR` set to `false` turns off the zero-data-retention
 requirement; unset keeps it on. `ATLAS_KEY_CEILING_USD` is the most the
-OpenRouter key's own credit limit may be, and the one-shot review reads
-it. The child is the one-shot `review` command. It does not read the
-agentic limit variables, and D25's ceilings apply: 3 calls, $3, and
-200,000 input tokens. The only GitHub credential the child receives is
-still the read-only installation token the parent minted. The App private
-key, the webhook secret, and `FLY_API_TOKEN` stay in the parent.
+OpenRouter key's own credit limit may be, and the review reads it.
+`ATLAS_SERVICE_MODE` selects the child command: `agentic` (the default,
+D70) runs `agentic-review`, whose review-wide limits derive from the
+planned lens count under the per-review dollar ceiling (D68), and
+`oneshot` runs the one-shot `review` command — D25's ceilings apply: 3
+calls, $3, and 200,000 input tokens; an unknown value refuses to start the
+service. `ATLAS_SERVICE_DEADLINE_S` sets the parent's wall clock around
+one review child, 60 to 14,400 seconds, default 1,200. Flipping either
+setting on the running app is a separate, approved deploy step and is
+not part of the change that introduces them; this runbook only names
+them. The
+agentic limit variables (`ATLAS_PER_LENS_CALLS`, `ATLAS_PER_LENS_USD`,
+`ATLAS_REVIEW_CEILING_USD`, and the rest of `README.md`'s `ATLAS_*`
+limit table) reach the
+child when set on the Machine. The only GitHub credential the child
+receives is still the read-only installation token the parent minted.
+The App private key, the webhook secret, and `FLY_API_TOKEN` stay in the
+parent.
 
 The App needs Pull requests set to read and write. The service's posting
 token asks for `pull_requests: write` and no other write. The operator CLI
