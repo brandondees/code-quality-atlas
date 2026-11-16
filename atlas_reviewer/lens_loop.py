@@ -781,7 +781,7 @@ def diff_prefix_for(
             "the diff holds no section for the paths in scope, so the "
             "diff pages through diff_file"
         )
-    room = _prefix_room(model)
+    room = input_room_tokens(model)
     if room is None:
         return None, (
             "the model does not report an input room, so the diff pages "
@@ -806,11 +806,14 @@ def diff_prefix_for(
     )
 
 
-def _prefix_room(model: LensModel) -> int | None:
-    """The input room the model names for the shared prefix, or None when
-    it cannot say. The live adapter resolves its per-call bounds from the
-    endpoint terms; a model that refuses them here pages, and the refusal
-    surfaces again when the turn itself is priced."""
+def input_room_tokens(model: LensModel) -> int | None:
+    """The input room the model names, or None when it cannot say: the
+    model's resolved per-call input cap, in tokens. The loop budgets the
+    shared diff prefix against it (D65), and the `agentic-review` command
+    sizes the caller-context blocks against it (D67). The live adapter
+    resolves its per-call bounds from the endpoint terms; a model that
+    refuses them here pages (and the CLI keeps D52's fixed caps), and the
+    refusal surfaces again when the turn itself is priced."""
     found = getattr(model, "prefix_room_tokens", None)
     if not callable(found):
         return None

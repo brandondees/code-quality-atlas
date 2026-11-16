@@ -46,6 +46,7 @@ from atlas_reviewer.budget import (
     ReviewBudget,
 )
 from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.controller import (
     DEFAULT_DIFF_CHARS_PER_CALL,
     MAX_MODEL_CALLS,
@@ -54,7 +55,19 @@ from atlas_reviewer.controller import (
     ReviewConfig,
     run_review,
 )
+from atlas_reviewer.conversation import (
+    SOURCE as CONVERSATION_SOURCE,
+)
+from atlas_reviewer.conversation import (
+    ConversationBudget,
+    build_conversation,
+    fetch_remarks,
+    picker_block,
+    review_context,
+)
 from atlas_reviewer.coordinator import (
+    NONCE_BYTES,
+    first_turn,
     limits_for_lens,
     model_for_lens,
     render_draft,
@@ -64,6 +77,7 @@ from atlas_reviewer.diffs import diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
     InvalidEventError,
+    Omission,
     PrEvent,
     RunnerReport,
     RunnerStatus,
@@ -72,7 +86,9 @@ from atlas_reviewer.domain import (
 )
 from atlas_reviewer.draft import telemetry_section
 from atlas_reviewer.eval_harness import EvalFormatError, load_directory
+from atlas_reviewer.evidence import PullInfo, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
+from atlas_reviewer.gather import Collected, pr_commits
 from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
 from atlas_reviewer.github_fixture import FixtureGitHub
@@ -87,14 +103,20 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
+from atlas_reviewer.lens_loop import (
+    AgenticLimits,
+    FinalReply,
+    LensModel,
+    TurnRequest,
+    input_room_tokens,
+)
 from atlas_reviewer.lens_script import (
     LensScript,
     LensScriptError,
     LensScriptModel,
     load_lens_script,
 )
-from atlas_reviewer.lenses import LensLibrary, LensStatus
+from atlas_reviewer.lenses import LensLibrary, LensPlan, LensStatus
 from atlas_reviewer.local_runner import LocalSprites, LocalTasks
 from atlas_reviewer.openrouter import (
     ENV_KEY_CEILING_USD,
@@ -106,13 +128,15 @@ from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_len
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
+    GitHubReader,
     ModelProvider,
     PickRequest,
     SpritesApi,
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
-from atlas_reviewer.redact import Redactor
+from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
+from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
@@ -620,6 +644,132 @@ class _DryRunLensModel:
         return FinalReply(json.dumps(payload), Decimal("0.01"))
 
 
+CONTEXT_RESERVE_CHARS = 8_192
+"""Characters of the model's per-call input room reserved ahead of the
+caller-context blocks (D67): the paged or shared-prefix instruction text,
+the reply contract, the fence framing, the tool schemas, and the nudge and
+repair turns' controller text, measured at under 6 KiB on main with
+headroom. The changed-file listing is not part of the reserve: it is
+measured exactly. Like D38's and D52's budgets this is a working default
+pending the owner; bytes are counted against the token room, the
+conservative direction (a token never encodes less than one byte, D65)."""
+
+_NONCE_PROBE = "0" * (NONCE_BYTES * 2)
+"""A same-length stand-in for the per-review fence nonce, so the scaffold
+measurement counts the framing the real nonce produces."""
+
+_MARKER_CHARS = len(TRUNCATION_MARKER)
+"""The characters a truncated build appends after its cap (`_truncate`),
+which every byte bound below must count."""
+
+_MIN_FIT_CHARS = 4 + _MARKER_CHARS
+"""The smallest input room a provably-fitting block can fill: one
+worst-case UTF-8 character (four bytes) plus the truncation marker. A
+room below this cannot hold any block, and the omit-whole gate fires."""
+
+
+def _input_room_chars(
+    limits: AgenticLimits,
+    model: LensModel,
+    plan: LensPlan,
+    event: PrEvent,
+    diff: str,
+) -> int | None:
+    """The characters of caller context -- the prior rounds, then the
+    conversation block, in the first turn's D52 order -- that the model's
+    resolved per-call input room can hold next to the shared diff prefix
+    and the lens body (D67).
+
+    The room is the same figure the loop budgets the shared prefix against
+    (`input_room_tokens`): the model's context minus its output reserve.
+    From it this takes the share the prefix may take (D65), the largest
+    lens body the plan loaded, the turn-1 message's own framing measured
+    from the diff (the subject, the fence markers and the changed-file
+    listing), and the fixed controller reserve. Every part is measured in
+    characters against a token room, which is the conservative direction:
+    content that passes here cannot overflow the per-call token check
+    later. None: the model names no input room -- the dry run's scripted
+    reviewer never does -- so D52's fixed caps stand and the per-call
+    token check stays the only bound, as before this wiring.
+    """
+    room = input_room_tokens(model)
+    if room is None:
+        return None
+    share = limits.resolve().diff_prefix_share
+    skill = max((use.chars for use in plan.uses), default=0)
+    scaffold = len(first_turn(event, diff, (), _NONCE_PROBE))
+    return int(room - share * room) - skill - scaffold - CONTEXT_RESERVE_CHARS
+
+
+def _conversation_block(
+    event: PrEvent,
+    github: GitHubReader,
+    pull_info: PullInfo | None,
+    redactor: Redactor,
+    scrub: Callable[[str], str],
+    budget: ConversationBudget,
+    fit: int | None,
+) -> tuple[UntrustedBlock | None, tuple[Omission, ...]]:
+    """The one-shot path's conversation block for the agentic first turn
+    (D52): the same `build_conversation` assembly the `review` command
+    runs, with every fetch or parse cut recorded as an omission.
+
+    `fit` is the characters the model's input room holds for the context
+    blocks, or None when the model names no room and D52's fixed caps
+    stand. Under a fit the block is first built at the room's own size,
+    not D38's cap. A truncated build appends `TRUNCATION_MARKER` after
+    its cap, so its bytes are at most four per content character plus the
+    ASCII marker's 39: building at `fit - 39` characters makes an
+    ASCII-truncated build exactly the room's size, and a multi-byte build
+    that still overflows is rebuilt once at a quarter of what remains,
+    `(fit - 39) // 4`, whose byte bound holds by construction
+    (4 * ((fit - 39) // 4) + 39 <= fit). What omits a block whole is the
+    small-fit gate: a room below one worst-case character plus the marker
+    (43 characters) cannot hold any block next to the shared diff prefix
+    and the lens body, so the block is never built and the omission says
+    so. A pull whose fields do not parse yields no block and one
+    omission, so the review stays COMMENT instead of dying before it
+    started."""
+    if pull_info is None:
+        return None, (
+            Omission(
+                CONVERSATION_SOURCE,
+                "pull request fields",
+                "the pull request's fields did not parse, so the conversation "
+                "block was not built",
+            ),
+        )
+    if fit is not None and fit < _MIN_FIT_CHARS:
+        return None, (
+            Omission(
+                CONVERSATION_SOURCE,
+                "model input room",
+                f"the model's input room cannot hold the conversation block "
+                f"next to the shared diff prefix and the lens body ({fit} "
+                "characters left for the context blocks), so it was left out",
+            ),
+        )
+    collected = Collected()
+    commits = pr_commits(event, github, collected)
+    remarks = fetch_remarks(event, github, collected, scrub=scrub)
+
+    def build(size: int) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
+        conversation = build_conversation(
+            pull_info, commits, remarks, event.head_sha, redactor,
+            replace(budget, total_chars=size),
+        )  # fmt: skip
+        return review_context(conversation)
+
+    if fit is None:
+        block, omissions = build(budget.total_chars)
+        return block, (*collected.omissions, *omissions)
+    block, omissions = build(min(budget.total_chars, fit - _MARKER_CHARS))
+    size = len(block.content.text.encode("utf-8"))
+    if size > fit:
+        block, omissions = build((fit - _MARKER_CHARS) // 4)
+    return block, (*collected.omissions, *omissions)
+
+
 def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     """Every selected lens, concurrently up to the pool, then one draft.
 
@@ -710,19 +860,43 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
         library = LensLibrary()
         depth = Depth(args.depth)
+        conversation_budget = ConversationBudget()
+        try:
+            pull_info: PullInfo | None = parse_pull(
+                pull, redactor, conversation_budget.body_chars
+            )
+        except BoundaryError:
+            # The picker falls back to its old title-only view and the
+            # conversation block is not built; `_conversation_block` records
+            # the omission that keeps the review from approving on a
+            # conversation nobody could assemble.
+            pull_info = None
         # The PR body decides only whether the process-hygiene lens is
         # included (D58); the text itself reaches no lens unfenced.
         body = pull.get("body")
         pr_text = body if isinstance(body, str) else ""
+        # Flagged before anything is quoted, the way the one-shot path
+        # orders it: quote_untrusted and the draft's cells encode `|`, `\`
+        # and backticks, and a scrub after that encoding cannot find the
+        # value. The scrubber the remarks' fetch errors are quoted with is
+        # the one-shot's: the redactor plus the diff's flagged secret
+        # values (D33).
+        scrubber = replace(redactor, flagged=scan_diff(diff).values)
         harness = SkillBundleHarness(picker_provider, load_bundle(), redactor)
 
         def scrub(text: str) -> str:
-            return redactor(text).text
+            return scrubber(text).text
 
         def run_picker() -> str:
             paths = diff_paths(diff)[:500]
             shown = "\n".join(paths) or "(no changed paths)"
-            title = pull.get("title") if isinstance(pull, dict) else ""
+            # The picker's view of the PR is the one-shot path's: title and
+            # body, redacted, fenced as untrusted, never instructions (D38).
+            pull_view = (
+                picker_block(pull_info, redactor)
+                if pull_info is not None
+                else UntrustedBlock("pull-request", redactor(str(pull.get("title") or "")))
+            )  # fmt: skip
             return harness.pick(
                 PickRequest(
                     event.repo,
@@ -730,7 +904,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     event.head_sha,
                     picker_instructions(depth),
                     (
-                        UntrustedBlock("pull-request", redactor(str(title or ""))),
+                        pull_view,
                         UntrustedBlock("changed-paths", RepoText(shown)),
                     ),
                 )
@@ -758,6 +932,21 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 ledger = AttemptLedger(
                     _attestation_ledger_path(args, env, scratch), clock
                 )
+                fit = _input_room_chars(limits, lens_model, plan, event, diff)
+                block, context_omissions = _conversation_block(
+                    event,
+                    github,
+                    pull_info,
+                    redactor,
+                    scrub,
+                    conversation_budget,
+                    fit,
+                )
+                if fit is None:
+                    prior = PRIOR_ROUND_CHARS
+                else:
+                    used = len(block.content.text.encode("utf-8")) if block else 0
+                    prior = min(PRIOR_ROUND_CHARS, max(1, fit - used))
                 review = review_lenses(
                     event,
                     names,
@@ -776,6 +965,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     picker_spend=picker_spend,
                     task_socket=task_socket,
                     bridge_root=bridge_root,
+                    context=() if block is None else (block,),
+                    context_omissions=context_omissions,
+                    round_log=RoundLog(_state_dir(args, env) / "rounds.jsonl"),
+                    prior_chars=prior,
                 )
                 review = replace(
                     review,

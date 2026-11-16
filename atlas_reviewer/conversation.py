@@ -173,6 +173,15 @@ def review_context(
     return UntrustedBlock("pull-request", conversation.text), conversation.omissions
 
 
+def picker_block(pull: PullInfo, redactor: Redactor) -> UntrustedBlock:
+    """The picker's view of the PR: title and body only, not the whole
+    conversation (D38). The body is the `parse_pull`-capped one, and the
+    whole block is fenced as untrusted by whatever prompt carries it."""
+    return UntrustedBlock(
+        "pull-request", redactor(f"Title: {pull.title.text}\n\n{pull.body.text}")
+    )
+
+
 def build_conversation(
     pull: PullInfo,
     commits: Sequence[PrCommit],
