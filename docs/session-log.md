@@ -2483,3 +2483,33 @@ mutants applied by hand and killed, each attributed in the D73 Update's
 round-1 paragraph. #730's `cli.py` hunks are disjoint; latest main merged
 first. 3,100 reviewer tests, tooling 882 passed at 95.20%,
 ruff/mypy/drift clean. Offline only.
+
+## 2026-11-16 (same day) — round-2 fixes for #731: the routine's Major — the re-assessment quote check saw changed files only
+
+The round-1 review's verdict held at COMMENT solely on the routine's open
+Major, reproduced live: a verified prior finding can cite an unchanged
+file (the ordinary run's lens read it there), and the re-assessment's
+quote check — built from the changed files' sources plus an empty
+head-reads set — could not verify that same quote, so a revision replaced
+a verified finding with an unverified copy and the finding vanished from
+the reported set. Both of the routine's suggested shapes shipped:
+`judge` now takes the head tree and quote-checks against the head lines
+of every path the reply's and the prior findings' locations cite, so the
+requested test (P1 cites `docs/notes.md:1`, revised with its quote
+unchanged) verifies and keeps counting toward the verdict; and
+`effective_outcome` keeps the prior whenever its replacement does not
+verify, showing the failed revision as an annotation with the quote
+check's reason. The carried routine Minor ships with it: the
+re-assessment attempt is started on the ledger before its first model
+call, and a failure beyond the recorded causes is finished as the
+MODEL_ERROR attempt it is — an exception in the re-assessment no longer
+fails the whole review, the prior findings stand, and a death mid-call
+(a BaseException the guard correctly does not catch) leaves the started
+attempt reading back as ABANDONED. The three Nits: a revision's `reason`
+capped at `MAX_TEXT_CHARS` like a withdrawal's; `_note` counting only
+resolved references with annotation-only revisions counted as
+`annotated`, separate from `revised`; the N2 test on pytest's `tmp_path`
+instead of a leaked `mkdtemp`; and the abandoned-latest-attempt dropped
+note documented. Six mutants applied by hand and killed, each attributed
+in the D73 Update's round-2 paragraph. 3,105 reviewer tests, tooling 882
+passed at 95.20%, ruff/mypy/drift clean. Offline only.
