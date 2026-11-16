@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The service runs the selected mode's review command and reads its draft."""
 
+import argparse
 import io
 import json
 import os
@@ -242,6 +243,56 @@ def test_the_child_does_not_receive_the_app_private_key():
     assert WEBHOOK_SECRET_ENV not in env
     assert env[READ_TOKEN_ENV] == "ghs_read"
     assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_the_child_env_is_enough_for_the_agentic_command_to_reach_github(
+    monkeypatch,
+):
+    """The boundary between the service parent and the review child: the
+    parent passes one read-only installation token and no App credentials,
+    and the agentic command the child runs must wire its GitHub client
+    from exactly that env. The first live agentic run died here, demanding
+    the App id the child must never hold."""
+    parent = {
+        "ATLAS_OPENROUTER_API_KEY": "sk-or",
+        "ATLAS_SPRITES_TOKEN": "sprite",
+        "PATH": "/usr/bin",
+    }
+    env = child_env(parent, token="ghs_read")
+    seen = {}
+
+    class Client:
+        def __init__(self, _transport, tokens):
+            seen["tokens"] = tokens
+
+    monkeypatch.setattr(cli, "GitHubClient", Client)
+    wiring = cli._live_github(
+        argparse.Namespace(include_issues=False),
+        env,
+        PrEvent(REPO, 7, SHA),
+        cli._Credentials(env),
+    )
+    assert isinstance(wiring, cli.GitHubClient)
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == "ghs_read"
+
+
+def test_the_agentic_command_without_the_parent_token_refuses_clearly(monkeypatch):
+    """A parent that failed to mint and pass the token must not send the
+    child hunting for App credentials it cannot hold: the same clear
+    usage error the standalone path gives fires instead."""
+    env = child_env({"ATLAS_SPRITES_TOKEN": "sprite", "PATH": "/usr/bin"})
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
+    )
+    with pytest.raises(cli.UsageError) as raised:
+        cli._live_github(
+            argparse.Namespace(include_issues=False),
+            env,
+            PrEvent(REPO, 7, SHA),
+            cli._Credentials(env),
+        )
+    assert "ATLAS_GITHUB_APP_ID" in str(raised.value)
 
 
 def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):

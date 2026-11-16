@@ -1799,6 +1799,139 @@ def test_a_read_token_replaces_the_app_private_key(tmp_path):
     assert "ghs_readonly_token_value" not in scrubbed
 
 
+def test_the_agentic_command_builds_its_github_client_from_the_read_token(
+    tmp_path, monkeypatch
+):
+    """The service child holds no App credentials, only the parent-minted
+    read-only installation token; the agentic command must build its
+    GitHub client from that token the way the one-shot path already does,
+    instead of demanding App credentials the child must never hold. The
+    first live agentic run died exactly there."""
+    token = "ghs_readonly_token_value"
+    seen = {}
+
+    def github(_transport, tokens):
+        seen["tokens"] = tokens
+        raise BoundaryError("stop before the first GitHub read")
+
+    monkeypatch.setattr(cli, "GitHubClient", github)
+
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake
+
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "triage", "--pool-size", "1", "--max-calls", "8", "--max-turns",
+         "2", "--reservation-usd", "5.00"],
+        env={cli.ENV_INSTALLATION_TOKEN: token, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out, err=err,
+        sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(
+            OpenRouterFake(), key, limits=limits
+        ),
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY, err.getvalue()
+    assert "stop before the first GitHub read" in err.getvalue()
+    assert cli.ENV_APP_ID not in err.getvalue()
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == token
+
+
+def test_the_agentic_command_without_any_github_credential_names_the_missing_one(
+    tmp_path,
+):
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake
+
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "triage", "--pool-size", "1", "--max-calls", "8", "--max-turns",
+         "2", "--reservation-usd", "5.00"],
+        env={cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out, err=err,
+        sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(
+            OpenRouterFake(), key, limits=limits
+        ),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE, err.getvalue()
+    assert cli.ENV_APP_ID in err.getvalue()
+
+
+def test_the_sequence_probe_fetches_the_tarball_with_the_read_token(monkeypatch):
+    """--sequence review's tarball fetch takes the parent-minted token
+    like the other live paths, not App credentials."""
+    token = "ghs_readonly_token_value"
+    seen = {}
+
+    class Client:
+        def __init__(self, _transport, tokens):
+            seen["tokens"] = tokens
+
+        def get_tarball(self, _repo, _sha):
+            return b"tar-bytes"
+
+    monkeypatch.setattr(cli, "GitHubClient", Client)
+
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.telemetry import Telemetry
+
+    env = {cli.ENV_INSTALLATION_TOKEN: token}
+    credentials = cli._Credentials(env)
+    tarball = cli._probe_source(
+        argparse.Namespace(tarball="", event=EVENT),
+        env,
+        Telemetry(SystemClock()),
+        credentials,
+    )
+    assert tarball == b"tar-bytes"
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == token
+    assert token not in credentials.scrub(f"sent {token} onward")
+
+
+@pytest.mark.parametrize("path", ["agentic", "sequence"])
+def test_the_live_github_paths_without_the_token_or_app_credentials_refuse(
+    path, monkeypatch
+):
+    """With neither the fixed token nor App credentials set, the existing
+    clear usage error still fires, and no minting is attempted."""
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
+    )
+
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.telemetry import Telemetry
+
+    credentials = cli._Credentials({})
+
+    def call():
+        if path == "agentic":
+            cli._live_github(
+                argparse.Namespace(include_issues=False),
+                {},
+                cli.load_event(Path(EVENT)),
+                credentials,
+            )
+        else:
+            cli._probe_source(
+                argparse.Namespace(tarball="", event=EVENT),
+                {},
+                Telemetry(SystemClock()),
+                credentials,
+            )
+
+    with pytest.raises(cli.UsageError) as raised:
+        call()
+    assert cli.ENV_APP_ID in str(raised.value)
+
+
 def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     tmp_path, monkeypatch
 ):

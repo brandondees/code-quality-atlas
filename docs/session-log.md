@@ -2241,3 +2241,30 @@ the comparison. The docs name the case in one line each. The round-3
 review also flagged commit `3a7f66f4`'s message as garbled (a pasted
 shell line embedded twice); noted in the PR body for cleanup at merge
 rather than a history rewrite. Offline only.
+
+## 2026-11-16 (same day) — fix: the agentic and --sequence paths now honor the parent-minted installation token
+
+The first live agentic review on the deployed service (Fly v5, D70) died
+at boot with `this command needs the ATLAS_GITHUB_APP_ID environment
+variable`: the parent mints a read-only installation token and passes the
+child only `ATLAS_GITHUB_INSTALLATION_TOKEN` (`_CHILD_ALLOWED` withholds
+the App id and key by design, D53), but `_live_github` and `_probe_source`
+called `_app_tokens` unconditionally while `_live_wiring` alone checked
+for the fixed token first. The token choice now lives in one
+`_review_tokens` helper all three live call sites ask: fixed token when
+set, App-minted otherwise with the existing `_require_env` checks — so
+the paths cannot drift apart again, and no new credential crosses the
+child boundary (`_CHILD_ALLOWED` is untouched). Redaction is unchanged:
+the minted token still goes through `credentials.register`, and
+`_Credentials` already seeds the env token. Pinned by tests at each path
+(agentic command, `--sequence` tarball fetch) that pass only with the
+token and no App credentials, a boundary test feeding `service_run`'s
+`child_env` output straight into the agentic wiring — the test that
+would have caught this — and fallback tests that the clear
+`ATLAS_GITHUB_APP_ID` usage error survives when neither credential is
+set. Mutants killed: reverting either call site to `_app_tokens`
+unconditionally fails the agentic, `--sequence` and boundary tests. The
+deploy runbook already says the child's only GitHub credential is the
+read-only installation token, and `docs/agentic-reviewer.md` puts the
+App key on the controller, so no doc correction was needed; no new D
+number. Offline only.
