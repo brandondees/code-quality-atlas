@@ -286,10 +286,13 @@ def test_a_zdr_list_timeout_on_the_lens_path_is_recorded_as_a_refusal():
 
 
 def test_a_zdr_list_http_failure_on_the_lens_path_is_recorded_as_a_refusal():
+    """Issue #689: a 5xx is a server error (`BoundaryError`), not a
+    refusal (`PricingUnknownError`)."""
     fake = OpenRouterFake(reply(completion()), zdr=reply({}, status=503))
     lens = OpenRouterLensModel(OpenRouterProvider(fake, KEY))
-    with pytest.raises(PricingUnknownError, match="HTTP 503"):
+    with pytest.raises(BoundaryError, match="HTTP 503") as excinfo:
         lens.worst_case_usd(request())
+    assert not isinstance(excinfo.value, PricingUnknownError)
     assert lens.provider.budget.refusals == [
         "OpenRouter HTTP 503 for https://openrouter.ai/api/v1/endpoints/zdr"
     ]
