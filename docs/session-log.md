@@ -2411,3 +2411,105 @@ edits, which the full-suite run caught as three failures; the edits were
 re-applied, committed, and only then were the two mutants applied
 against the commit and killed. 3,040 reviewer tests at 96.68% coverage.
 Offline only.
+
+## 2026-11-16 (same day) — #726: a reused settled lens re-assesses on newer CI evidence or comments (D73)
+
+D73's follow-up, implemented as `atlas_reviewer/reassess.py` and the
+pieces it wires. The reuse key is unchanged — a lens settled for this
+head and body is still reused without a runner — but the reuse path now
+compares the evidence snapshot this review gathered against a digest
+stored with the settled result (`AttemptLedger.finish`'s new
+`evidence_digest`, read back by `AttemptLedger.evidence_digest`), over
+the gathered head-SHA CI items and the PR's remarks with each item's
+fetch time excluded, plus the gathers' omissions, failures and notes so a
+listing that now fails or now succeeds moves the digest too. A digest
+that moved — or a result settled before the digest was ever stored —
+earns one bounded re-assessment call: no tools (the head is unchanged, so
+the cited code is the code that is there), no repair turn, reserved at
+its worst case against the review's shared `Spend` (D68's derived limits
+and dollar ceiling; D69's no-lens-cap stands), settled like any turn. The
+turn carries the prior findings labeled `P1`, `P2`, … plus the review's
+own conversation and CI blocks — the digest says something changed, not
+what, so the delta is the complete current picture under the same
+budgets, inside the review's one fence. The reply has its own contract
+shape: findings that may `revises` a prior label with a stated reason,
+and `withdrawn` entries of exactly `{id, reason}` — silence keeps a prior
+finding as it stands, so nothing is ever dropped silently, and the draft
+lists withdrawals with their reasons and a revision's replacement id.
+Every reported finding is quote-verified against the head files like an
+ordinary reply's; a label naming no prior finding refuses the whole
+reply. The re-assessment is recorded on the lens's `#reassess` ledger
+key, never the lens key, so a garbled supplementary reply cannot turn a
+clean lens partial, and the effective result is composed from the ledger
+alone on every review; a failed re-assessment (unparsed, refused,
+halted) stores no digest, so the next review re-earns the bounded call
+instead of freezing the failure in. A settled result that never attested
+earns no re-assessment — the ordinary retry policy governs it — and a
+caller that passes no snapshot keeps today's reuse unchanged. The
+one-shot path re-reviews every time and has no settled-result reuse to
+wire; the service's GitHub permission failures keep their existing
+omission handling, and a refused listing moves the digest so the
+re-assessment proceeds with what is available and names the gap. The
+dry-run script gained a `reassessment` scenario section (validated at
+load) and the no-script dry-run model confirms by silence. Twelve
+mutants applied by hand and killed, each named in the D73 Update; 3,080
+reviewer tests at 96.29% coverage, tooling suite 882 passed at 95.20%,
+`gate`'s ruff/mypy/drift legs clean. Offline only.
+
+## 2026-11-16 (same day) — round-1 fixes for #731: a withdrawal annotates instead of deleting, and the re-assessment call is traced
+
+Round 1 returned COMMENT with no Blocker — every acceptance criterion in
+issue #726 confirmed met, the digest called sound, and five of the author's
+twelve mutants independently re-killed — plus four fixes. M2 is the
+substantive one: a withdrawal was untrusted-input-driven and directly
+deleted a prior finding from the effective set, so a comment crafted to
+say "P1 is wrong" could flip a Blocker review to approve. Per the brief's
+option (a), `effective_outcome` now never removes a prior finding on a
+withdrawal — the withdrawal is an annotation the draft's withdrawn
+section shows with its reason — and a revision that would lower a
+Blocker's or a Major's severity is annotation-only too, so the higher
+severity still counts; the status line gained the `withdrawn` annotation
+count (option (c)), and the reply instructions state the proposal
+semantics. M1: the reuse branch now builds the scrubber and wraps the
+model in the lens trace, so the re-assessment call records its completion
+span. M3: `dropped` is composed from the settled run plus only the latest
+re-assessment's notes, so one malformed severity cannot accumulate into
+every later review of the head. N1–N4: the verified-only participation
+rule stated, a revise-and-withdraw-same-label reply refused at `judge`,
+the digest's not-covered fields (title, body, labels, commit subjects)
+named in its docstring, and the latest re-assessment's `limit_hit`
+carried onto the composed outcome so the status line names it. Seven new
+mutants applied by hand and killed, each attributed in the D73 Update's
+round-1 paragraph. #730's `cli.py` hunks are disjoint; latest main merged
+first. 3,100 reviewer tests, tooling 882 passed at 95.20%,
+ruff/mypy/drift clean. Offline only.
+
+## 2026-11-16 (same day) — round-2 fixes for #731: the routine's Major — the re-assessment quote check saw changed files only
+
+The round-1 review's verdict held at COMMENT solely on the routine's open
+Major, reproduced live: a verified prior finding can cite an unchanged
+file (the ordinary run's lens read it there), and the re-assessment's
+quote check — built from the changed files' sources plus an empty
+head-reads set — could not verify that same quote, so a revision replaced
+a verified finding with an unverified copy and the finding vanished from
+the reported set. Both of the routine's suggested shapes shipped:
+`judge` now takes the head tree and quote-checks against the head lines
+of every path the reply's and the prior findings' locations cite, so the
+requested test (P1 cites `docs/notes.md:1`, revised with its quote
+unchanged) verifies and keeps counting toward the verdict; and
+`effective_outcome` keeps the prior whenever its replacement does not
+verify, showing the failed revision as an annotation with the quote
+check's reason. The carried routine Minor ships with it: the
+re-assessment attempt is started on the ledger before its first model
+call, and a failure beyond the recorded causes is finished as the
+MODEL_ERROR attempt it is — an exception in the re-assessment no longer
+fails the whole review, the prior findings stand, and a death mid-call
+(a BaseException the guard correctly does not catch) leaves the started
+attempt reading back as ABANDONED. The three Nits: a revision's `reason`
+capped at `MAX_TEXT_CHARS` like a withdrawal's; `_note` counting only
+resolved references with annotation-only revisions counted as
+`annotated`, separate from `revised`; the N2 test on pytest's `tmp_path`
+instead of a leaked `mkdtemp`; and the abandoned-latest-attempt dropped
+note documented. Six mutants applied by hand and killed, each attributed
+in the D73 Update's round-2 paragraph. 3,105 reviewer tests, tooling 882
+passed at 95.20%, ruff/mypy/drift clean. Offline only.

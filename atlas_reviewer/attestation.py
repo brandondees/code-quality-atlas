@@ -211,6 +211,15 @@ class AttemptOutcome:
     # text: that the prefix was inlined and at what size, or why the diff
     # pages through `diff_file` instead. Empty when the prefix is off.
     diff_prefix: str = ""
+    # The re-assessment's recorded references (D73), on a `#reassess` key's
+    # outcome only: `withdrawn` is each `(prior label, stated reason)` the
+    # reply withdrew, and `revises` each `(finding index from 1, prior
+    # label, stated reason)` a `findings` entry revises. The labels name
+    # the prior findings the re-assessment turn listed; `reassess.judge`
+    # refuses a label that names none, and `reassess.effective_outcome`
+    # resolves them against the effective set its replay reconstructs.
+    withdrawn: tuple[tuple[str, str], ...] = ()
+    revises: tuple[tuple[int, str, str], ...] = ()
 
     @property
     def state(self) -> LensState:
@@ -310,8 +319,33 @@ class AttemptLedger:
         outcome: AttemptOutcome,
         *,
         scrub: Callable[[str], str],
+        evidence_digest: str | None = None,
     ) -> None:
-        self._append(key, attempt, "finished", outcome, scrub)
+        """Record the finish. `evidence_digest` is the evidence snapshot
+        (D73) the attempt was judged against, when the caller gathered
+        one: the reuse path compares it against a later review's snapshot
+        to tell newer evidence from unchanged evidence. None stores
+        nothing, which reads as "cannot be shown to be current"."""
+        self._append(key, attempt, "finished", outcome, scrub, evidence_digest)
+
+    def evidence_digest(self, key: LensKey) -> str | None:
+        """The evidence snapshot (D73) the key's last finished attempt was
+        judged against, or None when none was recorded: a ledger line from
+        before the digest was stored, a caller that passes no snapshot, or
+        a re-assessment that never met the contract (its digest is
+        withheld, so the next review re-runs the bounded call)."""
+        with self._lock:
+            found: tuple[int, str | None] | None = None
+            for record in self._records():
+                if record.get("key_id") != key.id or record["event"] != "finished":
+                    continue
+                if found is None or record["attempt"] > found[0]:
+                    digest = record.get("evidence_digest")
+                    found = (
+                        record["attempt"],
+                        digest if isinstance(digest, str) else None,
+                    )
+            return None if found is None else found[1]
 
     def _append(
         self,
@@ -320,13 +354,14 @@ class AttemptLedger:
         event: str,
         outcome: AttemptOutcome | None,
         scrub: Callable[[str], str],
+        evidence_digest: str | None = None,
     ) -> None:
         if attempt < 1:
             raise ValueError("attempts are numbered from 1")
         with self._lock:
             if any(_same(r, key, attempt, event) for r in self._records()):
                 return
-            self._write_record(key, attempt, event, outcome, scrub)
+            self._write_record(key, attempt, event, outcome, scrub, evidence_digest)
 
     def _write_record(
         self,
@@ -335,6 +370,7 @@ class AttemptLedger:
         event: str,
         outcome: AttemptOutcome | None,
         scrub: Callable[[str], str],
+        evidence_digest: str | None = None,
     ) -> None:
         record: dict[str, Any] = {
             "v": LEDGER_VERSION,
@@ -344,6 +380,8 @@ class AttemptLedger:
             "event": event,
             "at": self.clock.now().isoformat(),
         }
+        if evidence_digest is not None:
+            record["evidence_digest"] = evidence_digest
         if outcome is not None:
             record["outcome"] = _outcome_json(outcome, scrub)
         self._write(json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n")
@@ -437,6 +475,13 @@ def _outcome_json(
         "dropped": [scrub(note) for note in outcome.dropped],
         "nudges": [scrub(nudge) for nudge in outcome.nudges],
         "diff_prefix": scrub(outcome.diff_prefix),
+        "withdrawn": [
+            [scrub(prior), scrub(reason)] for prior, reason in outcome.withdrawn
+        ],
+        "revises": [
+            [index, scrub(prior), scrub(reason)]
+            for index, prior, reason in outcome.revises
+        ],
     }
 
 
@@ -495,7 +540,51 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _dropped_from(data.get("dropped", ())),
         tuple(nudges),
         diff_prefix,
+        _withdrawn_from(data.get("withdrawn", ())),
+        _revises_from(data.get("revises", ())),
     )
+
+
+def _withdrawn_from(data: object) -> tuple[tuple[str, str], ...]:
+    """A recorded re-assessment's withdrawals (D73): each a
+    `[prior label, reason]` pair, written back as a tuple of strings."""
+    if isinstance(data, tuple):
+        data = list(data)
+    if not isinstance(data, list) or not all(
+        isinstance(entry, list)
+        and len(entry) == 2
+        and all(isinstance(value, str) for value in entry)
+        for entry in data
+    ):
+        raise TypeError("withdrawn must be a list of [prior label, reason] pairs")
+    return tuple((str(prior), str(reason)) for prior, reason in data)
+
+
+def _revises_from(data: object) -> tuple[tuple[int, str, str], ...]:
+    """A recorded re-assessment's revisions (D73): each a
+    `[finding index, prior label, reason]` triple, the index the 1-based
+    position of the revising finding in the same outcome's `findings`."""
+    if isinstance(data, tuple):
+        data = list(data)
+    if not isinstance(data, list):
+        raise TypeError(
+            "revises must be a list of [index, prior label, reason] triples"
+        )
+    refs = []
+    for entry in data:
+        if (
+            not isinstance(entry, list)
+            or len(entry) != 3
+            or isinstance(entry[0], bool)
+            or not isinstance(entry[0], int)
+            or entry[0] < 1
+            or not all(isinstance(value, str) for value in entry[1:])
+        ):
+            raise TypeError(
+                "revises must be a list of [index, prior label, reason] triples"
+            )
+        refs.append((int(entry[0]), str(entry[1]), str(entry[2])))
+    return tuple(refs)
 
 
 def _dropped_from(data: object) -> tuple[str, ...]:

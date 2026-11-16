@@ -1321,9 +1321,23 @@ D41 records the 2026-11-12 probe that did.
   valence and attribution, and the normalized finding and evidence text).
   A crash leaves an
   abandoned attempt that counts as used. A lens already settled for this
-  head and body is reused without a runner. A settled outcome with no
-  changed-file count, from before the per-file gate, shows no coverage,
-  so the review cannot approve on it.
+  head and body is reused without a runner, and (D73) the reused result
+  keeps its findings while a moved evidence-snapshot digest -- the
+  gathered head-SHA CI items and the PR's remarks, fetch times excluded,
+  stored with the finished attempt -- earns it one bounded no-tools
+  re-assessment call against the review's shared spend: its reply may add
+  findings, revise or propose withdrawing prior ones, a withdrawal or
+  revision always with its stated reason, and silence keeps a prior
+  finding as it stands. A withdrawal removes nothing -- it annotates, and
+  so does a revision that would lower a Blocker's or a Major's severity,
+  so the higher severity still counts for the verdict (round-1 review of
+  #731, M2). The re-assessment is recorded on the lens's `#reassess`
+  ledger key, so a garbled reply cannot turn a clean lens partial, and
+  the effective result is composed from the ledger alone on every review;
+  the composed outcome carries the latest re-assessment's own limit stop
+  and, beside the settled run's dropped notes, only its latest reply's. A
+  settled outcome with no changed-file count, from before the per-file
+  gate, shows no coverage, so the review cannot approve on it.
 - **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
   request per turn, with the one-shot provider pin (`require_parameters`,
   zero data retention unless `ATLAS_REQUIRE_ZDR` is false, no fallbacks,
@@ -1381,14 +1395,19 @@ D41 records the 2026-11-12 probe that did.
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
     `coverage_complete`, `changed_files`, `unreviewed_files`,
-    `context_omissions`, `other_pull_requests`, `round_log_note`,
-    `trace_id` when a span was recorded, the lens counts by state, and
-    `limit_stop`. The two file fields are counts. `context_omissions` is
-    a count. `other_pull_requests` is how many records in the log belonged
-    to another pull request. `round_log_note` is empty, or the error class
-    and its strerror when the log could not be written. `limit_stop` is
-    the first limit that stopped a lens, or null. Paths stay out of the
-    line.
+    `context_omissions`, `other_pull_requests`, `withdrawn`,
+    `round_log_note`, `trace_id` when a span was recorded, the lens
+    counts by state, and `limit_stop`. The two file fields are counts.
+    `context_omissions` is a count. `other_pull_requests` is how many
+    records in the log belonged to another pull request. `withdrawn` is
+    how many prior findings a re-assessment annotated -- a D73
+    withdrawal or revision -- which removes nothing, so it is an
+    annotation count (round-1 review of #731, M2). `round_log_note` is
+    empty, or the error class and its strerror when the log could not be
+    written. `limit_stop` is the first limit that stopped a lens -- a
+    lens's own run, or its latest re-assessment's refused reservation or
+    spent-out call cap (round-1 review of #731, N4) -- or null. Paths
+    stay out of the line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -1443,6 +1462,7 @@ D41 records the 2026-11-12 probe that did.
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
+| `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
 | `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. Also reads the same merge-base `REVIEW.md`'s lens-preference lines (D69: `review_lens_include:` / `review_lens_exclude:`), fail-open with a note when unusable | no |

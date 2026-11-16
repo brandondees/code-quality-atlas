@@ -93,7 +93,9 @@ def test_the_shipped_default_scenario_loads_and_names_a_blocker():
 
 
 def test_an_unknown_top_level_key_is_refused(tmp_path):
-    with pytest.raises(LensScriptError, match="keys outside findings and unread"):
+    with pytest.raises(
+        LensScriptError, match="keys outside findings, unread and reassessment"
+    ):
         script(tmp_path, {"findings": {}, "unread": [], "depth": 2})
 
 
@@ -271,3 +273,88 @@ def test_a_missing_changed_file_list_is_refused():
 def test_every_turn_costs_the_same_small_worst_case():
     model = LensScriptModel(load_lens_script(BLOCKER))
     assert model.worst_case_usd(request_with(base_message())) == Decimal("0.01")
+
+
+# ------------------------------------------------- D73: the reassessment turn
+
+
+def reassess_message():
+    return UserText(
+        "Re-assessment target (from the controller): example-org/example-app#42 at "
+        + HEAD
+        + "\n\nprior findings follow"
+    )
+
+
+def test_the_reassessment_section_loads_and_validates_its_entries(tmp_path):
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {},
+            "unread": [],
+            "reassessment": {
+                "findings": {
+                    LENS: [
+                        {
+                            "location": "calc.py:4",
+                            "evidence": "discount = round(gross * discount_pct / 100)",
+                            "severity": "blocker",
+                            "valence": "defect",
+                            "route": "eng",
+                            "attribution": "introduced",
+                            "finding": "the CI run confirms the drift",
+                            "fix": "sum first, then round once",
+                            "revises": "P1",
+                            "reason": "the newer run failed",
+                        }
+                    ]
+                },
+                "withdrawn": {LENS: [{"id": "P2", "reason": "the check passes"}]},
+            },
+        },
+    )
+    (finding,) = loaded.reassessment_for(LENS)
+    assert finding["revises"] == "P1"
+    (withdrawn,) = loaded.withdrawn_for(LENS)
+    assert withdrawn == {"id": "P2", "reason": "the check passes"}
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"findings": {LENS: [{"location": "calc.py:4"}]}},
+        {"withdrawn": {LENS: [{"id": "P1"}]}},
+        {"withdrawn": {LENS: [{"id": "P1", "reason": ""}]}},
+        {"extra": {}},
+    ],
+    ids=["bad-finding", "no-reason", "blank-reason", "unknown-key"],
+)
+def test_a_malformed_reassessment_entry_is_refused_at_load(tmp_path, raw):
+    with pytest.raises(LensScriptError):
+        script(tmp_path, {"findings": {}, "unread": [], "reassessment": raw})
+
+
+def test_the_reassessment_turn_is_answered_from_the_scenario(tmp_path):
+    """The reuse path's turn opens with the controller's re-assessment
+    subject and offers no tools; the scripted reviewer answers it with the
+    scenario's re-assessment reply, not with a tool call -- and an
+    ordinary first turn still starts the coverage walk (the mutant that
+    answers every no-schema turn as a re-assessment fails the second
+    half)."""
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {LENS: []},
+            "unread": [],
+            "reassessment": {
+                "withdrawn": {LENS: [{"id": "P1", "reason": "the check passes"}]}
+            },
+        },
+    )
+    model = LensScriptModel(loaded)
+    reply = model.turn(TurnRequest(system(), (reassess_message(),), ()))
+    payload = json.loads(reply.text)
+    assert payload["withdrawn"] == [{"id": "P1", "reason": "the check passes"}]
+    assert payload["findings"] == []
+    walk = model.turn(request_with(base_message()))
+    assert isinstance(walk, ToolCalls)

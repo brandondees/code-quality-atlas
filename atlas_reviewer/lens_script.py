@@ -17,16 +17,32 @@ directory, so a new scenario is a new file, not new code:
   "findings": {
     "<lens name>": [{"location": "calc.py:4", "evidence": "...", ...}]
   },
-  "unread": ["settings.ini"]
+  "unread": ["settings.ini"],
+  "reassessment": {
+    "findings": {
+      "<lens name>": [{"location": "calc.py:4", "revises": "P1", "reason": "...", ...}]
+    },
+    "withdrawn": {"<lens name>": [{"id": "P1", "reason": "..."}]}
+  }
 }
 ```
 
 `findings` maps a lens name to the finding objects that lens reports, in
 the finding contract's shape (each entry is validated with the real
 parser at load, so a malformed scenario is refused before a run rather
- than discovered as a contract refusal mid-run). `unread` names changed
+than discovered as a contract refusal mid-run). `unread` names changed
 files no lens ever reads, for a scenario that must end with a coverage
 gap. A lens with no entry here reports no findings.
+
+`reassessment` is the scenario's D73 re-assessment reply, answered when a
+review reuses a settled lens and finds newer evidence: `findings` maps a
+lens name to the findings it reports then -- an entry's optional
+`revises` names the prior-finding label the entry revises and its
+`reason` states what in the new evidence changed the judgment -- and
+`withdrawn` maps a lens name to the prior labels it withdraws, each with
+its reason. Every entry is validated with the real re-assessment parser
+at load. A lens with no entry here confirms every prior finding by
+silence.
 """
 
 from __future__ import annotations
@@ -51,6 +67,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
 )
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, parse_reassess_reply
 
 COST_PER_TURN = Decimal("0.01")
 
@@ -71,34 +88,59 @@ class LensScriptError(ValueError):
 
 
 @dataclass(frozen=True)
+class ReassessScript:
+    """The scenario's D73 re-assessment reply: per lens, the findings it
+    reports (each optionally revising a prior label) and the prior labels
+    it withdraws."""
+
+    findings: Mapping[str, tuple[Mapping[str, str], ...]]
+    withdrawn: Mapping[str, tuple[Mapping[str, str], ...]]
+
+
+@dataclass(frozen=True)
 class LensScript:
     """`findings` maps a lens name to the finding objects it reports, in
-    reply order. `unread` names changed files no lens ever reads."""
+    reply order. `unread` names changed files no lens ever reads.
+    `reassessment` is the reply a reused lens's D73 re-assessment earns."""
 
     findings: Mapping[str, tuple[Mapping[str, str], ...]]
     unread: frozenset[str]
+    reassessment: ReassessScript = ReassessScript(
+        MappingProxyType({}), MappingProxyType({})
+    )
 
     def findings_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
         return self.findings.get(lens, ())
+
+    def reassessment_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
+        return self.reassessment.findings.get(lens, ())
+
+    def withdrawn_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
+        return self.reassessment.withdrawn.get(lens, ())
 
 
 def load_lens_script(path: Path) -> LensScript:
     """The script at `path`, validated: every finding must parse under the
     real finding contract (an unknown severity loads — dropping it is a
-    scenario — but any other contract problem is refused here)."""
+    scenario — but any other contract problem is refused here), and every
+    re-assessment entry must parse under the re-assessment reply's shape."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise LensScriptError(f"cannot read lens script {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise LensScriptError(f"lens script {path} must hold a JSON object")
-    unknown = set(raw) - {"findings", "unread"}
+    unknown = set(raw) - {"findings", "unread", "reassessment"}
     if unknown:
         raise LensScriptError(
-            f"lens script {path} has keys outside findings and unread: "
-            f"{', '.join(sorted(unknown))}"
+            f"lens script {path} has keys outside findings, unread and "
+            f"reassessment: {', '.join(sorted(unknown))}"
         )
-    return LensScript(_findings(path, raw.get("findings", {})), _unread(path, raw))
+    return LensScript(
+        _findings(path, raw.get("findings", {})),
+        _unread(path, raw),
+        _reassessment(path, raw.get("reassessment", {})),
+    )
 
 
 def _findings(path: Path, raw: object) -> Mapping[str, tuple[Mapping[str, str], ...]]:
@@ -143,6 +185,104 @@ def _unread(path: Path, raw: Mapping[str, object]) -> frozenset[str]:
     return frozenset(unread)
 
 
+def _reassessment(path: Path, raw: object) -> ReassessScript:
+    """The scenario's D73 re-assessment reply, validated entry by entry
+    with the real re-assessment parser: an entry that breaks the reply's
+    shape is refused at load, not discovered as a contract refusal
+    mid-run. The prior-finding labels an entry names are not resolved
+    here -- they resolve against the prior findings the run composes --
+    only the shape is checked."""
+    if not isinstance(raw, dict):
+        raise LensScriptError(f"lens script {path}: reassessment must be an object")
+    unknown = set(raw) - {"findings", "withdrawn"}
+    if unknown:
+        raise LensScriptError(
+            f"lens script {path}: reassessment has keys outside findings "
+            f"and withdrawn: {', '.join(sorted(unknown))}"
+        )
+    return ReassessScript(
+        _reassess_findings(path, raw.get("findings", {})),
+        _reassess_withdrawn(path, raw.get("withdrawn", {})),
+    )
+
+
+def _reassess_findings(
+    path: Path, raw: object
+) -> Mapping[str, tuple[Mapping[str, str], ...]]:
+    if not isinstance(raw, dict):
+        raise LensScriptError(
+            f"lens script {path}: reassessment findings must be an object"
+        )
+    parsed: dict[str, tuple[Mapping[str, str], ...]] = {}
+    for lens, entries in raw.items():
+        if not isinstance(lens, str) or not isinstance(entries, list):
+            raise LensScriptError(
+                f"lens script {path}: each reassessment findings value must "
+                "be a list of finding objects"
+            )
+        parsed[lens] = tuple(
+            _reassess_entry(path, lens, i, entry) for i, entry in enumerate(entries, 1)
+        )
+    return MappingProxyType(parsed)
+
+
+def _reassess_entry(
+    path: Path, lens: str, index: int, raw: object
+) -> Mapping[str, str]:
+    if not isinstance(raw, dict) or not all(
+        isinstance(value, str) for value in raw.values()
+    ):
+        raise LensScriptError(
+            f"lens script {path}: reassessment finding {index} for {lens!r} "
+            "must be an object of strings"
+        )
+    reply = json.dumps(
+        {"lens": lens, "body_sha256": "0" * 64, "findings": [raw], "withdrawn": []}
+    )
+    try:
+        parse_reassess_reply(reply)
+    except ContractError as exc:
+        raise LensScriptError(
+            f"lens script {path}: reassessment finding {index} for {lens!r} "
+            f"breaks the re-assessment reply's shape: {exc}"
+        ) from exc
+    return MappingProxyType(dict(raw))
+
+
+def _reassess_withdrawn(
+    path: Path, raw: object
+) -> Mapping[str, tuple[Mapping[str, str], ...]]:
+    if not isinstance(raw, dict):
+        raise LensScriptError(
+            f"lens script {path}: reassessment withdrawn must be an object"
+        )
+    parsed: dict[str, tuple[Mapping[str, str], ...]] = {}
+    for lens, entries in raw.items():
+        if not isinstance(lens, str) or not isinstance(entries, list):
+            raise LensScriptError(
+                f"lens script {path}: each reassessment withdrawn value must "
+                "be a list of {id, reason} objects"
+            )
+        for i, entry in enumerate(entries, 1):
+            reply = json.dumps(
+                {
+                    "lens": lens,
+                    "body_sha256": "0" * 64,
+                    "findings": [],
+                    "withdrawn": [entry],
+                }
+            )
+            try:
+                parse_reassess_reply(reply)
+            except ContractError as exc:
+                raise LensScriptError(
+                    f"lens script {path}: reassessment withdrawal {i} for "
+                    f"{lens!r} breaks the re-assessment reply's shape: {exc}"
+                ) from exc
+        parsed[lens] = tuple(MappingProxyType(dict(entry)) for entry in entries)
+    return MappingProxyType(parsed)
+
+
 class LensScriptModel:
     """The scripted reviewer one lens run talks to. Each run gets a fresh
     instance, so a continuation starts with its own coverage state and
@@ -171,6 +311,11 @@ class LensScriptModel:
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         lens, digest = _markers(request.system)
+        if _is_reassessment(request.messages):
+            # D73's re-assessment turn: the reuse path offers no tools and
+            # asks for one reply, which the scenario's `reassessment`
+            # section holds (silence confirms every prior finding).
+            return self._reassess_final(lens, digest)
         if len(request.messages) == 1:
             # A conversation restart (a retry attempt reuses this instance):
             # the coverage state is the old attempt's, so start over.
@@ -224,6 +369,20 @@ class LensScriptModel:
         }
         return FinalReply(json.dumps(payload), self._cost)
 
+    def _reassess_final(self, lens: str, digest: str) -> FinalReply:
+        """The scenario's re-assessment reply: the findings it reports --
+        each optionally revising a prior label -- and the prior labels it
+        withdraws, each with its reason."""
+        payload = {
+            "lens": lens,
+            "body_sha256": digest,
+            "findings": [
+                dict(finding) for finding in self._script.reassessment_for(lens)
+            ],
+            "withdrawn": [dict(entry) for entry in self._script.withdrawn_for(lens)],
+        }
+        return FinalReply(json.dumps(payload), self._cost)
+
     def _note_results(self, messages: tuple[object, ...]) -> None:
         """Reconcile the coverage state with the tool results already in
         the conversation. A failed or refused call stops its file's page
@@ -255,6 +414,17 @@ class LensScriptModel:
             self._pages[path] = int(page.group(1)) if page is not None else None
         elif call.tool == "read_file" and _OK in first:
             self._read.add(path)
+
+
+def _is_reassessment(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the reuse path's re-assessment turn
+    (D73): its first message opens with the controller's own re-assessment
+    subject, which no PR-written text can be the first line of."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(REASSESS_TARGET_PREFIX)
+    )
 
 
 def _after_first_turn(messages: tuple[object, ...]) -> bool:

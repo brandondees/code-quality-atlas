@@ -493,11 +493,21 @@ def _block_at_fit(
         WideGitHub(body),
         pull_info,
         redactor,
-        lambda text: redactor(text).text,
         budget,
         fit,
+        _remarks(WideGitHub(body), event, redactor),
     )
     return block, omissions
+
+
+def _remarks(github: FixtureGitHub, event: PrEvent, redactor: Redactor):
+    """The fixture's remarks as `fetch_remarks` returns them, the way the
+    `agentic-review` command gathers them before the block is built (D73's
+    snapshot keeps them)."""
+    collected = Collected()
+    return cli.fetch_remarks(
+        event, github, collected, scrub=lambda text: redactor(text).text
+    )
 
 
 @pytest.mark.parametrize(
@@ -913,9 +923,9 @@ def test_the_ci_block_takes_the_room_the_conversation_leaves(
         seen["fit"] = real_fit(*args, **kwargs)
         return seen["fit"]
 
-    def ci_spy(event, github, redactor, clock, room, config=None):
+    def ci_spy(event, github, redactor, clock, room, config=None, collected=None):
         seen["room"] = room
-        return real_ci(event, github, redactor, clock, room, config)
+        return real_ci(event, github, redactor, clock, room, config, collected)
 
     monkeypatch.setattr(cli, "_input_room_chars", fit_spy)
     monkeypatch.setattr(cli, "ci_block", ci_spy)
@@ -955,3 +965,37 @@ def test_the_cli_sizing_copies_agree_with_their_shared_home():
     fails here."""
     assert cli._MARKER_CHARS == TRUNCATION_MARKER_CHARS
     assert cli._MIN_FIT_CHARS == MIN_FIT_CHARS
+
+
+# --- D73: the reuse path's evidence snapshot ---
+
+
+def test_the_agentic_review_hands_the_reuse_path_the_evidence_snapshot(
+    tmp_path, monkeypatch
+):
+    """The digest of the gathered snapshot -- the CI evidence and the
+    conversation the blocks were built from -- is computed by the command
+    and passed into `review_lenses`, so a reused settled lens can be
+    checked for newer evidence (D73); the mutant that drops the argument
+    leaves the reuse path unwired and fails here. `ci_block` gathers into
+    a caller-owned `Collected`, which is what the digest reads."""
+    seen = {}
+    real_review = cli.review_lenses
+    real_ci = cli.ci_block
+
+    def review_spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real_review(*args, **kwargs)
+
+    def ci_spy(*args, **kwargs):
+        seen["ci_collected"] = kwargs.get("collected")
+        return real_ci(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "review_lenses", review_spy)
+    monkeypatch.setattr(cli, "ci_block", ci_spy)
+    code, _draft, err = _run(tmp_path, "--depth", "review")
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    digest = seen.get("evidence_digest")
+    assert isinstance(digest, str) and len(digest) == 64
+    assert seen["ci_collected"] is not None
+    assert seen["ci_collected"].items
