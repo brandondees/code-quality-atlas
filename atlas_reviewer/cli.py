@@ -45,6 +45,7 @@ from atlas_reviewer.budget import (
     CallLimits,
     ReviewBudget,
 )
+from atlas_reviewer.ci_block import ci_block
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.controller import (
@@ -675,10 +676,10 @@ def _input_room_chars(
     event: PrEvent,
     diff: str,
 ) -> int | None:
-    """The characters of caller context -- the prior rounds, then the
-    conversation block, in the first turn's D52 order -- that the model's
-    resolved per-call input room can hold next to the shared diff prefix
-    and the lens body (D67).
+    """The characters of caller context -- the prior rounds, the
+    conversation block and the CI evidence block, in the first turn's
+    D52 order -- that the model's resolved per-call input room can hold
+    next to the shared diff prefix and the lens body (D67, D73).
 
     The room is the same figure the loop budgets the shared prefix against
     (`input_room_tokens`): the model's context minus its output reserve.
@@ -942,10 +943,13 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     conversation_budget,
                     fit,
                 )
+                ci, ci_omissions = ci_block(event, github, redactor, clock, fit)
+                context = tuple(b for b in (block, ci) if b is not None)
+                context_omissions = (*context_omissions, *ci_omissions)
                 if fit is None:
                     prior = PRIOR_ROUND_CHARS
                 else:
-                    used = len(block.content.text.encode("utf-8")) if block else 0
+                    used = sum(len(b.content.text.encode("utf-8")) for b in context)
                     prior = min(PRIOR_ROUND_CHARS, max(1, fit - used))
                 review = review_lenses(
                     event,
@@ -965,7 +969,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     picker_spend=picker_spend,
                     task_socket=task_socket,
                     bridge_root=bridge_root,
-                    context=() if block is None else (block,),
+                    context=context,
                     context_omissions=context_omissions,
                     round_log=RoundLog(_state_dir(args, env) / "rounds.jsonl"),
                     prior_chars=prior,

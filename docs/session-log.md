@@ -1783,3 +1783,52 @@ Correction's false unreachability claim: the deleted loop's exhaustion
 branch WAS reachable for fit 1 through 39, because of that same marker
 — the old code omitted whole there, which was correct. Offline only,
 as before.
+
+## 2026-11-16 — the agentic lenses receive the head SHA's CI evidence (issue #715 Part A, D73)
+
+The 2026-11-13 plan's phase 3. `gather.py` had collected check runs,
+workflow runs and jobs since the one-shot path was built, but only that
+path consumed them, so no agentic lens could name a real CI run and the
+#661 m1 shape (a PR body claiming verification results the head's own
+CI contradicts) stayed unreachable in an agentic review.
+`gather_head_ci` now fetches the head SHA's own results only — the check
+runs at the SHA, the workflow runs at the SHA, and the jobs of those
+runs, under the one-shot `IngestConfig` caps, with no other commit's
+checks, no branch-name listing and no log or artifact download (D25's
+scoping; the one-shot's `_gather_run` lost its jobs half to the
+extracted `_gather_jobs`, which it calls back into, so its behavior is
+unchanged) — and the new `ci_block.ci_block` renders it with the
+one-shot path's own `classify` + `render_evidence`, prefixed by the one
+controller-written line in the block, which names the head SHA. The CLI
+passes the block into `review_lenses` as one more `context=` block after
+the conversation (the first turn's order is now prior rounds,
+conversation, CI evidence, changed-files), with every gather failure —
+an unfetchable listing, a malformed entry, a page-cap cut — converted
+into an omission beside the assembly's, so `coverage_complete` goes
+false and an approve-shaped review is held at COMMENT (D42): CI evidence
+can never make a review approvable the omission gate would not. The
+sizing is D67's, shared with the conversation: the block takes what the
+conversation left of the input room, builds at
+`min(16,384, room − 39)` characters (`CI_EVIDENCE_CHARS`, the size D52
+gives the prior-round blocks), names a truncation at its cap, and is
+omitted whole and named when its UTF-8 bytes still overflow — never
+silently truncated; the omit-whole gate fires below 43 characters, the
+same figure D67's round-2 review derived. The fence and nonce are
+`first_turn`'s one fence; the picker keeps D38's view; the status line
+gains no field; the draft shows CI evidence only through the existing
+quote and scrub paths. Eight behaviors pinned in
+`atlas_reviewer/tests/test_agentic_context.py`, mutants M1–M7 (and the
+marker mutant M5b) applied by hand and killed by their named tests:
+dropping the block from `context=` and dropping the head-SHA tag (M1,
+M7), swallowing the gather's failures (M2), the fence-stripping mutant
+that ships block text unfenced (M3), the gather reaching past the head
+SHA (M4), removing the omit-whole gate (M5), the skipped-marker build
+budget (M5b), and the wiring that hands the block no room (M6). The diff
+stays off #717's files: no `lens_loop.py`, `review_wide.py` or
+`agentic_config.py` change, the CLI edit confined to the wiring beside
+D67's blocks, no coordinator change at all, and the docs logs appended
+only. Part B of the plan (the sandboxed `run_tests`/`mutate` tools) is
+untouched. Offline only: fixture, scripted reviewer and fakes; no live
+model call, network call or secret, and no deployed service setting
+changed. The live confirmation that #661 m1 is now reachable stays with
+S0 (#708).
