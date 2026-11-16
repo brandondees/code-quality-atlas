@@ -223,6 +223,31 @@ def test_unfetchable_issue_is_noted_not_fatal():
     assert "Issue #7 could not be fetched" in draft
 
 
+def test_an_issue_refused_for_permission_is_noted_not_fatal():
+    """A 403 on an optional read degrades to a recorded gap: the note
+    names what could not be read and why, the review continues, and the
+    failed read is also a telemetry event."""
+    from dataclasses import replace
+
+    from atlas_reviewer.telemetry import Telemetry
+
+    class RefusedIssues(FixtureGitHub):
+        def get_issue(self, repo, number):
+            raise BoundaryError("GitHub HTTP 403 for /issues/7")
+
+    s = Setup(github=RefusedIssues(FIXTURE))
+    telemetry = Telemetry(FakeClock())
+    s.deps = replace(s.deps, telemetry=telemetry)
+    draft = s.run(include_issues=True)
+    assert "Issue #7 could not be fetched" in draft
+    assert "GitHub HTTP 403" in draft
+    (refused,) = [
+        e for e in telemetry.events if e.status == "error" and e.step == "issue #7"
+    ]
+    assert refused.phase == "evidence fetch"
+    assert "GitHub HTTP 403" in refused.error
+
+
 def test_moved_pr_head_is_called_out():
     pull = json.loads((FIXTURE / "pull.json").read_text())
     pull["head"]["sha"] = "1" * 40

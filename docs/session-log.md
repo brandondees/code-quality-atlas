@@ -2242,6 +2242,60 @@ review also flagged commit `3a7f66f4`'s message as garbled (a pasted
 shell line embedded twice); noted in the PR body for cleanup at merge
 rather than a history rewrite. Offline only.
 
+## 2026-11-16 (same day) — fix: the agentic and --sequence paths now honor the parent-minted installation token
+
+The first live agentic review on the deployed service (Fly v5, D70) died
+at boot with `this command needs the ATLAS_GITHUB_APP_ID environment
+variable`: the parent mints a read-only installation token and passes the
+child only `ATLAS_GITHUB_INSTALLATION_TOKEN` (`_CHILD_ALLOWED` withholds
+the App id and key by design, D53), but `_live_github` and `_probe_source`
+called `_app_tokens` unconditionally while `_live_wiring` alone checked
+for the fixed token first. The token choice now lives in one
+`_review_tokens` helper all three live call sites ask: fixed token when
+set, App-minted otherwise with the existing `_require_env` checks — so
+the paths cannot drift apart again, and no new credential crosses the
+child boundary (`_CHILD_ALLOWED` is untouched). Redaction is unchanged:
+the minted token still goes through `credentials.register`, and
+`_Credentials` already seeds the env token. Pinned by tests at each path
+(agentic command, `--sequence` tarball fetch) that pass only with the
+token and no App credentials, a boundary test feeding `service_run`'s
+`child_env` output straight into the agentic wiring — the test that
+would have caught this — and fallback tests that the clear
+`ATLAS_GITHUB_APP_ID` usage error survives when neither credential is
+set. Mutants killed: reverting `_live_github` to `_app_tokens`
+unconditionally fails the agentic and service-boundary tests; reverting
+`_probe_source` the same way fails the `--sequence` test. Round 1 of the
+PR's own review first had the fixed-token branch refuse
+`--include-issues` up front; Brandon amended that the same day: the
+parent's mint now includes issues read (read-only, on every mint — the
+mint happens before the child exists and `review_argv` builds no
+`--include-issues` flag a conditional mint could key on), and a
+permission error on an optional read degrades instead of refusing:
+GitHub's 403/404 on issues, checks, actions or any optional context read
+is already caught by the gather's `_attempt` and the controller's
+`_issue_block`, recorded as a gap in the draft's coverage notes with the
+failed read as a telemetry event, while a 403 on a read the review
+cannot proceed without (the PR, its diff, the head contents) still fails
+loudly with exit 3. The up-front refusal is gone: a fixed token plus
+`--include-issues` wires and lets the read proceed. Pinned by the
+one-shot and agentic paths building from the fixed token with
+`--include-issues`, an issue read refused for permission noted and
+continuing with its telemetry event, a required read refused for
+permission exiting 3, and the service mint asserting the five read
+permissions. Precedence when both the fixed token and App credentials
+are set is pinned with a mint-attempt guard, killing the mutant that
+mints whenever the App id is present. The deploy runbook now names the
+issues read in the child token's grant; `docs/agentic-reviewer.md` puts
+the App key on the controller, unchanged; no new D number. Round 2 of
+the PR's own review: the runbook's installation paragraph now also
+states the App itself must grant read on contents, checks, actions,
+pull requests and issues, because an installation missing any of them
+fails every mint at review start and no review posts; the
+wiring-with-`--include-issues` pin is parametrized over the one-shot and
+agentic paths; and a failed mint's error names the five read
+permissions it requested and hints that the installation may be missing
+one, without ever carrying the key. Offline only.
+
 ## 2026-11-16 — the lens picker chooses any number of lenses, and a repo preference overrides the guideline (issue #711, D69)
 
 The picker was hard-capped at 8 names at review depth (40 at

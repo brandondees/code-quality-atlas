@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The service runs the selected mode's review command and reads its draft."""
 
+import argparse
 import io
 import json
 import os
@@ -30,6 +31,7 @@ from atlas_reviewer.service_run import (
     WEBHOOK_SECRET_ENV,
     ReviewRun,
     RunConfig,
+    _read_token,
     _stop,
     child_env,
     make_runner,
@@ -242,6 +244,114 @@ def test_the_child_does_not_receive_the_app_private_key():
     assert WEBHOOK_SECRET_ENV not in env
     assert env[READ_TOKEN_ENV] == "ghs_read"
     assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_the_child_env_is_enough_for_the_agentic_command_to_reach_github(
+    monkeypatch,
+):
+    """The boundary between the service parent and the review child: the
+    parent passes one read-only installation token and no App credentials,
+    and the agentic command the child runs must wire its GitHub client
+    from exactly that env. The first live agentic run died here, demanding
+    the App id the child must never hold."""
+    parent = {
+        "ATLAS_OPENROUTER_API_KEY": "sk-or",
+        "ATLAS_SPRITES_TOKEN": "sprite",
+        "PATH": "/usr/bin",
+    }
+    env = child_env(parent, token="ghs_read")
+    seen = {}
+
+    class Client:
+        def __init__(self, _transport, tokens):
+            seen["tokens"] = tokens
+
+    monkeypatch.setattr(cli, "GitHubClient", Client)
+    cli._live_github(
+        argparse.Namespace(include_issues=False),
+        env,
+        PrEvent(REPO, 7, SHA),
+        cli._Credentials(env),
+    )
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == "ghs_read"
+
+
+def test_the_agentic_command_without_the_parent_token_refuses_clearly(monkeypatch):
+    """A parent that failed to mint and pass the token leaves the child
+    with no GitHub credential at all. The agentic command then fails at
+    boot with the same clear usage error a standalone run without App
+    credentials gets -- naming the App id, the credential only the
+    standalone path holds -- instead of starting with broken wiring."""
+    env = child_env({"ATLAS_SPRITES_TOKEN": "sprite", "PATH": "/usr/bin"})
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
+    )
+    with pytest.raises(cli.UsageError) as raised:
+        cli._live_github(
+            argparse.Namespace(include_issues=False),
+            env,
+            PrEvent(REPO, 7, SHA),
+            cli._Credentials(env),
+        )
+    assert "ATLAS_GITHUB_APP_ID" in str(raised.value)
+
+
+def test_the_read_token_mints_issues_read_too(monkeypatch):
+    """The parent's mint includes issues read. The mint happens before the
+    child exists and `review_argv` builds no --include-issues flag a
+    conditional mint could key on, so the grant rides along on every
+    mint; the token stays read-only over the one repository."""
+    seen = {}
+
+    class Tokens:
+        def __init__(self, _transport, _clock, **kwargs):
+            seen.update(kwargs)
+
+        def token(self):
+            return "ghs_read"
+
+    monkeypatch.setattr("atlas_reviewer.github_auth.AppInstallationTokens", Tokens)
+    token, error = _read_token(
+        {
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_INSTALLATION_ID": "12345",
+        },
+        PrEvent(REPO, 7, SHA),
+    )
+    assert (token, error) == ("ghs_read", "")
+    assert seen["permissions"] == {
+        "contents": "read",
+        "checks": "read",
+        "actions": "read",
+        "pull_requests": "read",
+        "issues": "read",
+    }
+
+
+def test_a_failed_mint_names_the_permissions_it_asked_for(monkeypatch):
+    """A mint refused by GitHub is self-diagnosing: the error names every
+    read permission the mint requested and hints that the installation
+    may be missing one, and it never carries the key."""
+
+    class Refusing:
+        def __init__(self, *a, **k):
+            raise RuntimeError("403 from the installation")
+
+    monkeypatch.setattr("atlas_reviewer.github_auth.AppInstallationTokens", Refusing)
+    _token, error = _read_token(
+        {
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_INSTALLATION_ID": "12345",
+        },
+        PrEvent(REPO, 7, SHA),
+    )
+    for permission in ("contents", "checks", "actions", "pull_requests", "issues"):
+        assert f"{permission} read" in error
+    assert "is a permission missing" in error
+    assert "pem-secret-value" not in error
 
 
 def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):
