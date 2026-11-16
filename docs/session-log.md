@@ -2089,8 +2089,14 @@ definitions exactly as main has them, `redact`'s shared constants serve
 `ci_block.py` alone, and
 `test_the_cli_sizing_copies_agree_with_their_shared_home` holds the two
 copies equal (kills M10, a drifting copy); the PR body states the real
-merge-tree result and that whoever merges second keeps #717's
-40-to-42-character margin note, which is content, not noise. Minor
+merge-tree result. While this round was in flight #717 merged to main
+(`1c230180`), so the branch merges main with a normal merge commit
+(`d9dfbaf6`) and the #717 conflict is resolved in that merge: `cli.py`
+keeps both import lines and #717's `_MIN_FIT_CHARS` docstring — its
+"conservative margin, rooms of 40 to 42" note intact, content and not
+noise — alongside this PR's `ci_block` wiring, and the session-log EOF
+conflict is resolved by keeping both sides' dated entries in
+chronological order. Minor
 R2-2: the CLI's conversation measure is named `conversation_bytes` (it
 was `conversation_chars` while holding UTF-8 bytes), and
 `test_the_ci_block_takes_the_room_the_conversation_leaves` gains a
