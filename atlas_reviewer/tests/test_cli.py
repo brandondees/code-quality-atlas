@@ -1105,6 +1105,23 @@ def test_boundary_errors_exit_nonzero(tmp_path, monkeypatch):
     assert HEAD not in err
 
 
+def test_a_required_read_refused_for_permission_fails_loudly(tmp_path, monkeypatch):
+    """A 403 on a read the review cannot proceed without -- the PR, its
+    diff or the head contents -- is the clear boundary failure, not a
+    recorded gap; only optional context reads degrade."""
+
+    class Refused(FixtureGitHub):
+        def get_pull(self, repo, number):
+            raise BoundaryError("GitHub HTTP 403 for /pulls/42")
+
+    monkeypatch.setattr(cli, "FixtureGitHub", Refused)
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
+    )
+    assert code == cli.EXIT_BOUNDARY
+    assert "GitHub HTTP 403" in err
+
+
 # --- telemetry, call config and the review-sequence probe -------------------
 
 
@@ -1864,41 +1881,31 @@ def test_the_agentic_command_without_any_github_credential_names_the_missing_one
     assert cli.ENV_APP_ID in err.getvalue()
 
 
-def test_include_issues_with_a_read_token_refuses_on_the_one_shot_path(tmp_path):
-    """The parent-minted token carries no issues permission, so an issues
-    read under it would only surface as a 403 mid-review; the refusal is
-    loud at wiring instead."""
-    code, _out, err = run_cli(
-        "--state-dir",
-        str(tmp_path),
-        "review",
-        "--event",
-        EVENT,
-        "--include-issues",
-        env={
-            cli.ENV_INSTALLATION_TOKEN: "ghs_readonly_token_value",
-            cli.ENV_SPRITES_TOKEN: "sprite-token-value",
-        },
-    )
-    assert code == cli.EXIT_USAGE
-    assert "--include-issues" in err
-    assert "no issues permission" in err
+def test_include_issues_under_a_fixed_token_wires_and_does_not_refuse(monkeypatch):
+    """The fixed token's grant is whatever the parent minted -- under the
+    service that now includes issues read -- and an optional read it
+    cannot serve is refused by GitHub and degrades to a recorded gap,
+    never an up-front refusal here."""
+    token = "ghs_readonly_token_value"
+    seen = {}
 
+    class Client:
+        def __init__(self, _transport, tokens):
+            seen["tokens"] = tokens
 
-def test_include_issues_with_a_read_token_refuses_on_the_agentic_path(monkeypatch):
+    monkeypatch.setattr(cli, "GitHubClient", Client)
     monkeypatch.setattr(
         cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
     )
-    env = {cli.ENV_INSTALLATION_TOKEN: "ghs_readonly_token_value"}
-    with pytest.raises(cli.UsageError) as raised:
-        cli._live_github(
-            argparse.Namespace(include_issues=True),
-            env,
-            cli.load_event(Path(EVENT)),
-            cli._Credentials(env),
-        )
-    assert "--include-issues" in str(raised.value)
-    assert "no issues permission" in str(raised.value)
+    env = {cli.ENV_INSTALLATION_TOKEN: token}
+    cli._live_github(
+        argparse.Namespace(include_issues=True),
+        env,
+        cli.load_event(Path(EVENT)),
+        cli._Credentials(env),
+    )
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == token
 
 
 def test_the_fixed_token_wins_even_when_app_credentials_are_also_set(

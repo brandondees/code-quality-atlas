@@ -2265,13 +2265,25 @@ would have caught this — and fallback tests that the clear
 set. Mutants killed: reverting `_live_github` to `_app_tokens`
 unconditionally fails the agentic and service-boundary tests; reverting
 `_probe_source` the same way fails the `--sequence` test. Round 1 of the
-PR's own review added two pins: a fixed token plus `--include-issues` is
-refused loudly at wiring (the parent's read-only mint has no issues
-permission, so the alternative was a 403 mid-review), on both the
-one-shot and agentic paths; and precedence when both the fixed token and
-App credentials are set is pinned with a mint-attempt guard, killing the
-mutant that mints whenever the App id is present. The deploy runbook
-already says the child's only GitHub credential is the read-only
-installation token, and `docs/agentic-reviewer.md` puts the App key on
-the controller, so no doc correction was needed; no new D number.
-Offline only.
+PR's own review first had the fixed-token branch refuse
+`--include-issues` up front; Brandon amended that the same day: the
+parent's mint now includes issues read (read-only, on every mint — the
+mint happens before the child exists and `review_argv` builds no
+`--include-issues` flag a conditional mint could key on), and a
+permission error on an optional read degrades instead of refusing:
+GitHub's 403/404 on issues, checks, actions or any optional context read
+is already caught by the gather's `_attempt` and the controller's
+`_issue_block`, recorded as a gap in the draft's coverage notes with the
+failed read as a telemetry event, while a 403 on a read the review
+cannot proceed without (the PR, its diff, the head contents) still fails
+loudly with exit 3. The up-front refusal is gone: a fixed token plus
+`--include-issues` wires and lets the read proceed. Pinned by the
+one-shot and agentic paths building from the fixed token with
+`--include-issues`, an issue read refused for permission noted and
+continuing with its telemetry event, a required read refused for
+permission exiting 3, and the service mint asserting the five read
+permissions. Precedence when both the fixed token and App credentials
+are set is pinned with a mint-attempt guard, killing the mutant that
+mints whenever the App id is present. The deploy runbook now names the
+issues read in the child token's grant; `docs/agentic-reviewer.md` puts
+the App key on the controller, unchanged; no new D number. Offline only.

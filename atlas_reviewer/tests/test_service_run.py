@@ -31,6 +31,7 @@ from atlas_reviewer.service_run import (
     WEBHOOK_SECRET_ENV,
     ReviewRun,
     RunConfig,
+    _read_token,
     _stop,
     child_env,
     make_runner,
@@ -294,6 +295,39 @@ def test_the_agentic_command_without_the_parent_token_refuses_clearly(monkeypatc
             cli._Credentials(env),
         )
     assert "ATLAS_GITHUB_APP_ID" in str(raised.value)
+
+
+def test_the_read_token_mints_issues_read_too(monkeypatch):
+    """The parent's mint includes issues read. The mint happens before the
+    child exists and `review_argv` builds no --include-issues flag a
+    conditional mint could key on, so the grant rides along on every
+    mint; the token stays read-only over the one repository."""
+    seen = {}
+
+    class Tokens:
+        def __init__(self, _transport, _clock, **kwargs):
+            seen.update(kwargs)
+
+        def token(self):
+            return "ghs_read"
+
+    monkeypatch.setattr("atlas_reviewer.github_auth.AppInstallationTokens", Tokens)
+    token, error = _read_token(
+        {
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_INSTALLATION_ID": "12345",
+        },
+        PrEvent(REPO, 7, SHA),
+    )
+    assert (token, error) == ("ghs_read", "")
+    assert seen["permissions"] == {
+        "contents": "read",
+        "checks": "read",
+        "actions": "read",
+        "pull_requests": "read",
+        "issues": "read",
+    }
 
 
 def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):

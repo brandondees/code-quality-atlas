@@ -711,7 +711,12 @@ def _read_token(env: Mapping[str, str], event: PrEvent) -> tuple[str, str]:
             app_id=app_id,
             private_key=key.replace("\\n", "\n") if "\n" not in key else key,
             installation_id=int(installation),
-            permissions=READ_PERMISSIONS,
+            # Issues read rides along on every mint: the mint happens
+            # before the child exists and `review_argv` builds no
+            # --include-issues flag the parent could key on, so a
+            # conditional mint would never mint it. The token stays
+            # read-only over the one repository.
+            permissions={**READ_PERMISSIONS, "issues": "read"},
             repositories=(event.repo.split("/", 1)[1],),
         )
         return tokens.token(), ""

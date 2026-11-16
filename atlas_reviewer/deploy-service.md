@@ -106,7 +106,11 @@ agentic limit variables (`ATLAS_PER_LENS_CALLS`, `ATLAS_PER_LENS_USD`,
 `ATLAS_REVIEW_CEILING_USD`, and the rest of `README.md`'s `ATLAS_*`
 limit table) reach the
 child when set on the Machine. The only GitHub credential the child
-receives is still the read-only installation token the parent minted.
+receives is still the read-only installation token the parent minted,
+which includes issues read alongside the contents, checks, actions and
+pull-request reads, so a child run with `--include-issues` holds a token
+that can read issues; an optional read the token cannot serve is refused
+by GitHub and recorded as a gap, never a crash.
 The App private key, the webhook secret, and `FLY_API_TOKEN` stay in the
 parent.
 
