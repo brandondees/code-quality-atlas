@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from atlas_reviewer.archive import ArchiveLimits, read_zip
 from atlas_reviewer.domain import (
@@ -179,7 +179,7 @@ def _pr_runs(ctx: _Ctx, head_ref: str) -> list[WorkflowRun]:
         "head-SHA workflow runs",
         lambda: ctx.github.list_workflow_runs_at(repo, sha),
     )
-    commits = {sha, *_pr_commits(ctx)}
+    commits = {sha, *(c.sha for c in _pr_commits(ctx))}
     on_branch = _runs(
         ctx, "workflow runs", lambda: ctx.github.list_workflow_runs(repo, head_ref)
     )
@@ -196,10 +196,28 @@ def _pr_runs(ctx: _Ctx, head_ref: str) -> list[WorkflowRun]:
     return list(runs.values())
 
 
-def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
-    """This PR's commit SHAs. A failed or cut-off listing leaves out the
-    runs at commits it did not return, which only drops evidence from
-    other commits; the failure itself is recorded."""
+def _utc_now() -> datetime:
+    """A commits-only read never timestamps evidence, but `_Ctx` carries the
+    clock its evidence-parsing siblings share."""
+    return datetime.now(UTC)
+
+
+def pr_commits(
+    event: PrEvent, github: GitHubReader, out: Collected
+) -> tuple[PrCommit, ...]:
+    """This PR's commits, oldest first in history order, for a caller that
+    builds the conversation block outside the CI gather (D52's agentic
+    first turn). The fetch, parse and cap bookkeeping is `_pr_commits`';
+    the config and download budgets it carries are not touched by a
+    commits-only listing."""
+    ctx = _Ctx(event, github, _utc_now, Redactor(), IngestConfig(), out, _Left(0, 0))
+    return _pr_commits(ctx)
+
+
+def _pr_commits(ctx: _Ctx) -> tuple[PrCommit, ...]:
+    """This PR's commits. A failed or cut-off listing leaves out the runs
+    at commits it did not return, which only drops evidence from other
+    commits; the failure itself is recorded."""
     what = "commits of this PR"
     commits = in_history_order(
         _parse_each(
@@ -223,7 +241,7 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
             "request, and this one listed that many: other commits, and their CI "
             "evidence, may be missing."
         )
-    return tuple(c.sha for c in commits)
+    return commits
 
 
 def _other_commit_checks(ctx: _Ctx) -> None:

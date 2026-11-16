@@ -1684,6 +1684,106 @@ killing mutant R5 — dropping the loop's `note_nudge` from the detector
 had passed the whole suite — and the round-1 entry's "verified filing"
 typo is corrected to "verified finding". Offline only.
 
+## 2026-11-15 — the agentic review passes the PR conversation and the round log into every lens, and the picker gets the PR body (issue #709, D67)
+
+The lens-budget plan's S1. `review_lens` had accepted `context=` and
+`round_log=` since D52, but no shipped caller passed either, so the
+agentic lenses' first turn never carried the PR conversation and the
+picker saw only the PR title, so process and claim findings such as the
+m1 mutant pinned on issue #661 were unreachable in a real run.
+`_cmd_agentic_review` now
+builds the one-shot path's `Conversation` (parse, commits through the
+new `gather.pr_commits`, remarks through `fetch_remarks`,
+`build_conversation`) and passes `conversation.review_context` plus its
+omissions into `review_lenses`, together with a `RoundLog` at
+`<state dir>/rounds.jsonl` — the caller-chosen path D52 left open — so
+the prior rounds open the first turn and the review appends its own
+record. The picker's pull-request block is the one-shot view, title and
+body, redacted and fenced: `conversation.picker_block` is now the one
+helper both pickers call. The sizing D52 left to the caller is here
+too: the model's resolved per-call input room minus D65's prefix share,
+the largest loaded lens body, the turn-1 framing measured from the
+diff, and an 8,192-character reserve for the controller text
+(`CONTEXT_RESERVE_CHARS`) bounds the context blocks; a block that does
+not fit is rebuilt smaller under the same recorded-omission trail D38
+uses, and one that still does not fit is left out whole and named —
+never silently truncated, never sent to overflow the per-call token
+check. A model that names no room keeps the D52 fixed caps. A partial
+context cannot approve and stays COMMENT, unchanged, and the parity
+gate is unchanged. Six behaviors pinned in
+`atlas_reviewer/tests/test_agentic_context.py`, mutants M1–M6 applied
+by hand and killed by their named tests (drop `context=`, the
+title-only picker, body-as-instructions, room without the prefix share,
+`round_log=None`, silent slice). The diff stays off #717's files: no
+`review_wide.py`, `agentic_config.py`, `lens_loop.py`, coordinator,
+`test_coordinator.py` or `docs/agentic-reviewer.md` change, and D68 is
+untouched. Offline only: fixture, scripted reviewer and fakes; no live
+model call, network call or secret, and no deployed service setting
+changed. The live confirmation that #661 m1 is reachable stays with S0
+(#708).
+
+## 2026-11-15 — round-1 review fixes for #718: the omits-whole gate is the mechanism, the positive-fit path is pinned, and the stale caller claims are cleared
+
+The round-1 protocol review came back COMMENT (2 Major, 1 Minor, 3 Nit),
+all fixed on the PR branch. M-1: the unparseable-pull guard had no test
+and its deletion survived the whole suite — a fixture whose pull
+carries no `head.ref` (the reachable shape; a headless pull is refused
+by `_require_head` first) now pins no crash, exactly one `pull request
+fields` omission, the COMMENT-not-approve outcome, and the picker's
+title-only fallback (kills N1). M-2: the positive-fit sizing path was
+untested and its mutant (N7, first build at D38's cap alone) survived —
+the refit loop the first wording described is gone entirely: the block
+is first built at the room's own size, and one rebuild at a quarter of
+the room follows when the UTF-8 bytes overflow, whose bound holds by
+construction (4 × (fit // 4) ≤ fit), so the omits-whole mechanism is
+exactly the fit < 1 gate and no dead exhaustion branch remains. The
+positive-fit test asserts the first build is the only build, the block
+reaches every lens smaller than D38's build, and the prior rounds take
+only what the conversation left of the room; a direct unit test at fit
+56,000 over thirty multi-byte remarks pins the byte-bound rebuild
+(kills M7, and with it the review's unreachable M6′). m-1: the README's
+two "no shipped caller builds the path yet" sentences for `rounds.py`
+are fixed here; `docs/agentic-reviewer.md`'s matching sentence is the
+follow-up for whichever PR merges second (it is in #717's edit set).
+n-1: `_input_room_chars`'s docstring states the first turn's real order
+(prior rounds, then the conversation block). n-2: the remarks' fetch
+errors are quoted with the one-shot's scrubber — the redactor augmented
+with `scan_diff`'s flagged secret values, flagged before anything is
+quoted — and D67's Correction states the one remaining difference (the
+one-shot's controller-notes channel has no agentic equivalent yet).
+n-3: the room accessor is public (`lens_loop.input_room_tokens`), no
+private import from the CLI. Offline only, as before: fixture, scripted
+reviewer and fakes; no live model call, network call or secret, and no
+deployed service setting changed.
+
+## 2026-11-15 — round-2 review fix for #718: the sizing counts the truncation marker, and the small-fit band is swept
+
+MJ-1, the round's one new Major: the round-1 fix's two-build scheme
+crashed at fit 1 to 3 — the rebuild asked `build_conversation` for a
+zero-character budget (`fit // 4` at fit below 4), and the resulting
+`ValueError` is one no CLI handler catches, so the review died with a
+traceback instead of an omission — and its "fits by construction" byte
+bound ignored `_truncate`'s 39-character marker, which a truncated
+build appends after its cap, so a rebuilt block could ship up to 39
+bytes over the room. The sizing is marker-aware now: the omit-whole
+gate fires below 43 characters (one worst-case UTF-8 character plus the
+marker — a room that small holds no block), the first build runs at
+`fit − 39` (an ASCII build truncated to the room ships at exactly the
+room's bytes in one build), and the multi-byte rebuild at
+`(fit − 39) // 4`, whose bound `4 × ((fit − 39) // 4) + 39 ≤ fit` holds
+by construction. A unit sweep over fit 1 to 60 in both byte widths
+(ASCII and four-byte) pins no-exception and bytes-within-the-room;
+the multi-byte test runs a four-byte variant beside the three-byte one;
+and a marker test pins the first build's subtraction (a giant fixed
+part truncated to the room ships in one build). Killed: the round-2
+scheme as written (crash), M8 (its clamped variant, which ships a
+40-byte block at fit 1), the skipped-marker first build, and a gate at
+39 instead of 43. D67's second Correction also retracts the round-1
+Correction's false unreachability claim: the deleted loop's exhaustion
+branch WAS reachable for fit 1 through 39, because of that same marker
+— the old code omitted whole there, which was correct. Offline only,
+as before.
+
 ## 2026-11-15 — the review-wide limits derive from the planned lens count, under a $10 ceiling (issue #710, D68)
 
 The flat review-wide defaults — 50 calls and a $5 reservation shared by
