@@ -47,6 +47,7 @@ from atlas_reviewer.lens_loop import (
     run_attempt,
     tool_schemas,
 )
+from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
@@ -148,6 +149,77 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
             review_started=clock.monotonic(),
         )  # fmt: skip
     assert spend.committed_usd == Decimal("0.01")
+
+
+def test_every_exception_path_after_a_reservation_settles_it_as_spent():
+    """Round-2 review of #717, m-6: a call that will never report an
+    actual settles at its reservation on every exit -- a turn that stops
+    at the output cap, a transport timeout and its retry, a transport
+    failure, a model error -- so the in-flight backpressure never waits on
+    a worst case that will never come down. Kills the dropped-settle
+    mutants on the turn-level output cap (C4) and the transport timeout
+    (C5)."""
+
+    class Refused:
+        name = "refused"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            raise LimitRefused(hit("max_output_tokens", 128_000, 64_000))
+
+    class TimedOut:
+        name = "timed-out"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            raise TransportTimeoutError("the request timed out")
+
+    class TransportFails:
+        name = "transport"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            raise TransportError("connection reset")
+
+    class ModelFails:
+        name = "model-error"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            raise BoundaryError("the model refused")
+
+    for model in (Refused(), TransportFails(), ModelFails()):
+        spend = Spend(LIMITS.resolve())
+        clock = FakeClock()
+        outcome = run_attempt(
+            job(), object(), model, spend, clock,
+            review_deadline=clock.monotonic() + 600,
+            review_started=clock.monotonic(),
+        )  # fmt: skip
+        assert spend.calls == 1
+        assert spend.committed_usd == Decimal("0.10")
+        assert spend.settled_usd == Decimal("0.10"), model.name
+    # The timed-out request keeps its full reservation as spent (D58 item
+    # 5) and its retry is its own reserved, settled call.
+    spend = Spend(LIMITS.resolve())
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), TimedOut(), spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert spend.calls == 2
+    assert spend.committed_usd == Decimal("0.20")
+    assert spend.settled_usd == Decimal("0.20")
+    assert Cause.TRANSPORT_ERROR in outcome.causes
 
 
 def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():

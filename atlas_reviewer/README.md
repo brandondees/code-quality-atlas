@@ -441,11 +441,14 @@ Environment variables (names only; never commit values):
 | `ATLAS_SPRITES_TOKEN` | controller → Sprites adapter | Sprites org token for the outside control-plane API |
 | `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most the configured ceiling |
 | `ATLAS_REVIEWER_STATE_DIR` | controller | Runner ledger and single-review lock (default `.atlas-reviewer-state/`, gitignored) |
-| `ATLAS_RESERVATION_USD` | agentic lens entry | Dollar reservation for one agentic review (default 5) |
-| `ATLAS_MAX_CALLS` | agentic lens entry | Model calls across every lens attempt (default 50) |
+| `ATLAS_RESERVATION_USD` | agentic lens entry | Dollar reservation for one agentic review (default 5). On `agentic-review`, unset derives it from the per-lens budget and the planned lens count, clamped to the ceiling (D68); a set value wins |
+| `ATLAS_MAX_CALLS` | agentic lens entry | Model calls across every lens attempt (default 50). On `agentic-review`, unset derives it from the per-lens budget and the planned lens count plus the picker's calls (D68); a set value wins |
 | `ATLAS_MAX_TURNS` | agentic lens entry | Turns of one lens attempt (default 50) |
 | `ATLAS_LENS_WALL_S` | agentic lens entry | Seconds for one lens attempt (default 1200) |
-| `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
+| `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600). On `agentic-review`, unset raises it to the lens wall times the planned waves when that is higher (D68); a set value wins |
+| `ATLAS_PER_LENS_CALLS` | `agentic-review` | Per-lens model-call budget the review-wide call cap derives from (D68; default 50) |
+| `ATLAS_PER_LENS_USD` | `agentic-review` | Per-lens dollar budget the review-wide reservation derives from (D68; default 5) |
+| `ATLAS_REVIEW_CEILING_USD` | `agentic-review` | The absolute per-review dollar ceiling the derived reservation clamps to (D68; default 10). The reviewed repo's merge-base `REVIEW.md` may override it with a `review_ceiling_usd:` line |
 | `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Consecutive turns that bring a lens nothing new -- no successful tool call the attempt has not made before, no new verified finding -- before one finalize nudge is injected, on the paged and the shared-prefix path alike (D58, D66; default 6) |
 | `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
 | `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
@@ -465,7 +468,7 @@ Environment variables (names only; never commit values):
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
-uses it. The sixteen `ATLAS_*` limit variables are not credentials.
+uses it. The nineteen `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
 accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
@@ -1078,7 +1081,9 @@ D41 records the 2026-11-12 probe that did.
   revisited after live runs: 50 model calls per review, 50 turns per
   lens, 20 minutes per lens and 60 minutes per review. An override must be
   positive and finite, and a per-lens limit no greater than its per-review
-  limit. Clearing one back to unset makes `resolve` raise
+  limit -- on `agentic-review`, against the totals the review runs on,
+  which D68 derives above the configured values and re-checks after the
+  derivation. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
@@ -1100,7 +1105,7 @@ D41 records the 2026-11-12 probe that did.
   completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
   the share of the model's resolved input cap the shared diff prefix may
   take; 0 pages every review, as before the prefix existed.
-  `coordinator.limits_for_lens` reads the sixteen limits through
+  `coordinator.limits_for_lens` reads the nineteen limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
@@ -1108,7 +1113,34 @@ D41 records the 2026-11-12 probe that did.
   variables. The one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
   On `agentic-review`, the picker's provider takes the smaller of those
   ceilings and `max_calls` / `reservation_usd`, and the picker's calls and
-  dollars count toward the review's totals.
+  dollars count toward the review's totals. D68: a multi-lens
+  `agentic-review` derives its review-wide limits from the planned lens
+  count under the absolute per-review ceiling
+  (`review_wide.derive_review_wide`): the call cap is the per-lens call
+  budget times the planned lenses plus the picker's calls, the
+  reservation is the per-lens dollar budget times the planned lenses
+  plus the picker's committed dollars clamped to the ceiling, and the
+  review wall is the configured wall raised to the lens wall times the
+  planned waves. An explicitly set `--max-calls`, `--reservation-usd` or
+  `--review-wall-seconds` still wins for that one limit, and the ceiling
+  clamps the reservation even then; a limit stop names the derived
+  values, the ceiling, the observed value and the knob. The reviewed
+  repo's `REVIEW.md` may set the ceiling with a `review_ceiling_usd:`
+  line, read from the merge-base tree the review already fetches — the
+  tree the PR branched from, not the base-ref tip — so a PR cannot move
+  its own ceiling, and a ceiling changed on the base tip takes effect
+  for pull requests branched after it. The clamp has one edge the
+  backpressure closes (round-1 review of #717, M-1): a pool of
+  concurrent first turns projects several worst-case reservations at
+  once, so a clamped reservation can be smaller than one wave's
+  worst-case reservations; a reservation that would pass the cap only on
+  other calls' in-flight worst cases waits, bounded by the review wall,
+  for one of them to settle instead of stopping its lens — the wait's
+  real-time backstop arms only when the review clock itself stops moving
+  across wakeups, so on a healthy clock the wall is the bound, however
+  long a turn takes (round-2 review of #717, M-1R) — and stops outright
+  only when the settled spend plus its own worst case cannot fit even
+  with nothing in flight. Spend never passes the ceiling.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
@@ -1332,7 +1364,8 @@ D41 records the 2026-11-12 probe that did.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
+| `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |

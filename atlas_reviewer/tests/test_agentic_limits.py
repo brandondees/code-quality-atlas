@@ -84,8 +84,12 @@ def test_an_empty_flag_is_refused_and_an_empty_variable_stays_unset():
 def test_an_unparseable_limit_is_refused():
     with pytest.raises(ValueError, match="max_turns"):
         load_agentic_limits({"ATLAS_MAX_TURNS": "nope"})
+    # The per-lens-against-review-wide relations are not the loader's
+    # check any more (D68: the derivation re-checks them against the
+    # totals the review runs on); a full resolve still refuses them.
+    limits = load_agentic_limits({}, max_turns="80", max_calls="10")
     with pytest.raises(ValueError, match="max_turns"):
-        load_agentic_limits({}, max_turns="80", max_calls="10")
+        limits.resolve()
 
 
 def test_the_output_default_is_the_models_and_an_override_cannot_exceed_it():
