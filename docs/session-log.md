@@ -2109,3 +2109,23 @@ D73 has never landed on main, the session-log preserves what changed
 and why, and the amendment is flagged in the entry itself. Offline only,
 as before: fixture, scripted reviewer and fakes; no live model call,
 network call or secret, and no deployed service setting changed.
+
+## 2026-11-16 — the owner decides the reuse-with-newer-evidence question D73 raised (docs only)
+
+Brandon's decision on round-1 Minor 2, given 2026-11-15 8:32 PM CT and
+recorded in D73 in place of the open question (D73 has not landed, so
+the in-place amendment stands, as round-2 Nit R2-3 accepted): "it's a
+little of both. we shouldn't toss out findings just because more
+information comes along, but the agent should re-assess their judgement
+and follow up accordingly if the new information changes anything." A
+reused settled result keeps its findings — newer CI evidence or newer
+comments never discard them — and, when newer CI evidence or comments
+exist since the reused result was produced, the lens re-assesses its
+judgment with that new evidence and adds, revises or follows up on
+findings where the new information changes anything. The re-assessment
+behavior is not implemented in this PR: the reuse key and the reuse code
+are unchanged, and the behavior is the follow-up the decision records,
+covering the conversation block's identical gap since D67. Docs only:
+`docs/open-questions.md` (D73) and this entry; no code, no test, no
+generated or mirrored file, and the full local gates were green on the
+merge before this docs-only commit.
