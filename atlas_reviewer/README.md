@@ -1326,11 +1326,16 @@ D41 records the 2026-11-12 probe that did.
   gathered head-SHA CI items and the PR's remarks, fetch times excluded,
   stored with the finished attempt -- earns it one bounded no-tools
   re-assessment call against the review's shared spend: its reply may add
-  findings, revise or withdraw prior ones, a withdrawal or revision
-  always with its stated reason, and silence keeps a prior finding as it
-  stands. The re-assessment is recorded on the lens's `#reassess` ledger
-  key, so a garbled reply cannot turn a clean lens partial, and the
-  effective result is composed from the ledger alone on every review. A
+  findings, revise or propose withdrawing prior ones, a withdrawal or
+  revision always with its stated reason, and silence keeps a prior
+  finding as it stands. A withdrawal removes nothing -- it annotates, and
+  so does a revision that would lower a Blocker's or a Major's severity,
+  so the higher severity still counts for the verdict (round-1 review of
+  #731, M2). The re-assessment is recorded on the lens's `#reassess`
+  ledger key, so a garbled reply cannot turn a clean lens partial, and
+  the effective result is composed from the ledger alone on every review;
+  the composed outcome carries the latest re-assessment's own limit stop
+  and, beside the settled run's dropped notes, only its latest reply's. A
   settled outcome with no changed-file count, from before the per-file
   gate, shows no coverage, so the review cannot approve on it.
 - **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
@@ -1390,14 +1395,19 @@ D41 records the 2026-11-12 probe that did.
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
     `coverage_complete`, `changed_files`, `unreviewed_files`,
-    `context_omissions`, `other_pull_requests`, `round_log_note`,
-    `trace_id` when a span was recorded, the lens counts by state, and
-    `limit_stop`. The two file fields are counts. `context_omissions` is
-    a count. `other_pull_requests` is how many records in the log belonged
-    to another pull request. `round_log_note` is empty, or the error class
-    and its strerror when the log could not be written. `limit_stop` is
-    the first limit that stopped a lens, or null. Paths stay out of the
-    line.
+    `context_omissions`, `other_pull_requests`, `withdrawn`,
+    `round_log_note`, `trace_id` when a span was recorded, the lens
+    counts by state, and `limit_stop`. The two file fields are counts.
+    `context_omissions` is a count. `other_pull_requests` is how many
+    records in the log belonged to another pull request. `withdrawn` is
+    how many prior findings a re-assessment annotated -- a D73
+    withdrawal or revision -- which removes nothing, so it is an
+    annotation count (round-1 review of #731, M2). `round_log_note` is
+    empty, or the error class and its strerror when the log could not be
+    written. `limit_stop` is the first limit that stopped a lens -- a
+    lens's own run, or its latest re-assessment's refused reservation or
+    spent-out call cap (round-1 review of #731, N4) -- or null. Paths
+    stay out of the line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner

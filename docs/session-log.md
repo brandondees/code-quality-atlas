@@ -2455,3 +2455,31 @@ load) and the no-script dry-run model confirms by silence. Twelve
 mutants applied by hand and killed, each named in the D73 Update; 3,080
 reviewer tests at 96.29% coverage, tooling suite 882 passed at 95.20%,
 `gate`'s ruff/mypy/drift legs clean. Offline only.
+
+## 2026-11-16 (same day) — round-1 fixes for #731: a withdrawal annotates instead of deleting, and the re-assessment call is traced
+
+Round 1 returned COMMENT with no Blocker — every acceptance criterion in
+issue #726 confirmed met, the digest called sound, and five of the author's
+twelve mutants independently re-killed — plus four fixes. M2 is the
+substantive one: a withdrawal was untrusted-input-driven and directly
+deleted a prior finding from the effective set, so a comment crafted to
+say "P1 is wrong" could flip a Blocker review to approve. Per the brief's
+option (a), `effective_outcome` now never removes a prior finding on a
+withdrawal — the withdrawal is an annotation the draft's withdrawn
+section shows with its reason — and a revision that would lower a
+Blocker's or a Major's severity is annotation-only too, so the higher
+severity still counts; the status line gained the `withdrawn` annotation
+count (option (c)), and the reply instructions state the proposal
+semantics. M1: the reuse branch now builds the scrubber and wraps the
+model in the lens trace, so the re-assessment call records its completion
+span. M3: `dropped` is composed from the settled run plus only the latest
+re-assessment's notes, so one malformed severity cannot accumulate into
+every later review of the head. N1–N4: the verified-only participation
+rule stated, a revise-and-withdraw-same-label reply refused at `judge`,
+the digest's not-covered fields (title, body, labels, commit subjects)
+named in its docstring, and the latest re-assessment's `limit_hit`
+carried onto the composed outcome so the status line names it. Seven new
+mutants applied by hand and killed, each attributed in the D73 Update's
+round-1 paragraph. #730's `cli.py` hunks are disjoint; latest main merged
+first. 3,100 reviewer tests, tooling 882 passed at 95.20%,
+ruff/mypy/drift clean. Offline only.
