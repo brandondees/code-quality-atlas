@@ -1824,11 +1824,58 @@ M7), swallowing the gather's failures (M2), the fence-stripping mutant
 that ships block text unfenced (M3), the gather reaching past the head
 SHA (M4), removing the omit-whole gate (M5), the skipped-marker build
 budget (M5b), and the wiring that hands the block no room (M6). The diff
-stays off #717's files: no `lens_loop.py`, `review_wide.py` or
-`agentic_config.py` change, the CLI edit confined to the wiring beside
-D67's blocks, no coordinator change at all, and the docs logs appended
-only. Part B of the plan (the sandboxed `run_tests`/`mutate` tools) is
+stays off #717's files except the one file it must touch:
+`atlas_reviewer/cli.py`, confined to the wiring beside D67's blocks and
+the `_input_room_chars` docstring; no `lens_loop.py`, `review_wide.py`
+or `agentic_config.py` change, no coordinator change at all, and the
+docs logs appended only. Part B of the plan (the sandboxed
+`run_tests`/`mutate` tools) is
 untouched. Offline only: fixture, scripted reviewer and fakes; no live
 model call, network call or secret, and no deployed service setting
 changed. The live confirmation that #661 m1 is now reachable stays with
 S0 (#708).
+
+## 2026-11-16 — round-1 review fixes for #724: the CI block is sized against the room the conversation left, and the overlap sentence says so
+
+The round-1 protocol review came back COMMENT (1 Major, 2 Minor, 2 Nit),
+all fixed on the PR branch. Major 1 (also CodeRabbit's inline Major on
+`cli.py`): `ci_block` was handed the full `fit`, so a conversation near
+its cap plus a near-cap CI block could overrun the fit by more than the
+8,192-character reserve, starving the prior rounds to one character and
+risking a per-call refusal — the reviewer's worktree arithmetic showed
++2.8k to +3.4k over the fit at ordinary rooms. The root fix: the CLI now
+passes the fit minus the conversation block's UTF-8 bytes
+(None-preserving) as `ci_block`'s room, so `sum(context bytes) ≤ fit`
+holds by construction and the prior rounds take the remainder; a
+conversation that leaves almost nothing trips the 43-character
+omit-whole gate and names the omission. The regression test
+(`test_the_ci_block_takes_the_room_the_conversation_leaves`, two
+conversation sizes under the approve scenario) records the fit and the
+room the block was actually handed and asserts `room == fit −
+conversation bytes` plus either `sum(context bytes) ≤ fit` or the named
+CI omission — killing M8, the revert to full-fit sizing, whose claimed
+pin in the first cut (M6's test) fired through the byte gate alone and
+pinned nothing about conversation-relative sizing; M6's test docstring
+now says what it actually pins. Minor 3: the "diff stays off #717's
+files" sentences were false for `cli.py` (it is in #717's edit set) —
+D73 and the session-log entry are new in this PR, so both say the
+exception first in place; the first commit message repeats the false
+clause and stays as written, since history is not rewritten. Nit 4: the
+marker and minimum-fit figures now live beside `redact.TRUNCATION_MARKER`
+(`TRUNCATION_MARKER_CHARS`, `MIN_FIT_CHARS`), imported by both `cli.py`
+and `ci_block.py`; `cli.py` keeps its two local names as one-line
+aliases with their docstrings intact, so #717's in-flight docstring edit
+of that block still merges. Nit 5: D73 now states the asymmetry once —
+the conversation block rebuilds once smaller on a multi-byte overflow
+because `build_conversation` can drop the oldest remarks, while
+`render_evidence` has no refit, so the CI block omits whole instead.
+Minor 2 is recorded, not fixed: a settled lens reused for the same head
+and body never sees the CI evidence gathered for the later review (the
+CI block is not in the reuse key), the same gap the conversation block
+has had since D67; whether context-derived data belongs in the reuse key
+is an owner decision on the reuse contract, recorded as an open question
+in D73, and no reuse key changed here. The session-log merge note: this
+file and #717 both append at EOF, so whichever merges second conflicts
+mechanically — keep both dated entries. Offline only, as before:
+fixture, scripted reviewer and fakes; no live model call, network call
+or secret, and no deployed service setting changed.

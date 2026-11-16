@@ -31,6 +31,17 @@ from urllib.parse import quote
 _MINT = object()
 _MIN_KNOWN_SECRET_LEN = 8
 TRUNCATION_MARKER = "\n[... truncated by atlas_reviewer ...]\n"
+TRUNCATION_MARKER_CHARS = len(TRUNCATION_MARKER)
+"""The characters a truncated build appends after its cap (`_truncate`),
+which every byte bound built on a capped block must count. The shared
+home for the sizing arithmetic (D73's round-1 review): `cli` and
+`ci_block` both derive their budgets from these two figures, so the
+derived formula lives here once."""
+
+MIN_FIT_CHARS = 4 + TRUNCATION_MARKER_CHARS
+"""The smallest input room a provably-fitting block can fill: one
+worst-case UTF-8 character (four bytes) plus the truncation marker. A
+room below this cannot hold any block, and the omit-whole gate fires."""
 
 _KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")

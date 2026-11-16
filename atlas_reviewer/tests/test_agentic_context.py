@@ -824,10 +824,13 @@ def test_a_ci_block_bigger_than_what_the_room_has_left_is_omitted_by_name(
     tmp_path,
 ):
     """End to end under the D67 room budget: with a room the conversation
-    block mostly spends, the emoji CI evidence is omitted whole and named,
-    the review stays COMMENT, and no lens is sent a ci-evidence block (the
-    CLI wiring mutant that passes the block whatever the room holds, M6,
-    ships it and fails here)."""
+    block mostly spends, the CI block is sized against the remainder the
+    conversation left, its emoji content overflows that remainder in
+    bytes, and it is omitted whole and named -- the review stays COMMENT
+    and no lens is sent a ci-evidence block (the wiring mutant that hands
+    the block no room, M6, sizes it at the fixed cap instead and fails
+    here; conversation-relative sizing itself is pinned by
+    `test_the_ci_block_takes_the_room_the_conversation_leaves`)."""
     fixtures = _emoji_ci_fixtures(tmp_path)
     Recording.room = 90_000
     try:
@@ -847,3 +850,88 @@ def test_a_ci_block_bigger_than_what_the_room_has_left_is_omitted_by_name(
     lines = "\n".join(_context_omission_lines(draft))
     assert "CI evidence" in lines
     assert "model input room" in lines
+
+
+@pytest.mark.parametrize(
+    "filler",
+    [
+        pytest.param(
+            "round the line discounts before summing the totals " * 3,
+            id="conversation-leaves-room",
+        ),
+        pytest.param(
+            "please also round the shipping fees " * 120,
+            id="conversation-nearly-fills-the-room",
+        ),
+    ],
+)
+def test_the_ci_block_takes_the_room_the_conversation_leaves(
+    tmp_path, monkeypatch, filler
+):
+    """Major-1 regression: `ci_block` is handed the fit minus the
+    conversation block's UTF-8 bytes -- None-preserving -- not the full
+    fit, so the two context blocks together cannot exceed the fit by
+    construction and the prior rounds take what is left (the mutant that
+    reverts to full-fit sizing, M8, records a room the fit minus the
+    conversation does not equal, and ships a combined context over the
+    room here). A conversation that leaves room ships the block inside
+    the remainder; a shrunken conversation's slack decides which of the
+    two outcomes the big filler lands in, so the test asserts the
+    invariant whichever way it falls, and the approve scenario makes the
+    clean-approval end observable."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    comments = json.loads((fixtures / "issue-comments.json").read_text())
+    comments = [
+        *comments,
+        *(
+            {
+                "id": 9000 + i,
+                "user": {"login": "drive-by-user"},
+                "created_at": "2026-11-06T21:00:00Z",
+                "body": filler,
+            }
+            for i in range(40)
+        ),
+    ]
+    (fixtures / "issue-comments.json").write_text(json.dumps(comments))
+    seen = {}
+    real_fit = cli._input_room_chars
+    real_ci = cli.ci_block
+
+    def fit_spy(*args, **kwargs):
+        seen["fit"] = real_fit(*args, **kwargs)
+        return seen["fit"]
+
+    def ci_spy(event, github, redactor, clock, room, config=None):
+        seen["room"] = room
+        return real_ci(event, github, redactor, clock, room, config)
+
+    monkeypatch.setattr(cli, "_input_room_chars", fit_spy)
+    monkeypatch.setattr(cli, "ci_block", ci_spy)
+    Recording.room = 120_000
+    try:
+        code, draft, err = _run(
+            tmp_path,
+            "--depth", "review",
+            "--fixtures", str(fixtures),
+            "--lens-script", str(FIXTURE / "scenarios" / "approve.json"),
+        )  # fmt: skip
+    finally:
+        Recording.room = None
+    assert Recording.first_turns
+    turn = Recording.first_turns[0]
+    conv = re.search(r'label="pull-request">\n(.*?)\n</untrusted-data', turn, re.DOTALL)
+    assert conv is not None
+    conv_bytes = len(conv.group(1).encode("utf-8"))
+    assert seen["room"] == seen["fit"] - conv_bytes
+    lines = "\n".join(_context_omission_lines(draft))
+    ci = _ci_fence(turn)
+    if ci is not None:
+        assert conv_bytes + len(ci.group(1).encode("utf-8")) <= seen["fit"]
+        assert "model input room" not in lines
+    else:
+        assert code == cli.EXIT_INCOMPLETE, err
+        assert '"review_event": "COMMENT"' in draft
+        assert "CI evidence" in lines
+        assert "model input room" in lines
