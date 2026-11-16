@@ -7,13 +7,22 @@ The picker ranks lenses against its route table and the depth mode; this
 module adds no routing of its own. The model's reply is untrusted output:
 only a JSON list of lens-shaped names is accepted, the critical tier is
 always considered ahead of it, and `lenses.plan_lenses` then runs whole
-bodies in that order up to the depth's breadth and reports every other name
+bodies in that order up to the character budget and reports every other name
 NOT RUN. Triage considers only the critical tier, without a call, and so
 does a review where no other lens could fit whole. If the picker cannot run
 or its reply is unusable, only the critical tier is considered and the
 controller notes say why, so a failed pick never means an empty review.
 A `ByokRefusedError` is re-raised: falling back would make another model
 call, and that refusal has to end the review.
+
+The picker names any number of lenses (D69): the guideline's breadth figure
+is a default, not a cap, and no depth but triage imposes one -- the
+one-shot character budget, not a lens count, bounds what a one-shot review
+inlines, and the derived review-wide limits (D68), not a lens count, bound
+an agentic review. A repo preference (the reviewed repo's merge-base
+`REVIEW.md`, read where that tree is already fetched) overrides the
+guideline by include and exclude, is applied to the picks by this module,
+and is recorded in the selection note.
 """
 
 from __future__ import annotations
@@ -28,7 +37,6 @@ from typing import Any
 
 from atlas_reviewer.lenses import (
     LENS_BUDGET_CHARS,
-    MAX_LENSES,
     LensChoice,
     LensLibrary,
     LensPlan,
@@ -52,13 +60,15 @@ CRITICAL_TIER = (
     "reviewing-migration-and-data-safety",
     "reviewing-concurrency-and-async",
 )
-COMPREHENSIVE_LIMIT = 40
 # The process-hygiene lens, added ahead of the picks when the PR body
 # itself states verification results (D58): a body that claims test
 # counts, coverage or CI outcomes is exactly the surface that lens checks
 # against what actually happened.
 PR_HYGIENE = "reviewing-pr-and-process-hygiene"
-_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+# The shape of a lens name, as `parse_picks` accepts it and a REVIEW.md
+# lens-preference line must carry (D69); lowercase alphanumerics and
+# hyphens, so a name from either place can never carry markup.
+LENS_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _FENCE = re.compile(r"\A```[a-z]*\n(.*)\n```\Z", re.DOTALL)
 # Heuristics over the PR body (untrusted text): a stated test count, a
 # coverage figure or percentage, or a CI or check-run result. A body that
@@ -97,15 +107,14 @@ You cannot open files, so the picker's steps that read or run anything
 controller handles evidence and synthesis separately.
 
 Depth mode: {depth}, set by the operator.
-
+{breadth}
 The critical tier always runs before your picks and does not spend your
-slots: {critical}. Use your slots for other lenses the change needs.
-
+slots: {critical}. Use your picks for the other lenses the change needs.
+{preferences}
 Reply with only one JSON object and nothing else:
 {{"lenses": ["<lens-name>", ...]}}
-most relevant first, at most {limit} names, each a lens name exactly as the
-picker writes it. If you name more, the extra names are dropped, not an
-error: do not correct yourself with a second list."""
+most relevant first, each a lens name exactly as the picker writes it.
+Do not correct yourself with a second list."""
 
 
 class Depth(Enum):
@@ -114,12 +123,44 @@ class Depth(Enum):
     COMPREHENSIVE = "comprehensive"
 
     @property
-    def limit(self) -> int:
+    def limit(self) -> int | None:
+        """The most lenses a one-shot plan at this depth runs, or None for
+        uncapped (D69): triage's cap is its critical tier and is intended;
+        review and comprehensive name no lens count -- the one-shot
+        character budget bounds what they inline, and an agentic review's
+        derived limits (D68) bound what it runs."""
         return {
             Depth.TRIAGE: len(CRITICAL_TIER),
-            Depth.REVIEW: MAX_LENSES,
-            Depth.COMPREHENSIVE: COMPREHENSIVE_LIMIT,
+            Depth.REVIEW: None,
+            Depth.COMPREHENSIVE: None,
         }[self]
+
+
+# The per-depth breadth paragraph. Review and comprehensive name no cap
+# (D69): the guideline's breadth figure is a default, its auto-includes
+# ride along, and the number of names is the picker's to decide.
+_BREADTH = {
+    Depth.TRIAGE: (
+        "Triage runs the critical tier only; nothing you name runs, and "
+        "this call is not made at triage."
+    ),
+    Depth.REVIEW: (
+        "Follow the guideline's review mode as it is written: its 3-8 "
+        "default breadth is a starting recommendation, not a cap. Name "
+        "every lens the change needs, however many that is, and name every "
+        "lens the guideline says rides along additively (its auto-includes): "
+        "a decision-record or decisions-log change names "
+        "reviewing-decision-lifecycle, a docs-only change names "
+        "auditing-documentation-health, and a rename or restructuring names "
+        "reviewing-module-design and reviewing-naming-and-readability. "
+        "There is no fixed cap on how many lenses you name."
+    ),
+    Depth.COMPREHENSIVE: (
+        "Comprehensive runs every relevant lens, uncapped: rank all of "
+        "them and name each one the guideline's routes and auto-includes "
+        "cover, however many that is."
+    ),
+}
 
 
 class PickerOutputError(BoundaryError):
@@ -139,20 +180,62 @@ def load_picker(path: Path = PICKER_PATH) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def picker_instructions(depth: Depth) -> str:
+@dataclass(frozen=True)
+class LensPreferences:
+    """A repo preference that overrides the picker's guideline (D69), read
+    from the reviewed repo's merge-base `REVIEW.md` where that tree is
+    already fetched. `include` names lenses the review runs whether or not
+    the picker ranked them; `exclude` names lenses the picks never run.
+    The critical tier is neither: it is the controller's own floor, not
+    the guideline's, so a preference neither adds to it nor removes from
+    it. Every name is lens-shaped (validated at parse), so the directive
+    below cannot carry injection into the instructions."""
+
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    source: str = "The reviewed repo's merge-base REVIEW.md"
+
+
+def preferences_directive(preferences: LensPreferences | None) -> str:
+    """The trusted instructions paragraph that states a repo preference
+    override of the guideline (D69), or "" when there is none. The
+    trailing blank line keeps the reply paragraph its own block either
+    way. The controller applies the override to the picks itself, so the
+    picker is told not to fight it."""
+    if preferences is None:
+        return ""
+    parts = []
+    if preferences.include:
+        parts.append("run " + ", ".join(preferences.include))
+    if preferences.exclude:
+        parts.append("do not run " + ", ".join(preferences.exclude))
+    if not parts:
+        return ""
+    return (
+        f"\n{preferences.source} overrides the guideline: "
+        + "; ".join(parts)
+        + ". The controller applies this override to your picks itself.\n"
+    )
+
+
+def picker_instructions(
+    depth: Depth, preferences: LensPreferences | None = None
+) -> str:
     return PICKER_INSTRUCTIONS.format(
         depth=depth.value,
-        limit=depth.limit,
+        breadth=_BREADTH[depth],
         critical=", ".join(CRITICAL_TIER),
+        preferences=preferences_directive(preferences),
     )
 
 
 def parse_picks(text: str) -> tuple[str, ...]:
     """Every distinct name in rank order. The reply's one JSON object may
     sit in a fence; when the whole reply is not one JSON object, the last
-    JSON object in it is read, because a model that overshoots the limit
-    appends its corrected list after prose. Nothing is dropped here: names
-    past the depth's breadth are reported NOT RUN by `plan_lenses`."""
+    JSON object in it is read, because a model that overshoots what it
+    believes the limit to be appends its corrected list after prose.
+    Nothing is dropped here: a name that cannot run is reported NOT RUN by
+    `plan_lenses`."""
     body = text.strip()
     data = _one_object(body)
     if data is None:
@@ -165,7 +248,7 @@ def parse_picks(text: str) -> tuple[str, ...]:
     unique = tuple(dict.fromkeys(names))
     if not unique:
         raise PickerOutputError("the reply named no lens")
-    if not all(_NAME.fullmatch(n) and len(n) <= 80 for n in unique):
+    if not all(LENS_NAME.fullmatch(n) and len(n) <= 80 for n in unique):
         raise PickerOutputError("the reply names something that is not a lens name")
     return unique
 
@@ -226,6 +309,7 @@ def select_lenses(
     *,
     scrub: Callable[[str], str],
     pr_text: str = "",
+    preferences: LensPreferences | None = None,
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the
@@ -233,7 +317,11 @@ def select_lenses(
     since no pick could then change which lenses run. A pick none of whose
     names has a bundle body would run no lens at all, so it falls back to
     the critical tier too. When `pr_text` states verification results, the
-    process-hygiene lens is included ahead of the picks (D58)."""
+    process-hygiene lens is included ahead of the picks (D58). A repo
+    preference (D69) drops its excluded names from the picks and appends
+    its included names, on the fallback paths too, and the note records
+    what it changed; no depth but triage caps the count, so the character
+    budget is what decides what runs whole."""
     hygiene = _hygiene_choice(pr_text)
 
     def has_body(name: str) -> bool:
@@ -248,23 +336,26 @@ def select_lenses(
         no_room=lambda: _no_room_for_a_pick(library, depth, budget_chars),
     )
     if isinstance(picked, LensSelection):
-        return picked
-    names = picked
-    with_body = sum(has_body(n) for n in names)
+        return _preferenced_fallback(picked, preferences, depth)
+    dropped, kept, includes = _apply_preferences(picked, preferences)
+    with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth over the PR's paths and text (untrusted input), "
-        f"and ranked {len(names)} lens name(s), {with_body} with a body in the "
-        f"bundle. {_order_note(hygiene)}then the picked names in rank order, "
-        f"and at most {depth.limit} lenses run: the Lenses line says which "
-        "ran whole and which are NOT RUN, and why."
+        f"and ranked {len(picked)} lens name(s), {with_body} with a body in "
+        "the bundle. "
+        f"{_order_note(hygiene)}then the picked names in rank order, and the "
+        f"{budget_chars}-character lens budget decides what runs whole: the "
+        f"Lenses line says which ran whole and which are NOT RUN, and why."
+        f"{_preference_note(preferences, dropped, includes)}"
     )
-    return LensSelection(_with_critical(names, hygiene), note, True)
+    return LensSelection(_with_critical(kept, hygiene) + includes, note, True)
 
 
 def _order_note(hygiene: tuple[LensChoice, ...]) -> str:
     """How the selection is ordered, from the critical tier down; the
-    caller appends its own tail (the cap, or the agentic body rule)."""
+    caller appends its own tail (the budget rule, or the agentic body
+    rule)."""
     if not hygiene:
         return "The critical tier is considered first, "
     return (
@@ -280,15 +371,19 @@ def select_agentic_lenses(
     *,
     scrub: Callable[[str], str],
     pr_text: str = "",
+    preferences: LensPreferences | None = None,
 ) -> tuple[LensSelection, LensPlan]:
     """The critical tier plus the picker's full ranking. The one-shot
     character budget is not consulted, so a review-depth PR still calls
     the picker and still runs every critical lens that has a body. When
     `pr_text` states verification results, the process-hygiene lens is
-    included ahead of the picks (D58)."""
+    included ahead of the picks (D58). A repo preference (D69) drops its
+    excluded names from the picks and appends its included names, on the
+    fallback paths too, and the note records what it changed."""
     selection = _agentic_selection(
-        depth, run_picker, library, scrub=scrub, pr_text=pr_text
-    )
+        depth, run_picker, library, scrub=scrub, pr_text=pr_text,
+        preferences=preferences,
+    )  # fmt: skip
     return selection, plan_agentic_lenses(library, selection.choices)
 
 
@@ -299,6 +394,7 @@ def _agentic_selection(
     *,
     scrub: Callable[[str], str],
     pr_text: str = "",
+    preferences: LensPreferences | None = None,
 ) -> LensSelection:
     def has_body(name: str) -> bool:
         return library.body(name) is not None
@@ -306,16 +402,91 @@ def _agentic_selection(
     hygiene = _hygiene_choice(pr_text)
     picked = _pick(depth, run_picker, has_body, scrub=scrub, hygiene=hygiene)
     if isinstance(picked, LensSelection):
-        return picked
-    names = picked
-    with_body = sum(has_body(n) for n in names)
+        return _preferenced_fallback(picked, preferences, depth)
+    dropped, kept, includes = _apply_preferences(picked, preferences)
+    with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth. The one-shot character budget does not apply. "
-        f"The picker ranked {len(names)} lens name(s), {with_body} with a body. "
+        f"The picker ranked {len(picked)} lens name(s), {with_body} with a body. "
         f"{_agentic_order_note(hygiene)}"
+        f"{_preference_note(preferences, dropped, includes)}"
     )
-    return LensSelection(_with_critical(names, hygiene), note, True)
+    return LensSelection(_with_critical(kept, hygiene) + includes, note, True)
+
+
+def _apply_preferences(
+    names: tuple[str, ...], preferences: LensPreferences | None
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[LensChoice, ...]]:
+    """The ranked names after a repo preference override (D69): the
+    excluded names dropped, the remaining names in rank order, and the
+    include choices to append -- every include name the picks and the
+    critical tier do not already cover, so an include never duplicates or
+    displaces anything. Excludes never touch the critical tier: it is the
+    controller's own floor, not the guideline's."""
+    if preferences is None:
+        return (), names, ()
+    drop = set(preferences.exclude)
+    dropped = tuple(n for n in names if n in drop)
+    kept = tuple(n for n in names if n not in drop)
+    covered = {*kept, *CRITICAL_TIER}
+    includes = tuple(
+        LensChoice(n, "included by the reviewed repo's merge-base REVIEW.md (D69)")
+        for n in preferences.include
+        if n not in drop and n not in covered
+    )
+    return dropped, kept, includes
+
+
+def _preferenced_fallback(
+    selection: LensSelection,
+    preferences: LensPreferences | None,
+    depth: Depth,
+) -> LensSelection:
+    """A fallback selection with the repo's includes appended (D69): the
+    override is honored even when the picker fell back or made no call.
+    Excludes have no picks to drop here; the note records the includes.
+    Triage is not widened: a preference re-ranks within its depth mode's
+    breadth and never widens the mode, and triage's breadth is the
+    critical tier alone."""
+    if depth is Depth.TRIAGE or preferences is None or not preferences.include:
+        return selection
+    covered = {c.name for c in selection.choices}
+    includes = tuple(
+        LensChoice(n, "included by the reviewed repo's merge-base REVIEW.md (D69)")
+        for n in preferences.include
+        if n not in covered
+    )
+    if not includes:
+        return selection
+    note = (
+        f"{selection.note} The reviewed repo's merge-base REVIEW.md "
+        f"overrides the guideline: added: {', '.join(c.name for c in includes)}."
+    )
+    return LensSelection(
+        selection.choices + includes, note, selection.used_call, selection.skipped
+    )
+
+
+def _preference_note(
+    preferences: LensPreferences | None,
+    dropped: tuple[str, ...],
+    includes: tuple[LensChoice, ...],
+) -> str:
+    """The note sentence recording what a repo preference override changed
+    (D69), or "" when there is no override or it changed nothing."""
+    if preferences is None or (not dropped and not includes):
+        return ""
+    parts = []
+    if dropped:
+        parts.append("dropped from the picks: " + ", ".join(dropped))
+    if includes:
+        parts.append("added: " + ", ".join(c.name for c in includes))
+    return (
+        f" The reviewed repo's merge-base REVIEW.md overrides the guideline "
+        f"(include: {', '.join(preferences.include) or 'none'}; exclude: "
+        f"{', '.join(preferences.exclude) or 'none'}): " + "; ".join(parts) + "."
+    )
 
 
 def _agentic_order_note(hygiene: tuple[LensChoice, ...]) -> str:
@@ -380,9 +551,10 @@ def _with_critical(
 ) -> tuple[LensChoice, ...]:
     """The critical tier first, then the process-hygiene lens when the PR
     body states verification results, then every other picked name in rank
-    order. `plan_lenses` spends its size budget and its lens cap in this
-    order, so a thin or steered pick can add lenses but never displace a
-    critical one, and it reports each name it does not run."""
+    order. `plan_lenses` spends its size budget in this order (and triage
+    its critical-tier cap), so a thin or steered pick can add lenses but
+    never displace a critical one, and it reports each name it does not
+    run."""
     rank = {n: i for i, n in enumerate(names, 1)}
     critical = tuple(
         LensChoice(n, f"critical tier; picker rank {rank[n]}")

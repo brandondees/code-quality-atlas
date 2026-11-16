@@ -1930,6 +1930,130 @@ def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
     assert "not_run=1" in err
 
 
+TEN_REAL_LENSES = (
+    "checking-restraint",
+    "reviewing-test-quality",
+    "reviewing-naming-and-readability",
+    "hunting-silent-failures",
+    "reviewing-module-design",
+    "reviewing-api-contract-safety",
+    "checking-idioms-and-consistency",
+    "reviewing-observability-and-operability",
+    "reviewing-performance-and-efficiency",
+    "reviewing-interoperability",
+)
+
+
+def _status(draft: str) -> dict:
+    return json.loads(
+        draft.splitlines()[0]
+        .removeprefix("<!-- atlas-review-status: ")
+        .removesuffix("-->")
+    )
+
+
+def test_a_dry_run_shows_the_full_plan_for_more_than_eight_picks(tmp_path, monkeypatch):
+    """#711's headline criterion, end to end: a picker that names more
+    than 8 lenses is not cut. The dry run's plan runs every named lens
+    beside the critical tier -- nothing is dropped by count -- and the
+    draft and the status line show the full plan."""
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt)
+            return json.dumps({"lenses": list(TEN_REAL_LENSES)})
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_OK, err
+    assert "ranked 10 lens name(s), 10 with a body" in out
+    assert "- NOT RUN:" not in out
+    assert _status(out)["lenses"]["clean"] == 4 + len(TEN_REAL_LENSES)
+    # The picker was asked to follow the guideline uncapped (D69): the
+    # instructions it received name no fixed cap and carry the
+    # auto-includes.
+    assert "There is no fixed cap on how many lenses you name." in seen[0].system
+    assert "guideline says rides along additively" in seen[0].system
+
+
+def test_a_dry_run_honors_the_reviewed_repos_lens_preference(tmp_path, monkeypatch):
+    """D69 end to end: the merge-base REVIEW.md's lens lines override the
+    guideline -- an excluded ranked pick is dropped and recorded, an
+    included lens the picker never named runs anyway -- and the draft
+    records the override."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_lens_include: reviewing-test-quality\n"
+        "review_lens_exclude: checking-restraint  # loud on every PR\n",
+        encoding="utf-8",
+    )
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt)
+            return '{"lenses": ["checking-restraint"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert code == cli.EXIT_OK, err
+    assert (
+        "The reviewed repo's merge-base REVIEW.md overrides the guideline "
+        "(include: reviewing-test-quality; exclude: checking-restraint): "
+        "dropped from the picks: checking-restraint; "
+        "added: reviewing-test-quality." in out
+    )
+    assert _status(out)["lenses"]["clean"] == 5
+    # The picker was told the override, so it does not fight it.
+    assert (
+        "The reviewed repo's merge-base REVIEW.md overrides the guideline: "
+        "run reviewing-test-quality; do not run checking-restraint." in seen[0].system
+    )
+
+
+def test_a_dry_run_records_an_unusable_lens_preference_line(tmp_path, monkeypatch):
+    """A REVIEW.md lens line that is present but unusable fails open to
+    the guideline and the draft says so, the way the ceiling's unusable
+    line is recorded (D68)."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_lens_exclude: Not A Lens Name\n",
+        encoding="utf-8",
+    )
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["checking-restraint"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert code == cli.EXIT_OK, err
+    assert (
+        "carries a review_lens_include: or review_lens_exclude: line that is "
+        "not a comma-separated list of lens names; it is ignored and the "
+        "picker's guideline stands" in out
+    )
+    # The guideline stood: the ranked pick ran.
+    assert _status(out)["lenses"]["clean"] == 5
+
+
 @pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
 def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
     from atlas_reviewer.cli import UsageError, _key_ceiling
