@@ -93,7 +93,9 @@ what stop a review. A plan's derived wall can reach
 must cover the plans you expect (a value below the child's *configured*
 wall refuses to start), and at pool 1, plans of 13 or more lenses
 exceed even 14,400 seconds — raise `ATLAS_POOL_SIZE` or lower
-`ATLAS_LENS_WALL_S` for those. A
+`ATLAS_LENS_WALL_S` for those, and a configured `ATLAS_REVIEW_WALL_S`
+above that ceiling refuses to start, since no in-bounds deadline can
+cover it. A
 review the parent kills at the deadline posts nothing: the job fails,
 the failure is a telemetry event, and the child's own stop has already
 destroyed its Sprite. Flipping either

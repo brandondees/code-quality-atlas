@@ -2222,3 +2222,22 @@ boot with the default in place, and a limit variable the loader refuses
 now names the environment variable (`ATLAS_REVIEW_WALL_S: ...`), not the
 loader's internal field name. Mutants killed: reverting the default to
 configured-wall-plus-margin, and dropping the naming wrap. Offline only.
+
+## 2026-11-16 (same day) — round-3 fix for #727: the wall-above-ceiling boot refusal is back on the default path
+
+Round 3 verified the round-2 fixes and the #724 merge, and caught one
+Minor: the round-2 change had removed the round-1 refusal of a
+configured child wall above the deadline ceiling along with its
+now-unneeded default branch, but the undercut it guarded stayed
+reachable on the default path — `ATLAS_REVIEW_WALL_S` above 14,400 s
+with no explicit `ATLAS_SERVICE_DEADLINE_S` booted the service with a
+14,400 s deadline below the child's configured wall, killing every
+review it queued, silently. The comparison is restored on both paths:
+`wall > MAX_SERVICE_DEADLINE_S` refuses, naming `ATLAS_REVIEW_WALL_S`
+and telling the operator to lower it. The restored assertions in
+`test_an_agentic_deadline_below_the_child_wall_refuses_at_boot` cover
+the default path and an explicit value, and kill the mutant dropping
+the comparison. The docs name the case in one line each. The round-3
+review also flagged commit `3a7f66f4`'s message as garbled (a pasted
+shell line embedded twice); noted in the PR body for cleanup at merge
+rather than a history rewrite. Offline only.

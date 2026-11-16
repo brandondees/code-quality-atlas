@@ -199,7 +199,9 @@ def service_deadline(
     who expects such plans sets ``ATLAS_SERVICE_DEADLINE_S`` to cover
     them -- an explicit value below the *configured* child wall refuses
     at boot, because a shorter parent wall SIGTERMs a healthy review into
-    a silent no-post. A value outside the bounds or not a number raises
+    a silent no-post, and a configured wall above the ceiling refuses
+    too, because no in-bounds value can cover it. A value outside the
+    bounds or not a number raises
     in both modes, so a mistyped setting stops the service instead of
     silently clipping or unbounding every review."""
     raw = env.get(SERVICE_DEADLINE_ENV, "")
@@ -207,8 +209,18 @@ def service_deadline(
         # Read the child's wall even when the default does not need it:
         # an invalid limit variable the one-shot child would have ignored
         # is a boot refusal here, with the variable named, not a review
-        # that dies at run time.
+        # that dies at run time. A configured wall above the ceiling is
+        # the same refusal: no deadline value inside the bounds can cover
+        # it, so booting would guarantee the silent undercut the
+        # below-wall refusal exists to prevent.
         wall = agentic_child_wall_s(env)
+        if wall > MAX_SERVICE_DEADLINE_S:
+            raise ValueError(
+                f"ATLAS_REVIEW_WALL_S is {wall:.0f} s, above the "
+                f"{MAX_SERVICE_DEADLINE_S:.0f} s deadline ceiling, so no "
+                f"{SERVICE_DEADLINE_ENV} value can cover a review this "
+                "child would run; lower ATLAS_REVIEW_WALL_S"
+            )
         if not raw:
             return MAX_SERVICE_DEADLINE_S
         value = _deadline_value(raw)

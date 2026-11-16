@@ -345,6 +345,18 @@ def test_an_agentic_deadline_below_the_child_wall_refuses_at_boot():
     assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_AGENTIC) == 3600.0
     with pytest.raises(ValueError):
         service_deadline({SERVICE_DEADLINE_ENV: "20000"}, mode=MODE_AGENTIC)
+    # A configured child wall the ceiling cannot cover refuses too -- on
+    # the default path as well, where the boot would otherwise carry a
+    # 14,400 s deadline below the child's wall and kill every review it
+    # queues.
+    for env in (
+        {"ATLAS_REVIEW_WALL_S": "20000"},
+        {"ATLAS_REVIEW_WALL_S": "20000", SERVICE_DEADLINE_ENV: "7200"},
+    ):
+        with pytest.raises(ValueError) as refused:
+            service_deadline(env, mode=MODE_AGENTIC)
+        assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
+        assert "lower ATLAS_REVIEW_WALL_S" in str(refused.value)
 
 
 def test_an_invalid_child_wall_refusal_names_the_variable():

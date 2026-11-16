@@ -95,7 +95,9 @@ between 60 and 14,400 seconds; an explicit value below the child's
 multi-wave plans sets it to cover the walls those plans derive. At pool
 1, plans of 13 or more lenses derive more than even 14,400 seconds
 (1,200 × 13); raise `ATLAS_POOL_SIZE` or lower `ATLAS_LENS_WALL_S` for
-those. A review the parent kills at the deadline posts nothing: the job
+those — and a configured `ATLAS_REVIEW_WALL_S` above that ceiling
+refuses to start, since no in-bounds deadline can cover it. A review the
+parent kills at the deadline posts nothing: the job
 fails, the failure is a telemetry
 event, and the review child's own stop has already destroyed its Sprite.
 A later push of the same head can queue it again. The child
