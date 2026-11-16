@@ -1789,7 +1789,7 @@ as before.
 The 2026-11-13 plan's phase 3. `gather.py` had collected check runs,
 workflow runs and jobs since the one-shot path was built, but only that
 path consumed them, so no agentic lens could name a real CI run and the
-#661 m1 shape (a PR body claiming verification results the head's own
+PR #661 m1 shape (a PR body claiming verification results the head's own
 CI contradicts) stayed unreachable in an agentic review.
 `gather_head_ci` now fetches the head SHA's own results only — the check
 runs at the SHA, the workflow runs at the SHA, and the jobs of those
