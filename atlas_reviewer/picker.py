@@ -32,9 +32,10 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
+from atlas_reviewer.diffs import DOCS, risk_tier
 from atlas_reviewer.lenses import (
     LENS_BUDGET_CHARS,
     LensChoice,
@@ -65,6 +66,8 @@ CRITICAL_TIER = (
 # counts, coverage or CI outcomes is exactly the surface that lens checks
 # against what actually happened.
 PR_HYGIENE = "reviewing-pr-and-process-hygiene"
+# Why a repo-preference include carries, wherever it is appended (D69).
+_INCLUDE_WHY = "included by the reviewed repo's merge-base REVIEW.md (D69)"
 # The shape of a lens name, as `parse_picks` accepts it and a REVIEW.md
 # lens-preference line must carry (D69); lowercase alphanumerics and
 # hyphens, so a name from either place can never carry markup.
@@ -110,7 +113,7 @@ Depth mode: {depth}, set by the operator.
 {breadth}
 The critical tier always runs before your picks and does not spend your
 slots: {critical}. Use your picks for the other lenses the change needs.
-{preferences}
+{preferences}{shapes}
 Reply with only one JSON object and nothing else:
 {{"lenses": ["<lens-name>", ...]}}
 most relevant first, each a lens name exactly as the picker writes it.
@@ -147,11 +150,14 @@ _BREADTH = {
     Depth.REVIEW: (
         "Follow the guideline's review mode as it is written: its 3-8 "
         "default breadth is a starting recommendation, not a cap. Name "
-        "every lens the change needs, however many that is, and name every "
-        "lens the guideline says rides along additively (its auto-includes): "
-        "a decision-record or decisions-log change names "
-        "reviewing-decision-lifecycle, a docs-only change names "
-        "auditing-documentation-health, and a rename or restructuring names "
+        "every lens the change needs, however many that is, and name the "
+        "lenses the guideline says ride along additively -- its "
+        "auto-includes include, for a decision-record or decisions-log "
+        "change, reviewing-decision-lifecycle (the guideline adds "
+        "auditing-decision-record-currency when the change touches an "
+        "existing record rather than authoring a new one) and, for a "
+        "docs-only change, auditing-documentation-health; for a rename or "
+        "restructuring, the guideline's restructuring route runs "
         "reviewing-module-design and reviewing-naming-and-readability. "
         "There is no fixed cap on how many lenses you name."
     ),
@@ -185,15 +191,22 @@ class LensPreferences:
     """A repo preference that overrides the picker's guideline (D69), read
     from the reviewed repo's merge-base `REVIEW.md` where that tree is
     already fetched. `include` names lenses the review runs whether or not
-    the picker ranked them; `exclude` names lenses the picks never run.
-    The critical tier is neither: it is the controller's own floor, not
-    the guideline's, so a preference neither adds to it nor removes from
-    it. Every name is lens-shaped (validated at parse), so the directive
-    below cannot carry injection into the instructions."""
+    the picker ranked them; `exclude` names lenses the picks never run --
+    including the controller-added process-hygiene lens, which is neither
+    critical-tier nor a cap (D69 round-1 F1) -- and exclude wins over
+    include on every path. The critical tier is neither: it is the
+    controller's own floor, not the guideline's, so a preference neither
+    adds to it nor removes from it. Every name is lens-shaped (validated
+    at parse), so the directive below cannot carry injection into the
+    instructions."""
 
     include: tuple[str, ...] = ()
     exclude: tuple[str, ...] = ()
-    source: str = "The reviewed repo's merge-base REVIEW.md"
+
+
+# Where the preference is read from, for the directive and the note; one
+# source exists today, so no field parameterizes it (round-1 F8).
+_PREFERENCE_SOURCE = "The reviewed repo's merge-base REVIEW.md"
 
 
 def preferences_directive(preferences: LensPreferences | None) -> str:
@@ -212,20 +225,35 @@ def preferences_directive(preferences: LensPreferences | None) -> str:
     if not parts:
         return ""
     return (
-        f"\n{preferences.source} overrides the guideline: "
+        f"\n{_PREFERENCE_SOURCE} overrides the guideline: "
         + "; ".join(parts)
         + ". The controller applies this override to your picks itself.\n"
     )
 
 
+def shapes_directive(shapes: tuple[str, ...]) -> str:
+    """The trusted instructions paragraph stating the controller's own
+    shape facts (D69 round-1 F4): what the changed paths say the change
+    is, and the auto-include each shape asks for. The paths inside are
+    quoted as data by `guideline_shapes`; the paragraph is a controller
+    fact, not a command to name a lens -- the picker still applies the
+    guideline. "" when the diff matches no shape."""
+    if not shapes:
+        return ""
+    return "\nThe controller read the changed paths itself: " + " ".join(shapes) + "\n"
+
+
 def picker_instructions(
-    depth: Depth, preferences: LensPreferences | None = None
+    depth: Depth,
+    preferences: LensPreferences | None = None,
+    shapes: tuple[str, ...] = (),
 ) -> str:
     return PICKER_INSTRUCTIONS.format(
         depth=depth.value,
         breadth=_BREADTH[depth],
         critical=", ".join(CRITICAL_TIER),
         preferences=preferences_directive(preferences),
+        shapes=shapes_directive(shapes),
     )
 
 
@@ -301,6 +329,105 @@ def _hygiene_choice(pr_text: str) -> tuple[LensChoice, ...]:
     )
 
 
+# The decisions log this repo reviews itself with; a repo that names its
+# own decisions log differently is covered by the directory and basename
+# heuristics below.
+DECISIONS_LOG = "docs/open-questions.md"
+# The directory names a decision record lives under, and the basename
+# prefix git convention gives ADR and RFC files. Heuristics, stated as
+# facts rather than enforced: naming a shape the diff does not have costs
+# one sentence; missing one leaves the picker to apply the guideline it
+# already carries.
+_DECISION_DIRS = frozenset(
+    {"adr", "adrs", "decisions", "decision-records", "rfc", "rfcs"}
+)
+# Git's own rename records, extended-header lines before a section's first
+# hunk. A content line never starts with `rename`, so a multiline scan of
+# the raw diff reads only real records; a rename a diff serves as
+# delete-plus-add instead is not detected, and no shape is stated for it.
+_RENAME_FROM = re.compile(r"^rename from (.+)$", re.MULTILINE)
+_RENAME_TO = re.compile(r"^rename to (.+)$", re.MULTILINE)
+_SHAPE_PATHS_SHOWN = 3
+
+
+def _is_decision_record(path: str) -> bool:
+    lowered = path.lower()
+    pure = PurePosixPath(lowered)
+    return (
+        lowered == DECISIONS_LOG
+        or any(part in _DECISION_DIRS for part in pure.parts[:-1])
+        or pure.name.startswith(("adr", "rfc"))
+    )
+
+
+def _is_docs(path: str) -> bool:
+    """The diff classifier's own docs tier: `.md`/`.rst`/`.txt`/`.adoc`
+    suffixes, `docs/` directories, LICENSE and NOTICE."""
+    return risk_tier(path) is DOCS
+
+
+def guideline_shapes(
+    paths: tuple[str, ...], *, scrub: Callable[[str], str], diff: str = ""
+) -> tuple[str, ...]:
+    """The change shapes the guideline auto-includes a lens for, detected
+    from the changed paths and the raw diff the caller already holds (D69
+    round-1 F4). Each sentence is a controller fact naming the lens the
+    shape asks for; the controller states them in the picker's
+    instructions and in the selection note, and adds no lens itself --
+    the guideline applies them through the picker, and the note keeps the
+    request auditable when the model leaves one out. The paths are
+    PR-controlled and are quoted as data, so a crafted path cannot speak
+    as the controller. `diff` is read only for git's rename records."""
+    shapes = []
+    decisions = tuple(p for p in paths if _is_decision_record(p))
+    if decisions:
+        shown = _shape_paths(decisions, scrub)
+        shapes.append(
+            f"a decision record or the decisions log is touched ({shown}): "
+            "the guideline auto-includes reviewing-decision-lifecycle, plus "
+            "auditing-decision-record-currency when an existing record is "
+            "edited rather than a new one authored"
+        )
+    if paths and all(_is_docs(p) for p in paths) and len(decisions) < len(paths):
+        shapes.append(
+            "every changed path is documentation: the guideline "
+            "auto-includes auditing-documentation-health"
+        )
+    renamed = tuple(zip(_RENAME_FROM.findall(diff), _RENAME_TO.findall(diff)))
+    if renamed:
+        shown = ", ".join(
+            f"{quote_untrusted(old, scrub=scrub)} to {quote_untrusted(new, scrub=scrub)}"
+            for old, new in renamed[:_SHAPE_PATHS_SHOWN]
+        )  # fmt: skip
+        shapes.append(
+            f"the diff renames {shown}: the guideline's restructuring route "
+            "runs reviewing-module-design and reviewing-naming-and-readability"
+        )
+    return tuple(shapes)
+
+
+def _shape_paths(paths: tuple[str, ...], scrub: Callable[[str], str]) -> str:
+    """The shape's paths, quoted as data, at most `_SHAPE_PATHS_SHOWN` of
+    them with the remainder counted."""
+    shown = ", ".join(
+        quote_untrusted(p, scrub=scrub) for p in paths[:_SHAPE_PATHS_SHOWN]
+    )
+    more = len(paths) - _SHAPE_PATHS_SHOWN
+    return f"{shown} and {more} more" if more > 0 else shown
+
+
+def _shapes_note(shapes: tuple[str, ...]) -> str:
+    """The selection-note sentence carrying the controller's shape facts
+    (D69 round-1 F4), or "" when the diff matched no shape."""
+    if not shapes:
+        return ""
+    return (
+        " The controller's shape facts from the changed paths: "
+        + " ".join(shapes)
+        + "."
+    )
+
+
 def select_lenses(
     depth: Depth,
     run_picker: Callable[[], str] | None,
@@ -310,6 +437,7 @@ def select_lenses(
     scrub: Callable[[str], str],
     pr_text: str = "",
     preferences: LensPreferences | None = None,
+    shapes: tuple[str, ...] = (),
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the
@@ -320,7 +448,9 @@ def select_lenses(
     process-hygiene lens is included ahead of the picks (D58). A repo
     preference (D69) drops its excluded names from the picks and appends
     its included names, on the fallback paths too, and the note records
-    what it changed; no depth but triage caps the count, so the character
+    the override whenever one is present; the controller's shape facts
+    (`shapes`, D69 round-1 F4) are stated here as well. No depth but
+    triage caps the count, so the character
     budget is what decides what runs whole."""
     hygiene = _hygiene_choice(pr_text)
 
@@ -336,8 +466,8 @@ def select_lenses(
         no_room=lambda: _no_room_for_a_pick(library, depth, budget_chars),
     )
     if isinstance(picked, LensSelection):
-        return _preferenced_fallback(picked, preferences, depth)
-    dropped, kept, includes = _apply_preferences(picked, preferences)
+        return _preferenced_fallback(picked, preferences, depth, shapes)
+    applied = _apply_preferences(picked, hygiene, preferences)
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -347,9 +477,12 @@ def select_lenses(
         f"{_order_note(hygiene)}then the picked names in rank order, and the "
         f"{budget_chars}-character lens budget decides what runs whole: the "
         f"Lenses line says which ran whole and which are NOT RUN, and why."
-        f"{_preference_note(preferences, dropped, includes)}"
+        f"{_shapes_note(shapes)}"
+        f"{_preference_record(preferences, applied)}"
     )
-    return LensSelection(_with_critical(kept, hygiene) + includes, note, True)
+    return LensSelection(
+        _with_critical(applied.kept, applied.hygiene) + applied.includes, note, True
+    )
 
 
 def _order_note(hygiene: tuple[LensChoice, ...]) -> str:
@@ -372,6 +505,7 @@ def select_agentic_lenses(
     scrub: Callable[[str], str],
     pr_text: str = "",
     preferences: LensPreferences | None = None,
+    shapes: tuple[str, ...] = (),
 ) -> tuple[LensSelection, LensPlan]:
     """The critical tier plus the picker's full ranking. The one-shot
     character budget is not consulted, so a review-depth PR still calls
@@ -379,10 +513,12 @@ def select_agentic_lenses(
     `pr_text` states verification results, the process-hygiene lens is
     included ahead of the picks (D58). A repo preference (D69) drops its
     excluded names from the picks and appends its included names, on the
-    fallback paths too, and the note records what it changed."""
+    fallback paths too, and the note records the override whenever one is
+    present; the controller's shape facts (`shapes`) are stated here as
+    well."""
     selection = _agentic_selection(
         depth, run_picker, library, scrub=scrub, pr_text=pr_text,
-        preferences=preferences,
+        preferences=preferences, shapes=shapes,
     )  # fmt: skip
     return selection, plan_agentic_lenses(library, selection.choices)
 
@@ -395,6 +531,7 @@ def _agentic_selection(
     scrub: Callable[[str], str],
     pr_text: str = "",
     preferences: LensPreferences | None = None,
+    shapes: tuple[str, ...] = (),
 ) -> LensSelection:
     def has_body(name: str) -> bool:
         return library.body(name) is not None
@@ -402,90 +539,141 @@ def _agentic_selection(
     hygiene = _hygiene_choice(pr_text)
     picked = _pick(depth, run_picker, has_body, scrub=scrub, hygiene=hygiene)
     if isinstance(picked, LensSelection):
-        return _preferenced_fallback(picked, preferences, depth)
-    dropped, kept, includes = _apply_preferences(picked, preferences)
+        return _preferenced_fallback(picked, preferences, depth, shapes)
+    applied = _apply_preferences(picked, hygiene, preferences)
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth. The one-shot character budget does not apply. "
         f"The picker ranked {len(picked)} lens name(s), {with_body} with a body. "
         f"{_agentic_order_note(hygiene)}"
-        f"{_preference_note(preferences, dropped, includes)}"
+        f"{_shapes_note(shapes)}"
+        f"{_preference_record(preferences, applied)}"
     )
-    return LensSelection(_with_critical(kept, hygiene) + includes, note, True)
+    return LensSelection(
+        _with_critical(applied.kept, applied.hygiene) + applied.includes, note, True
+    )
+
+
+@dataclass(frozen=True)
+class _Applied:
+    """The picker's ranking and the controller-added hygiene choices after
+    a repo preference override (D69 round-1 F1). `dropped` names the
+    excluded picks; `hygiene_dropped` says the controller-added
+    process-hygiene lens was excluded; `includes` are the choices to
+    append."""
+
+    kept: tuple[str, ...]
+    dropped: tuple[str, ...]
+    hygiene: tuple[LensChoice, ...]
+    hygiene_dropped: bool
+    includes: tuple[LensChoice, ...]
 
 
 def _apply_preferences(
-    names: tuple[str, ...], preferences: LensPreferences | None
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[LensChoice, ...]]:
-    """The ranked names after a repo preference override (D69): the
-    excluded names dropped, the remaining names in rank order, and the
-    include choices to append -- every include name the picks and the
-    critical tier do not already cover, so an include never duplicates or
-    displaces anything. Excludes never touch the critical tier: it is the
-    controller's own floor, not the guideline's."""
+    names: tuple[str, ...],
+    hygiene: tuple[LensChoice, ...],
+    preferences: LensPreferences | None,
+) -> _Applied:
+    """The ranked names and the controller-added hygiene choices after a
+    repo preference override (D69; round-1 F1/F2). An exclude drops its
+    names from the picks and, naming `PR_HYGIENE`, also removes the
+    controller-added hygiene lens -- hygiene is neither critical-tier nor
+    a cap, so the repo may decline it -- and exclude wins over include on
+    every path. The critical tier is neither list's to touch: a name it
+    carries stays in the tier whatever either list says, and is not
+    reported as dropped from the picks it would have been re-added to
+    anyway. The include choices cover every include name the kept picks,
+    the critical tier and the kept hygiene do not already carry, so an
+    include never duplicates or displaces anything."""
     if preferences is None:
-        return (), names, ()
+        return _Applied(names, (), hygiene, False, ())
     drop = set(preferences.exclude)
-    dropped = tuple(n for n in names if n in drop)
+    dropped = tuple(n for n in names if n in drop and n not in CRITICAL_TIER)
     kept = tuple(n for n in names if n not in drop)
-    covered = {*kept, *CRITICAL_TIER}
+    hygiene_dropped = PR_HYGIENE in drop and bool(hygiene)
+    kept_hygiene = () if hygiene_dropped else hygiene
+    covered = {*kept, *CRITICAL_TIER, *(c.name for c in kept_hygiene)}
     includes = tuple(
-        LensChoice(n, "included by the reviewed repo's merge-base REVIEW.md (D69)")
+        LensChoice(n, _INCLUDE_WHY)
         for n in preferences.include
         if n not in drop and n not in covered
     )
-    return dropped, kept, includes
+    return _Applied(kept, dropped, kept_hygiene, hygiene_dropped, includes)
 
 
 def _preferenced_fallback(
     selection: LensSelection,
     preferences: LensPreferences | None,
     depth: Depth,
+    shapes: tuple[str, ...] = (),
 ) -> LensSelection:
-    """A fallback selection with the repo's includes appended (D69): the
-    override is honored even when the picker fell back or made no call.
-    Excludes have no picks to drop here; the note records the includes.
-    Triage is not widened: a preference re-ranks within its depth mode's
-    breadth and never widens the mode, and triage's breadth is the
+    """A fallback selection with the controller's shape facts and the
+    repo's preference applied (D69; round-1 F2/F4/F6/F7): an exclude
+    drops its non-critical choices here too -- on the fallback paths the
+    only excludable choice is the controller-added hygiene lens -- and an
+    include is appended even when the picker fell back or made no call,
+    with exclude winning over include. The note records the override
+    whenever one is present, and no longer says "only the critical tier"
+    once the preference has added to it or dropped from it. Triage is not
+    widened and states no shapes: a preference re-ranks within its depth
+    mode's breadth and never widens the mode, and triage's breadth is the
     critical tier alone."""
-    if depth is Depth.TRIAGE or preferences is None or not preferences.include:
+    if depth is Depth.TRIAGE:
         return selection
-    covered = {c.name for c in selection.choices}
+    note = selection.note + _shapes_note(shapes)
+    if preferences is None:
+        return _with_note(selection, note)
+    drop = set(preferences.exclude) - set(CRITICAL_TIER)
+    dropped = tuple(c.name for c in selection.choices if c.name in drop)
+    kept = tuple(c for c in selection.choices if c.name not in drop)
+    hygiene_dropped = PR_HYGIENE in dropped
+    covered = {c.name for c in kept}
     includes = tuple(
-        LensChoice(n, "included by the reviewed repo's merge-base REVIEW.md (D69)")
+        LensChoice(n, _INCLUDE_WHY)
         for n in preferences.include
-        if n not in covered
+        if n not in preferences.exclude and n not in covered
     )
-    if not includes:
-        return selection
-    note = (
-        f"{selection.note} The reviewed repo's merge-base REVIEW.md "
-        f"overrides the guideline: added: {', '.join(c.name for c in includes)}."
+    if dropped or includes:
+        note = note.replace(
+            "only the critical tier was considered",
+            "the critical tier was considered",
+        )
+    note += _preference_record(
+        preferences,
+        _Applied((), dropped, (), hygiene_dropped, includes),
     )
+    return LensSelection(kept + includes, note, selection.used_call, selection.skipped)
+
+
+def _with_note(selection: LensSelection, note: str) -> LensSelection:
+    """The selection with its note replaced and everything else kept."""
     return LensSelection(
-        selection.choices + includes, note, selection.used_call, selection.skipped
+        selection.choices, note, selection.used_call, selection.skipped
     )
 
 
-def _preference_note(
-    preferences: LensPreferences | None,
-    dropped: tuple[str, ...],
-    includes: tuple[LensChoice, ...],
-) -> str:
-    """The note sentence recording what a repo preference override changed
-    (D69), or "" when there is no override or it changed nothing."""
-    if preferences is None or (not dropped and not includes):
+def _preference_record(preferences: LensPreferences | None, applied: _Applied) -> str:
+    """The note sentence recording a repo preference override (D69;
+    round-1 F6): present whenever a preference is present, so an operator
+    can tell "applied and already satisfied" from "ignored", and naming
+    what changed, or that nothing needed to. The dropped picks and the
+    added includes are lens-shaped names, so the sentence carries no
+    markup into the draft."""
+    if preferences is None:
         return ""
     parts = []
-    if dropped:
-        parts.append("dropped from the picks: " + ", ".join(dropped))
-    if includes:
-        parts.append("added: " + ", ".join(c.name for c in includes))
+    if applied.dropped:
+        parts.append("dropped from the picks: " + ", ".join(applied.dropped))
+    if applied.hygiene_dropped:
+        parts.append(f"dropped the controller-added {PR_HYGIENE} lens")
+    if applied.includes:
+        parts.append("added: " + ", ".join(c.name for c in applied.includes))
+    detail = "; ".join(parts) if parts else "nothing needed changing"
     return (
-        f" The reviewed repo's merge-base REVIEW.md overrides the guideline "
+        f" {_PREFERENCE_SOURCE} overrides the guideline "
         f"(include: {', '.join(preferences.include) or 'none'}; exclude: "
-        f"{', '.join(preferences.exclude) or 'none'}): " + "; ".join(parts) + "."
+        f"{', '.join(preferences.exclude) or 'none'}): {detail}."
     )
 
 

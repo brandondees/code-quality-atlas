@@ -2291,3 +2291,40 @@ exclude ignored, the includes silently dropped, the exclude reaching the
 critical tier, includes applied at triage, a numeric cap back in the
 instructions, the lens-name validation dropped, and the unusable-line
 note dropped from the draft. Offline only.
+
+## 2026-11-16 (same day) — round-1 fixes for #729: hygiene is excludable and undeletable no more, exclude wins everywhere, and the controller states its shape facts
+
+Round 1 verified the D69 implementation (mutants M4 and M9 re-run and
+confirmed killed) and returned one Major: `_apply_preferences` did not
+know the D58 controller-added hygiene choice `_with_critical` inserts
+after it, so `review_lens_include: reviewing-pr-and-process-hygiene` with
+a verification-stating body ran hygiene twice — the body inlined twice
+one-shot, two conversations and a doubled reservation agentic — and
+`review_lens_exclude:` naming hygiene silently did nothing. The hygiene
+choices now reach `_apply_preferences`, join the covered set, and an
+exclude naming hygiene removes the controller-added lens (hygiene is
+neither critical-tier nor a cap, so the repo may decline it), recorded in
+the note; `plan_lenses` refuses a repeated name structurally ("already
+chosen earlier in this plan"), so no path can plan a lens twice, and a
+loop test holds the selection duplicate-free across the
+hygiene/preference/fallback combinations. Exclude wins over include on
+every path — the fallback applies the exclude filter too. Cheap
+hardening, not a redesign: the controller computes the auto-include
+shapes from the changed paths it already holds (`guideline_shapes`: a
+decision record or the decisions log touched, an all-documentation diff
+with at least one non-record path, a git rename record), states them in
+the picker's instructions and the draft's selection note with every path
+quoted as data, and adds no lens itself — stated, not enforced; the
+recorded owner decision that the model applies the auto-includes stands.
+The instructions' enumeration no longer claims completeness ("its
+auto-includes include"), names the decision route's second lens, and
+attributes the rename pair to the restructuring route where the
+guideline carries it. A preference that changes nothing is now still
+recorded ("nothing needed changing"), and the fallback note no longer
+says "only the critical tier" once the preference changed the set.
+`LensPreferences.source` is dropped. Killed there, by hand: the
+covered-set mutant omitting hygiene, the structural dedupe removed, the
+fallback exclude filter removed, the nothing-changed record suppressed,
+and the "only" reword removed. Overlap noted in the PR body: #652's
+`test_lenses.py` imports `_NAME`, which this PR renamed to `LENS_NAME`;
+whoever merges second updates the import. Offline only.

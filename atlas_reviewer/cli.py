@@ -128,6 +128,7 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.picker import (
     Depth,
     LensSelection,
+    guideline_shapes,
     picker_instructions,
     select_agentic_lenses,
 )
@@ -920,9 +921,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         def scrub(text: str) -> str:
             return scrubber(text).text
 
+        picker_paths = diff_paths(diff)[:500]
+        # The controller's own shape facts (D69 round-1 F4), from the
+        # changed paths this command already holds; the paths are quoted
+        # as data inside the sentences.
+        shapes = guideline_shapes(picker_paths, scrub=scrub, diff=diff)
+
         def run_picker() -> str:
-            paths = diff_paths(diff)[:500]
-            shown = "\n".join(paths) or "(no changed paths)"
+            shown = "\n".join(picker_paths) or "(no changed paths)"
             # The picker's view of the PR is the one-shot path's: title and
             # body, redacted, fenced as untrusted, never instructions (D38).
             pull_view = (
@@ -935,7 +941,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     event.repo,
                     event.pr_number,
                     event.head_sha,
-                    picker_instructions(depth, lens_preferences.preferences),
+                    picker_instructions(depth, lens_preferences.preferences, shapes),
                     (
                         pull_view,
                         UntrustedBlock("changed-paths", RepoText(shown)),
@@ -955,6 +961,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     scrub=scrub,
                     pr_text=pr_text,
                     preferences=lens_preferences.preferences,
+                    shapes=shapes,
                 )
                 selection = _with_preference_note(selection, lens_preferences)
                 names = tuple(loaded.name for loaded in plan.loaded)

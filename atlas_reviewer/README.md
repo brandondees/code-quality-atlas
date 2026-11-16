@@ -732,20 +732,43 @@ cannot move its own override -- may carry two settings lines:
 
 ```text
 review_lens_include: <lens-name>[, <lens-name>...]   # runs even if the picker never ranked it
-review_lens_exclude: <lens-name>[, <lens-name>...]   # never runs, however highly the picker ranks it
+review_lens_exclude: <lens-name>[, <lens-name>...]   # never runs: exclude wins over include
 ```
 
 The controller applies the override to the picker's picks itself -- an
-exclude drops a ranked pick, an include runs even when the picker fell
-back or made no call -- and records what changed in the Lens selection
-note, which the draft carries. The critical tier is the controller's own
-floor, not the guideline's, so neither line touches it; triage is never
-widened. A line that is present but not a comma-separated list of lens
-names, or a key that appears twice, is ignored fail-open with a note in
-the draft, exactly like an unusable ceiling line; a name that matches no
-bundle lens is not silently dropped -- its include shows up as a NOT RUN
-line. `agentic-review` reads these lines; the one-shot `review` command
-fetches no merge-base tree and so runs on the guideline alone.
+exclude drops a ranked pick and also declines the controller-added
+process-hygiene lens (D58), which is neither critical-tier nor a cap, so
+the repo may turn it off; an include runs even when the picker fell back
+or made no call; a name in both lists does not run, because **exclude
+wins on every path**; and no lens is ever planned twice -- a repeated
+choice is one load and a named NOT RUN line. The critical tier is the
+controller's own floor, not the guideline's, so neither line touches it;
+triage is never widened. A line that is present but not a comma-separated
+list of lens names, or a key that appears twice, is ignored fail-open
+with a note in the draft, exactly like an unusable ceiling line; a name
+that matches no bundle lens is not silently dropped -- its include shows
+up as a NOT RUN line. The override is recorded in the Lens selection
+note whenever it is present, "nothing needed changing" when the picks
+already satisfy it, so an operator can tell applied-and-satisfied from
+ignored. `agentic-review` reads these lines; the one-shot `review`
+command fetches no merge-base tree and so runs on the guideline alone.
+
+**The controller's shape facts (D69 round-1 F4).** The controller also
+detects, from the changed paths and the diff it already holds, the change
+shapes the guideline auto-includes a lens for -- a decision record or the
+decisions log touched (`reviewing-decision-lifecycle`, plus
+`auditing-decision-record-currency` when an existing record is edited
+rather than a new one authored), an all-documentation diff
+(`auditing-documentation-health`), a git rename record (the
+restructuring route's `reviewing-module-design` and
+`reviewing-naming-and-readability`) -- and states them in the picker's
+instructions and in the draft's Lens selection note, each path quoted as
+data. The shapes are **stated, not enforced**: the picker's model applies
+the guideline, and the note keeps the request auditable when the model
+leaves a shape out. The detection is heuristic (the decisions log by its
+known path, decision-record directory names and ADR/RFC basenames, the
+diff's `rename from`/`rename to` records); a rename a diff serves as
+delete-plus-add is not detected, and no shape is stated for it.
 
 `lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`
 and inlines it into the trusted system prompt, in priority order, under a

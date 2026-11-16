@@ -127,7 +127,22 @@ def plan_lenses(
     uses: list[LensUse] = []
     loaded: list[LoadedLens] = []
     left = budget_chars
+    chosen: set[str] = set()
     for choice in ranked:
+        if choice.name in chosen:
+            # No path may plan a lens twice (D69 round-1 F1): a repeated
+            # name is reported NOT RUN, never loaded a second time.
+            uses.append(
+                LensUse(
+                    choice.name,
+                    LensStatus.NOT_RUN,
+                    0,
+                    choice.why,
+                    "already chosen earlier in this plan",
+                )
+            )
+            continue
+        chosen.add(choice.name)
         body = library.body(choice.name)
         skip = _skip_reason(
             body,

@@ -109,6 +109,19 @@ def test_an_uncapped_plan_runs_every_choice_the_budget_fits():
     assert all(u.status is LensStatus.RUN for u in plan.uses)
 
 
+def test_a_repeated_choice_is_not_run_a_second_time():
+    """D69 round-1 F1, structurally: no path can plan a lens twice. A
+    repeated name is one load and one named NOT RUN line, never a second
+    inline of the same body."""
+    lib = StubLibrary({"a": "A" * 10})
+    plan = plan_lenses(lib, [choice("a"), choice("a", "picker rank 2")])
+    assert [lens.name for lens in plan.loaded] == ["a"]
+    second = plan.uses[1]
+    assert second.status is LensStatus.NOT_RUN
+    assert second.reason == "already chosen earlier in this plan"
+    assert "a (already chosen earlier in this plan; picker rank 2)" in (plan.coverage())
+
+
 def test_a_lens_with_no_body_is_not_run_not_invented():
     plan = plan_lenses(StubLibrary({}), [choice("ghost")])
     assert plan.uses[0].status is LensStatus.NOT_RUN
