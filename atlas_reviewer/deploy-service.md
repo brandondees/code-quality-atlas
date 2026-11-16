@@ -106,7 +106,11 @@ agentic limit variables (`ATLAS_PER_LENS_CALLS`, `ATLAS_PER_LENS_USD`,
 `ATLAS_REVIEW_CEILING_USD`, and the rest of `README.md`'s `ATLAS_*`
 limit table) reach the
 child when set on the Machine. The only GitHub credential the child
-receives is still the read-only installation token the parent minted.
+receives is still the read-only installation token the parent minted,
+which includes issues read alongside the contents, checks, actions and
+pull-request reads, so a child run with `--include-issues` holds a token
+that can read issues; an optional read the token cannot serve is refused
+by GitHub and recorded as a gap, never a crash.
 The App private key, the webhook secret, and `FLY_API_TOKEN` stay in the
 parent.
 
@@ -199,7 +203,11 @@ already do. The payload URL is then `https://<that-name>.fly.dev/webhook`.
 Set the webhook secret to the same value as
 `ATLAS_GITHUB_WEBHOOK_SECRET`. Content type JSON. Subscribe to
 **Pull requests** and nothing else. The installation must include
-`brandondees/code-quality-atlas`.
+`brandondees/code-quality-atlas`, and the App itself must grant read on
+contents, checks, actions, pull requests and issues: the parent's
+read-token mint requests all five, so an installation whose App is
+missing any of them fails every mint at review start and no review
+posts.
 
 `ATLAS_REVIEW_REPOS` defaults to that repository. Leave it unset until a
 second repository is an explicit decision. One installation id cannot

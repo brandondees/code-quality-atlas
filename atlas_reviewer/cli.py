@@ -516,6 +516,27 @@ def _app_tokens(
     )
 
 
+def _review_tokens(
+    env: Mapping[str, str],
+    event: PrEvent,
+    include_issues: bool,
+    transport: UrllibTransport,
+) -> _FixedToken | AppInstallationTokens:
+    """The tokens every live review runs with. Inside the service the
+    child holds only the parent-minted read-only installation token (the
+    App id and key never cross `_CHILD_ALLOWED`), so the fixed token wins
+    when it is set; standalone runs mint their own from App credentials.
+    Every live call site must ask this helper, or the paths drift apart
+    and the service's agentic review dies on a credential it must not
+    hold. The fixed token's grant is whatever the parent minted; an
+    optional read it cannot serve is refused by GitHub and degrades to a
+    recorded gap, never an up-front refusal here."""
+    fixed = env.get(ENV_INSTALLATION_TOKEN, "")
+    if fixed:
+        return _FixedToken(fixed)
+    return _app_tokens(env, event, include_issues, transport)
+
+
 def _live_wiring(
     args: argparse.Namespace,
     env: Mapping[str, str],
@@ -528,13 +549,7 @@ def _live_wiring(
     _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
-    fixed = env.get(ENV_INSTALLATION_TOKEN, "")
-    tokens: _FixedToken | AppInstallationTokens
-    if fixed:
-        tokens = _FixedToken(fixed)
-    else:
-        _require_env(env, ENV_APP_KEY)
-        tokens = _app_tokens(env, event, args.include_issues, transport)
+    tokens = _review_tokens(env, event, args.include_issues, transport)
     credentials.register(tokens.secrets)
     redactor = credentials.redactor
     sprites = args.sprites_factory(env)
@@ -1107,7 +1122,7 @@ def _live_github(
     credentials: _Credentials,
 ) -> GitHubClient:
     transport = UrllibTransport()
-    tokens = _app_tokens(env, event, args.include_issues, transport)
+    tokens = _review_tokens(env, event, args.include_issues, transport)
     credentials.register(tokens.secrets)
     return GitHubClient(transport, tokens)
 
@@ -1379,7 +1394,7 @@ def _probe_source(
         raise UsageError("--sequence review needs --tarball FILE or --event FILE")
     event = load_event(Path(args.event))
     transport = UrllibTransport()
-    tokens = _app_tokens(env, event, False, transport)
+    tokens = _review_tokens(env, event, False, transport)
     credentials.register(tokens.secrets)
     github = InstrumentedGitHub(GitHubClient(transport, tokens), telemetry)
     return github.get_tarball(event.repo, event.head_sha)
