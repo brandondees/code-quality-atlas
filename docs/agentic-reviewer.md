@@ -250,8 +250,9 @@ itself, and a timeout is a coverage gap.
 - **Prior rounds.** `rounds.RoundLog` carries earlier verified findings
   into the next review of the same pull request (D52). The first turn
   lists every file in the current diff. Prior findings are quoted
-  input. They do not drop a file. The path is chosen when a caller is
-  wired. No shipped caller builds one yet.
+  input. They do not drop a file. The shipped caller is `agentic-review`
+  (D67): it keeps `rounds.jsonl` under its state directory and passes
+  the log into every review it runs.
 - **Scoring.** Score issue-hit precision and recall against pilot PRs the
   owner labels: did the review name the issues a human cared about, and
   how many of its findings were real? This is the hit-or-miss shape

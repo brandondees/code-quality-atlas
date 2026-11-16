@@ -1943,3 +1943,38 @@ C1/C7 (a dropped notify) stand as the round-2 review found them: the
 0.05 s polling slice is the correctness mechanism and now carries a
 comment saying so, with the C2 hazard (removing the slice because a
 notify looks reliable) named in it. Offline only.
+
+## 2026-11-15 — #717 merges #718 and pays D67's follow-ups; the frozen-clock wait is pinned (round 3)
+
+Round 3 of #717's review APPROVED at `a2beea96`, and #718 (D67) merged
+into main first, so the branch merged main (`5e39bd04`) with three
+conflicts, all mechanical: `cli.py`'s import block keeps both sides
+(#718's `TRUNCATION_MARKER`/`rounds` imports beside this PR's
+`review_wide` import); the decision list reads D65, D66, D67, D68 with
+both entries whole; and the session log lands main's three #718 entries
+before this PR's three. `lens_loop.py` auto-merged — #718's public
+`input_room_tokens` rename lives in the shared-prefix area, this PR's
+backpressure in the `Spend` area — and both slices' suites pass
+together. This PR merges second, so it owes #718's recorded follow-ups:
+`docs/agentic-reviewer.md`'s "No shipped caller builds one yet" sentence
+for `rounds.py` now names the shipped caller (`agentic-review` keeps
+`rounds.jsonl` under its state directory and passes the log into every
+review it runs); D67 carries an appended Correction — never editing
+earlier text — withdrawing the four-byte rebuild test's kill claim for
+the marker-blind `fit // 4` rebuild (equivalent-safe, by the
+ASCII-prefix argument: the block's leading framing is ASCII, so a
+build's bytes sit below the four-bytes-per-character bound by more than
+the marker-blind size's few extra characters can consume — run on the
+merged tree, the whole of `test_agentic_context.py` passes with the
+mutant in), correcting the round-2 oversize band's extent to fit 50 (not
+42), and stating that the 43-character omit-whole gate is a conservative
+margin, not the minimum, since one content character plus the marker
+needs only fit >= 40; `_MIN_FIT_CHARS`'s and `_conversation_block`'s
+docstrings now state the margin as a margin. The round's one new test
+pins the frozen-clock wait (m-8): a reservation parked on a frozen
+FakeClock — no settle, no halt, a far wall, the backstop monkeypatched
+to 0.3 s — returns with the reservation stop, killing the
+progress-comparison mutant A9 (`now >= last_seen` reads every wake as
+progress, never arms the backstop, and the parked wait never comes
+back). The healthy-clock pin's ticker steps coarser (five seconds of
+clock a tenth-second, n-9). Offline only.

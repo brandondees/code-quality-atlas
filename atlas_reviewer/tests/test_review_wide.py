@@ -604,10 +604,38 @@ def test_a_backpressure_wait_runs_out_at_the_wall():
     assert spend.calls == 3
 
 
+def test_a_frozen_clocks_wait_still_ends_on_the_backstop(monkeypatch):
+    """Round-3 review of #717, m-8: a reservation parked on a frozen
+    review clock -- no settle, no halt, a far wall -- still returns, on
+    the real-time backstop the stalled clock earns (shrunk here so the
+    test runs in under a second). Kills the progress-comparison mutant
+    A9 (`now >= last_seen`): it reads every wake as progress, never arms
+    the backstop, and the parked wait never comes back."""
+    monkeypatch.setattr(lens_loop, "BACKPRESSURE_REAL_LIMIT_S", 0.3)
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    results: list[object] = []
+
+    def fourth():
+        results.append(
+            spend.reserve(Decimal("2.90"), clock=FakeClock(), wait_until=10**6)
+        )
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    waiting.join(timeout=3)
+    assert not waiting.is_alive()  # A9 would spin forever on the frozen clock
+    hit = results[0]
+    assert hit is not None and hit.limit == "reservation_usd"
+    assert spend.calls == 3
+
+
 def test_a_healthy_clock_bounds_the_wait_not_the_backstop(monkeypatch):
     """M-1R (round-2 review of #717): the real-time backstop arms only
     when the review clock itself stops moving across wakeups. A freeing
-    settle that arrives after 22 seconds of *clock* advance -- beyond the
+    settle that arrives after 55 seconds of *clock* advance -- beyond the
     10-second backstop's reading -- still reserves: on a healthy clock
     the review wall is the bound, however long a turn takes. The backstop
     is shrunk to a quarter second so the unconditional-backstop mutant
@@ -621,9 +649,12 @@ def test_a_healthy_clock_bounds_the_wait_not_the_backstop(monkeypatch):
     clock = FakeClock()
 
     def tick():
-        for _ in range(30):
-            time.sleep(0.05)
-            clock.advance(1)
+        # A coarser tick step (round-3 n-9): five seconds of clock a
+        # tenth-second, so the pin exercises progress detection with
+        # fewer, larger advances.
+        for _ in range(12):
+            time.sleep(0.1)
+            clock.advance(5)
 
     threading.Thread(target=tick, daemon=True).start()
     results: list[object] = []
@@ -633,7 +664,7 @@ def test_a_healthy_clock_bounds_the_wait_not_the_backstop(monkeypatch):
 
     waiting = threading.Thread(target=fourth, daemon=True)
     waiting.start()
-    time.sleep(1.2)  # the clock is past 20 s and still moving
+    time.sleep(1.2)  # the clock is past 55 s and still moving
     spend.settle(Decimal("2.90"), Decimal("0.02"))
     waiting.join(timeout=5)
     assert results == [None]

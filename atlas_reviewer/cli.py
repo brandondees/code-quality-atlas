@@ -664,9 +664,13 @@ _MARKER_CHARS = len(TRUNCATION_MARKER)
 which every byte bound below must count."""
 
 _MIN_FIT_CHARS = 4 + _MARKER_CHARS
-"""The smallest input room a provably-fitting block can fill: one
+"""The smallest input room the omit-whole gate admits a block at: one
 worst-case UTF-8 character (four bytes) plus the truncation marker. A
-room below this cannot hold any block, and the omit-whole gate fires."""
+conservative margin, not the minimum: a one-content-character block
+needs only `1 + _MARKER_CHARS` (an ASCII character), so a room of 40 to
+42 characters could hold one and the gate omits it anyway -- the
+conservative direction for a gate that exists to keep the block next to
+the shared diff prefix and the lens body."""
 
 
 def _input_room_chars(
@@ -730,7 +734,10 @@ def _conversation_block(
     and the lens body, so the block is never built and the omission says
     so. A pull whose fields do not parse yields no block and one
     omission, so the review stays COMMENT instead of dying before it
-    started."""
+    started. The 43-character gate is a conservative margin, not the
+    minimum: a one-content-character block needs only
+    `1 + _MARKER_CHARS` (an ASCII character), so rooms of 40 to 42
+    characters could hold one and the gate omits them anyway."""
     if pull_info is None:
         return None, (
             Omission(
