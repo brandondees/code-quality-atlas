@@ -2328,3 +2328,32 @@ fallback exclude filter removed, the nothing-changed record suppressed,
 and the "only" reword removed. Overlap noted in the PR body: #652's
 `test_lenses.py` imports `_NAME`, which this PR renamed to `LENS_NAME`;
 whoever merges second updates the import. Offline only.
+
+## 2026-11-16 (same day) — round-2 fixes for #729: the doc claims stated as they are, and the fallback's hygiene drop recorded once
+
+Round 2 verified all eight round-1 fixes fixed — its reviewer re-ran all
+seven claimed mutants by hand and confirmed each killed — and returned
+two Minors and four Nits, all fixed: the `_pick_lenses` #624 comment now
+states its current truth (the branch's `select_lenses` call never reads
+`scrub`; `guideline_shapes` does, before the branch, and only through
+the note); the stray 4-space indent in `review_wide.py`'s module
+docstring is gone; a fallback's hygiene exclude is recorded once, as the
+controller-added drop, never also mislabeled as a dropped pick
+(`test_a_fallback_hygiene_exclude_is_recorded_once`; the
+revert-to-dropped-pick mutant dies on it); the rename sentences in the
+instructions and in the shape facts are marked "among others" — the
+same partial-list pattern swept from `_BREADTH` into `guideline_shapes`
+per the standing authoring rules — pinned by both rename tests (the
+qualifier-removal mutant dies on the instructions test); the
+`_DECISION_DIRS` comment no longer claims coverage it does not have (a
+root-level log under another name matches no heuristic, and a missed
+shape costs one sentence, as the function's docstring already says); and
+the D69 Update gained a write-once Correction splitting the
+killed-mutant attribution: the covered-set mutant kills only the
+include-duplicate test, while the exclude tests die to the separate
+`hygiene_dropped` mutant. One process slip, caught and recovered: the
+mutant revert's `git checkout` wiped the still-uncommitted N3/N4/N5
+edits, which the full-suite run caught as three failures; the edits were
+re-applied, committed, and only then were the two mutants applied
+against the commit and killed. 3,040 reviewer tests at 96.68% coverage.
+Offline only.
