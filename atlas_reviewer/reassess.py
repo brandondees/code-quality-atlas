@@ -45,14 +45,23 @@ This module is that re-assessment, as one bounded model call:
   ceiling (D68) through the review's shared `Spend`, and it introduces no
   lens-count bound (D69): the only caps it can hit are the shared call
   and dollar ones.
-- **Prior findings are never silently dropped.** A prior finding the
-  reply does not mention is kept as it stands; only an explicit
-  withdrawal removes one, and a withdrawal or revision carries its stated
-  reason, which the draft shows, so a reader can tell a finding was
-  revised and not lost. A re-assessment reply that never met the contract
-  is recorded as the failed attempt it is, keeps every prior finding, and
-  stores no digest, so the next review of this head re-runs the bounded
-  call instead of freezing the failure in.
+- **Prior findings are never silently dropped — and a withdrawal never
+  removes one.** A prior finding the reply does not mention is kept as it
+  stands; a withdrawal is an annotation, not a deletion: the finding
+  stays in the effective set the verdict is computed over, and the
+  draft's withdrawn section shows it with its stated reason, so an
+  injected comment can lower a finding's visibility but never flip a
+  Blocker review to approve (round-1 review of #731, M2). A revision
+  replaces the prior finding when it does not lower its severity; a
+  revision that lowers a Blocker's or a Major's severity is
+  annotation-only too, so the higher severity still counts. Only
+  **verified** prior findings take part — they are the ones the review
+  reports, and the only ones a label can name; an unverified prior
+  survives under "Not verified" with no path to withdrawal or revision
+  (round-1 review of #731, N1). A re-assessment reply that never met the
+  contract is recorded as the failed attempt it is, keeps every prior
+  finding, and stores no digest, so the next review of this head re-runs
+  the bounded call instead of freezing the failure in.
 - **Everything model-written is data.** The prior findings and the
   evidence blocks travel inside the review's one nonce fence, and the
   reply's new and revised findings are quote-verified against the head
@@ -97,6 +106,7 @@ from atlas_reviewer.lens_contract import (
     MAX_TEXT_CHARS,
     ContractError,
     Finding,
+    Severity,
     _dropped,
     _last_fenced_object,
     _parse_finding,
@@ -144,10 +154,16 @@ them:
   kept as it stands. Do not restate a prior finding you confirm.
 - To revise a prior finding, report the revised finding in `findings` with
   a `revises` key naming the prior label, and a `reason` key stating what
-  in the new evidence changed your judgment.
-- To withdraw a prior finding the new evidence shows is wrong, name its
-  label in `withdrawn` with a `reason` key stating that evidence. Never
-  withdraw a finding without a reason.
+  in the new evidence changed your judgment. The revision takes the
+  prior's place -- except one that would lower a Blocker's or a Major's
+  severity, which is recorded as your proposal instead: the finding stays
+  reported at its higher severity, annotated with your reason and your
+  revised copy.
+- To propose withdrawing a prior finding the new evidence shows is wrong,
+  name its label in `withdrawn` with a `reason` key stating that evidence.
+  A withdrawal is recorded as your proposal: the finding stays reported,
+  annotated with your reason; it is never deleted. Never propose a
+  withdrawal without a reason.
 - To add a finding the new evidence reveals, report it in `findings` with
   no `revises` key.
 
@@ -382,7 +398,10 @@ def judge(
     """Quote-check the reply's findings against the head files and resolve
     every `revises` and `withdrawn` label against `prior` -- the verified
     prior findings, labeled `P1`, `P2`, ... in `prior_findings_block`'s
-    order. A reply whose labels name nothing is refused before anything is
+    order; only verified prior findings take part, because they are the
+    ones the review reports and the only ones a label can name. A reply
+    whose labels name nothing, or that both revises and withdraws the same
+    label (round-1 review of #731, N2), is refused before anything is
     recorded."""
     labels = {f"P{n}": c for n, c in enumerate(_verified(prior), 1)}
     checked = tuple(
@@ -404,6 +423,11 @@ def judge(
     for prior_id, reason in reply.withdrawn:
         if prior_id not in labels:
             raise ContractError(f"withdrawn entry {prior_id!r} names no prior finding")
+        if any(prior_id == revised for _, revised, _ in revises):
+            raise ContractError(
+                f"withdrawn entry {prior_id!r} names a finding the same reply "
+                "also revises"
+            )
         withdrawn.append((prior_id, reason))
     causes = (
         frozenset({Cause.QUOTES_FAILED})
@@ -422,21 +446,27 @@ def _verified(prior: Sequence[CheckedFinding]) -> list[CheckedFinding]:
 
 @dataclass(frozen=True)
 class Withdrawn:
-    """A prior finding a recorded re-assessment removed, with its stated
-    reason and, for a revision, the checked finding that replaces it. The
-    draft lists these, so a reader can tell a finding was revised and not
-    lost."""
+    """A prior finding a recorded re-assessment annotated, with its stated
+    reason and, for a revision, the checked finding that revises it. Since
+    the round-1 review of #731 (M2) a withdrawal is an annotation, not a
+    deletion: the prior finding stays in the effective set the verdict is
+    computed over, and so does a revision that lowers a Blocker's or a
+    Major's severity (`replaced` False) -- the draft's withdrawn section
+    shows what was proposed and why, so a reader can tell a finding was
+    revised and not lost. `replaced` is True only when the revision
+    actually took the prior finding's place in the findings set."""
 
     finding: Finding
     reason: str
     replacement: CheckedFinding | None = None
+    replaced: bool = False
 
 
 def effective_outcome(
     settled: AttemptOutcome, reassessments: Sequence[Attempt]
 ) -> tuple[AttemptOutcome, tuple[Withdrawn, ...], str]:
     """The reused result as D73 leaves it: the settled outcome's findings
-    with every recorded re-assessment applied in order, the withdrawals
+    with every recorded re-assessment applied in order, the annotations
     the reader is shown, and the controller note for the lens line.
 
     The composition replays from the ledger alone, so every review of
@@ -444,13 +474,28 @@ def effective_outcome(
     applied against the set its own reply was labeled against -- the
     effective set before it -- which the replay reproduces by applying the
     recorded re-assessments in order over the verified findings, the set
-    the labels were issued over. A prior finding is removed only by a
-    withdrawal or a revision that names it; one the reply is silent on is
-    kept as it stands, which is the "never silently dropped" rule. A
-    recorded label that resolves against nothing -- possible only on a
-    hand-corrupted ledger line, since `judge` refuses unresolvable labels
-    at record time -- is skipped and named in the note, never applied
-    half-way."""
+    the labels were issued over.
+
+    A prior finding is never removed by a withdrawal: a withdrawal is an
+    annotation, and the finding stays in the set `decide` sees (round-1
+    review of #731, M2). A revision replaces the prior finding unless it
+    lowers a Blocker's or a Major's severity, in which case it too is
+    annotation-only and the higher severity still counts; a revision of a
+    lower-severity prior may lower it, and its replacement stands. One the
+    reply is silent on is kept as it stands, which is the "never silently
+    dropped" rule. A recorded label that resolves against nothing --
+    possible only on a hand-corrupted ledger line, since `judge` refuses
+    unresolvable labels at record time -- is skipped and named in the
+    note, never applied half-way.
+
+    `dropped` is composed from the settled run plus only the latest
+    re-assessment's notes (round-1 review of #731, M3): an earlier
+    attempt's malformed-severity entry is superseded by the later reply
+    that re-lists it or stays silent, so one malformed reply cannot
+    accumulate into every later review of the head. The latest
+    re-assessment's own limit stop (a refused reservation, a spent-out
+    call cap) is carried onto the composed outcome, so the status line's
+    `limit_stop` names it (round-1 review of #731, N4)."""
     findings = list(settled.findings)
     withdrawn: list[Withdrawn] = []
     unresolved: list[str] = []
@@ -459,21 +504,28 @@ def effective_outcome(
         outcome = attempt.outcome
         labels = {f"P{n}": c for n, c in enumerate(_verified(findings), 1)}
         gone: set[tuple[str, str, str, str, str, str]] = set()
+        superseded: set[int] = set()
         for index, prior_id, reason in outcome.revises:
             held = labels.get(prior_id)
             if held is None or not 1 <= index <= len(outcome.findings):
                 unresolved.append(prior_id)
                 continue
-            gone.add(_finding_key(held.finding))
-            withdrawn.append(
-                Withdrawn(held.finding, reason, outcome.findings[index - 1])
+            replacement = outcome.findings[index - 1]
+            lowered_from_blocker_or_major = (
+                held.finding.severity.rank <= Severity.MAJOR.rank
+                and replacement.finding.severity.rank > held.finding.severity.rank
             )
+            if lowered_from_blocker_or_major:
+                superseded.add(index)
+                withdrawn.append(Withdrawn(held.finding, reason, replacement))
+            else:
+                gone.add(_finding_key(held.finding))
+                withdrawn.append(Withdrawn(held.finding, reason, replacement, True))
         for prior_id, reason in outcome.withdrawn:
             held = labels.get(prior_id)
             if held is None:
                 unresolved.append(prior_id)
                 continue
-            gone.add(_finding_key(held.finding))
             withdrawn.append(Withdrawn(held.finding, reason))
         if gone:
             findings = [
@@ -481,18 +533,31 @@ def effective_outcome(
                 for checked in findings
                 if _finding_key(checked.finding) not in gone
             ]
-        findings.extend(outcome.findings)
+        findings.extend(
+            checked
+            for i, checked in enumerate(outcome.findings, 1)
+            if i not in superseded
+        )
         added += len(outcome.findings) - len(outcome.revises)
         revised += len(outcome.revises)
         removed += len(outcome.withdrawn)
     dropped = list(settled.dropped)
-    dropped.extend(
-        note for attempt in reassessments for note in attempt.outcome.dropped
+    if reassessments:
+        dropped.extend(reassessments[-1].outcome.dropped)
+    limit_hit = (
+        reassessments[-1].outcome.limit_hit
+        if reassessments and reassessments[-1].outcome.limit_hit is not None
+        else settled.limit_hit
     )
     effective = (
         settled
         if not reassessments
-        else replace(settled, findings=tuple(findings), dropped=tuple(dropped))
+        else replace(
+            settled,
+            findings=tuple(findings),
+            dropped=tuple(dropped),
+            limit_hit=limit_hit,
+        )
     )
     return (
         effective,
@@ -555,7 +620,15 @@ def snapshot_digest(
     time is left out: it differs on every review of unchanged evidence,
     and it says when *we* read, not what *they* did. The digest is over
     the gathered data, never over a rendered block, so a change in the
-    model's input room or the lens plan cannot read as newer evidence."""
+    model's input room or the lens plan cannot read as newer evidence.
+
+    Not digested, on purpose: the pull request's title, body, labels,
+    commit subjects and remark-derived block sizing. The block that
+    renders them is D38's assembly, and the commit list is effectively
+    covered by the head-SHA reuse key -- but an edited body changes what
+    the re-assessment turn's conversation block carries without moving
+    this digest, so "the conversation" here means the remarks, not the
+    whole block (round-1 review of #731, N3)."""
     payload = {
         "v": SNAPSHOT_VERSION,
         "items": sorted(_item(entry) for entry in ci.items),

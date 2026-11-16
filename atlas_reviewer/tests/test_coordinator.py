@@ -1582,6 +1582,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "unreviewed_files": 0,
         "context_omissions": 0,
         "other_pull_requests": 0,
+        "withdrawn": 0,
         "round_log_note": "",
         "limit_stop": None,
     }

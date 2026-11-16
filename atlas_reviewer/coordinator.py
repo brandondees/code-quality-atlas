@@ -39,7 +39,12 @@ newer comments never discard them -- and, when the evidence snapshot this
 review gathered differs from the digest stored with the settled result,
 the lens earns one bounded re-assessment call that sees its prior findings
 plus this review's context blocks, and may add, revise or withdraw
-findings, a withdrawal or revision always with its stated reason. The
+findings, a withdrawal or revision always with its stated reason. A
+withdrawal is an annotation, not a deletion (round-1 review of #731, M2):
+the prior finding stays in the set the verdict is computed over, and so
+does a revision that lowers a Blocker's or a Major's severity, so an
+injected comment can lower a finding's visibility but never flip a Blocker
+review to approve; the status line carries the withdrawn count. The
 re-assessment's attempts live on the lens's `#reassess` ledger key, so the
 lens's own settled state is never overwritten by a supplementary reply,
 and the effective result is composed from the ledger alone on every
@@ -957,6 +962,7 @@ def _review_one(
             redactor,
             diff_secrets,
             scope,
+            trace,
             deadline,
         )
     session = _Session()
@@ -1073,6 +1079,7 @@ def _reused_with_reassessment(
     redactor: Redactor,
     diff_secrets: DiffSecrets,
     scope: frozenset[str],
+    trace: ReviewTrace,
     deadline: float,
 ) -> _LensRun:
     """The reuse path with D73's re-assessment wired: compose the reused
@@ -1085,7 +1092,9 @@ def _reused_with_reassessment(
     no prior findings to keep, and a single no-tools call is not a lens
     run -- the ordinary retry policy governs what happens to it instead.
     So does a review whose spend is halted or whose wall clock has passed:
-    the reuse stands as it was, and the note says why no call was made."""
+    the reuse stands as it was, and the note says why no call was made.
+    The call itself is wrapped by the lens trace like every other model
+    call, so it records its completion span (round-1 review of #731, M1)."""
     # A settled result always carries its outcome; the assert is the
     # type checker's, not a new branch.
     assert settled.outcome is not None
@@ -1119,6 +1128,7 @@ def _reused_with_reassessment(
         redactor.sources,
         (*redactor.flagged, *diff_secrets.values),
     )
+    lens_trace = trace.with_scrub(lambda text: scrubber(text).text)
     outcome = _reassess_call(
         event,
         lens,
@@ -1130,7 +1140,7 @@ def _reused_with_reassessment(
         trees,
         diff,
         scope,
-        model,
+        lens_trace.wrap_model(model),
         spend,
         resolved,
         clock,
@@ -1513,6 +1523,7 @@ def status_line(review: AgenticReview) -> str:
         "unreviewed_files": len(_unread_paths(review)),
         "context_omissions": len(review.context_omissions),
         "other_pull_requests": review.other_pull_requests,
+        "withdrawn": _withdrawn_count(review),
         "round_log_note": _status_log_note(review.round_log_note),
         "limit_stop": _limit_stop(review),
     }
@@ -1936,6 +1947,16 @@ def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:
     )
 
 
+def _withdrawn_count(review: AgenticReview) -> int:
+    """The status line's withdrawn count (round-1 review of #731, M2c):
+    the prior findings a re-assessment annotated -- proposed withdrawals
+    and revisions alike -- since a pipeline gating on the status line must
+    see that prior findings were re-judged, not only that new ones were
+    added. A withdrawal removes nothing (M2), so the count is an
+    annotation count, never a deletion count."""
+    return sum(len(result.withdrawn) for result in review.lenses)
+
+
 def _withdrawn_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
     """The draft's withdrawn-findings section (D73), or an empty list when
     no re-assessment withdrew or revised anything: what the finding was,
@@ -1955,22 +1976,52 @@ def _withdrawn_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list
 def _withdrawn_line(
     result: LensResult, w: Withdrawn, scrub: Callable[[str], str]
 ) -> str:
-    """One withdrawn prior finding (D73): what it was, the stated reason
-    the newer evidence showed it wrong, and, for a revision, the finding
-    that replaced it -- so a reader can tell a finding was revised and not
-    lost. Every value here is model-written or PR-written text, so it is
-    quoted as data."""
-    text = (
-        f"- {result.lens} withdrew "
-        f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
-        f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)}. "
-        f"Reason, quoted: {quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
-    )
+    """One annotated prior finding (D73): what it was, the stated reason
+    the newer evidence changed its judgment, and, for a revision, what the
+    revision proposes -- so a reader can tell a finding was re-judged and
+    not lost. A withdrawal removes nothing (round-1 review of #731, M2),
+    so the verb is a proposal; a revision that took the prior's place says
+    what stands now, and one that only lowers a Blocker's or a Major's
+    severity says the higher severity still counts. Every value here is
+    model-written or PR-written text, so it is quoted as data."""
     if w.replacement is None:
-        return text
+        return (
+            f"- {result.lens} proposes withdrawing "
+            f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+            f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
+            f"[{w.finding.severity.value}]. Reason, quoted: "
+            f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
+        )
+    if w.replaced:
+        text = (
+            f"- {result.lens} revises "
+            f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+            f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
+            f"[{w.finding.severity.value}]. Reason, quoted: "
+            f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
+        )
+        if w.replacement.verified:
+            return text + f". Revised finding: {_finding_id(result, w.replacement)}"
+        return text + ". The revised finding did not verify; see Not verified"
     if w.replacement.verified:
-        return text + f". Revised finding: {_finding_id(result, w.replacement)}"
-    return text + ". The revised finding did not verify; see Not verified"
+        return (
+            f"- {result.lens} proposes revising "
+            f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+            f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
+            f"[{w.finding.severity.value}] down to {w.replacement.finding.severity.value}. "
+            f"Reason, quoted: {quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}. "
+            "The higher severity still counts; the revised finding, quoted: "
+            + quote_untrusted(w.replacement.finding.finding, QUOTED_CHARS, scrub=scrub)
+        )
+    return (
+        f"- {result.lens} proposes revising "
+        f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+        f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
+        f"[{w.finding.severity.value}] down to "
+        f"{w.replacement.finding.severity.value}. Reason, quoted: "
+        f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}. "
+        "The higher severity still counts; the revised finding did not verify."
+    )
 
 
 def _finding_id(result: LensResult, checked: CheckedFinding) -> str:
