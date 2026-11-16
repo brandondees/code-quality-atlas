@@ -1029,6 +1029,15 @@ class OpenRouterProvider:
         resp = self._transport.request(
             "GET", url, self._headers(authed=authed), None, self._timeout_s
         )
+        if resp.status >= 500:
+            # A server error, not a refusal (#689): the completion POST
+            # path (`_send`) already keeps a 5xx as plain `BoundaryError`,
+            # which `_refusal_cause` classifies as `MODEL_ERROR`. This GET
+            # (the ZDR list, the model catalog, or the key preflight) used
+            # to raise `PricingUnknownError` for any non-200, which
+            # `_refusal_cause` classifies as `MODEL_REFUSED` -- mislabeling
+            # a transient upstream failure as a policy refusal.
+            raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
         if resp.status != 200:
             raise PricingUnknownError(
                 f"OpenRouter HTTP {resp.status} for {safe_url(url)}"

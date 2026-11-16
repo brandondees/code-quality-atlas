@@ -586,10 +586,15 @@ def test_an_unreadable_zdr_list_refuses_before_a_completion():
 
 
 def test_a_non_200_zdr_list_and_a_timeout_send_no_completion():
+    """Issue #689: a 5xx is a server error (`BoundaryError`, `MODEL_ERROR`),
+    not a refusal -- `PricingUnknownError` (a `BoundaryError` subclass,
+    `MODEL_REFUSED`) is reserved for a readable-but-unusable response, so
+    the raised type must not be (a subclass of) `PricingUnknownError`."""
     refused = OpenRouterFake(reply(completion()), zdr=reply({}, status=503))
     adapter = provider(refused)
-    with pytest.raises(PricingUnknownError, match="HTTP 503"):
+    with pytest.raises(BoundaryError, match="HTTP 503") as excinfo:
         adapter.complete(SMALL)
+    assert not isinstance(excinfo.value, PricingUnknownError)
     assert refused.chat_requests() == []
     assert any(url.endswith("/endpoints/zdr") for _m, url, _h, _b in refused.requests)
 
@@ -605,6 +610,22 @@ def test_a_non_200_zdr_list_and_a_timeout_send_no_completion():
     with pytest.raises(BoundaryError, match="timed out"):
         waiting.complete(SMALL)
     assert timed.chat_requests() == []
+
+
+def test_a_5xx_model_catalog_get_is_a_server_error_not_a_refusal():
+    """Issue #689: the model-catalog GET has the same 5xx-mislabeling gap
+    as the ZDR list, exercised above. A non-5xx non-200 on either GET is
+    a genuine refusal and keeps `PricingUnknownError`, unchanged by #689."""
+    fake = OpenRouterFake(reply(completion()), model=reply({}, status=502))
+    with pytest.raises(BoundaryError, match="HTTP 502") as excinfo:
+        provider(fake).complete(SMALL)
+    assert not isinstance(excinfo.value, PricingUnknownError)
+    assert fake.chat_requests() == []
+
+    refused = OpenRouterFake(reply(completion()), model=reply({}, status=404))
+    with pytest.raises(PricingUnknownError, match="HTTP 404"):
+        provider(refused).complete(SMALL)
+    assert refused.chat_requests() == []
 
 
 @pytest.mark.parametrize("failure", [TransportTimeoutError, TransportError])
@@ -1828,8 +1849,10 @@ def test_zdr_off_still_refuses_a_safety_retention_tag_unless_opted_in():
         )
     )
     refused.preflight()
-    with pytest.raises(PricingUnknownError, match="HTTP 500"):
+    # Issue #689: a 5xx is a server error, not a refusal.
+    with pytest.raises(BoundaryError, match="HTTP 500") as excinfo:
         refused.complete(SMALL)
+    assert not isinstance(excinfo.value, PricingUnknownError)
     assert unread.chat_requests() == []
 
 
