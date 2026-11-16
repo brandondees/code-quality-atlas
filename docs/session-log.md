@@ -2357,3 +2357,47 @@ edits, which the full-suite run caught as three failures; the edits were
 re-applied, committed, and only then were the two mutants applied
 against the commit and killed. 3,040 reviewer tests at 96.68% coverage.
 Offline only.
+
+## 2026-11-16 (same day) — #726: a reused settled lens re-assesses on newer CI evidence or comments (D73)
+
+D73's follow-up, implemented as `atlas_reviewer/reassess.py` and the
+pieces it wires. The reuse key is unchanged — a lens settled for this
+head and body is still reused without a runner — but the reuse path now
+compares the evidence snapshot this review gathered against a digest
+stored with the settled result (`AttemptLedger.finish`'s new
+`evidence_digest`, read back by `AttemptLedger.evidence_digest`), over
+the gathered head-SHA CI items and the PR's remarks with each item's
+fetch time excluded, plus the gathers' omissions, failures and notes so a
+listing that now fails or now succeeds moves the digest too. A digest
+that moved — or a result settled before the digest was ever stored —
+earns one bounded re-assessment call: no tools (the head is unchanged, so
+the cited code is the code that is there), no repair turn, reserved at
+its worst case against the review's shared `Spend` (D68's derived limits
+and dollar ceiling; D69's no-lens-cap stands), settled like any turn. The
+turn carries the prior findings labeled `P1`, `P2`, … plus the review's
+own conversation and CI blocks — the digest says something changed, not
+what, so the delta is the complete current picture under the same
+budgets, inside the review's one fence. The reply has its own contract
+shape: findings that may `revises` a prior label with a stated reason,
+and `withdrawn` entries of exactly `{id, reason}` — silence keeps a prior
+finding as it stands, so nothing is ever dropped silently, and the draft
+lists withdrawals with their reasons and a revision's replacement id.
+Every reported finding is quote-verified against the head files like an
+ordinary reply's; a label naming no prior finding refuses the whole
+reply. The re-assessment is recorded on the lens's `#reassess` ledger
+key, never the lens key, so a garbled supplementary reply cannot turn a
+clean lens partial, and the effective result is composed from the ledger
+alone on every review; a failed re-assessment (unparsed, refused,
+halted) stores no digest, so the next review re-earns the bounded call
+instead of freezing the failure in. A settled result that never attested
+earns no re-assessment — the ordinary retry policy governs it — and a
+caller that passes no snapshot keeps today's reuse unchanged. The
+one-shot path re-reviews every time and has no settled-result reuse to
+wire; the service's GitHub permission failures keep their existing
+omission handling, and a refused listing moves the digest so the
+re-assessment proceeds with what is available and names the gap. The
+dry-run script gained a `reassessment` scenario section (validated at
+load) and the no-script dry-run model confirms by silence. Twelve
+mutants applied by hand and killed, each named in the D73 Update; 3,080
+reviewer tests at 96.29% coverage, tooling suite 882 passed at 95.20%,
+`gate`'s ruff/mypy/drift legs clean. Offline only.
