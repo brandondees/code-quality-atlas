@@ -2129,6 +2129,7 @@ are unchanged, and the behavior is the follow-up the decision records
 `docs/open-questions.md` (D73) and this entry; no code, no test, no
 generated or mirrored file, and the full local gates were green on the
 merge before this docs-only commit.
+
 ## 2026-11-16 — the webhook service's child follows a service mode: agentic by default, one-shot kept (issue #712, D70)
 
 The deployed Fly webhook app had started the one-shot `review` command
