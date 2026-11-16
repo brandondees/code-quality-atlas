@@ -82,7 +82,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -106,7 +106,9 @@ from atlas_reviewer.lens_contract import (
     MAX_TEXT_CHARS,
     ContractError,
     Finding,
+    LineRange,
     Severity,
+    WholeFile,
     _dropped,
     _last_fenced_object,
     _parse_finding,
@@ -118,6 +120,7 @@ from atlas_reviewer.quotes import (
     SourceText,
     Verified,
     check_all,
+    with_head_files,
 )
 
 REASSESS_TARGET_PREFIX = "Re-assessment target (from the controller):"
@@ -288,6 +291,10 @@ def _reassess_finding(index: int, raw: Any) -> ReassessFinding:
         raise ContractError(
             f"finding {index}: revises is over {PRIOR_LABEL_CHARS} characters"
         )
+    if len(reason) > MAX_TEXT_CHARS:
+        raise ContractError(
+            f"finding {index}: reason is over {MAX_TEXT_CHARS} characters"
+        )
     rest = {k: v for k, v in raw.items() if k not in ("revises", "reason")}
     try:
         finding = _parse_finding(rest)
@@ -393,22 +400,36 @@ def judge(
     reply: ReassessReply,
     prior: Sequence[CheckedFinding],
     sources: SourceText,
+    head_tree: bytes,
     tolerance: int,
 ) -> JudgedReassess:
     """Quote-check the reply's findings against the head files and resolve
     every `revises` and `withdrawn` label against `prior` -- the verified
     prior findings, labeled `P1`, `P2`, ... in `prior_findings_block`'s
     order; only verified prior findings take part, because they are the
-    ones the review reports and the only ones a label can name. A reply
-    whose labels name nothing, or that both revises and withdraws the same
-    label (round-1 review of #731, N2), is refused before anything is
-    recorded."""
+    ones the review reports and the only ones a label can name.
+
+    The quote check reads the head lines of every path the reply's and the
+    prior findings' locations cite, not only the changed files the diff
+    holds: a verified prior finding can cite an unchanged file (the
+    ordinary run's lens read it there), and the re-assessment's revision
+    of it must be able to verify the same quote (round-2 review of #731,
+    the open Major). A reply whose labels name nothing, or that both
+    revises and withdraws the same label (round-1 review of #731, N2), is
+    refused before anything is recorded."""
     labels = {f"P{n}": c for n, c in enumerate(_verified(prior), 1)}
+    cited = _cited_paths(rf.finding for rf in reply.findings) | _cited_paths(
+        c.finding for c in _verified(prior)
+    )
     checked = tuple(
         CheckedFinding(q.finding, q.source, drift=q.drift)
         if isinstance(q, Verified)
         else CheckedFinding(q.finding, problem=q.reason)
-        for q in check_all((rf.finding for rf in reply.findings), sources, tolerance)
+        for q in check_all(
+            (rf.finding for rf in reply.findings),
+            with_head_files(sources, head_tree, cited),
+            tolerance,
+        )
     )
     revises = []
     for i, rf in enumerate(reply.findings, 1):
@@ -441,6 +462,17 @@ def _verified(prior: Sequence[CheckedFinding]) -> list[CheckedFinding]:
     return [checked for checked in prior if checked.verified]
 
 
+def _cited_paths(findings: Iterable[Finding]) -> frozenset[str]:
+    """The head files the findings' locations cite: a line range's or a
+    whole file's path; a design reference cites no file."""
+    paths = set()
+    for finding in findings:
+        location = finding.location
+        if isinstance(location, LineRange | WholeFile):
+            paths.add(location.path)
+    return frozenset(paths)
+
+
 # ------------------------------------------------------- the effective set
 
 
@@ -450,10 +482,11 @@ class Withdrawn:
     reason and, for a revision, the checked finding that revises it. Since
     the round-1 review of #731 (M2) a withdrawal is an annotation, not a
     deletion: the prior finding stays in the effective set the verdict is
-    computed over, and so does a revision that lowers a Blocker's or a
-    Major's severity (`replaced` False) -- the draft's withdrawn section
+    computed over -- and so does a revision that lowers a Blocker's or a
+    Major's severity, or one whose replacement did not verify (round-2
+    review of #731, the open Major) -- and the draft's withdrawn section
     shows what was proposed and why, so a reader can tell a finding was
-    revised and not lost. `replaced` is True only when the revision
+    re-judged and not lost. `replaced` is True only when the revision
     actually took the prior finding's place in the findings set."""
 
     finding: Finding
@@ -479,54 +512,67 @@ def effective_outcome(
     A prior finding is never removed by a withdrawal: a withdrawal is an
     annotation, and the finding stays in the set `decide` sees (round-1
     review of #731, M2). A revision replaces the prior finding unless it
-    lowers a Blocker's or a Major's severity, in which case it too is
-    annotation-only and the higher severity still counts; a revision of a
-    lower-severity prior may lower it, and its replacement stands. One the
-    reply is silent on is kept as it stands, which is the "never silently
-    dropped" rule. A recorded label that resolves against nothing --
-    possible only on a hand-corrupted ledger line, since `judge` refuses
-    unresolvable labels at record time -- is skipped and named in the
-    note, never applied half-way.
+    lowers a Blocker's or a Major's severity, or unless its replacement
+    did not verify -- a revision whose quote check failed cannot be the
+    evidence for removing a verified finding, so it too is annotation-only
+    and the prior stands (round-2 review of #731, the open Major); a
+    revision of a lower-severity prior that verifies may lower it, and its
+    replacement stands. One the reply is silent on is kept as it stands,
+    which is the "never silently dropped" rule. A recorded label that
+    resolves against nothing -- possible only on a hand-corrupted ledger
+    line, since `judge` refuses unresolvable labels at record time -- is
+    skipped and named in the note, never applied half-way.
 
     `dropped` is composed from the settled run plus only the latest
     re-assessment's notes (round-1 review of #731, M3): an earlier
     attempt's malformed-severity entry is superseded by the later reply
     that re-lists it or stays silent, so one malformed reply cannot
-    accumulate into every later review of the head. The latest
-    re-assessment's own limit stop (a refused reservation, a spent-out
-    call cap) is carried onto the composed outcome, so the status line's
-    `limit_stop` names it (round-1 review of #731, N4)."""
+    accumulate into every later review of the head -- and when the latest
+    attempt is abandoned (a crash mid-call, which records no notes), the
+    earlier notes are not carried either; the lens line's "not accepted"
+    note and the next review's re-run of the bounded call cover the gap.
+    The latest re-assessment's own limit stop (a refused reservation, a
+    spent-out call cap) is carried onto the composed outcome, so the
+    status line's `limit_stop` names it (round-1 review of #731, N4)."""
     findings = list(settled.findings)
     withdrawn: list[Withdrawn] = []
     unresolved: list[str] = []
-    added = revised = removed = 0
+    added = revised = annotated = proposed = 0
     for attempt in reassessments:
         outcome = attempt.outcome
         labels = {f"P{n}": c for n, c in enumerate(_verified(findings), 1)}
         gone: set[tuple[str, str, str, str, str, str]] = set()
         superseded: set[int] = set()
+        resolved: set[int] = set()
         for index, prior_id, reason in outcome.revises:
             held = labels.get(prior_id)
             if held is None or not 1 <= index <= len(outcome.findings):
                 unresolved.append(prior_id)
                 continue
+            resolved.add(index)
             replacement = outcome.findings[index - 1]
             lowered_from_blocker_or_major = (
                 held.finding.severity.rank <= Severity.MAJOR.rank
                 and replacement.finding.severity.rank > held.finding.severity.rank
             )
-            if lowered_from_blocker_or_major:
+            if lowered_from_blocker_or_major or not replacement.verified:
+                # Annotation-only: a proposed downgrade, or a revision
+                # whose replacement did not verify -- the prior finding
+                # stays in the set, verified, and still counts.
                 superseded.add(index)
                 withdrawn.append(Withdrawn(held.finding, reason, replacement))
+                annotated += 1
             else:
                 gone.add(_finding_key(held.finding))
                 withdrawn.append(Withdrawn(held.finding, reason, replacement, True))
+                revised += 1
         for prior_id, reason in outcome.withdrawn:
             held = labels.get(prior_id)
             if held is None:
                 unresolved.append(prior_id)
                 continue
             withdrawn.append(Withdrawn(held.finding, reason))
+            proposed += 1
         if gone:
             findings = [
                 checked
@@ -538,9 +584,9 @@ def effective_outcome(
             for i, checked in enumerate(outcome.findings, 1)
             if i not in superseded
         )
-        added += len(outcome.findings) - len(outcome.revises)
-        revised += len(outcome.revises)
-        removed += len(outcome.withdrawn)
+        added += sum(
+            1 for i in range(1, len(outcome.findings) + 1) if i not in resolved
+        )
     dropped = list(settled.dropped)
     if reassessments:
         dropped.extend(reassessments[-1].outcome.dropped)
@@ -562,7 +608,7 @@ def effective_outcome(
     return (
         effective,
         tuple(withdrawn),
-        _note(reassessments, added, revised, removed, unresolved),
+        _note(reassessments, added, revised, annotated, proposed, unresolved),
     )
 
 
@@ -570,9 +616,16 @@ def _note(
     reassessments: Sequence[Attempt],
     added: int,
     revised: int,
-    removed: int,
+    annotated: int,
+    proposed: int,
     unresolved: Sequence[str],
 ) -> str:
+    """The lens line's controller note. The counts cover only references
+    that resolved (round-2 review of #731, the open Nit): `added` the
+    reply's own findings, `revised` the revisions that took a prior
+    finding's place, `annotated` the annotation-only ones -- a proposed
+    downgrade, or a revision whose replacement did not verify -- and
+    `proposed` the withdrawals, which remove nothing."""
     if not reassessments:
         return ""
     counts = ", ".join(
@@ -580,7 +633,8 @@ def _note(
         for label, count in (
             ("added", added),
             ("revised", revised),
-            ("withdrawn", removed),
+            ("annotated", annotated),
+            ("withdrawn", proposed),
         )
         if count
     )

@@ -9,10 +9,8 @@ model call is made."""
 
 import json
 import re
-import tempfile
 from dataclasses import replace
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -50,7 +48,7 @@ from atlas_reviewer.redact import Redactor, redact
 from atlas_reviewer.tracing import memory_trace
 from atlas_reviewer.verdict import ReviewEvent
 
-from .agentic import COST, DIGEST, LENS, READ_ALL, final, finding
+from .agentic import COST, DIGEST, LENS, READ_ALL, final, finding, tools
 from .helpers import HEAD, NOW
 from .helpers import item as evidence_item
 from .test_coordinator import EVENT, ledger, review
@@ -350,12 +348,15 @@ def test_a_revision_replaces_the_prior_finding_and_names_its_replacement(
     assert again.verified[0].id == "L1-F1"
 
 
-def test_a_revision_whose_replacement_does_not_verify_is_shown_unverified(
+def test_a_revision_whose_replacement_does_not_verify_keeps_the_prior(
     tmp_path,
 ):
-    """A revision whose replacement quote fails the check does not report
-    the finding: the withdrawal stands with its reason, the replacement
-    shows under Not verified, and nothing is silently lost."""
+    """A revision whose replacement quote fails the check cannot be the
+    evidence for removing a verified finding: the prior stands, verified
+    and still counting, and the failed revision shows as an annotation
+    with the quote check's reason (round-2 review of #731, the open
+    Major -- the mutant that removes the prior on an unverified
+    replacement fails here)."""
     review(tmp_path, [READ_ALL, final(finding())], evidence_digest=UNCHANGED)
     again, _, _ = review(
         tmp_path,
@@ -371,10 +372,13 @@ def test_a_revision_whose_replacement_does_not_verify_is_shown_unverified(
         evidence_digest=NEWER,
         context=ci_context("check_run:7003 lint FAIL"),
     )
-    assert again.verified == ()
-    assert again.unverified
+    assert [f.finding.finding for f in again.verified] == [
+        "rounds each item before summing, so totals drift"
+    ]
+    assert again.verdict is Verdict.APPROVE_WITH_CHANGES
     (w,) = again.lenses[0].withdrawn
     assert w.replacement is not None and not w.replacement.verified
+    assert w.replaced is False
     draft = render_draft(again, Redactor())
     assert "The revised finding did not verify" in draft
 
@@ -585,9 +589,10 @@ def test_the_composition_replays_recorded_reassessments_in_order():
     )
 
 
-def checked(raw):
+def checked(raw, head_tree: bytes = b""):
     """One of `raw`'s findings quote-checked against a head file that
-    holds the quote, as the reuse path's judge checks a reply's."""
+    holds the quote, as the reuse path's judge checks a reply's; an empty
+    tree adds no head files beyond `sources`."""
     reply = parse_reassess_reply(
         json.dumps(
             {
@@ -601,7 +606,7 @@ def checked(raw):
     sources = SourceText(
         {"calc.py": ("def total(xs):", "    return sum(round(x, 2) for x in xs)")}
     )
-    (judged,) = judge(reply, (), sources, 3).checked
+    (judged,) = judge(reply, (), sources, head_tree, 3).checked
     return judged
 
 
@@ -709,7 +714,7 @@ def test_a_label_that_names_no_prior_finding_is_refused_at_judge():
         )
     )
     with pytest.raises(ContractError, match="names no prior finding"):
-        judge(reply, (checked(finding()),), SourceText({}), 3)
+        judge(reply, (checked(finding()),), SourceText({}), b"", 3)
 
 
 def test_a_reassessed_unknown_severity_is_dropped_and_named():
@@ -876,8 +881,8 @@ def test_a_reply_that_revises_and_withdraws_the_same_label_is_refused(
         )
     )
     with pytest.raises(ContractError, match="also revises"):
-        judge(reply, (checked(finding()),), SourceText({}), 3)
-    review(tmp_path := _tmp(), [READ_ALL, final(finding())], evidence_digest=UNCHANGED)
+        judge(reply, (checked(finding()),), SourceText({}), b"", 3)
+    review(tmp_path, [READ_ALL, final(finding())], evidence_digest=UNCHANGED)
     again, _, _ = review(
         tmp_path,
         [
@@ -893,10 +898,6 @@ def test_a_reply_that_revises_and_withdraws_the_same_label_is_refused(
         again.lenses[0].reassess_note
     )
     assert ledger(tmp_path).evidence_digest(REASSESS_KEY) is None
-
-
-def _tmp():
-    return Path(tempfile.mkdtemp())
 
 
 def test_the_status_line_names_a_reassessments_limit_stop(tmp_path):
@@ -937,3 +938,182 @@ def test_a_reassessment_call_records_its_completion_span(tmp_path):
     assert attrs["openinference.span.kind"] == "LLM"
     lens_spans = [s for s in spans if s.name == "lens"]
     assert completions[0].parent.span_id == lens_spans[0].context.span_id
+
+
+def test_a_revision_of_a_prior_citing_an_unchanged_file_verifies(tmp_path):
+    """The round-2 Major's requested test: P1 cites `docs/notes.md:1`, an
+    unchanged file the ordinary run's lens read at head, and the
+    re-assessment revises it with the same quote. The quote check reads
+    the head lines of the paths the prior and reply findings cite -- not
+    only the changed files -- so the revision verifies, takes the prior's
+    place, and keeps counting toward the verdict (the mutant that checks
+    against changed files only, or that leaves the prior unverified,
+    fails here)."""
+    prior = dict(
+        finding(
+            location="docs/notes.md:1",
+            evidence="rounding notes",
+            finding="the notes promise rounding the totals promise does not keep",
+        )
+    )
+    review(
+        tmp_path,
+        [
+            READ_ALL,
+            tools(("read_file", {"path": "docs/notes.md"})),
+            final(prior),
+        ],
+        evidence_digest=UNCHANGED,
+    )
+    revised = dict(
+        finding(
+            location="docs/notes.md:1",
+            evidence="rounding notes",
+            finding="the notes promise rounding the totals; the newer run makes it worse",
+        ),
+        revises="P1",
+        reason="the newer run shows the same drift in the notes' own example",
+    )
+    again, _model, _ = review(
+        tmp_path,
+        [reassess_reply(revised)],
+        evidence_digest=NEWER,
+        context=ci_context("check_run:7003 lint FAIL"),
+    )
+    (standing,) = again.verified
+    assert standing.finding.severity.value == "major"
+    assert "the newer run makes it worse" in standing.finding.finding
+    assert again.verdict is Verdict.APPROVE_WITH_CHANGES
+    (w,) = again.lenses[0].withdrawn
+    assert w.replaced is True
+    assert w.replacement is not None and w.replacement.verified
+    assert "Revised finding: L1-F1" in render_draft(again, Redactor())
+
+
+def test_an_exception_in_the_reassessment_does_not_fail_the_review(tmp_path):
+    """The round-2 Minor: the re-assessment attempt is on the ledger
+    before its call, and a call that fails beyond the recorded causes is
+    finished as the model error it is -- the review goes on, the prior
+    findings stand, the note says so, and no digest is stored (the mutant
+    that lets the exception propagate, or that starts the attempt only
+    after the call, fails here)."""
+
+    class Exploding:
+        name = "exploding"
+
+        def __init__(self) -> None:
+            self.priced: list[object] = []
+
+        def worst_case_usd(self, request):
+            self.priced.append(request)
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise RuntimeError("the adapter exploded mid-call")
+
+    first, _, _ = review(
+        tmp_path, [READ_ALL, final(finding())], evidence_digest=UNCHANGED
+    )
+    again, _model, _ = review(tmp_path, [], evidence_digest=NEWER, model=Exploding())
+    assert again.lenses[0].outcome.findings == first.lenses[0].outcome.findings
+    assert again.lenses[0].outcome.attestation is Attestation.ATTESTED
+    assert "a model call failed" in again.lenses[0].reassess_note
+    assert again.model_calls == 1
+    assert ledger(tmp_path).evidence_digest(REASSESS_KEY) is None
+    (attempt,) = ledger(tmp_path).attempts(REASSESS_KEY)
+    assert attempt.outcome.causes == {Cause.MODEL_ERROR}
+    assert "the adapter exploded mid-call" in attempt.outcome.detail
+    # The attempt was started before its call: the file's own record order
+    # pins it (the mutant that starts the attempt only after the call
+    # writes the finish line first and fails here).
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "state" / "attestations.jsonl").read_text().splitlines()
+        if "#reassess" in line
+    ]
+    assert [record["event"] for record in records] == ["started", "finished"]
+
+
+def test_a_revision_reason_over_the_text_cap_is_refused():
+    """The round-2 Nit: a revision's `reason` is capped at the same
+    `MAX_TEXT_CHARS` a withdrawal's is, so an arbitrarily long
+    model-written reason cannot reach the ledger in full (the mutant that
+    leaves the revision's reason uncapped fails here)."""
+    with pytest.raises(ContractError, match="reason is over"):
+        parse_reassess_reply(
+            json.dumps(
+                {
+                    "lens": LENS,
+                    "body_sha256": DIGEST,
+                    "findings": [dict(finding(), revises="P1", reason="x" * 4_001)],
+                    "withdrawn": [],
+                }
+            )
+        )
+
+
+def test_the_note_counts_resolved_references_and_names_annotations():
+    """The round-2 Nit: the note's counts cover only references that
+    resolved, and an annotation-only revision -- a proposed downgrade, or
+    one whose replacement did not verify -- is counted as `annotated`,
+    separate from a revision that took the prior's place (the mutant that
+    counts every recorded reference, or that folds the annotations into
+    `revised`, fails here)."""
+    settled = AttemptOutcome(Attestation.ATTESTED, findings=(checked(finding()),))
+    downgrade = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(checked(finding(severity="nit")),),
+        revises=((1, "P1", "the run says otherwise"),),
+    )
+    failed = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(checked(dict(finding(evidence="nowhere in the file"))),),
+        revises=((1, "P1", "the run failed"),),
+    )
+    real = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(checked(finding(severity="blocker")),),
+        revises=((1, "P1", "the run confirms it"),),
+    )
+    bogus = AttemptOutcome(
+        Attestation.ATTESTED, findings=(), withdrawn=(("P9", REASON),)
+    )
+    _effective, _withdrawn, note = effective_outcome(
+        settled,
+        (
+            Attempt(1, downgrade),
+            Attempt(2, failed),
+            Attempt(3, real),
+            Attempt(4, bogus),
+        ),
+    )
+    assert note.startswith(
+        "re-assessed with newer CI evidence or comments: 1 revised, 2 annotated"
+    )
+    assert "1 recorded re-assessment reference(s) resolved against nothing" in note
+
+
+def test_a_death_mid_reassessment_leaves_the_started_attempt_abandoned(
+    tmp_path,
+):
+    """The round-2 Minor's other half: the attempt is on the ledger
+    before its first model call, so a death mid-call -- here a
+    BaseException the guard correctly does not catch -- leaves a started
+    attempt with no finish, which reads back as ABANDONED and counts,
+    instead of a billed call with nothing recorded (the mutant that starts
+    the attempt only after the call records nothing and fails here)."""
+
+    class Interrupting:
+        name = "interrupting"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise KeyboardInterrupt
+
+    review(tmp_path, [READ_ALL, final(finding())], evidence_digest=UNCHANGED)
+    with pytest.raises(KeyboardInterrupt):
+        review(tmp_path, [], evidence_digest=NEWER, model=Interrupting())
+    (abandoned,) = ledger(tmp_path).attempts(REASSESS_KEY)
+    assert abandoned.outcome.causes == {Cause.ABANDONED}

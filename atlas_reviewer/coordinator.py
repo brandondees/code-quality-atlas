@@ -125,12 +125,7 @@ from atlas_reviewer.ports import (
     TransportError,
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
-from atlas_reviewer.quotes import (
-    QuoteSource,
-    drift_label,
-    read_sources,
-    with_head_files,
-)
+from atlas_reviewer.quotes import QuoteSource, drift_label, read_sources
 from atlas_reviewer.reassess import (
     REASSESS_SUFFIX,
     Withdrawn,
@@ -1129,25 +1124,42 @@ def _reused_with_reassessment(
         (*redactor.flagged, *diff_secrets.values),
     )
     lens_trace = trace.with_scrub(lambda text: scrubber(text).text)
-    outcome = _reassess_call(
-        event,
-        lens,
-        body,
-        contract,
-        fence_nonce,
-        context,
-        [c for c in effective.findings if c.verified],
-        trees,
-        diff,
-        scope,
-        lens_trace.wrap_model(model),
-        spend,
-        resolved,
-        clock,
-        deadline,
-    )
+    # The attempt is on the ledger before its first model call, the way
+    # the lens path's is (round-2 review of #731, the open Minor): a
+    # billed call with nothing recorded, or an exception that fails the
+    # whole review over a supplementary call, is what that ordering
+    # prevents.
     number = len(recorded) + 1
     ledger.start(reassess_key, number)
+    try:
+        outcome = _reassess_call(
+            event,
+            lens,
+            body,
+            contract,
+            fence_nonce,
+            context,
+            [c for c in effective.findings if c.verified],
+            trees,
+            diff,
+            scope,
+            lens_trace.wrap_model(model),
+            spend,
+            resolved,
+            clock,
+            deadline,
+        )
+    except Exception as exc:  # noqa: BLE001 - a supplementary call's failure must not fail the review
+        # The last guard: whatever the call or its judging raised beyond
+        # the recorded causes, the review goes on -- the attempt is
+        # finished as the model error it is, the prior findings stand, and
+        # the note says so. No digest is stored, so the next review
+        # re-earns the bounded call.
+        outcome = AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.MODEL_ERROR}),
+            detail=str(exc),
+        )
     ledger.finish(
         reassess_key,
         number,
@@ -1182,10 +1194,14 @@ def _reassess_call(
 ) -> AttemptOutcome:
     """One bounded re-assessment call (D73): the prior findings and the
     review's context blocks in, one final reply out, quote-checked like an
-    ordinary reply's. No tools are offered -- the head SHA is unchanged,
-    so the code the findings cite is the code that is there -- and there
-    is no repair turn: a reply outside the contract is the failed attempt
-    it is, recorded with no digest stored, so the next review of this head
+    ordinary reply's -- against the head lines of every path the reply's
+    and the prior findings' locations cite, not only the changed files,
+    so a revision of a verified prior that cites an unchanged file can
+    verify the same quote (round-2 review of #731, the open Major). No
+    tools are offered -- the head SHA is unchanged, so the code the
+    findings cite is the code that is there -- and there is no repair
+    turn: a reply outside the contract is the failed attempt it is,
+    recorded with no digest stored, so the next review of this head
     re-runs the bounded call. The call is reserved at its worst case
     against the review's shared spend (D68's derived limits and dollar
     ceiling) and settled like any turn; a BYOK refusal halts the review's
@@ -1255,7 +1271,8 @@ def _reassess_call(
         judged = judge(
             parsed,
             prior,
-            with_head_files(sources, trees.head, ()),
+            sources,
+            trees.head,
             resolved.quote_tolerance,
         )
     except ContractError as exc:
@@ -2003,24 +2020,39 @@ def _withdrawn_line(
         if w.replacement.verified:
             return text + f". Revised finding: {_finding_id(result, w.replacement)}"
         return text + ". The revised finding did not verify; see Not verified"
-    if w.replacement.verified:
-        return (
-            f"- {result.lens} proposes revising "
-            f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
-            f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
-            f"[{w.finding.severity.value}] down to {w.replacement.finding.severity.value}. "
-            f"Reason, quoted: {quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}. "
-            "The higher severity still counts; the revised finding, quoted: "
-            + quote_untrusted(w.replacement.finding.finding, QUOTED_CHARS, scrub=scrub)
-        )
-    return (
+    lowered = w.replacement.finding.severity.rank > w.finding.severity.rank
+    head = (
         f"- {result.lens} proposes revising "
         f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
         f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
         f"[{w.finding.severity.value}] down to "
         f"{w.replacement.finding.severity.value}. Reason, quoted: "
-        f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}. "
-        "The higher severity still counts; the revised finding did not verify."
+        f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
+        if lowered
+        else (
+            f"- {result.lens} proposes revising "
+            f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+            f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
+            f"[{w.finding.severity.value}]. Reason, quoted: "
+            f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
+        )
+    )
+    if lowered and w.replacement.verified:
+        return (
+            head
+            + ". The higher severity still counts; the revised finding, quoted: "
+            + quote_untrusted(w.replacement.finding.finding, QUOTED_CHARS, scrub=scrub)
+        )
+    if lowered:
+        return (
+            head
+            + ". The higher severity still counts; the revised finding did not verify."
+        )
+    return (
+        head
+        + ". The revised finding did not verify ("
+        + quote_untrusted(w.replacement.problem, QUOTED_CHARS, scrub=scrub)
+        + "), so the prior finding stands."
     )
 
 
