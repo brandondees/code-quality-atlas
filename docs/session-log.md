@@ -1978,6 +1978,7 @@ progress-comparison mutant A9 (`now >= last_seen` reads every wake as
 progress, never arms the backstop, and the parked wait never comes
 back). The healthy-clock pin's ticker steps coarser (five seconds of
 clock a tenth-second, n-9). Offline only.
+
 ## 2026-11-16 — the agentic lenses receive the head SHA's CI evidence (issue #715 Part A, D73)
 
 The 2026-11-13 plan's phase 3. `gather.py` had collected check runs,
