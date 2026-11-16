@@ -1979,6 +1979,156 @@ progress, never arms the backstop, and the parked wait never comes
 back). The healthy-clock pin's ticker steps coarser (five seconds of
 clock a tenth-second, n-9). Offline only.
 
+## 2026-11-16 — the agentic lenses receive the head SHA's CI evidence (issue #715 Part A, D73)
+
+The 2026-11-13 plan's phase 3. `gather.py` had collected check runs,
+workflow runs and jobs since the one-shot path was built, but only that
+path consumed them, so no agentic lens could name a real CI run and the
+PR #661 m1 shape (a PR body claiming verification results the head's own
+CI contradicts) stayed unreachable in an agentic review.
+`gather_head_ci` now fetches the head SHA's own results only — the check
+runs at the SHA, the workflow runs at the SHA, and the jobs of those
+runs, under the one-shot `IngestConfig` caps, with no other commit's
+checks, no branch-name listing and no log or artifact download (D25's
+scoping; the one-shot's `_gather_run` lost its jobs half to the
+extracted `_gather_jobs`, which it calls back into, so its behavior is
+unchanged) — and the new `ci_block.ci_block` renders it with the
+one-shot path's own `classify` + `render_evidence`, prefixed by the one
+controller-written line in the block, which names the head SHA. The CLI
+passes the block into `review_lenses` as one more `context=` block after
+the conversation (the first turn's order is now prior rounds,
+conversation, CI evidence, changed-files), with every gather failure —
+an unfetchable listing, a malformed entry, a page-cap cut — converted
+into an omission beside the assembly's, so `coverage_complete` goes
+false and an approve-shaped review is held at COMMENT (D42): CI evidence
+can never make a review approvable the omission gate would not. The
+sizing is D67's, shared with the conversation: the block takes what the
+conversation left of the input room, builds at
+`min(16,384, room − 39)` characters (`CI_EVIDENCE_CHARS`, the size D52
+gives the prior-round blocks), names a truncation at its cap, and is
+omitted whole and named when its UTF-8 bytes still overflow — never
+silently truncated; the omit-whole gate fires below 43 characters, the
+same figure D67's round-2 review derived. The fence and nonce are
+`first_turn`'s one fence; the picker keeps D38's view; the status line
+gains no field; the draft shows CI evidence only through the existing
+quote and scrub paths. Eight behaviors pinned in
+`atlas_reviewer/tests/test_agentic_context.py`, mutants M1–M7 (and the
+marker mutant M5b) applied by hand and killed by their named tests:
+dropping the block from `context=` and dropping the head-SHA tag (M1,
+M7), swallowing the gather's failures (M2), the fence-stripping mutant
+that ships block text unfenced (M3), the gather reaching past the head
+SHA (M4), removing the omit-whole gate (M5), the skipped-marker build
+budget (M5b), and the wiring that hands the block no room (M6). The diff
+stays off #717's files except the one file it must touch:
+`atlas_reviewer/cli.py`, confined to the wiring beside D67's blocks and
+the `_input_room_chars` docstring; no `lens_loop.py`, `review_wide.py`
+or `agentic_config.py` change, no coordinator change at all, and the
+docs logs appended only. Part B of the plan (the sandboxed
+`run_tests`/`mutate` tools) is
+untouched. Offline only: fixture, scripted reviewer and fakes; no live
+model call, network call or secret, and no deployed service setting
+changed. The live confirmation that #661 m1 is now reachable stays with
+S0 (#708).
+
+## 2026-11-16 — round-1 review fixes for #724: the CI block is sized against the room the conversation left, and the overlap sentence says so
+
+The round-1 protocol review came back COMMENT (1 Major, 2 Minor, 2 Nit),
+all fixed on the PR branch. Major 1 (also CodeRabbit's inline Major on
+`cli.py`): `ci_block` was handed the full `fit`, so a conversation near
+its cap plus a near-cap CI block could overrun the fit by more than the
+8,192-character reserve, starving the prior rounds to one character and
+risking a per-call refusal — the reviewer's worktree arithmetic showed
++2.8k to +3.4k over the fit at ordinary rooms. The root fix: the CLI now
+passes the fit minus the conversation block's UTF-8 bytes
+(None-preserving) as `ci_block`'s room, so `sum(context bytes) ≤ fit`
+holds by construction and the prior rounds take the remainder; a
+conversation that leaves almost nothing trips the 43-character
+omit-whole gate and names the omission. The regression test
+(`test_the_ci_block_takes_the_room_the_conversation_leaves`, two
+conversation sizes under the approve scenario) records the fit and the
+room the block was actually handed and asserts `room == fit −
+conversation bytes` plus either `sum(context bytes) ≤ fit` or the named
+CI omission — killing M8, the revert to full-fit sizing, whose claimed
+pin in the first cut (M6's test) fired through the byte gate alone and
+pinned nothing about conversation-relative sizing; M6's test docstring
+now says what it actually pins. Minor 3: the "diff stays off #717's
+files" sentences were false for `cli.py` (it is in #717's edit set) —
+D73 and the session-log entry are new in this PR, so both say the
+exception first in place; the first commit message repeats the false
+clause and stays as written, since history is not rewritten. Nit 4: the
+marker and minimum-fit figures now live beside `redact.TRUNCATION_MARKER`
+(`TRUNCATION_MARKER_CHARS`, `MIN_FIT_CHARS`), imported by `ci_block.py`;
+round 2 replaced this round's alias arrangement in `cli.py` — which
+conflicted with #717's edits of the same lines — with `cli.py` keeping
+its own main-side derivation of the same figures and a test holding the
+two copies equal. Nit 5: D73 now states the asymmetry once —
+the conversation block rebuilds once smaller on a multi-byte overflow
+because `build_conversation` can drop the oldest remarks, while
+`render_evidence` has no refit, so the CI block omits whole instead.
+Minor 2 is recorded, not fixed: a settled lens reused for the same head
+and body never sees the CI evidence gathered for the later review (the
+CI block is not in the reuse key), the same gap the conversation block
+has had since D67; whether context-derived data belongs in the reuse key
+is an owner decision on the reuse contract, recorded as an open question
+in D73, and no reuse key changed here. The session-log merge note: this
+file and #717 both append at EOF, so whichever merges second conflicts
+mechanically — keep both dated entries. Offline only, as before:
+fixture, scripted reviewer and fakes; no live model call, network call
+or secret, and no deployed service setting changed.
+
+## 2026-11-16 — round-2 review fixes for #724: the sizing constants go back to cli.py's main-side lines, and the byte measure is named and pinned
+
+The round-2 protocol review came back COMMENT (2 Minor, 1 Nit), all
+addressed on the PR branch. Minor R2-1: round 1's Nit-4 alias arrangement
+in `cli.py` — renaming the `redact` import line and rewriting the
+`_MARKER_CHARS`/`_MIN_FIT_CHARS` block #717 also edits — had moved
+`cli.py` into conflict with #717's head (`git merge-tree --write-tree`
+against `70d9110b` confirmed two hunks: the import line and the
+constants block). `cli.py` now keeps its import line and both constant
+definitions exactly as main has them, `redact`'s shared constants serve
+`ci_block.py` alone, and
+`test_the_cli_sizing_copies_agree_with_their_shared_home` holds the two
+copies equal (kills M10, a drifting copy); the PR body states the real
+merge-tree result. While this round was in flight #717 merged to main
+(`1c230180`), so the branch merges main with a normal merge commit
+(`d9dfbaf6`) and the #717 conflict is resolved in that merge: `cli.py`
+keeps both import lines and #717's `_MIN_FIT_CHARS` docstring — its
+"conservative margin, rooms of 40 to 42" note intact, content and not
+noise — alongside this PR's `ci_block` wiring, and the session-log EOF
+conflict is resolved by keeping both sides' dated entries in
+chronological order. Minor
+R2-2: the CLI's conversation measure is named `conversation_bytes` (it
+was `conversation_chars` while holding UTF-8 bytes), and
+`test_the_ci_block_takes_the_room_the_conversation_leaves` gains a
+four-byte parametrization — the multi-byte remark bodies the
+conversation byte-budget tests use — under which the chars-instead-of-
+bytes mutant M9 fails while both ASCII parametrizations pass under it,
+which is exactly why the mutant had survived round 1's test. Nit R2-3
+(D73 amended in place rather than by a Corrections append): no change —
+D73 has never landed on main, the session-log preserves what changed
+and why, and the amendment is flagged in the entry itself. Offline only,
+as before: fixture, scripted reviewer and fakes; no live model call,
+network call or secret, and no deployed service setting changed.
+
+## 2026-11-16 — the owner decides the reuse-with-newer-evidence question D73 raised (docs only)
+
+Brandon's decision on round-1 Minor 2, given 2026-11-15 8:32 PM CT and
+recorded in D73 in place of the open question (D73 has not landed, so
+the in-place amendment stands, as round-2 Nit R2-3 accepted): "it's a
+little of both. we shouldn't toss out findings just because more
+information comes along, but the agent should re-assess their judgement
+and follow up accordingly if the new information changes anything." A
+reused settled result keeps its findings — newer CI evidence or newer
+comments never discard them — and, when newer CI evidence or comments
+exist since the reused result was produced, the lens re-assesses its
+judgment with that new evidence and adds, revises or follows up on
+findings where the new information changes anything. The re-assessment
+behavior is not implemented in this PR: the reuse key and the reuse code
+are unchanged, and the behavior is the follow-up the decision records
+(#726), covering the conversation block's identical gap since D67. Docs only:
+`docs/open-questions.md` (D73) and this entry; no code, no test, no
+generated or mirrored file, and the full local gates were green on the
+merge before this docs-only commit.
 ## 2026-11-16 — the webhook service's child follows a service mode: agentic by default, one-shot kept (issue #712, D70)
 
 The deployed Fly webhook app had started the one-shot `review` command

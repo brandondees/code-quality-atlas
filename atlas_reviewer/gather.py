@@ -333,7 +333,57 @@ def _capped[T](
     return found[: max(left, 0)]
 
 
-def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
+def gather_head_ci(
+    event: PrEvent,
+    github: GitHubReader,
+    now: Callable[[], datetime],
+    redactor: Redactor,
+    config: IngestConfig,
+    out: Collected,
+) -> None:
+    """The head SHA's own CI results, for a caller that builds an agentic
+    first turn's CI evidence block (D73): the check runs at the head SHA,
+    the workflow runs at the head SHA, and the jobs of those runs, under
+    the same caps as `gather_ci`. Only the head SHA's own results are
+    fetched (D25's scoping): no other commit's checks, no listing under
+    the head branch's name, no job-log or artifact download -- the block
+    summarizes what ran at the head, and what was never fetched is simply
+    not in it. The fetch, parse and cap bookkeeping is `gather_ci`'s, so
+    a failed, malformed or cut-off listing is recorded in `out` the same
+    way."""
+    ctx = _Ctx(event, github, now, redactor, config, out, _Left(0, 0))
+    repo, sha = event.repo, event.head_sha
+    checks = _listing(ctx, "check runs", lambda: github.list_check_runs(repo, sha))
+    out.items.extend(
+        _parse_each(
+            ctx,
+            SourceKind.CHECK_RUN,
+            "check runs",
+            checks,
+            lambda e: parse_check_runs(e, now(), redactor),
+        )
+    )
+    runs = _runs(
+        ctx,
+        "head-SHA workflow runs",
+        lambda: github.list_workflow_runs_at(repo, sha),
+    )
+    at_head = [r for r in runs if r.item.head_sha == sha]
+    out.items.extend(r.item for r in at_head)
+    for run in _capped(
+        ctx,
+        "workflow runs at the head SHA",
+        at_head,
+        config.max_runs,
+        config.max_runs,
+        lambda r: SourceKey(
+            SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
+        ),
+    ):
+        _gather_jobs(ctx, run)
+
+
+def _gather_jobs(ctx: _Ctx, run: WorkflowRun) -> tuple[Job, ...]:
     repo, name = ctx.event.repo, run.item.provenance.key.name
     jobs = _parse_each(
         ctx,
@@ -348,6 +398,12 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
     )
     ctx.out.items.extend(j.item for j in jobs)
     ctx.out.links.extend(_job_links(run, jobs))
+    return jobs
+
+
+def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
+    repo, name = ctx.event.repo, run.item.provenance.key.name
+    jobs = _gather_jobs(ctx, run)
     _gather_job_logs(ctx, [j for j in jobs if j.item.head_sha == ctx.event.head_sha])
     artifacts = _parse_each(
         ctx,

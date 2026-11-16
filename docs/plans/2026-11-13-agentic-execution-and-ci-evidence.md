@@ -1,8 +1,8 @@
 # Plan: CI evidence for lenses, and a sandboxed `run_tests`/`mutate` tool in the Sprite
 
-**Status:** proposed — planning only, not started. Brandon asked for this plan on
-2026-11-13 alongside D58; building it is a later decision, and nothing here is
-wired into the controller.
+**Status:** Part A implemented with D73 (2026-11-16, issue #715 Part A).
+Part B — the sandboxed `run_tests`/`mutate` tools — is not started:
+planning only. Brandon asked for this plan on 2026-11-13 alongside D58.
 
 ## Why this plan exists
 
