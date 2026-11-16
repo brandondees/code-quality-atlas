@@ -14,6 +14,7 @@ review child is started without either.
 from __future__ import annotations
 
 import contextvars
+import math
 import os
 import random
 import shutil
@@ -42,12 +43,19 @@ from atlas_reviewer.service_admit import (
 from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
 from atlas_reviewer.service_run import (
     CLEANUP_WAIT_S,
+    DEFAULT_SERVICE_MODE,
+    MAX_SERVICE_DEADLINE_S,
+    MIN_SERVICE_DEADLINE_S,
+    MODE_AGENTIC,
+    MODE_ONESHOT,
     WEBHOOK_SECRET_ENV,
     ReviewReport,
     ReviewRun,
     RunConfig,
     make_runner,
     run_dir,
+    service_deadline,
+    service_mode,
 )
 from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, Event, EventSink, JsonlSink, Telemetry
@@ -125,6 +133,11 @@ class ServiceConfig:
     provider: str = "offline"
     allow_live_inference: bool = False
     max_body_bytes: int = MAX_BODY_BYTES
+    mode: str = DEFAULT_SERVICE_MODE
+    # None: resolve from the mode in `serve` (`service_deadline`), whose
+    # agentic default is the deadline bound's ceiling -- there the parent
+    # deadline is a backstop; the child's derived wall is the real limit.
+    deadline_s: float | None = None
 
     def __post_init__(self) -> None:
         if len(self.secret) < 16:
@@ -144,6 +157,22 @@ class ServiceConfig:
         if self.provider == "openrouter" and not self.allow_live_inference:
             raise ServiceError(
                 "openrouter reviews need live inference enabled on the service"
+            )
+        if self.mode not in {MODE_AGENTIC, MODE_ONESHOT}:
+            raise ServiceError(
+                f"service mode must be {MODE_AGENTIC} or {MODE_ONESHOT}, "
+                f"not {self.mode!r}"
+            )
+        if self.deadline_s is not None and (
+            isinstance(self.deadline_s, bool)
+            or not isinstance(self.deadline_s, (int, float))
+            or not math.isfinite(self.deadline_s)
+            or not MIN_SERVICE_DEADLINE_S <= self.deadline_s <= MAX_SERVICE_DEADLINE_S
+        ):
+            raise ServiceError(
+                f"the review deadline must be between "
+                f"{MIN_SERVICE_DEADLINE_S:.0f} and "
+                f"{MAX_SERVICE_DEADLINE_S:.0f} seconds"
             )
 
 
@@ -798,6 +827,11 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         raise ServiceError("ATLAS_SERVICE_PORT must be 8080, the port Fly checks")
     port = 8080
     state = Path(env.get("ATLAS_REVIEWER_STATE_DIR", ".atlas-reviewer-state"))
+    try:
+        mode = service_mode(env)
+        deadline_s = service_deadline(env, mode=mode)
+    except ValueError as exc:
+        raise ServiceError(str(exc)) from exc
     return ServiceConfig(
         secret=secret,
         allowlist=allowlist,
@@ -807,6 +841,8 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         state_dir=state,
         provider=provider,
         allow_live_inference=live,
+        mode=mode,
+        deadline_s=deadline_s,
     )
 
 
@@ -882,13 +918,20 @@ def serve(
             sink=_LoggingSink(sink, log),
         )
         if runner is None:
+            deadline = (
+                config.deadline_s
+                if config.deadline_s is not None
+                else service_deadline(env, mode=config.mode)
+            )
             runner = make_runner(
                 RunConfig(
                     config.provider,
                     config.allow_live_inference,
                     config.state_dir,
+                    config.mode,
                 ),
                 env,
+                deadline_s=deadline,
             )
         worker = Worker(
             board, runner, telemetry, publisher, config.concurrency, config.state_dir

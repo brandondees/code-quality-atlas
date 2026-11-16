@@ -98,8 +98,20 @@ def test_the_runbook_names_the_child_model_settings_outside_the_secret_file():
     for name in kept:
         assert name in RUNBOOK
         assert name not in secret
+    # The agentic limits reach the service child now (D70), so the
+    # runbook names the D68 derivation knobs and the ceiling in prose;
+    # they are settings, and none of them belongs in the secret file
+    # block.
     for name in LIMIT_ENV.values():
-        assert name not in RUNBOOK
+        assert name not in secret
+    for name in (
+        "ATLAS_PER_LENS_CALLS",
+        "ATLAS_PER_LENS_USD",
+        "ATLAS_REVIEW_CEILING_USD",
+    ):
+        assert name in flat
+    assert "ATLAS_SERVICE_MODE" in flat
+    assert "ATLAS_SERVICE_DEADLINE_S" in flat
     assert "opts into provider retention" in flat
     assert "D25's ceilings apply: 3 calls, $3, and 200,000 input tokens" in flat
     assert "read-only installation token" in flat
@@ -128,8 +140,13 @@ def test_the_runbook_names_the_child_model_settings_outside_the_secret_file():
     for name in kept:
         assert name in webhook_flat
     assert "D25's ceilings apply: 3 calls, $3, and 200,000 input tokens" in webhook_flat
-    for name in LIMIT_ENV.values():
-        assert name not in webhook_flat
+    # The service child reads the agentic limits now (D70), so the
+    # webhook section names the mode switch, the deadline switch and the
+    # D68 ceiling, and refers to the rest of the limit variables as a set.
+    for name in ("ATLAS_SERVICE_MODE", "ATLAS_SERVICE_DEADLINE_S"):
+        assert name in webhook_flat
+    assert "ATLAS_REVIEW_CEILING_USD" in webhook_flat
+    assert "the agentic limit variables" in webhook_flat
     assert "and the agentic limit variables" not in readme
 
 

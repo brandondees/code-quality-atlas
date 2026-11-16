@@ -2129,3 +2129,115 @@ are unchanged, and the behavior is the follow-up the decision records
 `docs/open-questions.md` (D73) and this entry; no code, no test, no
 generated or mirrored file, and the full local gates were green on the
 merge before this docs-only commit.
+
+## 2026-11-16 — the webhook service's child follows a service mode: agentic by default, one-shot kept (issue #712, D70)
+
+The deployed Fly webhook app had started the one-shot `review` command
+since D53, so every posted review ran only tracing and security —
+migration, concurrency and pr-hygiene were skipped and the picker was
+never called. Brandon's Nov 15 decision moves the service onto
+`agentic-review` and keeps one-shot as a selectable mode. `service_run`
+now resolves `ATLAS_SERVICE_MODE` (`agentic` unset; unknown refuses
+startup through `config_from_env`), `review_argv` builds the matching
+argv — same `--event`/`--out`/`--events`/`--provider` wiring for both —
+and `RunConfig` validates the mode, so nothing can silently pick a
+command. The agentic `ATLAS_*` limits (`agentic_config.ENV`, D68's
+`ATLAS_PER_LENS_CALLS`/`ATLAS_PER_LENS_USD` and the $10
+`ATLAS_REVIEW_CEILING_USD` included) join the child allowlist; the
+one-shot child ignores variables it does not read, and token-like names
+(`FLY_API_TOKEN`, the webhook secret) still stay in the parent. The
+parent's hard 1,200-second wall becomes `ATLAS_SERVICE_DEADLINE_S`
+(60–14,400 seconds, startup-refused outside the bounds) because a slower
+model needs more time. The posted body stays COMMENT-only (D46);
+`summarize_draft` dispatches on the status line's `"mode": "agentic"` and
+maps the agentic draft — selection NOT RUN bullets, ledger lens lines
+(`clean`/`partial` run; `failed`/`NOT RUN` not), a coverage note from the
+status line's controller counts, and the status line's limit stop, the
+context omissions and the ceiling note as Limit stops — with the
+`Model calls:` line as Cost; runner and round-log prose that shares the
+coverage section when no cache section follows is excluded. The fixture
+parity test runs the real `agentic-review` dry run through the faked
+`popen` and asserts the posted COMMENT lists every planned lens as run,
+`Lenses not run: None.`, and the coverage note. The mode flip on the
+running app is a separate approved deploy and was not made here. Offline
+only.
+
+## 2026-11-16 (same day) — round-1 fixes for #727: the deadline covers the child's wall, and the runner's failure note is not a limit stop
+
+Round 1 of #727's protocol review returned COMMENT with one Major: the
+shipped default left the parent's wall at the D53 one-shot 1,200 s, a
+third of the agentic child's default derived review wall (3,600 s), so a
+healthy multi-lens review was SIGTERMed mid-run and posted nothing —
+silently, on every push. `service_deadline` is now mode-aware: oneshot
+keeps 1,200 s; agentic derives its default from the child's own
+configured review wall (`agentic_child_wall_s` reads `ATLAS_REVIEW_WALL_S`
+through `agentic_config.load_agentic_limits`, the same configuration the
+child reads; D68's derivation only raises the multi-lens wall above it)
+plus the SIGTERM teardown wait — 3,690 s at defaults, following an
+operator-raised child wall. An explicit `ATLAS_SERVICE_DEADLINE_S` below
+the child's wall refuses at boot rather than warning: the service already
+refuses to start on a bad port, secret, concurrency or provider, the boot
+refusal is what the deploy's readiness checks see, and the alternative is
+a service that starts and then silently kills every review it queues. A
+child wall the 14,400 s ceiling cannot cover refuses too. The README and
+deploy-service.md state the pairing and say plainly that a deadline kill
+posts nothing (job FAILED, telemetry event, Sprite already destroyed, a
+later push can requeue). The runner's `Runner reported, quoted:` note —
+a real `coordinator.render_draft` shape the round-1 review caught landing
+in Limit stops when no prompt-cache section precedes it — joins
+`_AGENTIC_NON_LIMITS`, with the test built from the real renderer in the
+runner-failed state. The incomplete-coverage note with no unread file is
+cause-neutral now (the status counts do not name the gap). `make_runner`
+labels every draft-parse failure — including a status line that will not
+parse, and the version-skew shape of a draft whose status line disagrees
+with the service's mode (`summarize_draft`'s new `expect=` keyword) — as
+`draft parse failed`, still posting nothing. Recorded in D70 and the PR
+body: issue #712's `REVIEW_DEADLINE_S` is implemented as the env var
+`ATLAS_SERVICE_DEADLINE_S` (no alias), and the service's agentic round
+log is per-head until #728 lands. The session-log rotation nit is
+pre-existing debt and untouched. Offline only.
+
+## 2026-11-16 (same day) — round-2 fix for #727: the agentic deadline default is the ceiling, a backstop not the limit
+
+Round 2 verified five of the six round-1 fixes by execution and accepted
+the round-log deferral, and narrowed the deadline Major: the mode-aware
+default still tracked only the configured wall, while D68's waves raise
+(`max(configured, ATLAS_LENS_WALL_S x ceil(planned/pool))`) happens
+inside the child after the picker plans — invisible to the parent. At
+the shipped pool of 1, a plan of 4 or more lenses derives 4,800 s or
+more against the 3,690 s default; the parity fixture's own 4-lens plan
+was the boundary case. The unset agentic default is now the deadline
+bound's ceiling itself (14,400 s, the same constant the bound check
+uses): in agentic mode the parent deadline is a backstop, not the real
+limit — the child's derived wall and the $10 ceiling stop the review.
+The boot refusal stays for an explicit deadline below the *configured*
+wall (the only part of the child's wall the parent can see), and the
+residual is the operator's to cover: the README and deploy-service.md
+now state that a plan's derived wall can reach
+`ATLAS_LENS_WALL_S x ceil(N/pool)`, that an explicit deadline must cover
+the plans you expect, and that at pool 1 plans of 13 or more lenses
+exceed even 14,400 s — raise `ATLAS_POOL_SIZE` or lower
+`ATLAS_LENS_WALL_S` for those. The child's limits are still validated at
+boot with the default in place, and a limit variable the loader refuses
+now names the environment variable (`ATLAS_REVIEW_WALL_S: ...`), not the
+loader's internal field name. Mutants killed: reverting the default to
+configured-wall-plus-margin, and dropping the naming wrap. Offline only.
+
+## 2026-11-16 (same day) — round-3 fix for #727: the wall-above-ceiling boot refusal is back on the default path
+
+Round 3 verified the round-2 fixes and the #724 merge, and caught one
+Minor: the round-2 change had removed the round-1 refusal of a
+configured child wall above the deadline ceiling along with its
+now-unneeded default branch, but the undercut it guarded stayed
+reachable on the default path — `ATLAS_REVIEW_WALL_S` above 14,400 s
+with no explicit `ATLAS_SERVICE_DEADLINE_S` booted the service with a
+14,400 s deadline below the child's configured wall, killing every
+review it queued, silently. The comparison is restored on both paths:
+`wall > MAX_SERVICE_DEADLINE_S` refuses, naming `ATLAS_REVIEW_WALL_S`
+and telling the operator to lower it. The restored assertions in
+`test_an_agentic_deadline_below_the_child_wall_refuses_at_boot` cover
+the default path and an explicit value, and kill the mutant dropping
+the comparison. The docs name the case in one line each. The round-3
+review also flagged commit `3a7f66f4`'s message as garbled (a pasted
+shell line embedded twice); noted in the PR body for cleanup at merge
+rather than a history rewrite. Offline only.

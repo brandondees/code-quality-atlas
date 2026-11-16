@@ -1,17 +1,32 @@
 # SPDX-License-Identifier: MIT
-"""The service runs the existing review command and reads its draft."""
+"""The service runs the selected mode's review command and reads its draft."""
 
+import io
+import json
 import os
+import re
 import subprocess
 import sys
 import threading
 from pathlib import Path
 
+import pytest
+
+from atlas_reviewer import cli
+from atlas_reviewer.coordinator import render_draft
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.service import ServiceError, config_from_env
+from atlas_reviewer.service_post import comment_payload, post_key, render_comment
 from atlas_reviewer.service_run import (
     APP_KEY_ENV,
     CLEANUP_WAIT_S,
+    MAX_SERVICE_DEADLINE_S,
+    MODE_AGENTIC,
+    MODE_ONESHOT,
     READ_TOKEN_ENV,
+    REVIEW_DEADLINE_S,
+    SERVICE_DEADLINE_ENV,
+    SERVICE_MODE_ENV,
     WEBHOOK_SECRET_ENV,
     ReviewRun,
     RunConfig,
@@ -21,8 +36,14 @@ from atlas_reviewer.service_run import (
     review_argv,
     run_dir,
     run_process,
+    section,
+    service_deadline,
+    service_mode,
     summarize_draft,
 )
+
+from .helpers import FIXTURE
+from .helpers import HEAD as FIXTURE_HEAD
 
 SECRET = "webhook-secret-value"
 SHA = "c" * 40
@@ -118,7 +139,7 @@ def test_the_child_process_starts_without_the_app_key(tmp_path):
     assert "FLY_API_TOKEN" not in child
 
 
-def test_the_child_receives_the_route_settings_and_not_the_limit_variables():
+def test_the_child_receives_the_route_settings_and_the_agentic_limits():
     from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
     from atlas_reviewer.openrouter import (
         ENV_ALLOW_SAFETY_RETENTION,
@@ -142,6 +163,9 @@ def test_the_child_receives_the_route_settings_and_not_the_limit_variables():
         "ATLAS_RESERVATION_USD": "1",
         "ATLAS_LENS_WALL_S": "60",
         "ATLAS_REVIEW_WALL_S": "120",
+        "ATLAS_PER_LENS_CALLS": "50",
+        "ATLAS_PER_LENS_USD": "5",
+        "ATLAS_REVIEW_CEILING_USD": "10",
         "ATLAS_NOT_A_CHILD_SETTING": "dropped",
         "FLY_API_TOKEN": "fly-token-value",
         APP_KEY_ENV: "pem-secret-value",
@@ -155,8 +179,10 @@ def test_the_child_receives_the_route_settings_and_not_the_limit_variables():
     assert env[ENV_REQUIRE_ZDR] == "false"
     assert env[ENV_KEY_CEILING_USD] == "4"
     for name in LIMIT_ENV.values():
-        assert name not in env
-    assert "ATLAS_MAX_OUTPUT_TOKENS" not in env
+        assert env.get(name) == parent.get(name)
+    assert env["ATLAS_PER_LENS_CALLS"] == "50"
+    assert env["ATLAS_PER_LENS_USD"] == "5"
+    assert env["ATLAS_REVIEW_CEILING_USD"] == "10"
     assert "ATLAS_NOT_A_CHILD_SETTING" not in env
     assert "FLY_API_TOKEN" not in env
     assert APP_KEY_ENV not in env
@@ -236,19 +262,361 @@ def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):
     assert "super-secret-pem" not in result.error
 
 
-def test_the_review_command_is_the_cli_and_drops_the_webhook_secret(tmp_path):
-    offline = RunConfig("offline", False, tmp_path)
-    argv = review_argv(offline, tmp_path / "run")
-    assert argv[1:4] == ["-m", "atlas_reviewer", "--state-dir"]
-    assert "review" in argv
-    assert "--provider" in argv and "offline" in argv
-    assert "--allow-live-inference" not in argv
-    assert "APPROVE" not in argv and "REQUEST_CHANGES" not in argv
-    live = review_argv(RunConfig("openrouter", True, tmp_path), tmp_path / "run")
+def test_the_mode_selects_the_child_command(tmp_path):
+    oneshot = review_argv(
+        RunConfig("offline", False, tmp_path, MODE_ONESHOT), tmp_path / "run"
+    )
+    agentic = review_argv(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), tmp_path / "run"
+    )
+    for argv in (oneshot, agentic):
+        assert argv[1:4] == ["-m", "atlas_reviewer", "--state-dir"]
+        assert "--provider" in argv and "offline" in argv
+        assert "APPROVE" not in argv and "REQUEST_CHANGES" not in argv
+    assert "review" in oneshot and "agentic-review" not in oneshot
+    assert "agentic-review" in agentic and "review" not in agentic
+    event_at = oneshot.index("--event")
+    out_at = oneshot.index("--out")
+    events_at = oneshot.index("--events")
+    assert agentic[event_at + 1] == oneshot[event_at + 1]
+    assert agentic[out_at + 1] == oneshot[out_at + 1]
+    assert agentic[events_at + 1] == oneshot[events_at + 1]
+    live = review_argv(
+        RunConfig("openrouter", True, tmp_path, MODE_ONESHOT), tmp_path / "run"
+    )
     assert live[-1] == "--allow-live-inference"
+    live_agentic = review_argv(
+        RunConfig("openrouter", True, tmp_path, MODE_AGENTIC), tmp_path / "run"
+    )
+    assert live_agentic[-1] == "--allow-live-inference"
     env = child_env({WEBHOOK_SECRET_ENV: SECRET, "ATLAS_SPRITES_TOKEN": "sprite"})
     assert WEBHOOK_SECRET_ENV not in env
     assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_the_default_mode_is_agentic_and_an_unknown_mode_fails_closed():
+    assert service_mode({}) == MODE_AGENTIC
+    assert service_mode({SERVICE_MODE_ENV: "oneshot"}) == MODE_ONESHOT
+    assert service_mode({SERVICE_MODE_ENV: "agentic"}) == MODE_AGENTIC
+    with pytest.raises(ValueError) as refused:
+        service_mode({SERVICE_MODE_ENV: "fast"})
+    assert "ATLAS_SERVICE_MODE" in str(refused.value)
+    assert "fast" in str(refused.value)
+    with pytest.raises(ValueError):
+        RunConfig("offline", False, Path("state"), "fast")
+
+
+def test_the_service_deadline_is_configurable_and_bounded():
+    assert service_deadline({}, mode=MODE_ONESHOT) == REVIEW_DEADLINE_S
+    assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_ONESHOT) == 3600.0
+    for raw in ("0", "-5", "30", "abc", "20000", "nan", "inf"):
+        with pytest.raises(ValueError) as refused:
+            service_deadline({SERVICE_DEADLINE_ENV: raw}, mode=MODE_ONESHOT)
+    assert SERVICE_DEADLINE_ENV in str(refused.value)
+
+
+def test_the_agentic_deadline_defaults_to_the_bound_ceiling():
+    # The parent deadline is a backstop in agentic mode: the child's own
+    # derived wall (D68's lens wall times the waves, from a plan the
+    # parent cannot see) and the dollar ceiling are the real limits, so
+    # the unset default is the bound's ceiling, shared with the bound
+    # check -- not the configured wall plus a margin, which a plan of 4
+    # or more lenses at pool 1 outgrows.
+    assert service_deadline({}, mode=MODE_AGENTIC) == MAX_SERVICE_DEADLINE_S
+    # The child's limits are still validated at boot with the default.
+    with pytest.raises(ValueError) as refused:
+        service_deadline({"ATLAS_REVIEW_WALL_S": "abc"}, mode=MODE_AGENTIC)
+    assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
+    # An operator-raised child wall does not change the ceiling default.
+    assert (
+        service_deadline({"ATLAS_REVIEW_WALL_S": "7200"}, mode=MODE_AGENTIC)
+        == MAX_SERVICE_DEADLINE_S
+    )
+
+
+def test_an_agentic_deadline_below_the_child_wall_refuses_at_boot():
+    from atlas_reviewer.lens_loop import DEFAULT_REVIEW_WALL_S
+
+    with pytest.raises(ValueError) as refused:
+        service_deadline({SERVICE_DEADLINE_ENV: "1200"}, mode=MODE_AGENTIC)
+    assert "review wall" in str(refused.value)
+    assert str(int(DEFAULT_REVIEW_WALL_S)) in str(refused.value)
+    # At or above the configured wall is accepted, and the ceiling holds.
+    assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_AGENTIC) == 3600.0
+    with pytest.raises(ValueError):
+        service_deadline({SERVICE_DEADLINE_ENV: "20000"}, mode=MODE_AGENTIC)
+    # A configured child wall the ceiling cannot cover refuses too -- on
+    # the default path as well, where the boot would otherwise carry a
+    # 14,400 s deadline below the child's wall and kill every review it
+    # queues.
+    for env in (
+        {"ATLAS_REVIEW_WALL_S": "20000"},
+        {"ATLAS_REVIEW_WALL_S": "20000", SERVICE_DEADLINE_ENV: "7200"},
+    ):
+        with pytest.raises(ValueError) as refused:
+            service_deadline(env, mode=MODE_AGENTIC)
+        assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
+        assert "lower ATLAS_REVIEW_WALL_S" in str(refused.value)
+
+
+def test_an_invalid_child_wall_refusal_names_the_variable():
+    base = {"ATLAS_GITHUB_WEBHOOK_SECRET": SECRET, "ATLAS_SERVICE_PROVIDER": "offline"}
+    for raw in ("abc", "0", "-5"):
+        with pytest.raises(ServiceError) as refused:
+            config_from_env({**base, "ATLAS_REVIEW_WALL_S": raw})
+        assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
+
+
+def test_a_draft_from_the_other_mode_is_a_labeled_parse_failure(tmp_path):
+    config = RunConfig("offline", False, tmp_path, MODE_AGENTIC)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(DRAFT, encoding="utf-8")
+        return _Proc(0)
+
+    result = make_runner(config, {}, popen=popen)(event, threading.Event())
+    assert result.ok is False
+    assert "draft parse failed" in result.error
+    assert "no agentic status line" in result.error
+
+    agentic_draft = (
+        '<!-- atlas-review-status: {"mode": "agentic", "review_event": "COMMENT"} -->\n'
+    )
+
+    def popen_agentic(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(agentic_draft, encoding="utf-8")
+        return _Proc(0)
+
+    oneshot = make_runner(
+        RunConfig("offline", False, tmp_path, MODE_ONESHOT), {}, popen=popen_agentic
+    )(event, threading.Event())
+    assert oneshot.ok is False
+    assert "draft parse failed" in oneshot.error
+
+
+def test_an_unreadable_draft_fails_with_a_label(tmp_path):
+    config = RunConfig("offline", False, tmp_path, MODE_AGENTIC)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(
+            "<!-- atlas-review-status: {not json", encoding="utf-8"
+        )
+        return _Proc(0)
+
+    result = make_runner(config, {}, popen=popen)(event, threading.Event())
+    assert result.ok is False
+    assert result.report is None
+    assert "draft parse failed" in result.error
+
+
+def _renderer_draft(runner: object | None = None):
+    """A draft from the real `coordinator.render_draft`, in the state the
+    review flags: one selected lens that never ran, so coverage is
+    incomplete with no unread file, and optionally a runner that did not
+    complete and reported why."""
+    from atlas_reviewer.coordinator import AgenticReview, LensResult, Verdict
+    from atlas_reviewer.redact import Redactor
+
+    lens = LensResult(
+        "tracing-correctness-and-invariants",
+        1,
+        None,
+        None,
+        reason="the review ended first",
+    )
+    review = AgenticReview(
+        lenses=(lens,),
+        findings=(),
+        verdict=Verdict.APPROVE,
+        runner=runner,
+    )
+    return render_draft(review, Redactor())
+
+
+def test_the_runners_failure_note_is_not_a_limit_stop():
+    from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+
+    runner = RunnerReport(
+        RunnerStatus.FAILED,
+        CleanupStatus.DESTROYED_VERIFIED,
+        "cqa-rev-pr7-abcdef",
+        "the model refused the lens body",
+    )
+    draft = _renderer_draft(runner)
+    assert "Runner: failed" in draft
+    assert "Runner reported, quoted:" in draft
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.limit_stops == ()
+    assert all("Runner" not in stop for stop in report.limit_stops)
+
+
+def test_an_incomplete_coverage_with_no_unread_file_names_no_cause():
+    draft = _renderer_draft()
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.files_note == (
+        "Agentic coverage incomplete; see the draft's coverage and omission notes."
+    )
+
+
+def test_the_agentic_runner_runs_the_agentic_command_with_the_limits(tmp_path):
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["argv"] = list(argv)
+        seen["env"] = dict(env)
+        Path(argv[argv.index("--out") + 1]).write_text(
+            '<!-- atlas-review-status: {"mode": "agentic", "review_event": "COMMENT",'
+            ' "coverage_complete": true, "changed_files": 1, "unreviewed_files": 0}'
+            " -->\n",
+            encoding="utf-8",
+        )
+        return _Proc(0)
+
+    parent = {
+        "ATLAS_PER_LENS_CALLS": "50",
+        "ATLAS_PER_LENS_USD": "5",
+        "ATLAS_REVIEW_CEILING_USD": "10",
+        WEBHOOK_SECRET_ENV: SECRET,
+    }
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC),
+        parent,
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok
+    argv = seen["argv"]
+    assert isinstance(argv, list)
+    assert "agentic-review" in argv and "review" not in argv
+    child = seen["env"]
+    assert isinstance(child, dict)
+    assert child["ATLAS_REVIEW_CEILING_USD"] == "10"
+    assert child["ATLAS_PER_LENS_CALLS"] == "50"
+    assert WEBHOOK_SECRET_ENV not in child
+
+
+def test_an_agentic_fixture_run_posts_a_comment_listing_the_planned_lenses(
+    tmp_path, monkeypatch
+):
+    """The parity gate, on fakes: the shipped fixture PR reviewed by the
+    real agentic dry run. The posted COMMENT lists every planned lens as
+    run, no unexpected NOT RUN, and the coverage note; no live model
+    call, no network, no secret."""
+    event = PrEvent("example-org/example-app", 42, FIXTURE_HEAD)
+
+    def popen(argv, env, stdout, stderr):
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(
+            [*argv[3:], "--dry-run", "--fixtures", str(FIXTURE)],
+            env={},
+            out=out,
+            err=err,
+        )
+        return _Proc(code)
+
+    # The dry run binds a Unix socket under the state directory; a
+    # relative state root keeps that path inside the 108-character
+    # AF_UNIX bound that the pytest tmp path alone would blow.
+    monkeypatch.chdir(tmp_path)
+    runner = make_runner(
+        RunConfig("offline", False, Path("."), MODE_AGENTIC),
+        {},
+        popen=popen,
+    )
+    result = runner(event, threading.Event())
+    assert result.ok, result.error
+    report = result.report
+    assert report is not None
+    draft = (run_dir(Path("."), event) / "draft.md").read_text(encoding="utf-8")
+    planned = _planned_lenses(draft)
+    assert planned, "the fixture run selected no lens"
+    assert set(report.lenses_run) == planned
+    assert report.recommended_event == "REQUEST_CHANGES"
+    assert "read in full" in report.files_note
+    body = render_comment(report, post_key(event), lambda item: item)
+    payload = comment_payload(event.head_sha, body)
+    assert payload["event"] == "COMMENT"
+    run_section = body.split("## Lenses run", 1)[1].split("## Lenses not run", 1)[0]
+    for name in planned:
+        assert name in run_section
+    assert "## Lenses not run\n\nNone." in body
+    assert "was read in full" in body
+
+
+def _planned_lenses(draft: str) -> set[str]:
+    """The lenses the agentic draft's ledger shows as run."""
+    found = set()
+    for line in section(draft, "Lens coverage (attestation ledger)").splitlines():
+        match = re.match(r"^- L\d+ (.+?): \*\*(.+?)\*\*", line)
+        if match and match.group(2) in {"clean", "partial"}:
+            found.add(match.group(1))
+    return found
+
+
+def test_an_agentic_draft_reports_selection_stops_and_cost():
+    status = json.dumps(
+        {
+            "mode": "agentic",
+            "review_event": "COMMENT",
+            "proposed_event": "APPROVE",
+            "coverage_complete": False,
+            "changed_files": 3,
+            "unreviewed_files": 1,
+            "limit_stop": {
+                "limit": "review_wall_s",
+                "configured": "3600",
+                "observed": "3600",
+                "setting": "--review-wall-seconds or ATLAS_REVIEW_WALL_S",
+            },
+        }
+    )
+    draft = (
+        f"<!-- atlas-review-status: {status} -->\n"
+        "> **REVIEW INCOMPLETE -- not approvable.** Review event: COMMENT. "
+        "Lens coverage is not complete (other-lens: failed), and 1 changed "
+        'file not read in full: `"src/b.py"`.\n'
+        "\n"
+        "## Lens selection\n"
+        "\n"
+        '- NOT RUN: `"reviewing-concurrency-and-async"` (not picked)\n'
+        "\n"
+        "## Findings (verified quotes only)\n"
+        "\n"
+        "No verified findings.\n"
+        "\n"
+        "## Context omissions\n"
+        "\n"
+        "- pull request diff (character budget): kept 1 of 2\n"
+        "\n"
+        "## Lens coverage (attestation ledger)\n"
+        "\n"
+        "- L1 tracing-correctness-and-invariants: **clean**; body sha256 ab12\n"
+        "- L2 other-lens: **failed**; attestation: not_delivered\n"
+        "\n"
+        "Model calls: 12; committed: $0.34.\n"
+        "the derived reservation was clamped to the $10 ceiling\n"
+    )
+    report = summarize_draft(draft)
+    assert report.lenses_run == ("tracing-correctness-and-invariants",)
+    assert report.lenses_not_run == (
+        "reviewing-concurrency-and-async: not picked",
+        "other-lens",
+    )
+    assert "1 of 3" in report.files_note and "not read in full" in report.files_note
+    assert report.files_not_read == ("src/b.py",)
+    assert report.limit_stops[0] == (
+        "review_wall_s stopped the review: configured 3600, observed 3600. "
+        "Change it with --review-wall-seconds or ATLAS_REVIEW_WALL_S."
+    )
+    assert "pull request diff (character budget): kept 1 of 2" in report.limit_stops
+    assert report.limit_stops[-1] == (
+        "the derived reservation was clamped to the $10 ceiling"
+    )
+    assert report.cost_lines == ("Model calls: 12; committed: $0.34.",)
+    assert report.recommended_event == "COMMENT"
 
 
 def test_a_draft_reports_lenses_limits_cost_and_files():
@@ -287,7 +655,7 @@ def test_cancel_stops_the_child(tmp_path):
 
 
 def test_exits_0_4_and_5_are_postable_and_3_is_not(tmp_path):
-    config = RunConfig("offline", False, tmp_path)
+    config = RunConfig("offline", False, tmp_path, MODE_ONESHOT)
     event = PrEvent(REPO, 7, SHA)
 
     def popen_for(code):
@@ -329,7 +697,7 @@ def test_the_child_is_stopped_at_the_deadline(tmp_path):
 
 
 def test_a_finished_child_becomes_a_report_and_a_failure_does_not(tmp_path):
-    config = RunConfig("offline", False, tmp_path)
+    config = RunConfig("offline", False, tmp_path, MODE_ONESHOT)
     event = PrEvent(REPO, 7, SHA)
 
     def popen(argv, env, stdout, stderr):
