@@ -763,10 +763,11 @@ def _pick_lenses(
     if config.model_calls < 2:
         # `run_picker` is the literal `None` here, so `select_lenses`
         # (picker.py) always returns at its own `Depth.TRIAGE` or
-        # `run_picker is None` guard, before it ever reads `scrub`. No
-        # `depth`/`config` combination reaching this branch can make the
-        # forwarded `scrub` observable -- #624. `shapes` are built before
-        # the branch and only appended to the note.
+        # `run_picker is None` guard, and that call itself never reads
+        # `scrub`: no `depth`/`config` combination reaching this branch
+        # can make the forwarded `scrub` observable through it -- #624.
+        # `guideline_shapes` above does read `scrub`, before the branch,
+        # and what it quotes reaches the review only through the note.
         return select_lenses(
             config.depth,
             None,

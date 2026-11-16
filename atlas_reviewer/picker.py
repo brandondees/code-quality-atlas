@@ -158,7 +158,8 @@ _BREADTH = {
         "existing record rather than authoring a new one) and, for a "
         "docs-only change, auditing-documentation-health; for a rename or "
         "restructuring, the guideline's restructuring route runs "
-        "reviewing-module-design and reviewing-naming-and-readability. "
+        "reviewing-module-design and reviewing-naming-and-readability, "
+        "among others. "
         "There is no fixed cap on how many lenses you name."
     ),
     Depth.COMPREHENSIVE: (
@@ -329,9 +330,12 @@ def _hygiene_choice(pr_text: str) -> tuple[LensChoice, ...]:
     )
 
 
-# The decisions log this repo reviews itself with; a repo that names its
-# own decisions log differently is covered by the directory and basename
-# heuristics below.
+# The decisions log this repo reviews itself with. The heuristics below
+# cover a decisions log or decision record under the known directory
+# names, and ADR/RFC basenames; a root-level log under another name (a
+# `DECISIONS.md` at the repo root, say) matches none of them, and a shape
+# they miss costs one sentence -- the picker still applies the guideline
+# it already carries.
 DECISIONS_LOG = "docs/open-questions.md"
 # The directory names a decision record lives under, and the basename
 # prefix git convention gives ADR and RFC files. Heuristics, stated as
@@ -401,7 +405,8 @@ def guideline_shapes(
         )  # fmt: skip
         shapes.append(
             f"the diff renames {shown}: the guideline's restructuring route "
-            "runs reviewing-module-design and reviewing-naming-and-readability"
+            "runs reviewing-module-design and reviewing-naming-and-readability, "
+            "among others"
         )
     return tuple(shapes)
 
@@ -625,9 +630,17 @@ def _preferenced_fallback(
     if preferences is None:
         return _with_note(selection, note)
     drop = set(preferences.exclude) - set(CRITICAL_TIER)
-    dropped = tuple(c.name for c in selection.choices if c.name in drop)
+    # A fallback has no picks, so the only excludable choice here is the
+    # controller-added hygiene lens: it is recorded once, as the
+    # controller-added drop (`hygiene_dropped`), never as a dropped pick
+    # (round-2 N3).
+    dropped = tuple(
+        c.name for c in selection.choices if c.name in drop and c.name != PR_HYGIENE
+    )
     kept = tuple(c for c in selection.choices if c.name not in drop)
-    hygiene_dropped = PR_HYGIENE in dropped
+    hygiene_dropped = PR_HYGIENE in drop and any(
+        c.name == PR_HYGIENE for c in selection.choices
+    )
     covered = {c.name for c in kept}
     includes = tuple(
         LensChoice(n, _INCLUDE_WHY)

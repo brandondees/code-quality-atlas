@@ -79,7 +79,7 @@ def test_instructions_ask_for_the_guidelines_auto_includes():
     assert (
         "for a rename or restructuring, the guideline's restructuring "
         "route runs reviewing-module-design and "
-        "reviewing-naming-and-readability" in text
+        "reviewing-naming-and-readability, among others" in text
     )
 
 
@@ -763,6 +763,25 @@ def test_a_fallback_exclude_removes_the_controller_added_hygiene():
     assert f"dropped the controller-added {PR_HYGIENE} lens" in chosen.note
 
 
+def test_a_fallback_hygiene_exclude_is_recorded_once():
+    """Round-2 N3: a fallback has no picks, so the hygiene drop is
+    recorded once, as the controller-added drop -- never also as a
+    dropped pick, which would mislabel a controller-added choice and say
+    the same thing twice."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(exclude=(PR_HYGIENE,)),
+    )
+    note = chosen.note
+    assert note.count(f"dropped the controller-added {PR_HYGIENE} lens") == 1
+    assert "dropped from the picks" not in note
+
+
 # --- round 1 (F4): the controller's shape facts -------------------------
 
 
@@ -797,7 +816,7 @@ def test_the_rename_shape_names_the_restructuring_route_lenses():
     assert len(shapes) == 1
     assert "the guideline's restructuring route runs" in shapes[0]
     assert "reviewing-module-design" in shapes[0]
-    assert "reviewing-naming-and-readability" in shapes[0]
+    assert "reviewing-naming-and-readability, among others" in shapes[0]
     assert '"old_calc.py"` to `"new_calc.py"' in shapes[0]
 
 

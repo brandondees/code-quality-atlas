@@ -32,7 +32,7 @@ spend never passes the ceiling. What the limits never do is size a
 review cheaper than thoroughness needs. The default ceiling is $10
 (`DEFAULT_REVIEW_CEILING_USD`); `ATLAS_REVIEW_CEILING_USD` or
 `--review-ceiling-usd` sets it for the deployment, and the reviewed
-    repo's own `REVIEW.md` overrides both with a `review_ceiling_usd:` line,
+repo's own `REVIEW.md` overrides both with a `review_ceiling_usd:` line,
 read from the **merge-base** tree the review already fetches -- the tree
 the PR branched from, not the base-ref tip -- so a PR cannot raise or
 lower its own ceiling, and a ceiling the repo changes on the base tip
