@@ -2208,16 +2208,17 @@ def test_the_mode_defaults_to_agentic_and_an_unknown_mode_refuses_startup():
 
 def test_the_review_deadline_is_read_and_bounded():
     base = {"ATLAS_GITHUB_WEBHOOK_SECRET": SECRET, "ATLAS_SERVICE_PROVIDER": "offline"}
-    from atlas_reviewer.lens_loop import DEFAULT_REVIEW_WALL_S
-    from atlas_reviewer.service_run import CLEANUP_WAIT_S
+    from atlas_reviewer.service_run import MAX_SERVICE_DEADLINE_S
 
-    # The agentic default is the child's own review wall plus teardown.
-    assert config_from_env(base).deadline_s == DEFAULT_REVIEW_WALL_S + CLEANUP_WAIT_S
+    # The agentic default is the bound's ceiling: a backstop, not the
+    # child's real limit (its derived wall is).
+    assert config_from_env(base).deadline_s == MAX_SERVICE_DEADLINE_S
     oneshot = config_from_env({**base, "ATLAS_SERVICE_MODE": "oneshot"})
     assert oneshot.deadline_s == 1200.0
     long = config_from_env({**base, "ATLAS_SERVICE_DEADLINE_S": "7200"})
     assert long.deadline_s == 7200.0
-    # In agentic mode a value below the child's review wall refuses.
+    # In agentic mode a value below the child's configured wall refuses,
+    # and so does an invalid child wall -- naming the variable.
     for raw in ("0", "30", "1200", "abc", "20000"):
         with pytest.raises(ServiceError):
             config_from_env({**base, "ATLAS_SERVICE_DEADLINE_S": raw})

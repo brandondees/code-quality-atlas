@@ -83,15 +83,20 @@ tokens — while the agentic child reads
 the agentic limits and derives its review-wide limits from the planned
 lens count under the per-review dollar ceiling (D68). The parent's
 wall-clock deadline around one child follows the mode: oneshot keeps
-1,200 seconds; agentic defaults to the child's own review wall
-(`ATLAS_REVIEW_WALL_S`, which D68's derivation raises for a multi-wave
-plan, never lowers) plus the SIGTERM teardown wait — 3,690 seconds at
-defaults — because the one-shot budget is a third of that wall and would
-kill a healthy multi-lens review into a silent no-post.
-`ATLAS_SERVICE_DEADLINE_S` sets it between 60 and 14,400 seconds; in
-agentic mode a value below the child's review wall refuses to start, and
-so does a child wall the ceiling cannot cover. A review the parent kills
-at the deadline posts nothing: the job fails, the failure is a telemetry
+1,200 seconds; agentic defaults to the 14,400-second upper bound,
+because there the parent deadline is a backstop, not the real limit —
+the child's own derived wall and D68's dollar ceiling are what stop a
+review. The condition to know: a plan's derived wall can reach
+`ATLAS_LENS_WALL_S × ⌈planned lenses ÷ pool⌉` (D68 raises the configured
+wall to that, never lowers it), and the parent cannot see the plan
+before the picker runs. `ATLAS_SERVICE_DEADLINE_S` sets the deadline
+between 60 and 14,400 seconds; an explicit value below the child's
+*configured* wall refuses to start, and an operator who expects
+multi-wave plans sets it to cover the walls those plans derive. At pool
+1, plans of 13 or more lenses derive more than even 14,400 seconds
+(1,200 × 13); raise `ATLAS_POOL_SIZE` or lower `ATLAS_LENS_WALL_S` for
+those. A review the parent kills at the deadline posts nothing: the job
+fails, the failure is a telemetry
 event, and the review child's own stop has already destroyed its Sprite.
 A later push of the same head can queue it again. The child
 process receives only an allowlist: the OpenRouter key, because it calls

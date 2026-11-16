@@ -15,10 +15,12 @@ import pytest
 from atlas_reviewer import cli
 from atlas_reviewer.coordinator import render_draft
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.service import ServiceError, config_from_env
 from atlas_reviewer.service_post import comment_payload, post_key, render_comment
 from atlas_reviewer.service_run import (
     APP_KEY_ENV,
     CLEANUP_WAIT_S,
+    MAX_SERVICE_DEADLINE_S,
     MODE_AGENTIC,
     MODE_ONESHOT,
     READ_TOKEN_ENV,
@@ -313,18 +315,23 @@ def test_the_service_deadline_is_configurable_and_bounded():
     assert SERVICE_DEADLINE_ENV in str(refused.value)
 
 
-def test_the_agentic_deadline_defaults_to_the_childs_wall_plus_teardown():
-    from atlas_reviewer.lens_loop import DEFAULT_REVIEW_WALL_S
-
+def test_the_agentic_deadline_defaults_to_the_bound_ceiling():
+    # The parent deadline is a backstop in agentic mode: the child's own
+    # derived wall (D68's lens wall times the waves, from a plan the
+    # parent cannot see) and the dollar ceiling are the real limits, so
+    # the unset default is the bound's ceiling, shared with the bound
+    # check -- not the configured wall plus a margin, which a plan of 4
+    # or more lenses at pool 1 outgrows.
+    assert service_deadline({}, mode=MODE_AGENTIC) == MAX_SERVICE_DEADLINE_S
+    # The child's limits are still validated at boot with the default.
+    with pytest.raises(ValueError) as refused:
+        service_deadline({"ATLAS_REVIEW_WALL_S": "abc"}, mode=MODE_AGENTIC)
+    assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
+    # An operator-raised child wall does not change the ceiling default.
     assert (
-        service_deadline({}, mode=MODE_AGENTIC)
-        == DEFAULT_REVIEW_WALL_S + CLEANUP_WAIT_S
+        service_deadline({"ATLAS_REVIEW_WALL_S": "7200"}, mode=MODE_AGENTIC)
+        == MAX_SERVICE_DEADLINE_S
     )
-    assert service_deadline({}, mode=MODE_AGENTIC) > REVIEW_DEADLINE_S
-    # An operator-raised child wall raises the default with it: the
-    # figure comes from the same configuration the child reads.
-    raised = service_deadline({"ATLAS_REVIEW_WALL_S": "7200"}, mode=MODE_AGENTIC)
-    assert raised == 7200.0 + CLEANUP_WAIT_S
 
 
 def test_an_agentic_deadline_below_the_child_wall_refuses_at_boot():
@@ -334,14 +341,18 @@ def test_an_agentic_deadline_below_the_child_wall_refuses_at_boot():
         service_deadline({SERVICE_DEADLINE_ENV: "1200"}, mode=MODE_AGENTIC)
     assert "review wall" in str(refused.value)
     assert str(int(DEFAULT_REVIEW_WALL_S)) in str(refused.value)
-    # At or above the wall is accepted, and the ceiling still holds.
+    # At or above the configured wall is accepted, and the ceiling holds.
     assert service_deadline({SERVICE_DEADLINE_ENV: "3600"}, mode=MODE_AGENTIC) == 3600.0
     with pytest.raises(ValueError):
         service_deadline({SERVICE_DEADLINE_ENV: "20000"}, mode=MODE_AGENTIC)
-    # A child wall the ceiling cannot cover refuses too.
-    with pytest.raises(ValueError) as refused:
-        service_deadline({"ATLAS_REVIEW_WALL_S": "20000"}, mode=MODE_AGENTIC)
-    assert "ceiling" in str(refused.value)
+
+
+def test_an_invalid_child_wall_refusal_names_the_variable():
+    base = {"ATLAS_GITHUB_WEBHOOK_SECRET": SECRET, "ATLAS_SERVICE_PROVIDER": "offline"}
+    for raw in ("abc", "0", "-5"):
+        with pytest.raises(ServiceError) as refused:
+            config_from_env({**base, "ATLAS_REVIEW_WALL_S": raw})
+        assert "ATLAS_REVIEW_WALL_S" in str(refused.value)
 
 
 def test_a_draft_from_the_other_mode_is_a_labeled_parse_failure(tmp_path):

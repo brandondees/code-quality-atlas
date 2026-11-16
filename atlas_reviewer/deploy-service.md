@@ -85,12 +85,15 @@ planned lens count under the per-review dollar ceiling (D68), and
 calls, $3, and 200,000 input tokens; an unknown value refuses to start the
 service. `ATLAS_SERVICE_DEADLINE_S` sets the parent's wall clock around one
 review child, 60 to 14,400 seconds. The default follows the mode:
-oneshot keeps 1,200 seconds; agentic defaults to the child's own review
-wall (`ATLAS_REVIEW_WALL_S`, which D68's derivation only raises) plus
-the SIGTERM teardown wait — 3,690 seconds at defaults — because the
-one-shot budget would kill a healthy multi-lens review into a silent
-no-post. In agentic mode a set value below the child's review wall
-refuses to start, and so does a child wall the ceiling cannot cover. A
+oneshot keeps 1,200 seconds; agentic defaults to the 14,400-second
+upper bound, because there the parent deadline is a backstop, not the
+real limit — the child's own derived wall and D68's dollar ceiling are
+what stop a review. A plan's derived wall can reach
+`ATLAS_LENS_WALL_S × ⌈planned lenses ÷ pool⌉`; an explicit deadline
+must cover the plans you expect (a value below the child's *configured*
+wall refuses to start), and at pool 1, plans of 13 or more lenses
+exceed even 14,400 seconds — raise `ATLAS_POOL_SIZE` or lower
+`ATLAS_LENS_WALL_S` for those. A
 review the parent kills at the deadline posts nothing: the job fails,
 the failure is a telemetry event, and the child's own stop has already
 destroyed its Sprite. Flipping either

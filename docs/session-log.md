@@ -2045,3 +2045,29 @@ body: issue #712's `REVIEW_DEADLINE_S` is implemented as the env var
 `ATLAS_SERVICE_DEADLINE_S` (no alias), and the service's agentic round
 log is per-head until #728 lands. The session-log rotation nit is
 pre-existing debt and untouched. Offline only.
+
+## 2026-11-16 (same day) — round-2 fix for #727: the agentic deadline default is the ceiling, a backstop not the limit
+
+Round 2 verified five of the six round-1 fixes by execution and accepted
+the round-log deferral, and narrowed the deadline Major: the mode-aware
+default still tracked only the configured wall, while D68's waves raise
+(`max(configured, ATLAS_LENS_WALL_S x ceil(planned/pool))`) happens
+inside the child after the picker plans — invisible to the parent. At
+the shipped pool of 1, a plan of 4 or more lenses derives 4,800 s or
+more against the 3,690 s default; the parity fixture's own 4-lens plan
+was the boundary case. The unset agentic default is now the deadline
+bound's ceiling itself (14,400 s, the same constant the bound check
+uses): in agentic mode the parent deadline is a backstop, not the real
+limit — the child's derived wall and the $10 ceiling stop the review.
+The boot refusal stays for an explicit deadline below the *configured*
+wall (the only part of the child's wall the parent can see), and the
+residual is the operator's to cover: the README and deploy-service.md
+now state that a plan's derived wall can reach
+`ATLAS_LENS_WALL_S x ceil(N/pool)`, that an explicit deadline must cover
+the plans you expect, and that at pool 1 plans of 13 or more lenses
+exceed even 14,400 s — raise `ATLAS_POOL_SIZE` or lower
+`ATLAS_LENS_WALL_S` for those. The child's limits are still validated at
+boot with the default in place, and a limit variable the loader refuses
+now names the environment variable (`ATLAS_REVIEW_WALL_S: ...`), not the
+loader's internal field name. Mutants killed: reverting the default to
+configured-wall-plus-margin, and dropping the naming wrap. Offline only.

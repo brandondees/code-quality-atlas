@@ -104,9 +104,9 @@ _CHILD_ALLOWED = frozenset(
 # lowers it between these bounds: an agentic review of a slower model can
 # need more than the one-shot budget, and a value below a minute cannot
 # even start a runner. The default follows the mode: oneshot keeps this
-# figure; agentic derives its default from the child's own review wall
-# (`service_deadline`), because this number is a third of that wall and
-# would SIGTERM healthy multi-lens reviews into a silent no-post.
+# figure; agentic defaults to the bound's ceiling, because there the
+# parent deadline is a backstop -- the child's own derived wall and D68's
+# dollar ceiling are the real limits (`service_deadline`).
 REVIEW_DEADLINE_S = 1200.0
 SERVICE_DEADLINE_ENV = "ATLAS_SERVICE_DEADLINE_S"
 MIN_SERVICE_DEADLINE_S = 60.0
@@ -166,8 +166,22 @@ def agentic_child_wall_s(env: Mapping[str, str]) -> float:
     the configured ``ATLAS_REVIEW_WALL_S`` (``agentic_config`` reads it;
     D68's derivation raises the multi-lens wall above it, never below it).
     A healthy review always runs at least this long, so it is the floor
-    the parent's wall must clear."""
-    return load_agentic_limits(env).resolve(cross_limits=False).review_wall_s
+    an explicit parent deadline must clear. A limit variable the loader
+    refuses is re-raised naming the environment variable, not the
+    loader's internal field name."""
+    try:
+        return load_agentic_limits(env).resolve(cross_limits=False).review_wall_s
+    except ValueError as exc:
+        raise ValueError(_named_limit_error(exc)) from exc
+
+
+def _named_limit_error(exc: ValueError) -> str:
+    """The loader's messages lead with the limit's field name
+    (``review_wall_s must be ...``); the operator set an environment
+    variable, so name that."""
+    message = str(exc)
+    variable = AGENTIC_LIMIT_ENV.get(message.split(" ", 1)[0])
+    return f"{variable}: {message}" if variable else message
 
 
 def service_deadline(
@@ -175,37 +189,37 @@ def service_deadline(
 ) -> float:
     """The parent's wall clock around one child, in seconds.
 
-    Oneshot keeps the D53 1,200-second default. Agentic derives its
-    default from the child's own review wall plus the SIGTERM teardown
-    wait, because the one-shot budget is a third of that wall and would
-    kill healthy multi-lens reviews into a silent no-post. An explicit
-    value below the child's wall refuses at boot for the same reason, as
-    does a child wall the ceiling cannot cover. A value outside the
-    bounds or not a number raises in both modes, so a mistyped setting
-    stops the service instead of silently clipping or unbounding every
-    review."""
+    Oneshot keeps the D53 1,200-second default. Agentic defaults to the
+    ceiling itself, because there the parent deadline is a backstop, not
+    the real limit: the child's own derived wall (D68 raises the
+    configured wall to the lens wall times the waves, from a plan the
+    picker produces inside the child, where the parent cannot see it) and
+    D68's dollar ceiling are what stop a review. A plan's derived wall
+    can reach ``ATLAS_LENS_WALL_S`` x ceil(planned / pool); an operator
+    who expects such plans sets ``ATLAS_SERVICE_DEADLINE_S`` to cover
+    them -- an explicit value below the *configured* child wall refuses
+    at boot, because a shorter parent wall SIGTERMs a healthy review into
+    a silent no-post. A value outside the bounds or not a number raises
+    in both modes, so a mistyped setting stops the service instead of
+    silently clipping or unbounding every review."""
     raw = env.get(SERVICE_DEADLINE_ENV, "")
     if mode == MODE_AGENTIC:
+        # Read the child's wall even when the default does not need it:
+        # an invalid limit variable the one-shot child would have ignored
+        # is a boot refusal here, with the variable named, not a review
+        # that dies at run time.
         wall = agentic_child_wall_s(env)
         if not raw:
-            default = wall + CLEANUP_WAIT_S
-            if default > MAX_SERVICE_DEADLINE_S:
-                raise ValueError(
-                    f"the agentic child's review wall ({wall:.0f} s) plus "
-                    f"the teardown wait is past the "
-                    f"{MAX_SERVICE_DEADLINE_S:.0f} s deadline ceiling; "
-                    "lower ATLAS_REVIEW_WALL_S"
-                )
-            return default
+            return MAX_SERVICE_DEADLINE_S
         value = _deadline_value(raw)
         if not math.isfinite(value):
             raise ValueError(_deadline_bounds_message(raw))
         if value < wall:
             raise ValueError(
                 f"{SERVICE_DEADLINE_ENV} must be at least the agentic "
-                f"child's review wall ({wall:.0f} s, ATLAS_REVIEW_WALL_S), "
-                f"not {raw!r}: a shorter parent wall SIGTERMs a healthy "
-                "review and posts nothing"
+                f"child's configured review wall ({wall:.0f} s, "
+                f"ATLAS_REVIEW_WALL_S), not {raw!r}: a shorter parent wall "
+                "SIGTERMs a healthy review and posts nothing"
             )
         if value > MAX_SERVICE_DEADLINE_S:
             raise ValueError(_deadline_bounds_message(raw))

@@ -135,8 +135,8 @@ class ServiceConfig:
     max_body_bytes: int = MAX_BODY_BYTES
     mode: str = DEFAULT_SERVICE_MODE
     # None: resolve from the mode in `serve` (`service_deadline`), whose
-    # agentic default is the child's own review wall plus the teardown
-    # wait, not the one-shot figure.
+    # agentic default is the deadline bound's ceiling -- there the parent
+    # deadline is a backstop; the child's derived wall is the real limit.
     deadline_s: float | None = None
 
     def __post_init__(self) -> None:
