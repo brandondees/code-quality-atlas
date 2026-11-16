@@ -2241,3 +2241,53 @@ the comparison. The docs name the case in one line each. The round-3
 review also flagged commit `3a7f66f4`'s message as garbled (a pasted
 shell line embedded twice); noted in the PR body for cleanup at merge
 rather than a history rewrite. Offline only.
+
+## 2026-11-16 — the lens picker chooses any number of lenses, and a repo preference overrides the guideline (issue #711, D69)
+
+The picker was hard-capped at 8 names at review depth (40 at
+comprehensive, one-shot), with instructions that said extras "are
+dropped" — contradicting the guideline's own "not a strict cap" — and
+hygiene, added ahead of the picks since D58, could spend one of the 8
+slots because the picker was never told it was already in. Auto-includes
+depended on the model under that slot economy, which is how the #640
+module-design Major went missing. Brandon had settled the direction on
+Nov 15: the picker chooses any number of lenses, the skill bundle's
+guideline (default selection and auto-includes) governs, repo
+preferences override it, and the $10 review ceiling (D68), not a lens
+count, is the runaway guard.
+
+`Depth.limit` is now `int | None`: triage keeps its critical-tier cap
+(its depth mode), review and comprehensive are uncapped, and
+`plan_lenses` treats None as uncapped — the one-shot 60,000-character
+body budget decides what a one-shot review inlines, and the agentic path
+stays bounded by D68's derived limits. `MAX_LENSES` and
+`COMPREHENSIVE_LIMIT` are gone. The picker's instructions now carry the
+guideline's breadth as a default, name the auto-includes explicitly
+(decision-lifecycle on a decision-record or decisions-log change,
+documentation-health on a docs-only change, module-design and naming on
+a rename), and say there is no fixed cap. Hygiene spends no slot: twelve
+named picks plus a verification-stating body yield all twelve picks plus
+hygiene, every one running.
+
+The reviewed repo's merge-base `REVIEW.md` — the same tree the D68
+ceiling line is read from — may carry `review_lens_include:` and
+`review_lens_exclude:` lines (comma-separated lens names). The
+controller applies the override to the picks itself: an exclude drops a
+ranked pick, an include runs even when the picker fell back or made no
+call, triage is never widened, and the critical tier — the controller's
+own floor, not the guideline's — is untouched either way. The selection
+note records the override and the draft carries it; an unusable line
+fails open with a note, the way the ceiling's unusable line does, and a
+name matching no bundle lens surfaces as its own NOT RUN line rather
+than being guessed away. The auto-includes stay model-applied per the
+guideline: the slice removes what forced their drops, and the parity
+gate's missing-lens failure stays scoped to a leftover cap or a
+hygiene-spent slot. `agentic-review` reads the preference (it fetches
+the merge-base tree); the one-shot `review` command runs on the
+guideline alone, recorded in D69 rather than given a second preference
+source. Mutants applied by hand and killed: the cap of 8 back at review
+depth and on the agentic plan, the `max_lenses` default back at 8, the
+exclude ignored, the includes silently dropped, the exclude reaching the
+critical tier, includes applied at triage, a numeric cap back in the
+instructions, the lens-name validation dropped, and the unusable-line
+note dropped from the draft. Offline only.

@@ -96,7 +96,11 @@ multi-wave plans sets it to cover the walls those plans derive. At pool
 1, plans of 13 or more lenses derive more than even 14,400 seconds
 (1,200 × 13); raise `ATLAS_POOL_SIZE` or lower `ATLAS_LENS_WALL_S` for
 those — and a configured `ATLAS_REVIEW_WALL_S` above that ceiling
-refuses to start, since no in-bounds deadline can cover it. A review the
+refuses to start, since no in-bounds deadline can cover it. D69 removes
+the picker's fixed 8-lens cap, so a plan with more lenses is now an
+ordinary outcome of the guideline, not a misconfiguration; the same two
+levers cover it, and no lens-count cap was added to keep plans inside
+the deadline. A review the
 parent kills at the deadline posts nothing: the job
 fails, the failure is a telemetry
 event, and the review child's own stop has already destroyed its Sprite.
@@ -704,8 +708,10 @@ lens picker, `skills/choosing-review-lenses/SKILL.md`, run as one model call
 (`picker.py`, D32). The picker
 call gets that skill as its instructions, the PR metadata and the changed
 paths (at most 500) as untrusted fenced blocks, and the operator's depth.
-It must reply with only `{"lenses": [...]}`, at most 8 names at review depth
-(the top of review mode's 3-8 breadth) or 40 at comprehensive. The reply is
+It must reply with only `{"lenses": [...]}`, and there is **no fixed cap**
+on how many names it may give (D69): the guideline's 3-8 review breadth is
+a starting recommendation, its auto-includes ride along additively, and the
+instructions say so. The reply is
 parsed strictly, and a name with no body in the bundle is listed as NOT RUN
 and takes no slot.
 With no diff there is no model call at all (see Diff coverage). At
@@ -716,16 +722,39 @@ the critical tier is chosen (`tracing-correctness-and-invariants`,
 unusable reply also falls back to the critical tier, and the controller
 notes quote the reason. A usable reply never replaces the critical tier:
 the critical tier is always considered first, and the picker's other names follow
-in rank order up to the depth's breadth, so a thin or steered pick can add
+in rank order, so a thin or steered pick can add
 lenses but not drop a critical one. The picker call counts toward the
 3-call cap.
 
+**The reviewed repo's lens preference (D69).** The reviewed repo's
+merge-base `REVIEW.md` -- the same tree the ceiling is read from, so a PR
+cannot move its own override -- may carry two settings lines:
+
+```text
+review_lens_include: <lens-name>[, <lens-name>...]   # runs even if the picker never ranked it
+review_lens_exclude: <lens-name>[, <lens-name>...]   # never runs, however highly the picker ranks it
+```
+
+The controller applies the override to the picker's picks itself -- an
+exclude drops a ranked pick, an include runs even when the picker fell
+back or made no call -- and records what changed in the Lens selection
+note, which the draft carries. The critical tier is the controller's own
+floor, not the guideline's, so neither line touches it; triage is never
+widened. A line that is present but not a comma-separated list of lens
+names, or a key that appears twice, is ignored fail-open with a note in
+the draft, exactly like an unusable ceiling line; a name that matches no
+bundle lens is not silently dropped -- its include shows up as a NOT RUN
+line. `agentic-review` reads these lines; the one-shot `review` command
+fetches no merge-base tree and so runs on the guideline alone.
+
 `lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`
 and inlines it into the trusted system prompt, in priority order, under a
-**60,000-character budget** and a cap of **8 lenses**. A lens is never cut:
+**60,000-character budget**. A lens is never cut:
 a lens runs only if its whole body fits what is left of the budget, and
 otherwise it is **NOT RUN** and the next one is tried, so a smaller later
-lens can still fit. A lens past the cap is NOT RUN too, with its size. The
+lens can still fit. No lens-count cap remains (D69): the budget, not a
+count, decides what a one-shot review inlines, and triage's critical tier
+-- the one lens-count cap left -- is its depth mode, not a budget. The
 draft's **Review lenses** table and the controller
 notes list every lens as run whole or NOT RUN, with its size, its tier or
 picker rank, and why it did not run, and the prompt tells the model that
@@ -1379,11 +1408,11 @@ D41 records the 2026-11-12 probe that did.
 | `groups.py` | one CI gate seen as check run + job + log + workflow run → one independent check | no |
 | `notes.py` | the code-generated Controller notes | no |
 | `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts, fit the part size to the measured prompt | no |
-| `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier, skip the call when no picked lens could fit | reads the bundle |
+| `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier, skip the call when no picked lens could fit; applies a repo preference's include/exclude to the picks (D69) and records it | reads the bundle |
 | `verdict.py` | the proposed review event, the file-coverage gate on approval, the machine-readable status line and the incomplete-coverage warning | no |
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
-| `lenses.py` | load the chosen lenses' bodies whole under the budget and cap, or mark them NOT RUN with a reason | reads the bundle |
+| `lenses.py` | load the chosen lenses' bodies whole under the budget -- no lens-count cap (D69) except triage's critical tier -- or mark them NOT RUN with a reason | reads the bundle |
 | `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
 | `bridge_args.py` | the closed tool set and its argument rules (`validate`, `arg_names`, `required_args`) | no |
 | `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
@@ -1393,7 +1422,7 @@ D41 records the 2026-11-12 probe that did.
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
-| `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into | no |
+| `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. Also reads the same merge-base `REVIEW.md`'s lens-preference lines (D69: `review_lens_include:` / `review_lens_exclude:`), fail-open with a note when unusable | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
