@@ -517,9 +517,16 @@ def _review_tokens(
     when it is set; standalone runs mint their own from App credentials.
     Every live call site must ask this helper, or the paths drift apart
     and the service's agentic review dies on a credential it must not
-    hold."""
+    hold. The fixed token carries the parent's read-only grant, which has
+    no issues permission, so an issues read under it must fail here
+    instead of surfacing later as a 403 mid-review."""
     fixed = env.get(ENV_INSTALLATION_TOKEN, "")
     if fixed:
+        if include_issues:
+            raise UsageError(
+                f"--include-issues needs App credentials: the {ENV_INSTALLATION_TOKEN} "
+                "the service passes is read-only and holds no issues permission"
+            )
         return _FixedToken(fixed)
     return _app_tokens(env, event, include_issues, transport)
 

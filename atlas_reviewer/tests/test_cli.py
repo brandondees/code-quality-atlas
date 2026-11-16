@@ -1864,6 +1864,91 @@ def test_the_agentic_command_without_any_github_credential_names_the_missing_one
     assert cli.ENV_APP_ID in err.getvalue()
 
 
+def test_include_issues_with_a_read_token_refuses_on_the_one_shot_path(tmp_path):
+    """The parent-minted token carries no issues permission, so an issues
+    read under it would only surface as a 403 mid-review; the refusal is
+    loud at wiring instead."""
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--include-issues",
+        env={
+            cli.ENV_INSTALLATION_TOKEN: "ghs_readonly_token_value",
+            cli.ENV_SPRITES_TOKEN: "sprite-token-value",
+        },
+    )
+    assert code == cli.EXIT_USAGE
+    assert "--include-issues" in err
+    assert "no issues permission" in err
+
+
+def test_include_issues_with_a_read_token_refuses_on_the_agentic_path(monkeypatch):
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
+    )
+    env = {cli.ENV_INSTALLATION_TOKEN: "ghs_readonly_token_value"}
+    with pytest.raises(cli.UsageError) as raised:
+        cli._live_github(
+            argparse.Namespace(include_issues=True),
+            env,
+            cli.load_event(Path(EVENT)),
+            cli._Credentials(env),
+        )
+    assert "--include-issues" in str(raised.value)
+    assert "no issues permission" in str(raised.value)
+
+
+def test_the_fixed_token_wins_even_when_app_credentials_are_also_set(
+    tmp_path, monkeypatch
+):
+    """Precedence, not absence: the fixed token wins even when App
+    credentials are present too, so the mutant that mints whenever the
+    App id is set cannot survive."""
+    token = "ghs_readonly_token_value"
+    seen = {}
+
+    def github(_transport, tokens):
+        seen["tokens"] = tokens
+        raise BoundaryError("stop before the first GitHub read")
+
+    monkeypatch.setattr(cli, "GitHubClient", github)
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
+    )
+
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake
+
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "triage", "--pool-size", "1", "--max-calls", "8", "--max-turns",
+         "2", "--reservation-usd", "5.00"],
+        env={
+            cli.ENV_INSTALLATION_TOKEN: token,
+            cli.ENV_APP_ID: "5648875",
+            cli.ENV_APP_KEY: "not-a-real-key",
+            cli.ENV_INSTALLATION_ID: "12345",
+            cli.ENV_OPENROUTER_KEY: "sk-or-v1-x",
+        },
+        out=out, err=err,
+        sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(
+            OpenRouterFake(), key, limits=limits
+        ),
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY, err.getvalue()
+    assert "stop before the first GitHub read" in err.getvalue()
+    assert "minted" not in err.getvalue()
+    assert isinstance(seen["tokens"], cli._FixedToken)
+    assert seen["tokens"].token() == token
+
+
 def test_the_sequence_probe_fetches_the_tarball_with_the_read_token(monkeypatch):
     """--sequence review's tarball fetch takes the parent-minted token
     like the other live paths, not App credentials."""

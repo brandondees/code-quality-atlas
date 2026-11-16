@@ -2262,9 +2262,16 @@ token and no App credentials, a boundary test feeding `service_run`'s
 `child_env` output straight into the agentic wiring — the test that
 would have caught this — and fallback tests that the clear
 `ATLAS_GITHUB_APP_ID` usage error survives when neither credential is
-set. Mutants killed: reverting either call site to `_app_tokens`
-unconditionally fails the agentic, `--sequence` and boundary tests. The
-deploy runbook already says the child's only GitHub credential is the
-read-only installation token, and `docs/agentic-reviewer.md` puts the
-App key on the controller, so no doc correction was needed; no new D
-number. Offline only.
+set. Mutants killed: reverting `_live_github` to `_app_tokens`
+unconditionally fails the agentic and service-boundary tests; reverting
+`_probe_source` the same way fails the `--sequence` test. Round 1 of the
+PR's own review added two pins: a fixed token plus `--include-issues` is
+refused loudly at wiring (the parent's read-only mint has no issues
+permission, so the alternative was a 403 mid-review), on both the
+one-shot and agentic paths; and precedence when both the fixed token and
+App credentials are set is pinned with a mint-attempt guard, killing the
+mutant that mints whenever the App id is present. The deploy runbook
+already says the child's only GitHub credential is the read-only
+installation token, and `docs/agentic-reviewer.md` puts the App key on
+the controller, so no doc correction was needed; no new D number.
+Offline only.

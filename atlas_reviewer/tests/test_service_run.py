@@ -266,21 +266,22 @@ def test_the_child_env_is_enough_for_the_agentic_command_to_reach_github(
             seen["tokens"] = tokens
 
     monkeypatch.setattr(cli, "GitHubClient", Client)
-    wiring = cli._live_github(
+    cli._live_github(
         argparse.Namespace(include_issues=False),
         env,
         PrEvent(REPO, 7, SHA),
         cli._Credentials(env),
     )
-    assert isinstance(wiring, cli.GitHubClient)
     assert isinstance(seen["tokens"], cli._FixedToken)
     assert seen["tokens"].token() == "ghs_read"
 
 
 def test_the_agentic_command_without_the_parent_token_refuses_clearly(monkeypatch):
-    """A parent that failed to mint and pass the token must not send the
-    child hunting for App credentials it cannot hold: the same clear
-    usage error the standalone path gives fires instead."""
+    """A parent that failed to mint and pass the token leaves the child
+    with no GitHub credential at all. The agentic command then fails at
+    boot with the same clear usage error a standalone run without App
+    credentials gets -- naming the App id, the credential only the
+    standalone path holds -- instead of starting with broken wiring."""
     env = child_env({"ATLAS_SPRITES_TOKEN": "sprite", "PATH": "/usr/bin"})
     monkeypatch.setattr(
         cli, "AppInstallationTokens", lambda *a, **k: pytest.fail("minted")
