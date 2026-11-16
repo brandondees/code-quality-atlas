@@ -33,6 +33,20 @@ is finished as a model error before it leaves the loop: the attempt keeps
 the turns, tool calls and committed secrets already seen, the outcome is
 not retried, and the runner fails, so the next review of this head does
 not make another billed call.
+
+D73: a reused settled result keeps its findings -- newer CI evidence or
+newer comments never discard them -- and, when the evidence snapshot this
+review gathered differs from the digest stored with the settled result,
+the lens earns one bounded re-assessment call that sees its prior findings
+plus this review's context blocks, and may add, revise or withdraw
+findings, a withdrawal or revision always with its stated reason. The
+re-assessment's attempts live on the lens's `#reassess` ledger key, so the
+lens's own settled state is never overwritten by a supplementary reply,
+and the effective result is composed from the ledger alone on every
+review. A settled result that was not attested -- a lens that never
+produced a usable judgment -- re-runs through the ordinary retry policy
+instead, and earns no re-assessment: there are no prior findings to keep,
+and a single no-tools call is not a lens run.
 """
 
 from __future__ import annotations
@@ -55,6 +69,7 @@ from atlas_reviewer.attestation import (
     AttemptOutcome,
     Attestation,
     Cause,
+    CheckedFinding,
     LensKey,
     LensState,
     RunAttempt,
@@ -66,7 +81,7 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
-from atlas_reviewer.committed_secrets import scan_diff
+from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -76,14 +91,19 @@ from atlas_reviewer.domain import (
     RunnerStatus,
 )
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
-from atlas_reviewer.lens_contract import Finding, Severity
+from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     Derivation,
+    FinalReply,
     LensJob,
     LensModel,
     Limits,
     Spend,
+    TurnRequest,
+    UserText,
+    _refusal_cause,
+    _reserve_call,
     finding_contract,
     retry_reasons,
     run_attempt,
@@ -91,9 +111,31 @@ from atlas_reviewer.lens_loop import (
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.openrouter import OpenRouterProvider
-from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    Clock,
+    RunnerLedger,
+    SpritesApi,
+    TransportError,
+)
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
-from atlas_reviewer.quotes import QuoteSource, drift_label, read_sources
+from atlas_reviewer.quotes import (
+    QuoteSource,
+    drift_label,
+    read_sources,
+    with_head_files,
+)
+from atlas_reviewer.reassess import (
+    REASSESS_SUFFIX,
+    Withdrawn,
+    effective_outcome,
+    judge,
+    parse_reassess_reply,
+    prior_findings_block,
+    reassess_system,
+    reassess_turn,
+)
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
 from atlas_reviewer.rounds import (
@@ -157,6 +199,13 @@ class LensResult:
     scope: frozenset[str] | None = None
     """Changed paths this lens was asked to read. None keeps the older
     rule: any unread path on any lens blocks approval."""
+    withdrawn: tuple[Withdrawn, ...] = ()
+    """Prior findings a recorded re-assessment (D73) removed, each with
+    its stated reason and, for a revision, the finding that replaces it.
+    Empty on a lens that ran, and on a reuse with no re-assessment."""
+    reassess_note: str = ""
+    """Controller text about the re-assessments (D73) recorded for this
+    reused result, for the lens line; empty when there were none."""
 
     @property
     def state(self) -> LensState:
@@ -403,6 +452,7 @@ def review_lens(
     contract: str | None = None,
     task_socket: str = SOCKET_PATH,
     trace: ReviewTrace | None = None,
+    evidence_digest: str | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -414,7 +464,9 @@ def review_lens(
 
     Spans are recorded when `trace` is passed, or when
     `ATLAS_OTEL_ENDPOINT` is set in the environment. With neither, no
-    exporter is built. JSONL telemetry is unchanged."""
+    exporter is built. JSONL telemetry is unchanged. `evidence_digest` is
+    D73's evidence-snapshot digest: when given, a reused settled lens is
+    checked for newer evidence and re-assessed when it has some."""
     resolved = limits.resolve()
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
@@ -445,6 +497,7 @@ def review_lens(
             contract=contract,
             task_socket=task_socket,
             index=1,
+            evidence_digest=evidence_digest,
         )
         single = synthesize(
             [ran.result],
@@ -486,6 +539,7 @@ def review_lenses(
     model_for: Callable[[], LensModel] | None = None,
     picker_spend: tuple[int, Decimal] = (0, Decimal(0)),
     trace: ReviewTrace | None = None,
+    evidence_digest: str | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -507,7 +561,14 @@ def review_lenses(
     value when it sets one, else the configured ceiling, else the default.
     The derivation happens before any lens runs, so a configuration it
     refuses stops the review before any lens runs; the CLI validates the
-    same refusals before its picker spends (round-1 review of #717, m-3)."""
+    same refusals before its picker spends (round-1 review of #717, m-3).
+
+    D73: `evidence_digest` is the digest of the evidence snapshot this
+    review gathered (the CI block's and the conversation's gathered data,
+    `reassess.snapshot_digest`). It is stored with every attempt this
+    review finishes, and a reused settled lens whose stored digest differs
+    from it -- or that carries none -- earns one bounded re-assessment call
+    against this review's shared spend and wall clock."""
     read = review_md_ceiling(trees.base)
     derived, derivation = derive_review_wide(
         limits,
@@ -548,6 +609,7 @@ def review_lenses(
             resolved=derived,
             derivation=derivation,
             picker_spend=picker_spend,
+            evidence_digest=evidence_digest,
         ),
     )
 
@@ -580,6 +642,7 @@ def _review_lenses(
     resolved: Limits,
     derivation: Derivation,
     picker_spend: tuple[int, Decimal],
+    evidence_digest: str | None,
 ) -> AgenticReview:
     changed = frozenset(f.path for f in split_files(diff))
     blocks, omissions, other_pull_requests = _review_context(
@@ -651,6 +714,7 @@ def _review_lenses(
             continuation=index > len(names),
             create_gate=gate,
             create_retries=resolved.create_retries,
+            evidence_digest=evidence_digest,
         )
 
     names = tuple(lenses)
@@ -824,6 +888,7 @@ def _review_one(
     continuation: bool = False,
     create_gate: threading.Semaphore | None = None,
     create_retries: int = DEFAULT_CREATE_RETRIES,
+    evidence_digest: str | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -837,11 +902,17 @@ def _review_one(
     changed = frozenset(f.path for f in split_files(diff))
     scope = changed if assigned is None else assigned
     body = library.body(lens)
+    spend = spend or Spend(resolved)
     if body is None:
         missing = LensResult(
             lens, index, None, None, reason="no lens body in the bundle", scope=scope
         )
-        return _LensRun(missing, [], None, spend or Spend(resolved), ())
+        return _LensRun(missing, [], None, spend, ())
+    started = clock.monotonic() if review_started is None else review_started
+    deadline = (
+        started + resolved.review_wall_s if review_deadline is None else review_deadline
+    )
+    diff_secrets = scan_diff(diff)
     ledger_lens = lens
     if continuation:
         # A continuation is its own ledger entry. The lens's own attempt
@@ -854,14 +925,40 @@ def _review_one(
     )
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
         settled = _result(key, ledger.attempts(key), resolved, "", index)
-        return _LensRun(
+        run = _LensRun(
             replace(settled, lens=lens, scope=scope),
             [],
             None,
-            spend or Spend(resolved),
+            spend,
             (),
         )
-    diff_secrets = scan_diff(diff)
+        if evidence_digest is None:
+            # No snapshot was gathered: D73's check is not wired here, and
+            # reuse is exactly what it was before it existed.
+            return run
+        return _reused_with_reassessment(
+            run,
+            settled,
+            key,
+            event,
+            lens,
+            diff,
+            trees,
+            body,
+            contract,
+            fence_nonce,
+            context,
+            evidence_digest,
+            model,
+            spend,
+            resolved,
+            clock,
+            ledger,
+            redactor,
+            diff_secrets,
+            scope,
+            deadline,
+        )
     session = _Session()
     scrubber = Redactor(
         redactor.known_secrets,
@@ -874,7 +971,6 @@ def _review_one(
 
     lens_trace = trace.with_scrub(scrub)
     traced_model = lens_trace.wrap_model(model)
-    spend = spend or Spend(resolved)
     job = LensJob(
         lens,
         body,
@@ -887,10 +983,6 @@ def _review_one(
         trees.head,
         diff,
     )
-    started = clock.monotonic() if review_started is None else review_started
-    deadline = (
-        started + resolved.review_wall_s if review_deadline is None else review_deadline
-    )
     name = runner_name or event_runner_name(event)
 
     def in_session(bridge: Bridge) -> str:
@@ -900,7 +992,7 @@ def _review_one(
             return _attempts(
                 lens_trace.wrap_bridge(bridge), job, traced_model,
                 spend, clock, ledger, key, resolved,
-                deadline, started, session, scrub,
+                deadline, started, session, scrub, evidence_digest,
             )  # fmt: skip
 
     report = run_bridge(
@@ -922,6 +1014,256 @@ def _review_one(
     return _LensRun(result, secrets, report, spend, flagged)
 
 
+def _reassess_key(key: LensKey) -> LensKey:
+    """The re-assessment ledger key (D73): the lens key with `#reassess`
+    appended to the lens name. The lens's own key keeps its settled state
+    whatever a re-assessment reply does, and a continuation's scope suffix
+    -- twelve hex characters -- cannot collide with one that is not hex."""
+    return LensKey(
+        key.repo,
+        key.pr_number,
+        key.head_sha,
+        f"{key.lens}{REASSESS_SUFFIX}",
+        key.body_sha256,
+    )
+
+
+def _reused(
+    run: _LensRun,
+    effective: AttemptOutcome,
+    withdrawn: Sequence[Withdrawn],
+    note: str,
+) -> _LensRun:
+    """The reused result with its D73 composition applied: the settled
+    outcome's other fields stand -- the attestation, causes, turns and
+    coverage are the lens's own full run's -- and the findings, the
+    withdrawals and the note are the re-assessments'."""
+    return _LensRun(
+        replace(
+            run.result,
+            outcome=effective,
+            withdrawn=tuple(withdrawn),
+            reassess_note=note,
+        ),
+        run.secrets,
+        run.report,
+        run.spend,
+        run.flagged,
+    )
+
+
+def _reused_with_reassessment(
+    run: _LensRun,
+    settled: LensResult,
+    key: LensKey,
+    event: PrEvent,
+    lens: str,
+    diff: str,
+    trees: SourceTrees,
+    body: str,
+    contract: str,
+    fence_nonce: str,
+    context: Sequence[UntrustedBlock],
+    evidence_digest: str,
+    model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    ledger: AttemptLedger,
+    redactor: Redactor,
+    diff_secrets: DiffSecrets,
+    scope: frozenset[str],
+    deadline: float,
+) -> _LensRun:
+    """The reuse path with D73's re-assessment wired: compose the reused
+    result's effective findings from the settled outcome and every
+    re-assessment already recorded for it, then, when the snapshot digest
+    differs from the one stored with the result -- or none was stored --
+    earn the one bounded re-assessment call, record it, and compose again.
+
+    A settled outcome that was not attested earns no re-assessment: it has
+    no prior findings to keep, and a single no-tools call is not a lens
+    run -- the ordinary retry policy governs what happens to it instead.
+    So does a review whose spend is halted or whose wall clock has passed:
+    the reuse stands as it was, and the note says why no call was made."""
+    # A settled result always carries its outcome; the assert is the
+    # type checker's, not a new branch.
+    assert settled.outcome is not None
+    if settled.outcome.attestation is not Attestation.ATTESTED:
+        return run
+    reassess_key = _reassess_key(key)
+    recorded = ledger.attempts(reassess_key)
+    effective, withdrawn, note = effective_outcome(settled.outcome, recorded)
+    stored = (
+        ledger.evidence_digest(reassess_key)
+        if recorded
+        else ledger.evidence_digest(key)
+    )
+    if stored == evidence_digest:
+        if not recorded:
+            # No newer evidence, and nothing recorded: reuse is exactly
+            # what it was before D73, with no extra call.
+            return run
+        return _reused(run, effective, withdrawn, note)
+    if spend.halted or clock.monotonic() >= deadline:
+        why = (
+            "the review's spend was halted"
+            if spend.halted
+            else "the review's wall clock had passed"
+        )
+        return _reused(
+            run, effective, withdrawn, f"the re-assessment was not run: {why}"
+        )
+    scrubber = Redactor(
+        redactor.known_secrets,
+        redactor.sources,
+        (*redactor.flagged, *diff_secrets.values),
+    )
+    outcome = _reassess_call(
+        event,
+        lens,
+        body,
+        contract,
+        fence_nonce,
+        context,
+        [c for c in effective.findings if c.verified],
+        trees,
+        diff,
+        scope,
+        model,
+        spend,
+        resolved,
+        clock,
+        deadline,
+    )
+    number = len(recorded) + 1
+    ledger.start(reassess_key, number)
+    ledger.finish(
+        reassess_key,
+        number,
+        outcome,
+        scrub=lambda text: scrubber(text).text,
+        evidence_digest=(
+            evidence_digest if outcome.attestation is Attestation.ATTESTED else None
+        ),
+    )
+    effective, withdrawn, note = effective_outcome(
+        settled.outcome, ledger.attempts(reassess_key)
+    )
+    return _reused(run, effective, withdrawn, note)
+
+
+def _reassess_call(
+    event: PrEvent,
+    lens: str,
+    body: str,
+    contract: str,
+    fence_nonce: str,
+    context: Sequence[UntrustedBlock],
+    prior: Sequence[CheckedFinding],
+    trees: SourceTrees,
+    diff: str,
+    scope: frozenset[str],
+    model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+) -> AttemptOutcome:
+    """One bounded re-assessment call (D73): the prior findings and the
+    review's context blocks in, one final reply out, quote-checked like an
+    ordinary reply's. No tools are offered -- the head SHA is unchanged,
+    so the code the findings cite is the code that is there -- and there
+    is no repair turn: a reply outside the contract is the failed attempt
+    it is, recorded with no digest stored, so the next review of this head
+    re-runs the bounded call. The call is reserved at its worst case
+    against the review's shared spend (D68's derived limits and dollar
+    ceiling) and settled like any turn; a BYOK refusal halts the review's
+    spend the way one in the loop does."""
+    sources = read_sources(trees.head, diff, scope)
+    request = TurnRequest(
+        reassess_system(lens, body, contract, fence_nonce),
+        (
+            UserText(
+                reassess_turn(event, prior_findings_block(prior), context, fence_nonce)
+            ),
+        ),
+        (),
+        None,
+    )
+    priced = _reserve_call(model, request, spend, clock, deadline)
+    if not isinstance(priced, Decimal):
+        found = priced[2] if len(priced) > 2 else None
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({priced[0]}),
+            detail=priced[1],
+            limit_hit=found,
+        )
+    worst = priced
+    try:
+        reply = model.turn(request)
+    except ByokRefusedError as exc:
+        spend.settle(worst, None)
+        spend.halt()
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED, frozenset({Cause.MODEL_ERROR}), detail=str(exc)
+        )
+    except TransportError as exc:
+        spend.settle(worst, None)
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.TRANSPORT_ERROR}),
+            detail=str(exc),
+        )
+    except BoundaryError as exc:
+        spend.settle(worst, None)
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({_refusal_cause(exc)}),
+            detail=str(exc),
+        )
+    spend.settle(worst, reply.cost_usd)
+    if not isinstance(reply, FinalReply):
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.UNPARSED}),
+            detail="the re-assessment reply was a tool call, and the turn has none",
+        )
+    try:
+        parsed = parse_reassess_reply(reply.text)
+    except ContractError as exc:
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED, frozenset({Cause.UNPARSED}), detail=str(exc)
+        )
+    if parsed.lens != lens or parsed.body_sha256 != body_digest(body):
+        return AttemptOutcome(
+            Attestation.MISACKNOWLEDGED,
+            detail="the re-assessment reply named another lens or body",
+        )
+    try:
+        judged = judge(
+            parsed,
+            prior,
+            with_head_files(sources, trees.head, ()),
+            resolved.quote_tolerance,
+        )
+    except ContractError as exc:
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED, frozenset({Cause.UNPARSED}), detail=str(exc)
+        )
+    return AttemptOutcome(
+        Attestation.ATTESTED,
+        judged.causes,
+        findings=judged.checked,
+        turns=1,
+        changed_files=None,
+        dropped=parsed.dropped,
+        withdrawn=judged.withdrawn,
+        revises=judged.revises,
+    )
+
+
 def _attempts(
     bridge: Bridge,
     job: LensJob,
@@ -935,6 +1277,7 @@ def _attempts(
     review_started: float,
     session: _Session,
     scrub: Callable[[str], str],
+    evidence_digest: str | None = None,
 ) -> str:
     step = next_step(ledger.attempts(key), limits.retries)
     while isinstance(step, RunAttempt):
@@ -966,11 +1309,14 @@ def _attempts(
                     detail=str(exc),
                 ),
                 scrub=scrub,
+                evidence_digest=evidence_digest,
             )  # fmt: skip
             raise
         else:
             session.secrets.extend(secrets_seen)
-            ledger.finish(key, step.number, outcome, scrub=scrub)
+            ledger.finish(
+                key, step.number, outcome, scrub=scrub, evidence_digest=evidence_digest
+            )
         step = next_step(ledger.attempts(key), limits.retries)
     return f"lens {job.lens}: {len(ledger.attempts(key))} attempt(s)"
 
@@ -1236,12 +1582,7 @@ def render_draft(
                 f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
                 for name, why in review.not_picked
             ]
-    dropped = _dropped_notes(review)
-    if dropped:
-        lines += ["", "## Dropped findings (left out of this review)", ""]
-        lines += [
-            "- " + quote_untrusted(note, QUOTED_CHARS, scrub=scrub) for note in dropped
-        ]
+    lines += _reassess_sections(review, scrub)
     lines += ["", "## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
@@ -1546,6 +1887,8 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append("escalated: the retry also failed")
     if r.retry_pending:
         parts.append("its retry did not run before the review ended")
+    if r.reassess_note:
+        parts.append(f"re-assessment: {r.reassess_note}")
     repairs = o.nudges.count("quote-repair")
     if repairs:
         parts.append(f"{repairs} quote-repair turn(s)")
@@ -1561,6 +1904,29 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
     return f"{head}; " + "; ".join(parts)
 
 
+def _reassess_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The two sections a re-assessment (D73) can add to the draft, in
+    order: the findings dropped for an unknown severity -- the lens's own
+    run's and a re-assessment's alike -- and the prior findings a
+    re-assessment withdrew or revised. Each section is empty when nothing
+    backs it."""
+    return [*_dropped_lines(review, scrub), *_withdrawn_lines(review, scrub)]
+
+
+def _dropped_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The draft's dropped-findings section, or an empty list when no
+    finding was dropped for an unknown severity."""
+    dropped = _dropped_notes(review)
+    if not dropped:
+        return []
+    return [
+        "",
+        "## Dropped findings (left out of this review)",
+        "",
+        *("- " + quote_untrusted(note, QUOTED_CHARS, scrub=scrub) for note in dropped),
+    ]
+
+
 def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:
     return tuple(
         note
@@ -1568,3 +1934,52 @@ def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:
         if result.outcome is not None
         for note in result.outcome.dropped
     )
+
+
+def _withdrawn_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The draft's withdrawn-findings section (D73), or an empty list when
+    no re-assessment withdrew or revised anything: what the finding was,
+    the stated reason the newer evidence showed it wrong, and, for a
+    revision, the finding that replaced it."""
+    pairs = [(result, w) for result in review.lenses for w in result.withdrawn]
+    if not pairs:
+        return []
+    return [
+        "",
+        "## Withdrawn findings (re-assessed with newer evidence)",
+        "",
+        *(_withdrawn_line(result, w, scrub) for result, w in pairs),
+    ]
+
+
+def _withdrawn_line(
+    result: LensResult, w: Withdrawn, scrub: Callable[[str], str]
+) -> str:
+    """One withdrawn prior finding (D73): what it was, the stated reason
+    the newer evidence showed it wrong, and, for a revision, the finding
+    that replaced it -- so a reader can tell a finding was revised and not
+    lost. Every value here is model-written or PR-written text, so it is
+    quoted as data."""
+    text = (
+        f"- {result.lens} withdrew "
+        f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+        f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)}. "
+        f"Reason, quoted: {quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
+    )
+    if w.replacement is None:
+        return text
+    if w.replacement.verified:
+        return text + f". Revised finding: {_finding_id(result, w.replacement)}"
+    return text + ". The revised finding did not verify; see Not verified"
+
+
+def _finding_id(result: LensResult, checked: CheckedFinding) -> str:
+    """The minted id of one of the result's effective findings, found by
+    identity: `effective_outcome` puts the replacement's own object in the
+    composed outcome, so the same object the withdrawal carries is in the
+    list the ids were minted over."""
+    findings = () if result.outcome is None else result.outcome.findings
+    for n, held in enumerate(findings, 1):
+        if held is checked:
+            return f"L{result.index}-F{n}"
+    return "a finding this draft does not list"

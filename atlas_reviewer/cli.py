@@ -87,7 +87,7 @@ from atlas_reviewer.domain import (
 )
 from atlas_reviewer.draft import telemetry_section
 from atlas_reviewer.eval_harness import EvalFormatError, load_directory
-from atlas_reviewer.evidence import PullInfo, parse_pull
+from atlas_reviewer.evidence import PullInfo, Remark, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.gather import Collected, pr_commits
 from atlas_reviewer.github_api import GitHubClient
@@ -142,6 +142,7 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
+from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, snapshot_digest
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
 from atlas_reviewer.review_wide import (
     LensPreferencesRead,
@@ -637,7 +638,9 @@ _BODY_MARKER = re.compile(r"=== lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\
 class _DryRunLensModel:
     """A lens turn that acknowledges the delivered body and reports no
     findings. It calls no tool, so a dry run spends nothing and leaves
-    file coverage incomplete."""
+    file coverage incomplete. A request with no tools is D73's
+    re-assessment turn; it answers in the re-assessment reply's shape,
+    confirming every prior finding by silence."""
 
     name = "dry-run"
 
@@ -654,6 +657,11 @@ class _DryRunLensModel:
                 "body_sha256": match.group(2),
                 "findings": [],
             }
+        first = getattr(request.messages[0], "text", "") if request.messages else ""
+        if first.startswith(REASSESS_TARGET_PREFIX):
+            # D73's re-assessment turn: the dry run confirms every prior
+            # finding by silence.
+            payload["withdrawn"] = []
         return FinalReply(json.dumps(payload), Decimal("0.01"))
 
 
@@ -723,13 +731,20 @@ def _conversation_block(
     github: GitHubReader,
     pull_info: PullInfo | None,
     redactor: Redactor,
-    scrub: Callable[[str], str],
     budget: ConversationBudget,
     fit: int | None,
+    remarks: Sequence[Remark],
 ) -> tuple[UntrustedBlock | None, tuple[Omission, ...]]:
     """The one-shot path's conversation block for the agentic first turn
     (D52): the same `build_conversation` assembly the `review` command
     runs, with every fetch or parse cut recorded as an omission.
+
+    `remarks` are gathered by the caller (`fetch_remarks`), which keeps
+    them for D73's evidence-snapshot digest -- a reused settled lens's
+    re-assessment must see a comment posted after it settled even when
+    this review's own block is omitted -- so this builder fetches only the
+    commits, and the caller records the remarks gather's omissions beside
+    the block's own.
 
     `fit` is the characters the model's input room holds for the context
     blocks, or None when the model names no room and D52's fixed caps
@@ -771,7 +786,6 @@ def _conversation_block(
         )
     collected = Collected()
     commits = pr_commits(event, github, collected)
-    remarks = fetch_remarks(event, github, collected, scrub=scrub)
 
     def build(size: int) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
         conversation = build_conversation(
@@ -975,15 +989,23 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     _attestation_ledger_path(args, env, scratch), clock
                 )
                 fit = _input_room_chars(limits, lens_model, plan, event, diff)
+                # The remarks are gathered here, before the block is
+                # built, so a review whose conversation block is omitted
+                # still holds them -- D73's snapshot digest covers the
+                # conversation a reused lens settled before, and newer
+                # comments must move it whether or not the block fit.
+                remarks_collected = Collected()
+                remarks = fetch_remarks(event, github, remarks_collected, scrub=scrub)
                 block, context_omissions = _conversation_block(
                     event,
                     github,
                     pull_info,
                     redactor,
-                    scrub,
                     conversation_budget,
                     fit,
+                    remarks,
                 )
+                context_omissions = (*remarks_collected.omissions, *context_omissions)
                 # The CI block takes the room the conversation left (the
                 # first turn's budget order is conversation, then CI, then
                 # the prior rounds), so the two blocks together cannot
@@ -991,12 +1013,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 conversation_bytes = (
                     len(block.content.text.encode("utf-8")) if block else 0
                 )
+                ci_collected = Collected()
                 ci, ci_omissions = ci_block(
                     event,
                     github,
                     redactor,
                     clock,
                     None if fit is None else fit - conversation_bytes,
+                    collected=ci_collected,
                 )
                 context = tuple(b for b in (block, ci) if b is not None)
                 context_omissions = (*context_omissions, *ci_omissions)
@@ -1027,6 +1051,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     context_omissions=context_omissions,
                     round_log=RoundLog(_state_dir(args, env) / "rounds.jsonl"),
                     prior_chars=prior,
+                    evidence_digest=snapshot_digest(
+                        ci_collected, remarks, remarks_collected
+                    ),
                 )
                 review = replace(
                     review,

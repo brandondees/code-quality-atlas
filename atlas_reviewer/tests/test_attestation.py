@@ -713,3 +713,88 @@ def test_a_settled_single_attempt_keeps_its_own_duplicate_findings():
     )
     step = next_step((Attempt(1, clean),))
     assert len(step.outcome.findings) == 2
+
+
+# ------------------------------------------------- D73: digest and references
+
+
+def test_a_reassessed_outcome_reads_back_exactly(tmp_path):
+    """A re-assessment's recorded withdrawals and revisions survive the
+    file: each a `[label, reason]` pair and an `[index, label, reason]`
+    triple, written back as tuples with the index an integer (the mutant
+    that drops either field from the round-trip loses the re-assessment's
+    effect on every later review and fails here)."""
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(
+        KEY,
+        1,
+        outcome(withdrawn=(("P1", "the check now passes"),), revises=((2, "P2", "the run failed"),)),
+        scrub=str,
+    )  # fmt: skip
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.withdrawn == (("P1", "the check now passes"),)
+    assert attempt.outcome.revises == ((2, "P2", "the run failed"),)
+
+
+def test_an_ordinary_outcome_reads_back_without_reassessment_references(tmp_path):
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str)
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.withdrawn == ()
+    assert attempt.outcome.revises == ()
+
+
+def test_the_digest_recorded_with_a_finish_reads_back(tmp_path):
+    """The evidence snapshot's digest (D73) is stored with the finished
+    attempt and read back by key, so the reuse path can compare it against
+    a later review's snapshot."""
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str, evidence_digest="a" * 64)
+    assert ledger(tmp_path).evidence_digest(KEY) == "a" * 64
+
+
+def test_the_digest_reads_from_the_last_finished_attempt(tmp_path):
+    """Two finishes: the digest the reuse path compares against is the
+    last attempt's, so a re-assessment's own digest supersedes the lens
+    run's."""
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str, evidence_digest="a" * 64)
+    book.start(KEY, 2)
+    book.finish(KEY, 2, outcome(), scrub=str, evidence_digest="b" * 64)
+    assert ledger(tmp_path).evidence_digest(KEY) == "b" * 64
+
+
+def test_no_digest_is_stored_when_none_was_passed(tmp_path):
+    """A finish without a digest -- a caller that gathers no snapshot, or
+    a ledger line from before D73 -- reads as None: "cannot be shown to be
+    current"."""
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str, evidence_digest=None)
+    assert ledger(tmp_path).evidence_digest(KEY) is None
+
+
+def test_an_unfinished_attempt_records_no_digest(tmp_path):
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    assert ledger(tmp_path).evidence_digest(KEY) is None
+
+
+def test_a_malformed_reassessment_reference_refuses_the_line(tmp_path):
+    """A withdrawn entry that is not a `[label, reason]` pair, or a revises
+    entry whose index is not an integer from 1, is a damaged line the way
+    a torn write is: the attempt reads as abandoned and fails closed."""
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(withdrawn=(("P1", "why"),)), scrub=str)
+    lines = book.path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    finished["outcome"]["withdrawn"] = [["P1"]]
+    lines[-1] = json.dumps(finished)
+    book.path.write_text("\n".join(lines) + "\n")
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.causes == {Cause.ABANDONED}

@@ -74,6 +74,7 @@ def ci_block(
     clock: Clock,
     room: int | None,
     config: IngestConfig | None = None,
+    collected: Collected | None = None,
 ) -> tuple[UntrustedBlock | None, tuple[Omission, ...]]:
     """The head SHA's CI evidence block and every omission, for an agentic
     first turn.
@@ -87,10 +88,16 @@ def ci_block(
     block whole and names it. None: the model names no input room, so the
     fixed cap stands and the per-call token check stays the only bound.
     The gather runs first, so a failed or partial fetch is recorded even
-    when no block is built."""
+    when no block is built.
+
+    `collected`, when given, is the caller-owned `Collected` the gather
+    fills (D73): the caller keeps the gathered items, failures and notes
+    so the review's evidence-snapshot digest can be taken over them; None
+    gathers into a private one and drops them, as before this parameter."""
     if config is None:
         config = IngestConfig()
-    collected = Collected()
+    if collected is None:
+        collected = Collected()
     gather_head_ci(event, github, clock.now, redactor, config, collected)
     # Every gather failure is an omission (D42), whatever else was read:
     # a check-run listing that could not be fetched is CI evidence nobody
