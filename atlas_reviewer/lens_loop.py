@@ -1032,8 +1032,12 @@ def retry_reasons(outcome: AttemptOutcome) -> tuple[str, ...]:
 
 # The in-flight backpressure's waits (round-1 review of #717, M-1): how
 # long one wake of the settle wait sleeps in real time, and the real-time
-# backstop on the whole wait for a clock that cannot advance. The bound
-# that matters is the caller's wall deadline on its own clock.
+# backstop a STALLED review clock earns (round-2 review of #717, M-1R --
+# armed only when the clock shows no progress across wakeups, so a
+# healthy clock's wait is bounded by the review wall, not by wall-seconds
+# here). The slice is load-bearing: progress is guaranteed by the
+# slice-bounded re-check, not by the notify -- do not remove the slice
+# timeout because a notify looks reliable (the C2 hazard).
 BACKPRESSURE_SLICE_S = 0.05
 BACKPRESSURE_REAL_LIMIT_S = 10.0
 
@@ -1052,10 +1056,13 @@ class Spend:
     worst cases are still in flight waits, bounded by the review wall
     (round-1 review of #717, M-1), for one of them to settle -- the pool's
     concurrent first turns otherwise refused the last lens of a wave its
-    first call, the missing-lens failure. A reservation whose settled spend
-    plus its own worst case cannot fit even with nothing in flight still
-    stops, and a wait that runs out of wall stops too: spend never passes
-    the cap."""
+    first call, the missing-lens failure. The real-time backstop inside
+    the wait arms only when the review clock itself stops moving across
+    wakeups (round-2 review of #717, M-1R): on a healthy clock the wall
+    is the bound, however long a turn takes. A reservation whose settled
+    spend plus its own worst case cannot fit even with nothing in flight
+    still stops, and a wait that runs out of wall stops too: spend never
+    passes the cap."""
 
     limits: Limits
     calls: int = 0
@@ -1127,13 +1134,17 @@ class Spend:
     def _wait_for_settle(
         self, worst_usd: Decimal, clock: Clock, wait_until: float
     ) -> None:
-        """Wait for an in-flight call to settle, until the wall deadline
-        passes. A settle (or a halt) wakes the wait; each wake re-checks
-        the room under the held lock. The wall deadline is on `clock`'s
-        scale, and a real-time backstop bounds the wait when a clock
-        cannot advance -- a stopped test clock, or a clock that lies --
-        so a wait cannot outlive the review that waits in it."""
-        real_deadline = time.monotonic() + BACKPRESSURE_REAL_LIMIT_S
+        """Wait for an in-flight call to settle, bounded by the review
+        wall: `wait_until` is the caller's wall deadline on `clock`'s own
+        scale, and the wait ends when that wall passes. A settle (or a
+        halt) wakes the wait; each wake re-checks the room under the held
+        lock. The real-time backstop arms only when the review clock
+        itself shows no progress across wakeups -- a stopped test clock,
+        or a clock that lies -- so on a healthy clock the wall is the
+        bound, however long a turn takes (round-2 review of #717, M-1R);
+        a stalled clock's wait still ends, on the backstop."""
+        real_deadline: float | None = None
+        last_seen = clock.monotonic()
         while True:
             if self._halted.is_set():
                 return
@@ -1141,9 +1152,17 @@ class Spend:
                 return
             if self.settled_usd + worst_usd > self.limits.reservation_usd:
                 return
-            if clock.monotonic() >= wait_until:
+            now = clock.monotonic()
+            if now >= wait_until:
                 return
-            if time.monotonic() >= real_deadline:
+            if now > last_seen:
+                # The clock is moving: the wall bounds this wait, and a
+                # stalled-clock backstop, if one was armed, disarms.
+                real_deadline = None
+            elif real_deadline is None:
+                real_deadline = time.monotonic() + BACKPRESSURE_REAL_LIMIT_S
+            last_seen = now
+            if real_deadline is not None and time.monotonic() >= real_deadline:
                 return
             self._settled.wait(BACKPRESSURE_SLICE_S)
 
@@ -1658,6 +1677,12 @@ def _reserve_call(
     if not _valid_cost(worst):
         return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
     refused = spend.reserve(worst, clock=clock, wait_until=wait_until)
+    if spend.halted:
+        # The review halted while this reservation waited (or just after
+        # it committed): the call is not sent, and the outcome is the halt
+        # the loop already records, not a dollar stop (round-2 review of
+        # #717, n-7).
+        return Cause.MODEL_ERROR, HALTED_CALL
     if refused is not None:
         return _stopped(refused)
     return worst

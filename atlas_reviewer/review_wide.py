@@ -23,7 +23,10 @@ the review's worst-case *projections*, and a pool of concurrent first
 turns projects several worst cases at once, so a clamped reservation can
 be smaller than one wave's worst-case reservations. It does not stop a
 lens for that: `Spend.reserve` waits, bounded by the review wall, for an
-in-flight call to settle, and only stops when the settled spend plus the
+in-flight call to settle -- the wait's real-time backstop arms only when
+the review clock itself stops moving across wakeups (round-2 review of
+#717, M-1R), so on a healthy clock the wall is the bound, however long a
+turn takes -- and only stops when the settled spend plus the
 call's own worst case cannot fit even with nothing in flight. Total
 spend never passes the ceiling. What the limits never do is size a
 review cheaper than thoroughness needs. The default ceiling is $10
@@ -77,16 +80,17 @@ DEFAULT_REVIEW_CEILING_USD = Decimal("10.00")
 
 # The `REVIEW.md` line the reviewed repo sets its ceiling with. The value
 # runs to a `#` comment or the end of the line, as the file's other
-# settings do; a bare `review_ceiling_usd:` with no value matches too --
-# a line present with nothing usable in it.
-CEILING_LINE = re.compile(r"^review_ceiling_usd:(?:[ \t]+([^#]*?))?[ \t]*(?:#.*)?$")
+# settings do; the separator after the colon is optional (`review_ceiling_usd:15`
+# parses, round-2 review of #717, m-7), and a bare `review_ceiling_usd:`
+# with no value matches too -- a line present with nothing usable in it.
+CEILING_LINE = re.compile(r"^review_ceiling_usd:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$")
 REVIEW_MD = "REVIEW.md"
 # What a seen-but-unusable ceiling line says (round-1 review of #717,
 # m-5): the fail-open fallback is not silent.
 _UNUSABLE_NOTE = (
     f"the reviewed repo's merge-base {REVIEW_MD} carries a "
     "review_ceiling_usd: line that is not a positive dollar amount; it is "
-    "ignored and the configured ceiling stands"
+    "ignored and the configured ceiling (default $10) stands"
 )
 # Bound the file the ceiling line is read from, as `quotes` bounds the
 # files it checks.
@@ -141,7 +145,7 @@ def review_md_ceiling(base_tarball: bytes) -> CeilingRead:
                         f"the reviewed repo's merge-base {REVIEW_MD} is over the "
                         f"{MAX_CHECKED_BYTES}-byte read bound, so its "
                         "review_ceiling_usd: line, if any, was not read; the "
-                        "configured ceiling stands",
+                        "configured ceiling (default $10) stands",
                     )
                 return _ceiling_value(data.decode("utf-8", errors="replace"))
     except (tarfile.TarError, OSError, EOFError):

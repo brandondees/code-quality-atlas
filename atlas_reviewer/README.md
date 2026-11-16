@@ -1135,9 +1135,12 @@ D41 records the 2026-11-12 probe that did.
   once, so a clamped reservation can be smaller than one wave's
   worst-case reservations; a reservation that would pass the cap only on
   other calls' in-flight worst cases waits, bounded by the review wall,
-  for one of them to settle instead of stopping its lens, and stops
-  outright only when the settled spend plus its own worst case cannot
-  fit even with nothing in flight. Spend never passes the ceiling.
+  for one of them to settle instead of stopping its lens — the wait's
+  real-time backstop arms only when the review clock itself stops moving
+  across wakeups, so on a healthy clock the wall is the bound, however
+  long a turn takes (round-2 review of #717, M-1R) — and stops outright
+  only when the settled spend plus its own worst case cannot fit even
+  with nothing in flight. Spend never passes the ceiling.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*

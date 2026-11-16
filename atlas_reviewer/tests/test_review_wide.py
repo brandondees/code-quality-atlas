@@ -10,8 +10,9 @@ from decimal import Decimal
 
 import pytest
 
+from atlas_reviewer import lens_loop
 from atlas_reviewer.agentic_config import load_agentic_limits
-from atlas_reviewer.attestation import AttemptLedger, Attestation, LensState
+from atlas_reviewer.attestation import AttemptLedger, Attestation, Cause, LensState
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.coordinator import render_draft, review_lenses, status_line
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
@@ -19,9 +20,12 @@ from atlas_reviewer.lens_loop import (
     DEFAULT_PER_LENS_CALLS,
     DEFAULT_PER_LENS_USD,
     DEFAULT_REVIEW_CEILING_USD,
+    HALTED_CALL,
     AgenticLimits,
     Derivation,
     Spend,
+    TurnRequest,
+    _reserve_call,
 )
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.review_wide import (
@@ -305,6 +309,16 @@ def test_a_commented_or_spaced_ceiling_line_is_honored():
     assert review_md_ceiling(tarball).value == Decimal("7.25")
 
 
+def test_a_no_space_ceiling_line_is_honored():
+    """The tight form parses too (round-2 review of #717, m-7): a repo
+    that hand-writes `review_ceiling_usd:15` gets its ceiling, not a
+    silent fall-back to the default."""
+    tarball = _tarball({"REVIEW.md": b"review_ceiling_usd:15\n"})
+    read = review_md_ceiling(tarball)
+    assert read.value == Decimal(15)
+    assert read.note == ""
+
+
 def test_no_review_md_or_no_line_leaves_the_default_standing():
     assert review_md_ceiling(_tarball({})).value is None
     assert (
@@ -322,6 +336,7 @@ def test_an_unusable_ceiling_value_is_ignored_not_refused():
     stands -- the way REVIEW.md's own policy treats an unknown value."""
     for raw in (
         b"review_ceiling_usd: later\n",
+        b"review_ceiling_usd:bad\n",
         b"review_ceiling_usd: 0\n",
         b"review_ceiling_usd: -3\n",
         b"review_ceiling_usd:\n",
@@ -587,6 +602,159 @@ def test_a_backpressure_wait_runs_out_at_the_wall():
     assert hit is not None
     assert hit.limit == "reservation_usd"
     assert spend.calls == 3
+
+
+def test_a_healthy_clock_bounds_the_wait_not_the_backstop(monkeypatch):
+    """M-1R (round-2 review of #717): the real-time backstop arms only
+    when the review clock itself stops moving across wakeups. A freeing
+    settle that arrives after 22 seconds of *clock* advance -- beyond the
+    10-second backstop's reading -- still reserves: on a healthy clock
+    the review wall is the bound, however long a turn takes. The backstop
+    is shrunk to a quarter second so the unconditional-backstop mutant
+    (which stops the wait at 10 wall-seconds regardless of the clock)
+    dies here instead of needing a ten-second test."""
+    monkeypatch.setattr(lens_loop, "BACKPRESSURE_REAL_LIMIT_S", 0.25)
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    clock = FakeClock()
+
+    def tick():
+        for _ in range(30):
+            time.sleep(0.05)
+            clock.advance(1)
+
+    threading.Thread(target=tick, daemon=True).start()
+    results: list[object] = []
+
+    def fourth():
+        results.append(spend.reserve(Decimal("2.90"), clock=clock, wait_until=1000))
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    time.sleep(1.2)  # the clock is past 20 s and still moving
+    spend.settle(Decimal("2.90"), Decimal("0.02"))
+    waiting.join(timeout=5)
+    assert results == [None]
+    assert spend.calls == 4
+
+
+def test_a_wait_stops_at_the_wall_on_a_healthy_clock():
+    """M-1R's second test: the wait outlives the wall and stops at it. On
+    a moving clock the wall, not the backstop, ends the wait -- which is
+    also the wall-deadline mutant's kill (C9): a waiter that ignores the
+    wall on a healthy clock never comes back."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    clock = FakeClock()
+
+    def tick():
+        for _ in range(40):
+            time.sleep(0.05)
+            clock.advance(1)
+
+    threading.Thread(target=tick, daemon=True).start()
+    results: list[object] = []
+
+    def fourth():
+        results.append(spend.reserve(Decimal("2.90"), clock=clock, wait_until=5))
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    waiting.join(timeout=5)
+    assert not waiting.is_alive()  # C9 would leave it waiting forever
+    hit = results[0]
+    assert hit is not None and hit.limit == "reservation_usd"
+    assert clock.monotonic() >= 5  # the wall, not the backstop, ended it
+
+
+def test_a_genuine_stop_does_not_wait():
+    """Kills the genuine-stop-disabled mutant (C8, round-2 review of
+    #717, n-4): when the settled spend plus the call's worst case cannot
+    fit even with nothing in flight, the stop is immediate -- the mutant
+    parks the reservation in the wait and burns the stalled clock's
+    backstop out first."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    spend.settle(Decimal("2.90"), Decimal("0.02"))
+    results: list[object] = []
+
+    def fourth():
+        results.append(
+            spend.reserve(Decimal("10.50"), clock=FakeClock(), wait_until=10**6)
+        )
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    waiting.join(timeout=2)
+    assert not waiting.is_alive()
+    hit = results[0]
+    assert hit is not None and hit.limit == "reservation_usd"
+    assert spend.calls == 3
+
+
+def test_a_halt_wakes_a_parked_waiter():
+    """Kills the halt-ignored mutant (C10, round-2 review of #717, n-4):
+    a reservation parked in the wait when the review halts wakes and
+    stops instead of riding the stalled clock's backstop out."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+    results: list[object] = []
+
+    def fourth():
+        results.append(
+            spend.reserve(Decimal("2.90"), clock=FakeClock(), wait_until=10**6)
+        )
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    time.sleep(0.2)  # parked
+    spend.halt()
+    waiting.join(timeout=2)
+    assert not waiting.is_alive()
+    hit = results[0]
+    assert hit is not None and hit.limit == "reservation_usd"
+
+
+def test_a_halted_review_gives_a_parked_reservation_the_halt_outcome():
+    """Round-2 review of #717, n-7: a reservation parked in the wait when
+    the review halts comes back from `_reserve_call` as the halt outcome
+    the loop already records, not as a dollar stop."""
+    limits = replace(LIMITS, reservation_usd=Decimal("10.00")).resolve()
+    spend = Spend(limits)
+    for _ in range(3):
+        assert spend.reserve(Decimal("2.90")) is None
+
+    class Model:
+        name = "worst"
+
+        def worst_case_usd(self, request):
+            return Decimal("2.90")
+
+        def turn(self, request):
+            raise AssertionError("a halted review sends no call")
+
+    results: list[object] = []
+
+    def fourth():
+        results.append(
+            _reserve_call(Model(), TurnRequest("", (), ()), spend, FakeClock(), 10**6)
+        )
+
+    waiting = threading.Thread(target=fourth, daemon=True)
+    waiting.start()
+    time.sleep(0.2)  # parked
+    spend.halt()
+    waiting.join(timeout=2)
+    assert not waiting.is_alive()
+    assert results[0] == (Cause.MODEL_ERROR, HALTED_CALL)
 
 
 def test_a_reservation_still_stops_when_nothing_in_flight_could_free_room(tmp_path):

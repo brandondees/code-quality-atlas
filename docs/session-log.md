@@ -1800,3 +1800,46 @@ call share is a conscious acceptance; and the "the ceiling is never a
 budget" prose now describes what actually binds — settled spend plus a
 call's own worst case against the ceiling, with in-flight waits in
 between. Offline only.
+
+## 2026-11-15 — round-2 fixes for #717: the backstop arms only on a stalled clock, the exception-path settles are pinned, and the tight ceiling line parses
+
+The round-2 protocol review of #717 came back COMMENT (1 Major, 2 Minor,
+4 Nit) with the round-1 Major re-opened by the backstop itself:
+`BACKPRESSURE_REAL_LIMIT_S` (10 s) armed on every wait, and 10 wall
+seconds is shorter than the pinned model's typical first turn (31–46 s in
+the D58 trials), so the fourth lens at pool 4 could still take a BUDGET
+stop in production — the acceptance run had passed only because its
+scripted turns take 0.2 s. The backstop now arms only when the review
+clock shows no progress across wakeups — recorded at wait start,
+re-checked each wake, disarmed the moment the clock moves — so on a
+healthy clock the review wall is the bound however long a turn takes,
+and a stalled clock (a stopped test clock, one that lies) still ends its
+wait on the backstop. Two tests pin it: a freeing settle arriving after
+22 seconds of clock advance — with the backstop shrunk to a quarter
+second so the unconditional-backstop mutant dies in a second, not in
+ten — still reserves; and a wait on a moving clock stops at the wall,
+with the clock's reading at the stop naming the wall as what ended it.
+The exception-path settles are pinned per exit — a turn stopped at the
+output cap, a transport timeout with its retry, a transport failure, and
+a model error each settle at their reservation (`settled_usd` equals
+`committed_usd`), which kills the dropped-settle mutants C4 and C5 whose
+survival had left the wall-bounded guarantee resting on an unpinned
+invariant. The tight `review_ceiling_usd:15` form parses now (the
+separator after the colon is optional; the round-2 regex had required a
+space and silently dropped the tight form), a no-space unusable value
+still routes to the note, and `_UNUSABLE_NOTE` (and the oversized-file
+note) now say "the configured ceiling (default $10) stands", which reads
+true when nothing is configured. A reservation parked in the wait when
+the review halts comes back from `_reserve_call` as the halt outcome
+(`HALTED_CALL`), not as a dollar stop. The timing-level pins for the
+round-2 survivors: the wall-ignored mutant C9 and the halt-ignored
+mutant C10 die on thread-and-join pins (a parked waiter must return
+within two wall-seconds of the wall passing or of the halt), and C8 —
+the genuine-stop check disabled — is left recorded as equivalent by
+construction: the wait's own settled re-check returns immediately in the
+same case, so the branch is a fast path, not a distinct behavior, and no
+test can tell them apart without reshaping the code to kill a mutant.
+C1/C7 (a dropped notify) stand as the round-2 review found them: the
+0.05 s polling slice is the correctness mechanism and now carries a
+comment saying so, with the C2 hazard (removing the slice because a
+notify looks reliable) named in it. Offline only.
