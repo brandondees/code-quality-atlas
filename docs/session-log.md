@@ -2124,8 +2124,8 @@ exist since the reused result was produced, the lens re-assesses its
 judgment with that new evidence and adds, revises or follows up on
 findings where the new information changes anything. The re-assessment
 behavior is not implemented in this PR: the reuse key and the reuse code
-are unchanged, and the behavior is the follow-up the decision records,
-covering the conversation block's identical gap since D67. Docs only:
+are unchanged, and the behavior is the follow-up the decision records
+(#726), covering the conversation block's identical gap since D67. Docs only:
 `docs/open-questions.md` (D73) and this entry; no code, no test, no
 generated or mirrored file, and the full local gates were green on the
 merge before this docs-only commit.
