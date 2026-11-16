@@ -745,6 +745,24 @@ def test_exclude_wins_over_include_on_the_fallback_path():
     assert "overrides the guideline" in chosen.note
 
 
+def test_a_fallback_exclude_removes_the_controller_added_hygiene():
+    """Round-1 F2, with something the fallback exclude can actually drop:
+    the controller-added hygiene choice is excludable when the picker fell
+    back, exactly as on the success path."""
+    library = small_bundle("checking-restraint", PR_HYGIENE)
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: "not json",
+        library,
+        scrub=str,
+        pr_text="All 12 tests passed.",
+        preferences=LensPreferences(exclude=(PR_HYGIENE,)),
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == list(CRITICAL_TIER)
+    assert f"dropped the controller-added {PR_HYGIENE} lens" in chosen.note
+
+
 # --- round 1 (F4): the controller's shape facts -------------------------
 
 
