@@ -250,9 +250,11 @@ class OpenRouterLensModel:
         payload = _payload(self.provider, uncapped, terms, bounds, selected)
         fixed = input_token_bound(json.dumps(payload)) * terms.input_rate
         left = budget_usd - fixed - terms.request_fee
+        # The rate is positive by parse: `parse_model_terms` refuses a zero
+        # completion rate (`PricingUnknownError`), and a zero reasoning
+        # rate leaves the completion rate -- no zero-division and no
+        # free-output branch to reach here.
         rate = terms.completion_rate + terms.reasoning_rate
-        if rate <= 0:
-            return bounds.max_output_tokens if left >= 0 else 0
         return min(bounds.max_output_tokens, math.floor(left / rate))
 
     def turn(self, request: TurnRequest) -> ModelTurn:

@@ -1520,19 +1520,19 @@ def _fit_to_reservation(
     left = spend.left()
     try:
         cap = model.output_tokens_within(request, left)
-    except (LimitRefused, BoundaryError):
+    except LimitRefused:
         return refused
+    except BoundaryError as exc:
+        return _fit_stopped(refused, left, f"could not be fitted ({exc})")
     if cap < floor:
         # D68's stop text is kept: the derivation's configured value and
         # setting name the formula and the knobs, and the observed value
         # gains what the fit found (D50).
-        return LimitHit(
-            "reservation_usd",
-            refused.configured,
-            f"{refused.observed}; the ${left} left covers {max(cap, 0)} output "
-            f"tokens, under min_output_tokens {floor} "
+        return _fit_stopped(
+            refused,
+            left,
+            f"covers {max(cap, 0)} output tokens, under min_output_tokens {floor} "
             "(--min-output-tokens or ATLAS_MIN_OUTPUT_TOKENS)",
-            refused.setting,
         )
     fitted = replace(request, max_output_tokens=cap)
     try:
@@ -1542,6 +1542,21 @@ def _fit_to_reservation(
     if not _valid_cost(worst):
         return refused
     return fitted, worst, spend.reserve(worst, clock=clock, wait_until=wait_until)
+
+
+def _fit_stopped(refused: LimitHit, left: Decimal, detail: str) -> LimitHit:
+    """The fit's refusal: D68's derivation-aware configured and setting
+    text is kept, and the observed value names the remainder the fit was
+    working from (round-1 review of #740). A negative remainder -- spend
+    past its reservation, which a settle that reported above its own
+    worst case can produce -- is shown at zero; what the remainder could
+    cover is already clamped where the cap is computed."""
+    return LimitHit(
+        "reservation_usd",
+        refused.configured,
+        f"{refused.observed}; the ${max(left, Decimal(0))} left {detail}",
+        refused.setting,
+    )
 
 
 def _failed_calls(failures: list[str]) -> str:

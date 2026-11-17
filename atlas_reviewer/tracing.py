@@ -431,6 +431,14 @@ class _TracedModel:
         self._bound_note = getattr(self._model, "bound_note", "")
         return amount
 
+    def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
+        """The wrapped model's fit answer (D50). Every production lens
+        model is wrapped, so a reservation-short call's fit must see it
+        through this wrapper, not around it (round-1 review of #740):
+        without the forward, the fit dies in an `AttributeError` exactly
+        when D50 exists to act."""
+        return self._model.output_tokens_within(request, budget_usd)
+
     def turn(self, request: TurnRequest) -> Any:
         tracer = self._owner._tracer
         assert tracer is not None
