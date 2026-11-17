@@ -2613,3 +2613,187 @@ branch's own unmerged entry. `deploy-service.md`'s recovery paragraph
 and `rounds.py`'s docstrings now state the narrowed rule. 3,119
 reviewer tests at 96.39% coverage, ruff/format/mypy/drift clean.
 Offline only.
+
+## 2026-11-17 — the reviewer image carries every file the controller reads at review time (v6's synthesis.md crash)
+
+atlas-reviewer-service v6, the image built from main `d5a2a93f`, failed its
+first live review (of PR #732) on 2026-11-16 with
+`FileNotFoundError: '/opt/atlas/collapsed/skills/reviewing-a-change/reference/synthesis.md'`
+from `pathlib.Path.read_text` in the review subprocess, exit 1. Root cause:
+packaging, not generation. `finding_contract()` reads `lens_loop.SYNTHESIS`
+(added 2026-11-12 in 4057c636) and `coordinator.py` calls it with no path
+when a lens run starts, but the Dockerfile — written 2026-11-10 in 81a279d3,
+before that read landed — copied only the change bundle's `SKILL.md`, its
+`reference/lenses` directory, and the picker's `SKILL.md`. CI stayed green
+because `test_fly_deploy.py::test_image_copies_exactly_the_files_the_controller_reads`
+snapshotted the Dockerfile's COPY source list and checked that those files
+exist in the checkout, so a new runtime read never touched it; the lens-loop
+tests read `SYNTHESIS` against the full checkout, where the file exists, and
+nothing in CI builds the image. The same allow-list class also silently
+weakened reviews: `LensLibrary.body()` falls back to the other collapsed
+entrypoints' lens bodies when the picker names a lens the change bundle does
+not ship, and none of those trees was copied, so an audit, decision, or
+artifact lens in the image was NOT RUN ("no lens body in the bundle") instead
+of crashing. The fix copies the whole committed `collapsed/skills` tree (plus
+the unchanged picker `SKILL.md` copy) so the image holds every file the
+controller reads at the same path the code resolves — no per-file exception
+next to the lenses copy to drift out of sync again — and replaces the
+snapshot test with `test_image_carries_every_file_the_controller_reads`,
+which derives the required set from the modules that read
+(`harness.DEFAULT_BUNDLE`, `lens_loop.SYNTHESIS`, `picker.PICKER_PATH`, and
+every collapsed entrypoint's `reference/lenses/*/body.md`) and requires each
+file to land at `/opt/atlas/<repo path>` via a COPY whose source is the file
+or a parent directory; a companion test checks no `.dockerignore` rule hides
+one. The derived test fails on the pre-fix tree (synthesis.md plus all three
+fallback entrypoints' lens bodies uncovered), and kills a mutant that copies
+the tree to the wrong destination. `tool-evidence.md` rides along in the tree
+copy but is not a runtime read. 3,106 reviewer tests, ruff/mypy clean.
+Offline only. After merge, a Fly redeploy of atlas-reviewer-service is needed
+to pick this up; not deployed from here.
+
+## 2026-11-17 (same day) — round-1 fixes for #733: the dockerignore guard failed open on interior `**`, and the eval references left the derivation
+
+The round-1 review's Major: the new `.dockerignore` guard's `str.replace`
+translation chain destroyed its own `**` semantics — the `.*` emitted for
+`**` was rewritten by the later `*` pass into `.[^/]*`, which cannot cross a
+`/` — so the most natural rule for the v6 crash file
+(`collapsed/**/synthesis.md`, mutant M6) hid it from Docker while the guard
+stayed green, and a middle-directory rule (`**/reference`) was unreachable
+too because the leading-`**/` candidates only ran from each segment to the
+path's end. The guard now translates each rule token by token (`**/` → zero
+or more whole segments at any depth, `**` → crossing, `*`/`?` within one
+segment, character classes member-for-member, literals `re.escape`d) and
+walks the file's path node by node the way docker build walks the context:
+the last matching rule decides each node, and a directory the walk leaves
+excluded prunes its subtree, which is what makes the committed
+`atlas_reviewer/fixtures/*` + two `!` re-include rules behave as Docker
+behaves — and a `!` cannot resurrect a file whose parent directory the walk
+pruned. Nineteen single-rule and four multi-rule parametrized cases pin the
+semantics (M6, `**/reference`, `a/**/b` at zero and deep segments, `.git`
+vs `xgit`, root-anchored `*.md`, `**/*.py[cod]`, the committed negation
+triple, and the caveat cases). The Minor: the deleted snapshot had been the
+only guard on the non-skill COPY lines, so dropping
+`atlas_reviewer/fixtures/eval-references` (the `eval` subcommand's
+reference set, read by `eval_harness._REFERENCES`) or the whole
+`atlas_reviewer/*.py` package COPY left every test green (mutant M7). Both
+are now in the derived set — the `pr-*.json` fixtures and the top-level
+package modules — so each drop fails
+`test_image_carries_every_file_the_controller_reads`, and the glob COPY's
+`*` is matched with the same within-segment semantics. The Nits shipped
+with them: the PR body's count corrected to 33 files (1 synthesis + 32
+fallback lens bodies), the Dockerfile comment narrowed to the
+collapsed/skills tree, and the `!` walk semantics documented in the guard's
+docstring. Mutants M6, `**/reference`, M7, and the package-COPY drop each
+kill exactly one test. 3,129 reviewer tests, ruff/mypy clean. Offline only.
+
+## 2026-11-17 (same day) — round-2 fixes for #733: the dockerignore guard fails closed on what it cannot model, and the `!`-rescue claim corrected to BuildKit
+
+Correction first: the round-1 entry's "a `!` cannot resurrect a file whose
+parent directory the walk pruned" states classic-builder behavior as
+Docker's. Modern Docker (BuildKit's fsutil walk) descends into an excluded
+directory when an exception's literal reaches below it, so under rules
+`dir` + `!dir/file.md` the file ships — also under `!dir/sub/x.md` and a
+wildcarded child exception, though a bare trailing-`**` exception still
+prunes. The guard keeps the classic walk, so that case is its known
+strictness gap: it can report a file hidden where BuildKit would ship it,
+never the reverse — the test now says "at least what docker would", the
+case is annotated as the gap, and the agreeing shapes are pinned.
+
+The Major: the round-1 translator still had three fail-open divergences
+from moby/patternmatcher, each a future rule that hides a file in Docker
+while the guard stays green — no `filepath.Clean` preprocessing
+(`collapsed//skills` and `./collapsed` forms compile to regexes that can
+never match a real path), no backslash-escape handling
+(`synthesis\.md`), and `[!` read as a negated class where Go reads `!` as
+an ordinary member. Rather than chase full Docker emulation, the guard
+now fails closed: every rule is Cleaned Go-faithfully (empty segments
+collapse, `.` drops, `..` resolves; leading and trailing `/` dropped,
+which only over-reports), and a rule carrying a backslash escape or a
+`[!` class raises "unsupported .dockerignore syntax; extend the guard"
+instead of being mis-translated — the two constructs whose faithful
+behavior is ambiguous or easy to get wrong, while the plain and `[^`-
+negated classes the committed `.dockerignore` uses stay modeled. Mutants
+`collapsed//skills`, `collapsed/**/synthesis\.md`, and `[!n]ollapsed/
+skills` appended to `.dockerignore` each now fail
+`test_no_dockerignore_rule_hides_a_runtime_read`; Clean-equivalence and
+refusal cases are pinned parametrized. 3,139 reviewer tests, ruff/mypy
+clean. Offline only.
+
+## 2026-11-17 (same day) — round-3 fixes for #733: the guard refuses POSIX bracket classes, and Clean keeps a leading `/` like Go
+
+Two more fail-open classes in the `.dockerignore` guard, both closed the
+round-2 way — refuse or mirror, never mis-translate:
+
+- POSIX bracket classes: `_class_end` closed a class at the first `]`, so
+  `[[:alpha:]]` compiled as the Python members set `{[, :, a, l, p, h}` plus
+  a literal `]`, while Go passes `[` and `]` raw into RE2, where
+  `[[:alpha:]]` is any letter — the mutant `[[:alpha:]]ollapsed/**` hid the
+  whole `collapsed/` tree in Docker while every dockerignore test stayed
+  green. `_unsupported_syntax` now scans rule-by-rule and refuses `[[:`
+  (RE2 compiles it; Python re does not), a `[` nested inside a class, a `[!`
+  class, and a backslash escape, all with the same "unsupported
+  .dockerignore syntax; extend the guard" error; plain `[...]`/`[^...]`
+  classes stay modeled (the committed `**/*.py[cod]` needs one).
+- `_clean` dropped a leading `/`, which Go's Clean keeps — and the kept
+  slash compiles to a `^/...$` regex that never matches a relative context
+  path, so a leading-slash rule is inert in Docker in BOTH directions. For
+  an exclude rule the drop only over-reported; for a `!` exception
+  (`!/collapsed/skills` against a preceding exclude) it re-included a file
+  Docker hides — fail-open. `_clean` now keeps the slash (and drops a `..`
+  that would climb above the root, as Go does), so the model is inert
+  exactly where Docker is. The mutant kill is the parametrized pair
+  `["collapsed/skills", "!/collapsed/skills"]` (a lone appended
+  `!/collapsed/skills` is inert in both engines, since no committed rule
+  excludes the tree); the review's three fuzz shapes (`["[^a]", "!//?"]`,
+  `["y", "!/?"]`, `["**//", "c*", "!/**/**/y/"]`) are pinned too, and the
+  two docstrings no longer claim the dropped slash only over-reported.
+
+Cleaning the raw rule before reading `!` also exposed a third divergence
+the fuzz found on its own: Go's Clean resolves `..` against the segment
+carrying the `!`, so `![a]/../y` Cleans to the exclude rule `y` — the
+negation vanishes — while strip-first ordering made the model see an
+exception. The guard now Cleans first and reads `!` off the cleaned rule,
+as `patternmatcher.New` does. Verified against a fresh transcription of
+`moby/patternmatcher` and BuildKit's fsutil walk (seed 11): 19,533
+comparable cases, 0 fail-opens, 878 fail-closed over-reports, and 0
+divergences across the committed `.dockerignore` × all 158 runtime reads.
+The COPY glob sources now pass the same refusal gate (`image_path_of`
+raises on `\`, `[!`, `[[:`, nested-`[`), closing the round-3 Nit. 3,167
+reviewer tests at 96.37%, ruff/format/mypy clean. Offline only.
+
+## 2026-11-17 (same day) — round-4 fixes for #733: the guard reads `.dockerignore` through ignorefile.ReadAll, as BuildKit does
+
+Correction first: the round-3 entry's leading-slash semantics were built on
+the round-3 review's wrong ground truth, which that review has since
+retracted. BuildKit does not feed `.dockerignore` lines to
+`patternmatcher.New` directly — `frontend/dockerui` reads them through
+`moby/patternmatcher/ignorefile.ReadAll`, whose contract is: skip lines whose
+first raw character is `#` and blanks, trim, read `!` from the first raw
+character first (and re-trim the remainder), `filepath.Clean` the remainder,
+strip one leading `/` when more than one character remains — "/some/path and
+some/path are considered equivalent" — and re-attach the `!`. So
+`/collapsed`, `//collapsed`, `/../collapsed`, and `/x/../../collapsed` are
+all live excludes of `collapsed`, `!/collapsed/skills` is a live re-include,
+and `![a]/../y` normalizes to `!y` — the negation is never eaten by ReadAll.
+The guard's normalization is now one function transcribing exactly that
+(cited to moby/patternmatcher v0.6.1 in its docstring), and the four
+appended-slash mutants each fail `test_no_dockerignore_rule_hides_a_
+runtime_read`; the leading-slash and rescue parametrized cases were re-pinned
+to the corrected outcomes and the docstrings no longer claim the slash is
+inert.
+
+The re-verification ran against the real matcher, not a transcription: the
+fuzz corpus (5 seeds, 74,916 generated cases, 73,191 comparable after
+refusals) was scored by a Go program calling `ignorefile.ReadAll` +
+`patternmatcher.MatchesOrParentMatches` — fail-opens 0, over-reports 29 (the
+guard's documented strictness: the unmodeled exception descent and the wider
+mid-segment `**`), committed `.dockerignore` × 158 runtime reads: 0
+divergences. The real-matcher fuzz then surfaced one more quirk the
+transcriptions had all missed: `patternmatcher.New` cleans the ReadAll
+output — `!` attached — before reading `!`, and that second Clean can eat
+the negation (`!../../*` cleans to the exclude-everything rule `*`, because
+the `..` pops the `!..` segment), so the guard now applies New's Clean after
+ReadAll's, and the fuzz's own fail-open cases are pinned parametrized. The
+round-3 refusals (`\`, `[!`, `[[:`, nested `[`) and the COPY-source refusal
+gate are unchanged. 3,175 reviewer tests at 96.37%, ruff/format/mypy clean.
+Offline only.

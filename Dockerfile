@@ -23,8 +23,11 @@ RUN pip install --require-hashes --only-binary=:all: -r /tmp/requirements.txt \
 
 COPY atlas_reviewer/*.py /opt/atlas/atlas_reviewer/
 COPY atlas_reviewer/fixtures/eval-references /opt/atlas/atlas_reviewer/fixtures/eval-references
-COPY collapsed/skills/reviewing-a-change/SKILL.md /opt/atlas/collapsed/skills/reviewing-a-change/SKILL.md
-COPY collapsed/skills/reviewing-a-change/reference/lenses /opt/atlas/collapsed/skills/reviewing-a-change/reference/lenses
+# The whole collapsed/skills tree: the controller reads the change
+# bundle's synthesis.md at review time and falls back to the other
+# entrypoints' lens bodies, so per-file copies here drift out of sync
+# with those reads.
+COPY collapsed/skills /opt/atlas/collapsed/skills
 COPY skills/choosing-review-lenses/SKILL.md /opt/atlas/skills/choosing-review-lenses/SKILL.md
 COPY atlas_reviewer/docker-entrypoint.sh /usr/local/bin/atlas-reviewer
 RUN chmod 755 /usr/local/bin/atlas-reviewer
