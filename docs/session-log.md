@@ -2604,3 +2604,39 @@ branch's own unmerged entry. `deploy-service.md`'s recovery paragraph
 and `rounds.py`'s docstrings now state the narrowed rule. 3,119
 reviewer tests at 96.39% coverage, ruff/format/mypy/drift clean.
 Offline only.
+## 2026-11-17 — the reviewer image carries every file the controller reads at review time (v6's synthesis.md crash)
+
+atlas-reviewer-service v6, the image built from main `d5a2a93f`, failed its
+first live review (of PR #732) on 2026-11-16 with
+`FileNotFoundError: '/opt/atlas/collapsed/skills/reviewing-a-change/reference/synthesis.md'`
+from `pathlib.Path.read_text` in the review subprocess, exit 1. Root cause:
+packaging, not generation. `finding_contract()` reads `lens_loop.SYNTHESIS`
+(added 2026-11-12 in 4057c636) and `coordinator.py` calls it with no path
+when a lens run starts, but the Dockerfile — written 2026-11-10 in 81a279d3,
+before that read landed — copied only the change bundle's `SKILL.md`, its
+`reference/lenses` directory, and the picker's `SKILL.md`. CI stayed green
+because `test_fly_deploy.py::test_image_copies_exactly_the_files_the_controller_reads`
+snapshotted the Dockerfile's COPY source list and checked that those files
+exist in the checkout, so a new runtime read never touched it; the lens-loop
+tests read `SYNTHESIS` against the full checkout, where the file exists, and
+nothing in CI builds the image. The same allow-list class also silently
+weakened reviews: `LensLibrary.body()` falls back to the other collapsed
+entrypoints' lens bodies when the picker names a lens the change bundle does
+not ship, and none of those trees was copied, so an audit, decision, or
+artifact lens in the image was NOT RUN ("no lens body in the bundle") instead
+of crashing. The fix copies the whole committed `collapsed/skills` tree (plus
+the unchanged picker `SKILL.md` copy) so the image holds every file the
+controller reads at the same path the code resolves — no per-file exception
+next to the lenses copy to drift out of sync again — and replaces the
+snapshot test with `test_image_carries_every_file_the_controller_reads`,
+which derives the required set from the modules that read
+(`harness.DEFAULT_BUNDLE`, `lens_loop.SYNTHESIS`, `picker.PICKER_PATH`, and
+every collapsed entrypoint's `reference/lenses/*/body.md`) and requires each
+file to land at `/opt/atlas/<repo path>` via a COPY whose source is the file
+or a parent directory; a companion test checks no `.dockerignore` rule hides
+one. The derived test fails on the pre-fix tree (synthesis.md plus all three
+fallback entrypoints' lens bodies uncovered), and kills a mutant that copies
+the tree to the wrong destination. `tool-evidence.md` rides along in the tree
+copy but is not a runtime read. 3,106 reviewer tests, ruff/mypy clean.
+Offline only. After merge, a Fly redeploy of atlas-reviewer-service is needed
+to pick this up; not deployed from here.
