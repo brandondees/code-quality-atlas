@@ -108,22 +108,43 @@ def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) 
         report.files_note,
         *(f"not reviewed in full: {path}" for path in report.files_not_read),
     )
-    body = "\n\n".join(
-        (
-            _BANNER,
-            f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
-            _findings_section(report.findings, scrub),
-            _section("Lenses run", report.lenses_run, scrub),
-            _section("Lenses not run", report.lenses_not_run, scrub),
-            _FILES + "\n\n" + _section("Files read", files, scrub),
-            _section("Limit stops", report.limit_stops, scrub),
-            _section("Cost", report.cost_lines, scrub),
-        )
+    head = (
+        _BANNER,
+        f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
+    )
+    tail = (
+        _section("Lenses run", report.lenses_run, scrub),
+        _section("Lenses not run", report.lenses_not_run, scrub),
+        _FILES + "\n\n" + _section("Files read", files, scrub),
+        _section("Limit stops", report.limit_stops, scrub),
+        _section("Cost", report.cost_lines, scrub),
     )
     mark = marker_for(key)
     ending = f"\n\n[comment cut to fit the post limit]\n\n{mark}"
-    if len(body) + 2 + len(mark) <= MAX_COMMENT_CHARS:
+
+    def assemble(items: tuple[str, ...], dropped: int) -> str:
+        return "\n\n".join((*head, _findings_section(items, scrub, dropped), *tail))
+
+    def fits(b: str) -> bool:
+        return len(b) + 2 + len(mark) <= MAX_COMMENT_CHARS
+
+    findings = list(report.findings)
+    body = assemble(tuple(findings), 0)
+    if fits(body):
         return f"{body}\n\n{mark}"
+    # The cut must not land inside a finding's inner code span, where an
+    # unclosed backtick run would swallow the rest of the comment: drop
+    # whole findings from the end -- the draft lists them most severe
+    # first -- until what remains fits. The section names whatever was
+    # dropped; a body that still overflows with no finding left to drop
+    # ends in the plain hard cut, as it did before findings were posted.
+    dropped = 0
+    while findings:
+        findings.pop()
+        dropped += 1
+        body = assemble(tuple(findings), dropped)
+        if fits(body):
+            return f"{body}\n\n{mark}"
     keep = MAX_COMMENT_CHARS - len(ending)
     return body[: max(keep, 0)] + ending
 
@@ -136,7 +157,9 @@ def _section(title: str, items: tuple[str, ...], scrub: Callable[[str], str]) ->
     return f"## {title}\n\n{listed}"
 
 
-def _findings_section(items: tuple[str, ...], scrub: Callable[[str], str]) -> str:
+def _findings_section(
+    items: tuple[str, ...], scrub: Callable[[str], str], dropped: int = 0
+) -> str:
     """The Findings section, rendered unlike every other section.
 
     A finding bullet is one line the controller assembled (`_finding_line`):
@@ -150,16 +173,27 @@ def _findings_section(items: tuple[str, ...], scrub: Callable[[str], str]) -> st
     200-character default would cut a real finding's Fix and Evidence off
     (the controller mints finding text at 600 and evidence at 1,200
     characters). So the line is posted as the controller rendered it,
-    scrubbed and uncapped: bounded only by the 65,000-character cut, which
-    the section's position ahead of the lenses keeps from eating the
-    findings first. The invariant this rests on -- findings reach
+    scrubbed and uncapped. The invariant this rests on -- findings reach
     `ReviewReport` only through `summarize_draft`, from a draft the
     coordinator rendered -- is pinned by the round-trip tests through the
-    real `render_draft`."""
-    if not items:
-        listed = "None."
-    else:
+    real `render_draft`.
+
+    `dropped` is the count of whole findings the 65,000-character cut
+    removed from the end of the list (the draft lists findings most severe
+    first): the cut never lands inside a finding's inner code span, so an
+    overflowing post drops findings whole and the section names them
+    instead of leaving an unclosed span or a false none."""
+    if items:
         listed = "\n".join(f"- {scrub(item)}" for item in items)
+        if dropped:
+            listed += (
+                f"\n[{dropped} of {dropped + len(items)} findings"
+                " cut to fit the post limit]"
+            )
+    elif dropped:
+        listed = f"[all {dropped} findings cut to fit the post limit]"
+    else:
+        listed = "None."
     return f"## Findings\n\n{listed}"
 
 

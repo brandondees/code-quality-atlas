@@ -2893,3 +2893,41 @@ added, and the round-0 entry's "minus the placeholder" wording is
 corrected in place (this branch's own, unmerged entry). 3,182 reviewer
 tests at 96.38%, 882 tooling at 95.20%, ruff/format/mypy/drift clean.
 Offline only.
+
+## 2026-11-17 (same day) — #739 round-2 fixes: the section anchor, the siblings pin, and a cut that lands on a finding boundary
+
+Round 2 APPROVEs from both reviewers, with one shared Minor and two Nits.
+
+The Minor was in the extraction, not the rendering: `section` matched its
+heading anywhere in the draft and took the first occurrence, so posting the
+finding bullets raw was safe only because nothing before the real heading
+could carry the literal `## Findings (verified quotes only)` line — true,
+but pinned by nothing. The class fix went into `section` itself for every
+section: the match is anchored to a whole heading line and takes the last
+occurrence, which is always the real section (the controller writes each
+section once, in order), and a pre-section field rendered unquoted — the
+selection note, a lens note — that quotes a heading line can no longer
+steal the extraction. A quoted field can never carry a whole line
+(`quote_untrusted` collapses whitespace), so the doubled-heading shape
+needs unquoted prose; the test injects it through a real `render_draft`
+selection note and asserts the post takes only the real section.
+
+Nit 1: the minted `siblings` field's `quote_untrusted` had no test — a
+mutant dropping it survived all 86. The new assertion pins the escaped span
+form of a siblings string carrying a backtick, an HTML comment and a
+mention.
+
+Nit 2: the hard cut could land inside a finding's inner code span and leave
+an unclosed backtick run. `render_comment` now drops whole findings from
+the end (the draft lists findings most severe first) until what remains
+fits, and the Findings section names the drops — `[1 of 3 findings cut to
+fit the post limit]` after the kept bullets, `[all N findings cut to fit
+the post limit]` when every finding was dropped, never a false none — while
+a body that still overflows with nothing left to drop ends in the plain
+hard cut that predates findings. Mutants applied by hand and killed, all
+with `PYTHONDONTWRITEBYTECODE=1` per the round-1 stale-`__pycache__` lesson:
+the unanchored first-occurrence `section` (M9), the siblings quoting
+dropped (M10), the cut reverted to the hard cut (M11), the all-dropped note
+reverted to a bare none (M12), and the partial-drop note removed (M13).
+3,185 reviewer tests at 96.41%, 882 tooling at 95.20%,
+ruff/format/mypy/drift clean. Offline only.

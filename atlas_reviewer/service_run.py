@@ -686,11 +686,26 @@ def _agentic_coverage_note(status: Mapping[str, object]) -> str:
 
 
 def section(text: str, heading: str) -> str:
-    marker = f"## {heading}\n"
-    start = text.find(marker)
+    """The text after the last whole-line ``## heading`` and before the
+    next heading line.
+
+    The match is anchored to a whole heading line and takes the last
+    occurrence (#739 round 2): a pre-section field the draft renders
+    unquoted -- the selection note, a lens note -- could otherwise carry
+    the heading's own literal line and steal the extraction, and the real
+    section is always the latest one the controller wrote. No quoted
+    field can carry a whole line -- `quote_untrusted` collapses
+    whitespace -- so the only way the literal line appears twice is a
+    field the draft renders as prose."""
+    marker = f"\n## {heading}\n"
+    start = text.rfind(marker)
     if start < 0:
-        return ""
-    rest = text[start + len(marker) :]
+        probe = f"## {heading}\n"
+        if not text.startswith(probe):
+            return ""
+        rest = text[len(probe) :]
+    else:
+        rest = text[start + len(marker) :]
     nxt = rest.find("\n## ")
     return rest if nxt < 0 else rest[:nxt]
 

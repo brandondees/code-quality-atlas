@@ -446,6 +446,7 @@ FINDING = (
     "(tracing-correctness-and-invariants): rounds before summing. "
     "Fix: sum first"
 )
+SECOND_FINDING = "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it"
 
 
 def test_the_findings_reach_the_post_whole_with_the_recommended_line():
@@ -457,20 +458,17 @@ def test_the_findings_reach_the_post_whole_with_the_recommended_line():
         (),
         (),
         "COMMENT",
-        findings=(
-            FINDING,
-            "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it",
-        ),
+        findings=(FINDING, SECOND_FINDING),
     )
     key = post_key(EVENT)
     body = render_comment(report, key, lambda item: item)
     findings = body.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
     assert FINDING in findings
-    assert (
-        "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it" in findings
-    )
-    # The section sits right after the recommended-event line, so a cut to
-    # the post limit that trims lenses and cost still keeps the findings.
+    assert SECOND_FINDING in findings
+    # The section sits right after the recommended-event line. A tail that
+    # overflows on its own forces the cut past every finding: they are
+    # dropped whole, named in the section, and the marker survives the
+    # hard cut that the overflowing tail still needs.
     huge = ReviewReport(
         (),
         (),
@@ -479,10 +477,12 @@ def test_the_findings_reach_the_post_whole_with_the_recommended_line():
         tuple(f"stop-{i:04d}" for i in range(6000)),
         (),
         "COMMENT",
-        findings=(FINDING,),
+        findings=(FINDING, SECOND_FINDING),
     )
     cut = render_comment(huge, key, lambda item: item)
-    assert FINDING in cut
+    assert "[all 2 findings cut to fit the post limit]" in cut
+    assert FINDING not in cut and "L1-F2" not in cut
+    assert "[comment cut to fit the post limit]" in cut
     assert cut.endswith(marker_for(key))
     assert len(cut) <= 65_000
 
@@ -504,6 +504,67 @@ def test_a_long_non_finding_item_is_still_cut_at_the_two_hundred_default():
     stops = body.split("## Limit stops", 1)[1].split("## Cost", 1)[0]
     assert "x" * 200 + "..." in stops
     assert "x" * 201 not in stops
+
+
+_SPAN_FILLER = "stop-00000 | too large for one review pass | kept 1"
+
+
+def _span_finding(n: int) -> str:
+    return (
+        f'**L1-F{n}** [minor, defect, route: eng, introduced] `"calc.py:2"` '
+        "(tracing-correctness-and-invariants): the retry loop re-arms the "
+        "wall timer before the ledger write lands, and a crash in between "
+        "leaves the job unclaimed and unstuck until the next deploy, while "
+        "the queue grows without bound and every later enqueue is silently "
+        f"superseded for job {n}. "
+        'Fix: `"record the ledger write before re-arming the timer"`'
+    )
+
+
+def test_the_cut_drops_whole_findings_and_never_splits_a_span():
+    """Round 2 nit: the hard cut could land inside a finding's inner code
+    span and leave an unclosed backtick run. The cut now drops whole
+    findings from the end -- the draft lists them most severe first --
+    and names the drops; reverting to the hard cut fails here on the span
+    parity and on the kept findings' integrity."""
+    key = post_key(EVENT)
+    mark = marker_for(key)
+    identity = lambda item: item
+    findings = tuple(_span_finding(i) for i in (1, 2, 3))
+
+    def base_part(stops: tuple) -> int:
+        report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+        out = render_comment(report, key, identity)
+        assert out.endswith("\n\n" + mark)
+        return len(out) - 2 - len(mark) - len("## Findings\n\nNone.")
+
+    seed = (_SPAN_FILLER,) * 10
+    per_item = (base_part((_SPAN_FILLER,) * 30) - base_part(seed)) // 20
+    fs = lambda kept, note=0: (
+        13 + sum(2 + len(f) for f in findings[:kept]) + max(kept - 1, 0) + note
+    )
+    drop_note = "[1 of 3 findings cut to fit the post limit]"
+    upper = 65_000 - (fs(2, 1 + len(drop_note)) + 2 + len(mark))
+    lower = 65_000 - (fs(3) + 2 + 2 + len(mark)) + 1
+    target = (lower + upper) // 2
+    stops = (_SPAN_FILLER,) * (10 + (target - base_part(seed)) // per_item)
+
+    # Scenario preconditions: three findings overflow the limit, two plus
+    # the in-section drop note fit -- the assertions below test the cut,
+    # not the fixture arithmetic.
+    assert base_part(stops) + fs(3) + 2 + 2 + len(mark) > 65_000
+    assert base_part(stops) + fs(2, 1 + len(drop_note)) + 2 + len(mark) <= 65_000
+
+    report = ReviewReport((), (), "note", (), stops, (), "COMMENT", findings=findings)
+    cut = render_comment(report, key, identity)
+    assert cut.endswith("\n\n" + mark)
+    assert len(cut) <= 65_000
+    assert findings[0] in cut and findings[1] in cut
+    assert findings[2] not in cut
+    findings_part = cut.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert drop_note in findings_part
+    assert "[comment cut to fit the post limit]" not in cut
+    assert cut.count("`") % 2 == 0
 
 
 def test_a_report_without_findings_posts_none():
