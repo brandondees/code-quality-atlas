@@ -27,16 +27,22 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
-# Self-hosted runners don't get a fresh VM per run and this repo's own
-# runner registration processes one job at a time (docs/self-hosted-
-# runners.md), so without a concurrency group, superseded pushes to a
-# branch don't cancel -- they queue behind each other. Observed on this
-# fleet: three obsolete runs of the same workflow stacked on one branch,
-# each holding the single runner in turn ahead of everything else (#378).
+# Superseded pull_request runs are cancelled; a push to main (or a scheduled
+# run) never is. The original reason for that split was #378's single
+# self-hosted runner: obsolete pushes queued behind each other on one
+# machine, each holding it in turn. That contention is gone now that every
+# event runs on an ephemeral GitHub-hosted VM (D78) -- but the split stays,
+# for a different reason: a scheduled run shares this group with pushes to
+# main (both resolve to the default branch's ref), so cancelling in progress
+# on push would let any mid-week push cancel the weekly path-independent
+# pip-audit (#379) before it ran, leaving that CVE scan unexecuted until the
+# next week's cron; and letting each push to main finish keeps one complete,
+# recorded run per commit, which costs nothing extra on a public repo's free
+# hosted minutes. PR runs keep the cancel: they are far more frequent,
+# superseding one is unambiguous, and a superseded PR run's result is worth
+# nothing once the newer head has its own.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Cancel superseded PR runs; let a push to main (or a scheduled run)
-  # always finish.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -44,67 +50,42 @@ permissions:
 
 jobs:
   gate:
-    # #471: this job used to be self-hosted unconditionally, gated by an
-    # in-tree `if:` that skipped `pull_request` runs from a fork (persistent,
-    # personally-owned hardware executing arbitrary fork code was judged
-    # unacceptable).
+    # Every event now runs on a GitHub-hosted runner (D78). #471's concern --
+    # arbitrary fork code executing on this repo's persistent, personally-
+    # owned self-hosted hardware, which no in-tree gate could structurally
+    # prevent -- dissolves with the hardware: there is no persistent fleet
+    # left to expose, and `push`/`schedule` lose their "safe because they
+    # can't be forged by a PR branch" rationale for staying behind.
     #
-    # IMPORTANT, corrected after round-1 review (CodeRabbit) questioned the
-    # original version of this comment: for plain `pull_request` (unlike
-    # `pull_request_target`), GitHub evaluates the workflow file as it exists
-    # in the PR's own head -- confirmed against GitHub's own "Approving
-    # workflow runs from forks" guidance, which explicitly tells an approver
-    # to scrutinize proposed `.github/workflows/` changes (guidance that would
-    # be meaningless if such changes never took effect). That means a hostile
-    # PR editing THIS `runs-on:` expression back to an unconditional
-    # `[self-hosted, Linux]` gets that edit evaluated for its own run, exactly
-    # as it could have edited the old `if:` gate -- an editable in-tree
-    # condition can never structurally stop the PR that is editing it. The
-    # change below is therefore **not** a structural fix and does not, by
-    # itself, close #471; it narrows the default exposure window (a
-    # non-tampering `pull_request` run -- the overwhelming common case --
-    # now safely lands on ephemeral hosted hardware, same-repo or fork,
-    # instead of this fleet's persistent self-hosted hardware) while leaving
-    # the tampering case exactly where #471 originally placed it: gated only
-    # by the GitHub Settings value ("Require approval for all outside
-    # collaborators", not the default "first-time contributors only") that
-    # this repo's Settings must actually carry -- unverifiable from a
-    # checkout, and not changed by this commit. Real protection against a
-    # PR that edits its own `runs-on:`/`if:` needs a mechanism GitHub
-    # enforces independently of this file's content (that Settings value, or
-    # a required-reviewers Environment) -- tracked separately, not solved
-    # here.
+    # What #471's corrected analysis established still holds, unchanged:
+    # for plain `pull_request`, GitHub evaluates this workflow file as it
+    # exists in the PR's own head (confirmed against GitHub's own
+    # "Approving workflow runs from forks" guidance, which would be
+    # meaningless if such changes never took effect), so a hostile PR
+    # editing THIS `runs-on:` back to a persistent-runner label gets that
+    # edit evaluated for its own run -- an editable in-tree condition can
+    # never structurally stop the PR that is editing it. Real protection
+    # against that needs a mechanism GitHub enforces independently of this
+    # file's content (the Settings value "Require approval for all outside
+    # collaborators", or a required-reviewers Environment) -- still tracked
+    # in #471, still unverifiable from a checkout, and not changed by this
+    # file.
     #
-    # `push`/`schedule` (which never carry arbitrary fork content -- `push`
-    # here is branch-limited to `main` above, and `schedule` has no PR at
-    # all) stay on self-hosted, since neither can be forged by an untrusted
-    # PR branch. A side effect worth keeping regardless of the above: a
-    # non-tampering fork PR now gets a real CI run instead of an
-    # unconditional `skipped` step, the trade-off the old fork-gate's own
-    # comment had already flagged as worth revisiting once external
-    # contributions became common.
+    # `ubuntu-latest` is left floating rather than pinned to a dated image:
+    # every tool this job gates on is version-pinned independently of the
+    # runner OS (the hash-pinned requirements.txt, exact-version pip-tools/
+    # pip-audit/pip-licenses, and the checksum-verified upstream shellcheck
+    # and actionlint tarballs below -- the apt-pin breakage those two
+    # replaced was itself caused by coupling to a runner OS archive), so an
+    # image refresh changes the VM, not what the gates enforce.
     #
-    # Arch-agnostic on the self-hosted side on purpose: the fleet has an
-    # x86_64 Linux host (bazzite-runner-*) registered alongside the Mac's
-    # arm64 OrbStack VM, and `push`/`schedule` runs can land on either.
-    # Pinning ARM64 would strand this job on one machine and leave it queued
-    # whenever that machine is down or busy. `pull_request` runs always land
-    # on `ubuntu-latest` (x86_64) now, which moves arm64 coverage from
-    # pre-merge to post-merge only (round-1 review, `dees-bot`): before this
-    # change, a same-repo `pull_request` run could land on either self-hosted
-    # host, including arm64, giving a PR a chance at arm64 signal before
-    # merge; now an arm64-specific regression surfaces only once it's already
-    # on `main` via the `push` trigger. Low practical risk given the next
-    # paragraph (nothing here is genuinely arch-specific), but real: arm64 is
-    # still exercised, just later.
-    #
-    # Nothing in this job is arch-specific either way: the only step that
-    # fetches a prebuilt binary is `shellcheck` below, which already selects
-    # its asset and checksum from `uname -m` and errors loudly on an
-    # unrecognized arch rather than downloading the wrong one. Everything
-    # else is Python, actions/setup-python (which publishes both arches), or
-    # pure-Node actions.
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux"]') }}
+    # Nothing in this job is arch-specific either way: the only steps that
+    # fetch a prebuilt binary are `shellcheck` and `actionlint` below, which
+    # already select their asset and checksum from `uname -m` and error
+    # loudly on an unrecognized arch rather than downloading the wrong one.
+    # Everything else is Python, actions/setup-python (which publishes both
+    # arches), or pure-Node actions.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
@@ -304,59 +285,35 @@ jobs:
         if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         with:
           python-version: "3.12"
-          # #475/#589: `cache: 'pip'` is dropped on the `push`(main)/`schedule`
-          # branch of this job's `runs-on:` (persistent self-hosted runners,
-          # see that expression's own comment above), but added back for the
-          # `pull_request` branch, which #471 later routed to `ubuntu-latest`
-          # -- a fresh, ephemeral VM every run with no local `~/.cache/pip` to
-          # warm. #475 originally suspected this pinned action's pip cache key
-          # was arch-blind (`runner.os` only, per docs/self-hosted-runners.md's
-          # general "Known gotchas" warning for actions/cache) and would let
-          # one of this job's two self-hosted architectures (x86_64/arm64, see
-          # the job's own comment above) silently restore the other's
-          # incompatible wheels. That premise doesn't hold for this pinned
-          # commit: setup-python@v7.0.0's `pip-cache.ts` `computeKeys()`
-          # already includes `process.arch` in both the primary and restore
-          # keys (verified directly against the pinned SHA's source), so it's
-          # already arch-safe -- no different from `Swatinem/rust-cache`
-          # keying on the rustc host triple, per that same doc section. On the
-          # self-hosted branch, `cache: 'pip'` stays dropped for an unrelated,
-          # independently-valid reason: each host's own local `~/.cache/pip`
-          # already survives between jobs without actions/cache's network
-          # round-trip to GitHub's cache API, and the fresh-venv
-          # `--require-hashes` install below is already the source of
-          # correctness, not the cache -- so actions/cache there would add
-          # network overhead for a warm cache that's already local, not close
-          # an arch-mixing gap. Neither of those holds on `ubuntu-latest`: the
-          # cache is genuinely cold every run, so `cache: 'pip'` buys a real
-          # speedup with the same already-established arch safety.
-          cache: ${{ github.event_name == 'pull_request' && 'pip' || '' }}
-      # #366: this runner is self-hosted and persistent (see the job's own
-      # comment above) -- installing straight into its interpreter meant any
-      # pin already present in site-packages from a prior job was reported
-      # "Requirement already satisfied" and its hash was never checked at
-      # all, silently defeating --require-hashes below. Reproduced during the
-      # audit: with ruff already installed, a requirements.txt pinning it
-      # with a hash of 64 zeros still exited 0. A fresh venv per job (--clear
-      # as defense in depth, in case a self-hosted runner's $RUNNER_TEMP ever
-      # isn't wiped between jobs the way a hosted runner's is) guarantees
-      # nothing is ever already-satisfied, so every pin's hash is verified on
-      # every run. Exporting its bin/ onto $GITHUB_PATH -- rather than only
-      # this step -- carries the same guarantee through every later step that
-      # invokes pip/python/ruff/pytest (pip-tools and pip-audit below
-      # included), without touching each of them individually.
+          # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
+          # so `cache: 'pip'` buys a real speedup unconditionally. It is
+          # arch-safe regardless: setup-python's `pip-cache.ts`
+          # `computeKeys()` includes `process.arch` in both the primary and
+          # restore keys (verified directly against the pinned SHA's source,
+          # #475), so one architecture can never silently restore the other's
+          # incompatible wheels.
+          cache: 'pip'
+      # #366's fresh-venv dance is retired (D78): it existed because the
+      # persistent self-hosted runner's shared interpreter accumulated
+      # site-packages across jobs, letting an already-installed pin report
+      # "Requirement already satisfied" and skip its hash check entirely
+      # (reproduced during that audit: ruff preinstalled, a forged hash of 64
+      # zeros, exit 0). Each hosted run now gets a fresh VM and setup-
+      # python's clean tool-cache interpreter, so nothing is ever already-
+      # satisfied and every pin's hash is verified on every run, with no venv
+      # and no $GITHUB_PATH export needed -- setup-python already puts this
+      # exact interpreter's pip/python on PATH for every later step
+      # (pip-tools, pip-audit, ruff, pytest, tooling.cli included).
       - if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: |
-          python -m venv --clear "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt
-          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+        run: pip install --require-hashes -r requirements.txt
       - name: dependency vulnerability audit
         # Also runs on the weekly `schedule` trigger above (#379), independent
         # of the path filter, so a CVE against an unchanged pin doesn't wait
         # for the next python/requirements-touching push to be caught.
         #
-        # Placed immediately after venv setup -- the only thing it needs --
-        # and deliberately ahead of every other schedule-eligible step
+        # Placed immediately after the hash-verified dependency install --
+        # the only thing it needs -- and deliberately ahead of every other
+        # schedule-eligible step
         # (`tests` included) in this fail-fast job: a security scan must run
         # regardless of whether an unrelated later step (e.g. a stale
         # session-log currency check on a quiet week) fails and aborts the
@@ -399,8 +356,9 @@ jobs:
         # Python packages.
         run: mypy
       - name: tests
-        # `schedule` runs unconditionally (like the venv-setup and pip-audit
-        # steps above/below) rather than relying on the path filter: on a
+        # `schedule` runs unconditionally (like the dependency-install and
+        # pip-audit steps above/below) rather than relying on the path
+        # filter: on a
         # `schedule` event dorny/paths-filter has no `before` SHA to diff
         # against and falls back to the single last commit, so if that
         # commit happens to touch neither `python` nor `requirements`, this
@@ -527,7 +485,8 @@ jobs:
         #
         # Placement matters: this step must run here, before
         # requirements.txt-is-in-sync/dependency-vulnerability-audit install
-        # pip-tools/pip-audit into this same venv, for the identical reason
+        # pip-tools/pip-audit into this same environment, for the identical
+        # reason
         # those two steps' own comment below states -- pip-licenses scans
         # every package installed in the interpreter, not just
         # requirements.txt's own tree, so running it after those unpinned
@@ -569,7 +528,8 @@ jobs:
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
-      # this job's fresh venv, on top of the hash-verified `requirements.txt`
+      # this job's Python environment, on top of the hash-verified
+      # `requirements.txt`
       # install above. Every trusted gate above them (lint, format, tests,
       # eval structure, drift, generated-tree sync, license compatibility)
       # has already run and passed against the hash-verified install alone
@@ -604,8 +564,8 @@ jobs:
           # reuses an already-satisfying pinned line *verbatim, hash included*,
           # and only computes hashes for packages it newly resolves. So a
           # hand-edited hash on an already-pinned package survives this diff.
-          # `pip install --require-hashes` above (into a fresh per-job venv,
-          # #366) catches most of that: it verifies the one artifact pip
+          # `pip install --require-hashes` above catches most of that: it
+          # verifies the one artifact pip
           # actually resolves and downloads for this job's platform/Python
           # against the hash(es) listed for it, and exits 1 on any mismatch.
           #
@@ -654,8 +614,8 @@ jobs:
           # documenting how the file was produced are informational, not part
           # of the contract this gate checks.
           # $RUNNER_TEMP unconditionally, no ${RUNNER_TEMP:-/tmp} fallback --
-          # matching the convention the require-hashes install and shellcheck
-          # steps in this same job already use (#366/#378): GitHub Actions
+          # matching the convention the shellcheck and actionlint steps in
+          # this same job already use (#378): GitHub Actions
           # guarantees the var is set on every runner, so a fallback here
           # would only mask it silently going missing rather than failing loudly.
           work="$(mktemp -d "$RUNNER_TEMP/reqcheck.XXXXXX")"
@@ -704,8 +664,8 @@ jobs:
           # it installs identically on any Linux host regardless of distro or
           # release. Checksums are per-arch and verified, matching the
           # pinned-release-plus-checksum pattern used elsewhere in this org's
-          # CI. Both arches are listed so this step stays correct if the job
-          # ever moves back to a hosted x86_64 runner.
+          # CI. Both arches are listed so the step stays correct on any
+          # Linux hosted image, including the arm64 variant.
           #
           # Version is unchanged from the previous pin (0.10.0) — verified
           # again on the current runner that it reports no findings across
@@ -721,15 +681,13 @@ jobs:
             "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.${arch}.tar.xz"
           echo "${sha}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
-          # $RUNNER_TEMP, not $HOME/.local/bin (#378): this host is shared
-          # across repos with nothing reset between jobs, and $HOME/.local/bin
-          # persisted the binary onto every later job's PATH indefinitely.
-          # $RUNNER_TEMP is documented to be wiped between jobs, though (per
-          # the same hedge the require-hashes install above makes, #366) this
-          # step doesn't actually depend on that: it downloads, checksums,
-          # and overwrites the pinned binary unconditionally every run, so a
-          # leftover from a prior job here would just be clobbered, never
-          # trusted-as-is.
+          # $RUNNER_TEMP, not $HOME/.local/bin: the per-run scratch dir keeps
+          # the downloaded binary out of any PATH location a later step might
+          # assume is clean, and (the same hedge the require-hashes install
+          # above made for #366) this step doesn't depend on the dir's
+          # wiping anyway: it downloads, checksums, and overwrites the pinned
+          # binary unconditionally every run, so a leftover here would just
+          # be clobbered, never trusted-as-is.
           mkdir -p "$RUNNER_TEMP/bin"
           mv "$RUNNER_TEMP/shellcheck-${version}/shellcheck" "$RUNNER_TEMP/bin/shellcheck"
           chmod +x "$RUNNER_TEMP/bin/shellcheck"
@@ -768,7 +726,7 @@ jobs:
           # above, for the same reason: an apt/distro package would couple
           # this gate to whatever version the runner OS archive happens to
           # carry, which has already broken this repo's shellcheck pin twice
-          # across OS moves on this fleet.
+          # across OS moves.
           version=v1.7.12
           case "$(uname -m)" in
             aarch64|arm64) arch=arm64; sha=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
