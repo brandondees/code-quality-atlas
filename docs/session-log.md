@@ -2578,5 +2578,29 @@ names both paths now (N3). Four mutants applied by hand and killed:
 charge-any-named-line, set-aside-everything, no-quarantine, and the
 reverted casefold, each on its named test; the coordinator pin that a
 head-less bad line blocks the PR it names was re-pinned to the new
-rule. 3,116 reviewer tests, ruff/mypy clean, drift clean. Offline
+rule. 3,119 reviewer tests, ruff/mypy clean, drift clean. Offline
 only.
+
+## 2026-11-17 (same day) — round-2 fixes for #732: quarantine narrowed to decode failures, and the permission tests made root-independent
+
+The round-2 protocol review returned APPROVE with three cleanups. The
+quarantine no longer fires on every `OSError`: `RoundLog.read` moves a
+file aside only when its bytes cannot be decoded (`UnicodeError`) — a
+permission refusal, an unreachable parent, or a directory at the log's
+path renames nothing, keeps the file where it is, and stays the named
+omission and the operator's repair, so a transient read failure can
+never rename a healthy log out from under the path (killed by hand:
+the quarantine-on-any-OSError mutant fails on
+`test_a_directory_at_the_log_path_stays_put_and_stays_unreadable`,
+`test_a_permission_refusal_does_not_quarantine_and_the_file_stays_put`
+and `test_an_unreachable_log_does_not_quarantine_and_stays_put`). The
+two round-1 permission-based tests leaned on `chmod(0)`, which a root
+runner ignores; they are now root-independent fakes that raise the
+error for the target path only, the fragile `finally` restore is gone
+with them, and the four quarantine tests were verified passing under
+`sudo` as well as the normal user. Nit: the round-1 entry's test count
+said 3,116 where the suite has 3,119 — corrected here in this
+branch's own unmerged entry. `deploy-service.md`'s recovery paragraph
+and `rounds.py`'s docstrings now state the narrowed rule. 3,119
+reviewer tests at 96.39% coverage, ruff/format/mypy/drift clean.
+Offline only.

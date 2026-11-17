@@ -175,15 +175,17 @@ pull request and charges nobody; a garbled or version-skewed line that
 names this pull request is charged to it only when it sits at the head
 under review -- at an older head it is superseded data -- and that
 charge holds the review at COMMENT until the log is repaired, which is
-why the reader also acts: a file it cannot decode at all is moved aside
-automatically under a `.corrupt-<UTC timestamp>-<nanoseconds>` name
-beside the log, the review that saw it reports the omission once, and
-the next head starts a fresh log. The operator's recovery for a
-standing charge the reader cannot clear -- a garbled line at the
-current head, or an unreadable file the process cannot move -- is to
-repair or remove `/data/rounds/<repo>-<pr>.jsonl` by hand; salvage the
-quarantined copy first, because deleting the log loses only prior-round
-context. No cleanup path removes a round log: the run
+why the reader also acts on what it can repair: a file whose bytes it
+cannot decode is moved aside automatically under a
+`.corrupt-<UTC timestamp>-<nanoseconds>` name beside the log, the
+review that saw it reports the omission once, and the next head starts
+a fresh log. A read that fails any other way -- a permission refusal,
+an unreachable parent, a directory at the log's path -- renames
+nothing: the operator's recovery for that, and for a garbled line at
+the current head the reader cannot clear, is to repair or remove
+`/data/rounds/<repo>-<pr>.jsonl` by hand; salvage the quarantined copy
+first, because deleting the log loses only prior-round context. No
+cleanup path removes a round log: the run
 directory that is removed when a job ends does not contain it, and the
 log stays on the volume until a later cleanup slice trims it. At one
 record per finished review, growth is slow enough that the 1 GB volume

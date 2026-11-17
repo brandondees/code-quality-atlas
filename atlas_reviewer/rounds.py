@@ -20,8 +20,9 @@ data, and a line whose head cannot be read is not proven to hide
 current-head context, so it charges nobody. A line that
 names no pull request blocks no pull request: this reader cannot tell
 whose review it was, and charging every review in the file is the
-failure that rule avoids. A file the read cannot decode is moved aside
-(quarantined) once, so no later review inherits the loss.
+failure that rule avoids.     A file the read cannot decode is moved aside
+(quarantined) once, so no later review inherits the loss; a read that
+fails any other way leaves the file where it is for the operator.
 """
 
 from __future__ import annotations
@@ -81,10 +82,13 @@ class LogRead:
     the head the line claims when that is readable. `unattributed`
     counts lines that name no pull request. An unattributed line blocks
     no pull request. `file_unreadable` means the file itself could not
-    be read; the reader quarantined it aside -- named on
+    be read. When the failure is undecodable bytes (`UnicodeError`), the
+    reader quarantined it aside -- named on
     `quarantined_to`, empty when the file could not be moved -- so the
     next review starts fresh, and the review that saw it reports the
-    omission for itself."""
+    omission for itself; any other read failure (a permission refusal,
+    an unreachable parent, a directory at the path) leaves the file in
+    place and `quarantined_to` empty, for the operator to clear."""
 
     records: tuple[RoundRecord, ...] = ()
     unreadable: tuple[UnreadableLine, ...] = ()
@@ -110,10 +114,13 @@ class RoundLog:
     case-insensitively. `records_for` reports how many other pull
     requests were set aside. That drop is not an omission.
 
-    A file the read cannot decode is quarantined: moved aside under a
-    `.corrupt-` name, reported once by the review that saw it, and gone
-    from the log's path, so the next review starts fresh instead of
-    inheriting the omission for the life of the pull request."""
+    A file whose bytes the read cannot decode is quarantined: moved
+    aside under a `.corrupt-` name, reported once by the review that
+    saw it, and gone from the log's path, so the next review starts
+    fresh instead of inheriting the omission for the life of the pull
+    request. A read that fails any other way -- permissions, an
+    unreachable parent, a directory at the path -- renames nothing and
+    stays the operator's to clear."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -129,9 +136,16 @@ class RoundLog:
             if not self.path.exists():
                 return LogRead()
             text = self.path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
+        except UnicodeError:
             moved = self._quarantine()
             return LogRead(file_unreadable=True, quarantined_to=moved)
+        except OSError:
+            # A read that fails for any other reason -- a permission
+            # refusal, an unreachable parent, a directory at the path --
+            # is not this reader's to repair: nothing is renamed, the
+            # file stays put, and every review that tries reports the
+            # omission until the operator clears it.
+            return LogRead(file_unreadable=True)
         records: list[RoundRecord] = []
         unreadable: list[UnreadableLine] = []
         unattributed = 0

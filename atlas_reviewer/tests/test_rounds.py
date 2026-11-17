@@ -192,51 +192,68 @@ def test_an_undecodable_file_is_quarantined_and_the_next_read_starts_fresh(
     assert loaded.file_unreadable is False
 
 
-def test_a_directory_at_the_log_path_is_quarantined_too(tmp_path):
+def test_a_directory_at_the_log_path_stays_put_and_stays_unreadable(tmp_path):
+    """D74 round 2: quarantine is for bytes no reader can decode. A
+    directory at the log's path is an OSError, not a decode failure, so
+    it stays where it is and every review that tries keeps its named
+    omission until the operator moves it (the quarantine-on-any-OSError
+    mutant fails here)."""
     directory = tmp_path / "a-directory"
     directory.mkdir()
-    moved = RoundLog(directory).read()
-    assert moved.file_unreadable is True
-    assert ".corrupt-" in moved.quarantined_to
-    assert Path(moved.quarantined_to).is_dir()
-    assert not directory.exists()
+    stuck = RoundLog(directory).read()
+    assert stuck.file_unreadable is True
+    assert stuck.quarantined_to == ""
+    assert directory.is_dir()
 
 
-def test_a_locked_file_is_quarantined_when_the_directory_allows_it(tmp_path):
-    locked = tmp_path / "locked.jsonl"
-    locked.write_text('{"v": 1}\n', encoding="utf-8")
-    locked.chmod(0)
-    try:
-        moved = RoundLog(locked).read()
-        assert moved.file_unreadable is True
-        assert not locked.exists()
-    finally:
-        restored = Path(moved.quarantined_to)
-        restored.chmod(0o600)
-        restored.unlink()
-
-
-def test_a_child_the_process_cannot_reach_stays_put_and_stays_unreadable(
-    tmp_path,
+def test_a_permission_refusal_does_not_quarantine_and_the_file_stays_put(
+    tmp_path, monkeypatch
 ):
-    """A parent directory the process cannot enter cannot be repaired
-    from here: the file stays, and every review that tries keeps its
-    named omission -- the operator's recovery, not the reader's."""
-    hidden = tmp_path / "hidden"
-    hidden.mkdir()
-    child = hidden / "rounds.jsonl"
-    child.write_text("", encoding="utf-8")
-    hidden.chmod(0)
-    try:
-        # The parent directory cannot be entered, so nothing here can
-        # stat the child either: the pinned facts are the unreadable
-        # read and the failed quarantine, and the operator recovers.
-        stuck = RoundLog(child).read()
-        assert stuck.file_unreadable is True
-        assert stuck.quarantined_to == ""
-    finally:
-        hidden.chmod(0o700)
-    assert child.is_file()
+    """D74 round 2, root-independent: a read refused by permissions is
+    an OSError, not a decode failure, so nothing is renamed and the
+    operator's recovery applies. A fake raises the error for the target
+    path only, because a chmod(0) guard means nothing to a root
+    runner."""
+    real_read_text = Path.read_text
+    target = tmp_path / "locked.jsonl"
+    target.write_text('{"v": 1}\n', encoding="utf-8")
+
+    def refusing(self, *args, **kwargs):
+        if self == target:
+            raise PermissionError(13, "Permission denied")
+        return real_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", refusing)
+    stuck = RoundLog(target).read()
+    assert stuck.file_unreadable is True
+    assert stuck.quarantined_to == ""
+    monkeypatch.undo()
+    assert target.is_file()
+    assert target.read_text(encoding="utf-8") == '{"v": 1}\n'
+
+
+def test_an_unreachable_log_does_not_quarantine_and_stays_put(tmp_path, monkeypatch):
+    """D74 round 2, root-independent: a log the process cannot even
+    locate (an unreachable parent) fails before the read and stays
+    exactly where it is -- the named omission is the review's, the
+    repair is the operator's, and the no-quarantine rule holds for this
+    OSError too."""
+    real_exists = Path.exists
+    target = tmp_path / "hidden" / "rounds.jsonl"
+    target.parent.mkdir(parents=True)
+    target.write_text("", encoding="utf-8")
+
+    def refusing(self, *args, **kwargs):
+        if self == target:
+            raise PermissionError(13, "Permission denied")
+        return real_exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", refusing)
+    stuck = RoundLog(target).read()
+    assert stuck.file_unreadable is True
+    assert stuck.quarantined_to == ""
+    monkeypatch.undo()
+    assert target.is_file()
 
 
 def test_a_pr_number_that_is_not_an_integer_is_unreadable(tmp_path):
