@@ -204,7 +204,7 @@ class AttemptOutcome:
     dropped: tuple[str, ...] = ()
     # The harness-injected turns this attempt answered, in order:
     # `unread-files`, `no-progress`, `duplicate-calls` (D58),
-    # `quote-repair` (D64). Controller
+    # `quote-repair` (D64), `session-limit` (issue #693). Controller
     # labels, not model text.
     nudges: tuple[str, ...] = ()
     # The shared diff prefix's decision for this attempt (D65), controller

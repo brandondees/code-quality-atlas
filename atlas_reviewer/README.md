@@ -1131,9 +1131,10 @@ a `Bridge` to the caller.
   nor any value sent. One attempt may spend at most 64 calls and 1 MiB of
   output of its session (#693): the coordinator starts that budget over
   for each attempt, so a retry begins whole, and a refusal names the
-  attempt that spent it. `SESSION_REFUSAL_LIMIT` consecutive refusals
-  end the attempt at a limit stop naming the lens, the attempt and the
-  cap.
+  attempt that spent it. When three refusals have accumulated, the
+  turn's results go back and one tool-less turn asks the model to
+  finalize with what it has; the stop rides on what the attempt then
+  delivers, naming the lens, the attempt and the cap.
 - **Exec.** Each call is a fixed git argv with every value shell-quoted,
   under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
   and repository attributes disable config, hooks, pagers, transports,
@@ -1263,14 +1264,13 @@ D41 records the 2026-11-12 probe that did.
   first limit stop, as its own message naming the lens, the attempt and
   the cap (#693), and the next round's first turn shows it back; a line
   from before the field existed parses with an empty stop. Prior blocks
-  stay whole, newest
-  first, inside 16,384 characters. Leaving out a superseded round does
-  not block approval. Leaving out a round at the head under review
-  does. A line that names another pull request, or no pull request,
-  does not block this one. A line that names this pull request but
-  cannot be parsed charges this review only when it sits at the head
-  under review; at an older head it is superseded data, and a line
-  whose head cannot be read charges nobody. A file the read cannot
+  stay whole, newest first, inside 16,384 characters. Leaving out a
+  superseded round does not block approval. Leaving out a round at the
+  head under review does. A line that names another pull request, or no
+  pull request, does not block this one. A line that names this pull
+  request but cannot be parsed charges this review only when it sits at
+  the head under review; at an older head it is superseded data, and a
+  line whose head cannot be read charges nobody. A file the read cannot
   decode is moved aside under a `.corrupt-` name, so the next review
   starts fresh, and the review that saw it reports the loss once. The
   `agentic-review` command is the shipped
@@ -1334,18 +1334,20 @@ D41 records the 2026-11-12 probe that did.
   the unread list never occurs — coverage is attested from what the
   prefix held — so the unread-list nudge and the `diff_file` page
   bookkeeping are retired there; the paged path keeps both, and its
-  coverage stays honest: a lens never attests coverage it did not get.   A timed-out, unavailable or
-  over-limit tool call makes the lens partial. Every `diff_file` page
-  counts against the bridge's per-attempt output budget (`SessionLimits`,
-  1 MiB by default; #693 starts it over for each attempt, so a retry does
-  not inherit what its predecessor spent). A PR whose diff is larger than
-  that budget cannot
+  coverage stays honest: a lens never attests coverage it did not get.
+  A timed-out, unavailable or over-limit tool call makes the lens
+  partial. Every `diff_file` page counts against the bridge's
+  per-attempt output budget (`SessionLimits`, 1 MiB by default; #693
+  starts it over for each attempt, so a retry does not inherit what its
+  predecessor spent). A PR whose diff is larger than that budget cannot
   come clean on this path: the call past the budget is refused
-  `OVER_SESSION_LIMIT`, its file stays unread, and the review fails closed.
-  Raising the budget is the only remedy built; no path-exclusion option
-  exists. Three consecutive refusals end the attempt at a limit stop
-  naming the lens, the attempt and the cap, instead of sending the
-  results back for another turn of re-issued refused calls (#693).
+  `OVER_SESSION_LIMIT`, its file stays unread, and the review fails
+  closed. Raising the budget is the only remedy built; no path-exclusion
+  option exists. When three refusals have accumulated in the attempt,
+  the turn's results go back and one tool-less turn asks the model to
+  finalize with what it has (#693): the finding it then delivers is
+  attested, with the stop attached, naming the lens, the attempt and the
+  cap.
 - **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an
   append-only ledger when it starts and again when it ends, keyed by
   repository, PR, head SHA, lens and body digest. A failed attestation, an

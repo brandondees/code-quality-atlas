@@ -1750,27 +1750,34 @@ def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     assert outcome.state is LensState.PARTIAL
 
 
-def test_consecutive_session_limit_refusals_end_the_attempt(tmp_path):
-    """Issue #693: once SESSION_REFUSAL_LIMIT consecutive results have
-    been OVER_SESSION_LIMIT, the attempt ends at a limit stop instead of
-    going back for another turn of re-issued refused calls. The cut is
-    mid-turn: the turn's calls past the threshold never run."""
+def test_consecutive_session_limit_refusals_earn_a_tool_less_finalize_turn(tmp_path):
+    """Issue #693, round 1: once `SESSION_REFUSAL_LIMIT` results have been
+    `OVER_SESSION_LIMIT`, the budget is spent. The turn's results go back
+    -- so a model whose batch straddled the budget still sees what ran --
+    and one tool-less turn asks the model to finalize with what it has:
+    the finding it then delivers is attested, with the stop attached,
+    instead of the round-1 cut's `UNACKNOWLEDGED` attempt that discarded
+    both the results and the reply. A model that would re-issue refused
+    calls has no tools to re-issue with."""
     spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
     outcome, model, _ = attempt(
         tmp_path,
-        [tools(("diff_file", {"path": "calc.py"})), spent],
+        [tools(("diff_file", {"path": "calc.py"})), spent, final(finding())],
         session_limits=SessionLimits(max_calls=1),
     )
     assert outcome.state is LensState.PARTIAL
+    assert outcome.attestation is Attestation.ATTESTED
+    assert [f.finding.finding for f in outcome.findings] == [
+        "rounds each item before summing, so totals drift"
+    ]
     assert outcome.causes == {Cause.TOOL_GAP, Cause.FILES_UNREAD}
-    assert outcome.attestation is Attestation.UNACKNOWLEDGED
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "session_limits"
     assert outcome.limit_hit.configured == (
         "1 call(s) and 1048576 output bytes per attempt"
     )
     assert outcome.limit_hit.observed == (
-        "3 consecutive session-limit refusals ended "
+        "4 session-limit refusals ended "
         "tracing-correctness-and-invariants attempt 1; the last: "
         "session-limit: all 1 calls of this attempt made"
     )
@@ -1778,15 +1785,20 @@ def test_consecutive_session_limit_refusals_end_the_attempt(tmp_path):
         "the bridge's session limits (SessionLimits in bridge.py)"
     )
     assert "session_limits stopped the review" in outcome.detail
-    # One turn that ran, one turn cut at the third refusal: the fourth
-    # refused call was never made, and no third turn was asked for.
+    assert outcome.nudges == ("session-limit",)
+    # Every call of the refused batch was answered, then exactly one
+    # tool-less turn was asked for: no third reading turn, and no tool
+    # schemas on it.
     assert [t.status for t in outcome.tools] == [
         "OK",
         "OVER_SESSION_LIMIT",
         "OVER_SESSION_LIMIT",
         "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
     ]
-    assert len(model.requests) == 2
+    assert len(model.requests) == 3
+    assert model.requests[2].tools == ()
+    assert "tool budget is spent" in model.requests[2].messages[-1].text
 
 
 def test_a_retry_begins_with_a_full_bridge_budget(tmp_path):

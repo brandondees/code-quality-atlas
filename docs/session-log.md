@@ -2983,8 +2983,8 @@ each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 Found in the Nov 14 model-trials rerun: `SessionLimits.max_calls = 64` was
 per runner session, and a lens's attempt 1 and its retry share that
 session, so eight DeepSeek #661 retries, DeepSeek #640's
-decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals), one Kimi
-retry started nearly out of tool calls and ended `TOOL_GAP` and
+decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals) and one
+Kimi #640 retry started nearly out of tool calls and ended `TOOL_GAP`
 `FILES_UNREAD`, every duplicate-call nudge earned from re-issuing refused
 calls. D77 records the decision.
 
@@ -3013,3 +3013,47 @@ session-wide counter restored), M2 (the threshold raised out of reach),
 M3 (`begin_attempt` not called by the coordinator), M4 (the attempt
 number not passed to the loop). 3,224 reviewer tests at 96.40%, 882
 tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #745 round-1 fixes: the refusal stop delivers instead of discarding, and the decision records catch up
+
+Round 1 (the protocol review, Brandon's routine review, and the atlas
+reviewer service converging on one Major) caught the round-1 cut
+throwing away an attempt's ready findings: when a tool batch straddled
+the attempt budget, the mid-turn cut fired before the model saw any
+refusal, so the results and the final reply both vanished into an
+unretried `UNACKNOWLEDGED` outcome where the pre-#693 code ended
+attested with the finding delivered.
+
+The stop no longer ends the attempt. Once `SESSION_REFUSAL_LIMIT` (3)
+`OVER_SESSION_LIMIT` results have accumulated -- cumulative, since once
+either cap is spent every later call refuses, so the round-1
+"consecutive" streak and its untestable reset branch are gone -- the
+turn's results go back and the attempt gets a tool-less turn to finalize
+with what it has: the next request carries no tool schemas, so
+re-issuing refused calls is impossible, and the reply the model then
+gives is judged like any final reply. The stop is built once at that
+boundary and rides on the delivered outcome's `limit_hit` (a later
+stop's own hit wins), so the ledger, the status line, the round log and
+the service report still name the lens, the attempt and the cap; the
+unread-list nudge is not earned on the finalize path (its request has no
+tools to read with), and the stall detector's own nudge does not also
+fire on the stop's turn. D77 now amends D39 and records the
+alternatives, the accepted cost (one more reserved, clock-gated model
+call; an unread-file finalize stays partial) and a revisit trigger;
+D39 and D42 carry the `Update (2026-11-17, D77)` notes; the coordinator
+test's call arithmetic and the session log's Kimi-retry sentence are
+restored; the README's stray triple space and rewrap noise are cleaned.
+
+The rewritten regression tests pin the reviewer's repro shape: a batch
+straddling the budget ends attested with the finding delivered, the
+tool-less finalize request carries no schemas, and the stop rides on the
+outcome (loop-level) and reaches the status line and the round log
+(coordinator-level, which also pins that the retry's 64 reads really
+ran). Mutants applied by hand and killed with
+`PYTHONDONTWRITEBYTECODE=1`: the round-1 four (M1 shared counter, M2
+threshold raised, M3 `begin_attempt` dropped, M4 attempt number
+dropped) plus the round-1 fixes' own: the finalize turn never built (the
+loop and coordinator tests lose the stop and the tool-less request), the
+tool-less request reverted to the full tool set, and the stop not
+attached to the delivered outcome. Full local checks green; offline
+only.
