@@ -2751,3 +2751,40 @@ divergences across the committed `.dockerignore` × all 158 runtime reads.
 The COPY glob sources now pass the same refusal gate (`image_path_of`
 raises on `\`, `[!`, `[[:`, nested-`[`), closing the round-3 Nit. 3,167
 reviewer tests at 96.37%, ruff/format/mypy clean. Offline only.
+
+## 2026-11-17 (same day) — round-4 fixes for #733: the guard reads `.dockerignore` through ignorefile.ReadAll, as BuildKit does
+
+Correction first: the round-3 entry's leading-slash semantics were built on
+the round-3 review's wrong ground truth, which that review has since
+retracted. BuildKit does not feed `.dockerignore` lines to
+`patternmatcher.New` directly — `frontend/dockerui` reads them through
+`moby/patternmatcher/ignorefile.ReadAll`, whose contract is: skip lines whose
+first raw character is `#` and blanks, trim, read `!` from the first raw
+character first (and re-trim the remainder), `filepath.Clean` the remainder,
+strip one leading `/` when more than one character remains — "/some/path and
+some/path are considered equivalent" — and re-attach the `!`. So
+`/collapsed`, `//collapsed`, `/../collapsed`, and `/x/../../collapsed` are
+all live excludes of `collapsed`, `!/collapsed/skills` is a live re-include,
+and `![a]/../y` normalizes to `!y` — the negation is never eaten by ReadAll.
+The guard's normalization is now one function transcribing exactly that
+(cited to moby/patternmatcher v0.6.1 in its docstring), and the four
+appended-slash mutants each fail `test_no_dockerignore_rule_hides_a_
+runtime_read`; the leading-slash and rescue parametrized cases were re-pinned
+to the corrected outcomes and the docstrings no longer claim the slash is
+inert.
+
+The re-verification ran against the real matcher, not a transcription: the
+fuzz corpus (5 seeds, 74,916 generated cases, 73,191 comparable after
+refusals) was scored by a Go program calling `ignorefile.ReadAll` +
+`patternmatcher.MatchesOrParentMatches` — fail-opens 0, over-reports 29 (the
+guard's documented strictness: the unmodeled exception descent and the wider
+mid-segment `**`), committed `.dockerignore` × 158 runtime reads: 0
+divergences. The real-matcher fuzz then surfaced one more quirk the
+transcriptions had all missed: `patternmatcher.New` cleans the ReadAll
+output — `!` attached — before reading `!`, and that second Clean can eat
+the negation (`!../../*` cleans to the exclude-everything rule `*`, because
+the `..` pops the `!..` segment), so the guard now applies New's Clean after
+ReadAll's, and the fuzz's own fail-open cases are pinned parametrized. The
+round-3 refusals (`\`, `[!`, `[[:`, nested `[`) and the COPY-source refusal
+gate are unchanged. 3,175 reviewer tests at 96.37%, ruff/format/mypy clean.
+Offline only.

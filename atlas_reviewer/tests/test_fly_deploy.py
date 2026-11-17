@@ -274,13 +274,12 @@ def _class_end(pattern: str, start: int) -> int | None:
 
 
 def _clean(rule: str) -> str:
-    """Go's filepath.Clean for a slash-separated rule: empty segments
-    collapse, `.` drops, `..` resolves against the segments before it,
-    and a leading `/` stays, as Go's Clean keeps it. Docker compiles the
-    kept slash into an anchored regex that never matches a relative
-    context path, so a leading-slash rule is inert in Docker -- in its
-    exclude form and, the fail-open trap, in its `!` exception form
-    too."""
+    """Go's filepath.Clean for a slash-separated rule, which
+    `ignorefile.ReadAll` applies to the post-`!` remainder: empty
+    segments collapse, `.` drops, `..` resolves against the segments
+    before it, `..` that would climb above a rooted rule drops, and a
+    leading `/` stays (ReadAll strips it afterwards, which is what makes
+    `/some/path` and `some/path` equivalent)."""
     absolute = rule.startswith("/")
     segments = []
     for segment in rule.split("/"):
@@ -293,6 +292,35 @@ def _clean(rule: str) -> str:
         else:
             segments.append(segment)
     return "/" + "/".join(segments) if absolute else "/".join(segments)
+
+
+def _readall_pattern(line: str) -> str | None:
+    """One `.dockerignore` line through `ignorefile.ReadAll`'s
+    normalization, transcribed from moby/patternmatcher v0.6.1
+    (`ignorefile/ignorefile.go`, fetched 2026-11-17; BuildKit's
+    frontend/dockerui feeds every line through it before
+    `patternmatcher.New`): None for a line ReadAll skips -- one whose
+    first raw character is `#`, or that is blank after trimming; else
+    the normalized pattern, with `!` read from the first raw character
+    first (and the remainder re-trimmed), then `filepath.Clean` on the
+    remainder, then one leading `/` stripped when more than one
+    character remains -- `/some/path` and `some/path` are equivalent --
+    then `!` re-attached. A line that is only `!` normalizes to `!`,
+    which `patternmatcher.New` refuses (the build fails loudly there);
+    this walk skips an empty pattern instead."""
+    if line.startswith("#"):
+        return None
+    pattern = line.strip()
+    if pattern == "":
+        return None
+    invert = pattern[0] == "!"
+    if invert:
+        pattern = pattern[1:].strip()
+    if pattern:
+        pattern = _clean(pattern)
+        if len(pattern) > 1 and pattern.startswith("/"):
+            pattern = pattern[1:]
+    return f"!{pattern}" if invert else pattern
 
 
 def _unsupported_syntax(rule: str) -> str | None:
@@ -327,35 +355,42 @@ def _unsupported_syntax(rule: str) -> str | None:
 def _dockerignore_hides(rules: list[str], rel: str) -> bool:
     """Whether `.dockerignore` excludes the file at `rel`. The guard is
     at least as strict as Docker, and on the modeled syntax agrees with
-    it exactly where it does not over-report: each rule is Cleaned the
-    way Go's filepath.Clean does -- on the raw rule, before the `!` is
-    read, so a `..` that cancels the segment carrying the `!` consumes
-    the negation exactly as Docker's Clean does -- and a leading `/`
-    stays, with the compiled `^/...$` regex inert against relative
-    paths, in both the exclude and the `!` exception form -- exactly as
-    in Docker. The rules are then evaluated node by node down the
-    file's path with the last matching rule deciding each node, and a
-    directory the walk leaves excluded prunes its subtree. Where that
-    can diverge from BuildKit it only over-reports hiding: BuildKit
-    descends into an excluded directory when an exception's literal
-    reaches below it, which this walk does not model, and a `**` inside
-    a path segment is wider here than Docker compiles it. A `!`
-    re-include reaches a file only when nothing excluded one of its
-    parent directories without re-including it. Syntax that could fail
-    open -- a backslash escape, a `[!` class, a `[[:` POSIX class, a `[`
-    nested in a class -- raises instead of being mis-translated."""
-    for rule in rules:
-        unsupported = _unsupported_syntax(rule)
-        if unsupported:
-            raise ValueError(
-                "unsupported .dockerignore syntax; extend the guard: "
-                f"{rule!r} uses {unsupported}"
-            )
+    it exactly where it does not over-report. Each raw line goes through
+    `_readall_pattern` -- `ignorefile.ReadAll`'s normalization, the same
+    reader BuildKit feeds every line through before
+    `patternmatcher.New` -- so `/collapsed` and `//collapsed` and
+    `/../collapsed` are live excludes of `collapsed`, and
+    `!/collapsed/skills` is a live re-include. The rules are then
+    evaluated node by node down the file's path with the last matching
+    rule deciding each node, and a directory the walk leaves excluded
+    prunes its subtree. Where that can diverge from BuildKit it only
+    over-reports hiding: BuildKit descends into an excluded directory
+    when an exception's literal reaches below it, which this walk does
+    not model, and a `**` inside a path segment is wider here than
+    Docker compiles it. A `!` re-include reaches a file only when
+    nothing excluded one of its parent directories without re-including
+    it. Syntax that could fail open -- a backslash escape, a `[!`
+    class, a `[[:` POSIX class, a `[` nested in a class -- raises
+    instead of being mis-translated."""
     segments = rel.split("/")
     included = True
     cleaned = []
     for rule in rules:
-        pattern = _clean(rule)
+        pattern = _readall_pattern(rule)
+        if pattern is None:
+            continue
+        # patternmatcher.New cleans the ReadAll output -- `!` attached --
+        # before reading `!`, and that second Clean can eat the
+        # negation: `!../../*` cleans to the exclude rule `*`, because
+        # the `..` pops the `!..` segment (verified against the real
+        # matcher).
+        pattern = _clean(pattern)
+        unsupported = _unsupported_syntax(pattern)
+        if unsupported:
+            raise ValueError(
+                "unsupported .dockerignore syntax; extend the guard: "
+                f"{rule!r} (normalized {pattern!r}) uses {unsupported}"
+            )
         negated = pattern.startswith("!")
         cleaned.append((pattern[1:] if negated else pattern, negated))
     for depth in range(1, len(segments) + 1):
@@ -438,11 +473,19 @@ def _dockerignore_hides(rules: list[str], rel: str) -> bool:
         ("collapsed/./skills", "collapsed/skills/x.md", True),
         ("a/../b", "b/c.md", True),
         ("collapsed/", "collapsed/skills/x.md", True),
-        # Go's Clean keeps a leading `/`, and the compiled `^/...$` never
-        # matches a relative context path: the rule is inert in Docker,
-        # exclude or not.
-        ("/collapsed", "collapsed/skills/x.md", False),
-        ("/collapsed/skills", "collapsed/skills/x.md", False),
+        # ReadAll strips one leading `/` after Clean, so `/some/path` and
+        # `some/path` are equivalent: live excludes, whatever wrote the
+        # slash or how many, or what climbed above the root first.
+        ("/collapsed", "collapsed/skills/x.md", True),
+        ("/collapsed/skills", "collapsed/skills/x.md", True),
+        ("//collapsed", "collapsed/skills/x.md", True),
+        ("/../collapsed", "collapsed/skills/x.md", True),
+        ("/x/../../collapsed", "collapsed/skills/x.md", True),
+        # A `..` climb that survives Clean stays above the context root;
+        # the compiled `^\.\./...$` matches no relative path, in both
+        # engines.
+        ("!x/../../y", "y", False),
+        ("../collapsed", "collapsed/skills/x.md", False),
     ],
 )
 def test_a_dockerignore_rule_hides_at_least_what_docker_would(
@@ -524,25 +567,24 @@ def test_a_copy_source_the_translator_cannot_model_fails_closed(source: str):
         (["dir/*", "!dir"], "dir/x.md", True),
         # A file-level exclude is re-includable by a later `!`.
         (["*.md", "!README.md"], "README.md", False),
-        # A leading-slash `!` exception is inert in Docker: Clean keeps
-        # the slash and the compiled `^/...$` never matches a relative
-        # path, so the dir the exclude hid stays hidden. The pre-fix
-        # guard dropped the slash, the active exception rescued the
-        # excluded dir node, and the walk then reached the file --
-        # the fail-open shape of `!/collapsed/skills`.
+        # ReadAll normalizes `!/collapsed/skills` to `!collapsed/skills`:
+        # a live re-include that rescues the tree the exclude hid, and
+        # BuildKit ships the file (verified against the real matcher).
         (
             ["collapsed/skills", "!/collapsed/skills"],
             "collapsed/skills/reviewing-a-change/reference/synthesis.md",
-            True,
+            False,
         ),
-        # The three fail-open fuzz shapes from the round-3 review, with
-        # the leading-slash exception inert again: hidden, like Docker.
-        (["[^a]", "!//?"], "y", True),
-        (["y", "!/?"], "y/c", True),
-        (["**//", "c*", "!/**/**/y/"], "y", True),
-        # A leading-slash file-level exception cannot rescue through the
-        # prune either; Docker prunes the same way (its literal starts
-        # with `/`, so it never reaches below the excluded dir).
+        # The round-3 review's three fuzz shapes, re-read under ReadAll:
+        # each `!` exception normalizes to a live pattern and the file
+        # ships, as the real matcher confirms.
+        (["[^a]", "!//?"], "y", False),
+        (["y", "!/?"], "y/c", False),
+        (["**//", "c*", "!/**/**/y/"], "y", False),
+        # ReadAll makes this exception live and its literal reaches below
+        # the excluded dir, so BuildKit descends and ships the file; the
+        # guard's classic walk prunes at the dir -- the same known
+        # strictness gap as `!dir/file.md`, over-reporting only.
         (
             [
                 "collapsed/skills",
@@ -561,6 +603,26 @@ def test_a_copy_source_the_translator_cannot_model_fails_closed(source: str):
             "collapsed/skills/reviewing-a-change/reference/synthesis.md",
             False,
         ),
+        # ReadAll keeps the negation on `!../../*`, but patternmatcher.New
+        # then cleans the `!`-attached output before reading `!`, and that
+        # Clean eats it -- the `..` pops the `!..` segment -- leaving the
+        # exclude-everything rule `*`. Found by the fuzz against the real
+        # matcher; the pre-fix guard read `!` off the ReadAll output and
+        # called the rule an inert exception.
+        (["!../..//./*"], "y", True),
+        (
+            [
+                "!../..//./*",
+                "!collapsed/../collapsed/./[^a]",
+                "/[a]/./skills",
+                "/reference/?/synthesis.md/skills",
+            ],
+            "y/a/b",
+            True,
+        ),
+        # ReadAll normalizes `![a]/../y` to the live re-include `!y`
+        # (the `!` is read before Clean and never eaten there).
+        (["y", "![a]/../y"], "y", False),
     ],
 )
 def test_dockerignore_rules_apply_in_order(rules: list[str], rel: str, hides: bool):
@@ -571,13 +633,7 @@ def test_dockerignore_rules_apply_in_order(rules: list[str], rel: str, hides: bo
 
 
 def test_no_dockerignore_rule_hides_a_runtime_read():
-    rules = [
-        line.strip()
-        for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    unsupported = [(rule, why) for rule in rules if (why := _unsupported_syntax(rule))]
-    assert unsupported == [], "unsupported .dockerignore syntax; extend the guard"
+    rules = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     for path in runtime_read_files():
         rel = path.relative_to(ROOT).as_posix()
         assert not _dockerignore_hides(rules, rel), rel
