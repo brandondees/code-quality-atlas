@@ -309,6 +309,10 @@ class LensScriptModel:
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         return self._cost
 
+    def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
+        """A fixed worst case: no smaller cap ever fits better."""
+        return 0
+
     def turn(self, request: TurnRequest) -> ModelTurn:
         lens, digest = _markers(request.system)
         if _is_reassessment(request.messages):

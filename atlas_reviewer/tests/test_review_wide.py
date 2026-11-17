@@ -547,7 +547,10 @@ def test_a_reservation_stop_names_the_derivation_the_ceiling_and_the_knobs(tmp_p
         "$1.00 (derived $1.00 = $1.00 per lens x 1 planned lens"
         "; the $10.00 per-review ceiling is above it)"
     )
-    assert hit.observed == "$15.00"
+    assert hit.observed == (
+        "$15.00; the $1.00 left covers 0 output tokens, under "
+        "min_output_tokens 16000 (--min-output-tokens or ATLAS_MIN_OUTPUT_TOKENS)"
+    )
     assert hit.setting == (
         "--per-lens-usd or ATLAS_PER_LENS_USD (D68 derives the review total "
         "from the planned lens count); the ceiling: --review-ceiling-usd or "
