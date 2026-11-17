@@ -2983,8 +2983,8 @@ each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 Found in the Nov 14 model-trials rerun: `SessionLimits.max_calls = 64` was
 per runner session, and a lens's attempt 1 and its retry share that
 session, so eight DeepSeek #661 retries, DeepSeek #640's
-decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals) and one Kimi
-#640 retry started nearly out of tool calls and ended `TOOL_GAP` and
+decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals), one Kimi
+retry started nearly out of tool calls and ended `TOOL_GAP` and
 `FILES_UNREAD`, every duplicate-call nudge earned from re-issuing refused
 calls. D77 records the decision.
 
