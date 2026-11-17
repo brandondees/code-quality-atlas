@@ -279,6 +279,7 @@ class ReviewReport:
     limit_stops: tuple[str, ...]
     cost_lines: tuple[str, ...]
     recommended_event: str
+    findings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -447,7 +448,8 @@ def run_process(
 
 
 def summarize_draft(draft: str, *, expect: str | None = None) -> ReviewReport:
-    """Lenses, coverage, limit rows and cost lines from a controller draft.
+    """Lenses, coverage, limit rows, cost lines and verified findings from
+    a controller draft.
 
     The one-shot draft does not list every path a model call saw. The
     files section is the controller's coverage note, plus any path the
@@ -455,8 +457,8 @@ def summarize_draft(draft: str, *, expect: str | None = None) -> ReviewReport:
     draft -- its status line says ``"mode": "agentic"`` -- carries the
     same report from its own sections: the selection's NOT RUN bullets
     and the attestation-ledger lens lines, the status line's coverage
-    counts and limit stop, the context omissions, and the model-usage
-    line.
+    counts and limit stop, the context omissions, the verified-findings
+    bullets, and the model-usage line.
 
     ``expect`` is the service mode that ran the child. A draft whose
     status line disagrees with it -- an agentic child's draft with no
@@ -513,6 +515,7 @@ def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         ),
         tuple(_bullets(section(draft, "Model usage"))),
         recommended if isinstance(recommended, str) else "",
+        findings=_findings(draft),
     )
 
 
@@ -583,7 +586,23 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         tuple(stops),
         tuple(cost),
         recommended if isinstance(recommended, str) else "",
+        findings=_findings(draft),
     )
+
+
+def _findings(draft: str) -> tuple[str, ...]:
+    """The verified-findings section's bullets, each the whole finding line
+    the draft wrote (id, severity tags, location, lens, text, fix), so
+    severity and location survive into the post. The `No verified
+    findings.` line is prose, not a bullet, and yields none; the one-shot
+    draft has no such section and yields none too. No CRLF or
+    wrapped-bullet hardening: the coordinator renders the draft with
+    ``"\\n".join`` (never ``\\r``) and every finding field is
+    whitespace-collapsed by `quote_untrusted` before it lands in a bullet,
+    so a draft violating either is not a draft this coordinator wrote --
+    and a marker miss degrades to an empty Findings section, never a
+    crash."""
+    return tuple(_bullets(section(draft, "Findings (verified quotes only)")))
 
 
 def _agentic_selection_skips(draft: str) -> list[tuple[str, str]]:
@@ -667,11 +686,26 @@ def _agentic_coverage_note(status: Mapping[str, object]) -> str:
 
 
 def section(text: str, heading: str) -> str:
-    marker = f"## {heading}\n"
-    start = text.find(marker)
+    """The text after the last whole-line ``## heading`` and before the
+    next heading line.
+
+    The match is anchored to a whole heading line and takes the last
+    occurrence (#739 round 2): a pre-section field the draft renders
+    unquoted -- the selection note, a lens note -- could otherwise carry
+    the heading's own literal line and steal the extraction, and the real
+    section is always the latest one the controller wrote. No quoted
+    field can carry a whole line -- `quote_untrusted` collapses
+    whitespace -- so the only way the literal line appears twice is a
+    field the draft renders as prose."""
+    marker = f"\n## {heading}\n"
+    start = text.rfind(marker)
     if start < 0:
-        return ""
-    rest = text[start + len(marker) :]
+        probe = f"## {heading}\n"
+        if not text.startswith(probe):
+            return ""
+        rest = text[len(probe) :]
+    else:
+        rest = text[start + len(marker) :]
     nxt = rest.find("\n## ")
     return rest if nxt < 0 else rest[:nxt]
 

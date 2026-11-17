@@ -311,6 +311,7 @@ def test_a_finished_review_is_one_comment_with_the_banner_and_the_lists(tmp_path
         "src/a.py",
         "too large for one review pass",
         "actual $0.10",
+        "## Findings",
         "## Lenses run",
         "## Lenses not run",
         "## Files read",
@@ -440,6 +441,169 @@ def test_a_huge_comment_keeps_the_idempotency_marker():
     assert len(text) <= 65_000
 
 
+FINDING = (
+    "**L1-F1** [minor, defect, route: eng, introduced] calc.py:2 "
+    "(tracing-correctness-and-invariants): rounds before summing. "
+    "Fix: sum first"
+)
+SECOND_FINDING = "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it"
+
+
+def test_the_findings_reach_the_post_whole_with_the_recommended_line():
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+        findings=(FINDING, SECOND_FINDING),
+    )
+    key = post_key(EVENT)
+    body = render_comment(report, key, lambda item: item)
+    findings = body.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert FINDING in findings
+    assert SECOND_FINDING in findings
+    # The section sits right after the recommended-event line. A tail that
+    # overflows on its own forces the cut past every finding: they are
+    # dropped whole, named in the section, and the marker survives the
+    # hard cut that the overflowing tail still needs.
+    huge = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        tuple(f"stop-{i:04d}" for i in range(6000)),
+        (),
+        "COMMENT",
+        findings=(FINDING, SECOND_FINDING),
+    )
+    cut = render_comment(huge, key, lambda item: item)
+    assert "[all 2 findings cut to fit the post limit]" in cut
+    assert FINDING not in cut and "L1-F2" not in cut
+    assert "[comment cut to fit the post limit]" in cut
+    assert cut.endswith(marker_for(key))
+    assert len(cut) <= 65_000
+
+
+def test_a_long_non_finding_item_is_still_cut_at_the_two_hundred_default():
+    """The findings are uncapped because they are already the controller's
+    inert rendering; every other section keeps the 200-character quote
+    default, pinned here so a raised default cannot pass unnoticed."""
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        ("x" * 300,),
+        (),
+        "COMMENT",
+    )
+    body = render_comment(report, post_key(EVENT), lambda item: item)
+    stops = body.split("## Limit stops", 1)[1].split("## Cost", 1)[0]
+    assert "x" * 200 + "..." in stops
+    assert "x" * 201 not in stops
+
+
+_SPAN_FILLER = "stop-00000 | too large for one review pass | kept 1"
+
+
+def _span_finding(n: int) -> str:
+    return (
+        f'**L1-F{n}** [minor, defect, route: eng, introduced] `"calc.py:2"` '
+        "(tracing-correctness-and-invariants): the retry loop re-arms the "
+        "wall timer before the ledger write lands, and a crash in between "
+        "leaves the job unclaimed and unstuck until the next deploy, while "
+        "the queue grows without bound and every later enqueue is silently "
+        f"superseded for job {n}. "
+        'Fix: `"record the ledger write before re-arming the timer"`'
+    )
+
+
+def test_the_cut_drops_whole_findings_and_never_splits_a_span():
+    """Round 2 nit: the hard cut could land inside a finding's inner code
+    span and leave an unclosed backtick run. The cut now drops whole
+    findings from the end -- the draft lists them most severe first --
+    and names the drops; reverting to the hard cut fails here on the span
+    parity and on the kept findings' integrity."""
+    key = post_key(EVENT)
+    mark = marker_for(key)
+    identity = lambda item: item
+    findings = tuple(_span_finding(i) for i in (1, 2, 3))
+
+    def base_part(stops: tuple) -> int:
+        report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+        out = render_comment(report, key, identity)
+        assert out.endswith("\n\n" + mark)
+        return len(out) - 2 - len(mark) - len("## Findings\n\nNone.")
+
+    seed = (_SPAN_FILLER,) * 10
+    per_item = (base_part((_SPAN_FILLER,) * 30) - base_part(seed)) // 20
+    fs = lambda kept, note=0: (
+        13 + sum(2 + len(f) for f in findings[:kept]) + max(kept - 1, 0) + note
+    )
+    drop_note = "[1 of 3 findings cut to fit the post limit]"
+    upper = 65_000 - (fs(2, 1 + len(drop_note)) + 2 + len(mark))
+    lower = 65_000 - (fs(3) + 2 + 2 + len(mark)) + 1
+    target = (lower + upper) // 2
+    stops = (_SPAN_FILLER,) * (10 + (target - base_part(seed)) // per_item)
+
+    # Scenario preconditions: three findings overflow the limit, two plus
+    # the in-section drop note fit -- the assertions below test the cut,
+    # not the fixture arithmetic.
+    assert base_part(stops) + fs(3) + 2 + 2 + len(mark) > 65_000
+    assert base_part(stops) + fs(2, 1 + len(drop_note)) + 2 + len(mark) <= 65_000
+
+    report = ReviewReport((), (), "note", (), stops, (), "COMMENT", findings=findings)
+    cut = render_comment(report, key, identity)
+    assert cut.endswith("\n\n" + mark)
+    assert len(cut) <= 65_000
+    assert findings[0] in cut and findings[1] in cut
+    assert findings[2] not in cut
+    findings_part = cut.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert drop_note in findings_part
+    assert "[comment cut to fit the post limit]" not in cut
+    assert cut.count("`") % 2 == 0
+
+
+_SPAN_ITEM = 'stop-{i:04d} | `"detail {i:04d} span"` | kept'
+
+
+def test_the_hard_cut_fallback_lands_on_a_line_boundary():
+    """Round 3 nit: the plain hard cut (a tail that overflows with no
+    finding left to drop) could slice inside a quoted item's code span
+    and leave an unclosed backtick run. The fallback now cuts at the last
+    whole line, dropping the split line whole; the mid-line-cut mutant
+    dies here on the last kept line's integrity."""
+    key = post_key(EVENT)
+    mark = marker_for(key)
+    identity = lambda item: item
+
+    # A tail of span-carrying one-line items sized to overflow the limit:
+    # every rendered line is whole, so the cut must land between lines.
+    stops = tuple(_SPAN_ITEM.format(i=i) for i in range(1600))
+    report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+    cut = render_comment(report, key, identity)
+    assert cut.endswith("\n\n[comment cut to fit the post limit]\n\n" + mark)
+    assert len(cut) <= 65_000
+    assert cut.count("`") % 2 == 0
+    content = cut.split("\n\n[comment cut", 1)[0]
+    last = content.rstrip("\n").splitlines()[-1]
+    from atlas_reviewer.notes import quote_untrusted
+
+    expected = {
+        f"- {quote_untrusted(_SPAN_ITEM.format(i=i), scrub=identity)}"
+        for i in range(1600)
+    }
+    assert last in expected, last
+
+
+def test_a_report_without_findings_posts_none():
+    body = render_comment(REPORT, post_key(EVENT), lambda item: item)
+    assert "## Findings\n\nNone." in body
+
+
 def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):
     secret = "super-secret-value"
     report = ReviewReport(
@@ -450,6 +614,7 @@ def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):
         (),
         (),
         "COMMENT",
+        findings=(f"see {secret} again",),
     )
     poster, github = _poster(tmp_path)
     poster._scrub = lambda text: text.replace(secret, "[REDACTED]")

@@ -119,7 +119,15 @@ telemetry event.
 
 The post is one pull-request review whose event is COMMENT. The body says
 the review is advisory and not a substitute for the full Claude Code
-protocol review, then lists the lenses that ran, the lenses that did not,
+protocol review, then lists the draft's verified findings -- each finding
+line exactly as the controller rendered it in the draft (every
+model-authored field already an inert code span, the line uncapped so a
+long finding's `Fix:` and `Evidence:` survive), placed right after the
+recommendation; a comment cut to the post limit drops whole findings
+from the end (the draft lists them most severe first) and names the
+drops in the Findings section, rather than slicing a finding mid-span --
+then the lenses
+that ran, the lenses that did not,
 the controller's file-coverage note, the limit stops, and the cost. The
 draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
 and is not sent. A retry of the same commit does not post a second time:
