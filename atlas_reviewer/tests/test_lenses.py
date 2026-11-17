@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +14,7 @@ from atlas_reviewer.lenses import (
     plan_agentic_lenses,
     plan_lenses,
 )
-from atlas_reviewer.picker import CRITICAL_TIER, Depth, select_lenses
+from atlas_reviewer.picker import CRITICAL_TIER, LENS_NAME, Depth, select_lenses
 
 from .helpers import StubLibrary
 
@@ -220,12 +222,59 @@ def test_a_blank_body_is_no_body(tmp_path, text):
     assert LensLibrary(tmp_path).body("empty") is None
 
 
-def test_every_lens_a_route_can_run_has_a_body():
-    from pathlib import Path
+# Cited by the picker skill and not themselves review lenses with a body.
+# `choosing-review-lenses` is the skill's own name. The skill never cites
+# it as a lens, so an entry for it would check nothing.
+_NOT_A_REVIEW_LENS = frozenset(
+    {
+        "synthesizing-review-findings",
+        "grounding-review-in-tool-output",
+    }
+)
+_REPO = Path(__file__).resolve().parents[2]
 
+
+def _skill_directories() -> set[str]:
+    return {path.name for path in (_REPO / "skills").iterdir() if path.is_dir()}
+
+
+def _cited_picker_names(text: str) -> set[str]:
+    """Lens names the picker skill cites, as its own `LENS_NAME` accepts
+    them: backtick spans. A single-word backtick is prose (`acknowledge`,
+    `minor`), not a lens; no lens name is single-word, so the test's
+    completeness half fails if that ever changes. A name the skill cites
+    without backticks is not read, and the completeness half fails on it
+    too, rather than the reader guessing at the Routes section's table
+    and bullet shapes."""
+    quoted = set(re.findall(rf"`({LENS_NAME.pattern})`", text))
+    return {name for name in quoted if "-" in name}
+
+
+def test_every_lens_the_picker_names_has_a_body():
+    text = (_REPO / "skills/choosing-review-lenses/SKILL.md").read_text()
+    directories = _skill_directories()
+    cited = _cited_picker_names(text)
+    assert sorted(cited - directories) == []
+    # The other half of the guarantee: a partial extraction drift -- the
+    # generated skill naming a lens somewhere the reader does not read --
+    # would shrink `pickable` silently without this.
+    uncited = sorted(directories - cited - {"choosing-review-lenses"})
+    assert uncited == []
+    library = LensLibrary()
+    for name in _NOT_A_REVIEW_LENS:
+        assert name in directories
+        assert name in cited
+        assert library.body(name) is None
+    pickable = sorted((cited & directories) - _NOT_A_REVIEW_LENS)
+    assert "auditing-infrastructure-as-code" in pickable
+    missing = [name for name in pickable if library.body(name) is None]
+    assert missing == []
+
+
+def test_every_lens_a_route_can_run_has_a_body():
     from tooling.manifest import load_manifest
 
-    manifest = load_manifest(str(Path("skills/manifest.yaml")))
+    manifest = load_manifest(str(_REPO / "skills/manifest.yaml"))
     assert manifest.router is not None
     library = LensLibrary()
     missing = sorted(

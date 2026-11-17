@@ -2176,7 +2176,9 @@ def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
     monkeypatch.setattr(cli, "OfflineProvider", Picks)
     code, out, err = _agentic_dry_run(tmp_path)
     assert code == cli.EXIT_INCOMPLETE, err
-    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in out
+    selection = out.split("## Lens selection", 1)[1].split("## Findings", 1)[0]
+    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in selection
+    assert "## Lenses NOT RUN" not in out
     assert "ranked 2 lens name(s), 1 with a body" in out
     assert "review event: COMMENT; coverage_complete=false" in err
     assert "not_run=1" in err

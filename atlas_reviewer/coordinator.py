@@ -177,6 +177,7 @@ HALTED_REASON = (
     "not started: an earlier call in this review stopped it (BYOK or a failed lens)"
 )
 LATE_REASON = "not started: the review deadline had passed"
+NO_BODY_REASON = "no lens body in the bundle"
 
 # ----------------------------------------------------------------- results
 
@@ -906,7 +907,7 @@ def _review_one(
     spend = spend or Spend(resolved)
     if body is None:
         missing = LensResult(
-            lens, index, None, None, reason="no lens body in the bundle", scope=scope
+            lens, index, None, None, reason=NO_BODY_REASON, scope=scope
         )
         return _LensRun(missing, [], None, spend, ())
     started = clock.monotonic() if review_started is None else review_started
