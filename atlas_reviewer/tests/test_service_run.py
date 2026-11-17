@@ -800,7 +800,9 @@ def test_a_draft_reports_lenses_limits_cost_and_files():
     assert empty.files_note == "The draft has no diff-coverage note."
 
 
-def _finding_draft(findings: tuple, selection_note: str = "") -> str:
+def _finding_draft(
+    findings: tuple, selection_note: str = "", ceiling_note: str = ""
+) -> str:
     """A draft from the real `coordinator.render_draft` whose one lens ran
     clean with the given verified findings, each (severity, problem, fix),
     (severity, problem, fix, evidence) or (..., evidence, siblings); the
@@ -836,8 +838,10 @@ def _finding_draft(findings: tuple, selection_note: str = "") -> str:
     review = synthesize(
         [LensResult("tracing-correctness-and-invariants", 1, "ab12", outcome)]
     )
-    if selection_note:
-        review = dataclasses.replace(review, selection_note=selection_note)
+    if selection_note or ceiling_note:
+        review = dataclasses.replace(
+            review, selection_note=selection_note, ceiling_note=ceiling_note
+        )
     return render_draft(review, Redactor())
 
 
@@ -951,6 +955,23 @@ def test_a_pre_findings_field_quoting_the_heading_cannot_steal_the_section():
     assert "fake" not in report.findings[0]
     body = render_comment(report, post_key(PrEvent(REPO, 7, SHA)), lambda item: item)
     assert "a fake finding bullet" not in body.split("## Findings", 1)[1]
+
+
+def test_a_post_findings_line_ending_in_the_heading_cannot_steal_the_section():
+    """Round 3: the whole-line anchor itself is pinned. A later line that
+    merely ends with the Findings heading's literal text -- the ceiling
+    note here, rendered unquoted after the coverage section -- is not a
+    heading; the unanchored-rfind mutant that would take it as the last
+    occurrence dies here."""
+    note = "the derived reservation was clamped; see ## Findings (verified quotes only)"
+    draft = _finding_draft(
+        ((Severity.MINOR, "rounds before summing", "sum first"),),
+        ceiling_note=note,
+    )
+    assert draft.splitlines()[-1].endswith("## Findings (verified quotes only)")
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert len(report.findings) == 1
+    assert "rounds before summing" in report.findings[0]
 
 
 def test_the_siblings_field_is_escaped_like_every_other_model_field():

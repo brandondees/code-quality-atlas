@@ -437,7 +437,12 @@ def judge(
             continue
         if rf.revises not in labels:
             raise ContractError(
-                f"finding {i} revises {rf.revises}, which names no prior finding"
+                # repr, as the withdrawn path's: the label is model-authored,
+                # and the message becomes outcome.detail, which retry_reasons
+                # echoes and the lens line joins raw into the coverage
+                # section -- a raw newline in the label could forge a later
+                # heading the section reader would favor (#739 round 2).
+                f"finding {i} revises {rf.revises!r}, which names no prior finding"
             )
         revises.append((i, rf.revises, rf.reason))
     withdrawn = []

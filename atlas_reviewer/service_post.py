@@ -146,7 +146,12 @@ def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) 
         if fits(body):
             return f"{body}\n\n{mark}"
     keep = MAX_COMMENT_CHARS - len(ending)
-    return body[: max(keep, 0)] + ending
+    # The fallback cut lands on a line boundary, not mid-line: every
+    # rendered item is one line carrying whole code spans, so slicing a
+    # line could leave an unclosed backtick run (#739 round 3), and the
+    # line the plain cut would have split is dropped whole instead.
+    cut = body.rfind("\n", 0, max(keep, 0)) + 1
+    return body[: cut or max(keep, 0)] + ending
 
 
 def _section(title: str, items: tuple[str, ...], scrub: Callable[[str], str]) -> str:

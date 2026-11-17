@@ -2931,3 +2931,39 @@ dropped (M10), the cut reverted to the hard cut (M11), the all-dropped note
 reverted to a bare none (M12), and the partial-drop note removed (M13).
 3,185 reviewer tests at 96.41%, 882 tooling at 95.20%,
 ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #739 round-3 fixes: the label echo reprd at the source, the anchor and the fallback cut pinned
+
+The branch rebased onto main (36842631, carrying #654's merge) first; the
+rebase was clean and the frozen-decision-entry test passes against it, so
+the docs logs' appends needed no conflict resolution.
+
+The Minor was the r2 anchor's own hazard, closed at its source: the
+re-assessment judge interpolated the model-authored `revises` label raw
+into its refusal message, which becomes `outcome.detail`, which
+`retry_reasons` echoes and the lens line joins raw into the coverage
+section — a section that comes after Findings, where the r2
+last-occurrence `section()` would favor a later forgery; a label of 32
+characters or fewer could carry `## Context omissions` plus a bullet,
+putting fake limit stops into the post. The judge now reprs the label, as
+the withdrawn path already does. Pinned three ways: at the judge (the
+message carries no raw newline), end to end from the real refusal through
+the draft to the post (exactly one real `## Context omissions` heading in
+the draft, the section reader takes it, no fake stop or forged heading in
+the post), and cap-independently — a 33-to-64-character label carrying the
+Findings heading is refused at parse by the length message alone, which
+never echoes the label, so no label length can forge a heading through any
+refusal path; the mutant raising `PRIOR_LABEL_CHARS` from 32 to 64, which
+had survived everything, dies on that test.
+
+The nits: the r2 whole-line anchor itself is pinned — a post-findings line
+that merely ends with the heading's literal text (the unquoted ceiling
+note) is not a heading, and the unanchored-rfind mutant dies there; and the
+hard-cut fallback now lands on a line boundary rather than mid-line — every
+rendered item is one line of whole code spans, so the line the plain cut
+would have split is dropped whole, and the mid-line-cut mutant dies on the
+last kept line's integrity. Mutants applied by hand and killed with
+`PYTHONDONTWRITEBYTECODE=1`: M14 (raw interpolation), M15 (the cap raised),
+M16 (the anchor dropped), M17 (the mid-line fallback). One measured pair
+each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
+95.20%; ruff/format/mypy/drift clean. Offline only.

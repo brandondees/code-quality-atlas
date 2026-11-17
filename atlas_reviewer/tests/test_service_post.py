@@ -567,6 +567,38 @@ def test_the_cut_drops_whole_findings_and_never_splits_a_span():
     assert cut.count("`") % 2 == 0
 
 
+_SPAN_ITEM = 'stop-{i:04d} | `"detail {i:04d} span"` | kept'
+
+
+def test_the_hard_cut_fallback_lands_on_a_line_boundary():
+    """Round 3 nit: the plain hard cut (a tail that overflows with no
+    finding left to drop) could slice inside a quoted item's code span
+    and leave an unclosed backtick run. The fallback now cuts at the last
+    whole line, dropping the split line whole; the mid-line-cut mutant
+    dies here on the last kept line's integrity."""
+    key = post_key(EVENT)
+    mark = marker_for(key)
+    identity = lambda item: item
+
+    # A tail of span-carrying one-line items sized to overflow the limit:
+    # every rendered line is whole, so the cut must land between lines.
+    stops = tuple(_SPAN_ITEM.format(i=i) for i in range(1600))
+    report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+    cut = render_comment(report, key, identity)
+    assert cut.endswith("\n\n[comment cut to fit the post limit]\n\n" + mark)
+    assert len(cut) <= 65_000
+    assert cut.count("`") % 2 == 0
+    content = cut.split("\n\n[comment cut", 1)[0]
+    last = content.rstrip("\n").splitlines()[-1]
+    from atlas_reviewer.notes import quote_untrusted
+
+    expected = {
+        f"- {quote_untrusted(_SPAN_ITEM.format(i=i), scrub=identity)}"
+        for i in range(1600)
+    }
+    assert last in expected, last
+
+
 def test_a_report_without_findings_posts_none():
     body = render_comment(REPORT, post_key(EVENT), lambda item: item)
     assert "## Findings\n\nNone." in body
