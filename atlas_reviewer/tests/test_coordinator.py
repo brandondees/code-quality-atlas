@@ -1105,9 +1105,18 @@ def test_an_unreadable_round_log_is_an_omission(tmp_path):
     assert "calc.py (+1 -1)" in text and "config/keys.py (+1 -0)" in text
     assert not result.coverage_complete
     assert any(
-        item.detail == "the round log file could not be read"
+        item.detail.startswith("the round log file could not be read")
+        and "moved aside" in item.detail
         for item in result.context_omissions
     )
+    # The quarantine healed the location: the undecodable bytes are
+    # gone and the file at the log's path is this review's own fresh
+    # record, so the next review of this pull request starts from it
+    # (D74 round 1).
+    assert list(path.parent.glob("*.corrupt-*"))
+    loaded = RoundLog(path).read()
+    assert loaded.file_unreadable is False
+    assert [record.head_sha for record in loaded.records] == [EVENT.head_sha]
     assert not any(
         item.limit == "unreadable record" for item in result.context_omissions
     )
@@ -1219,7 +1228,14 @@ def test_many_superseded_rounds_do_not_stop_a_later_approval(tmp_path):
     assert result.event is ReviewEvent.APPROVE
 
 
-def test_a_bad_line_blocks_only_the_pull_request_it_names(tmp_path):
+def test_a_bad_line_charges_nobody_it_cannot_tie_to_the_current_head(tmp_path):
+    """D74 round 1: a line this reader cannot parse charges the pull
+    request it names only when it sits at that review's head -- a line
+    naming another pull request never blocks, and a line with no
+    readable head is not proven to hide current-head context, so it
+    charges nobody too. Under a per-PR log (D74) a charged line would
+    otherwise hold every later review of the pull request with no way
+    to heal."""
     import json
 
     from atlas_reviewer.rounds import RoundLog
@@ -1250,8 +1266,7 @@ def test_a_bad_line_blocks_only_the_pull_request_it_names(tmp_path):
         round_log=RoundLog(path),
         event=PrEvent(EVENT.repo, EVENT.pr_number, "c" * 40),
     )
-    assert not own.coverage_complete
-    assert any(item.limit == "unreadable record" for item in own.context_omissions)
+    assert own.coverage_complete
 
 
 def test_a_log_write_failure_keeps_the_review(tmp_path):

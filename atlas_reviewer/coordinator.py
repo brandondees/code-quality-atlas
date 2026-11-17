@@ -143,6 +143,7 @@ from atlas_reviewer.rounds import (
     SOURCE,
     RoundLog,
     RoundRecord,
+    UnreadableLine,
     fit_record,
     prior_blocks,
     records_for,
@@ -1396,23 +1397,31 @@ def _review_context(
         loaded = round_log.read()
         # Other pull requests in the same file are counted and are not
         # omissions. The repository key is case-insensitive. A line that
-        # names no pull request is not charged here.
+        # names no pull request is not charged here, and the
+        # head-scoping that decides which unreadable lines charge this
+        # review is `prior_blocks`'s.
         mine, dropped_other = records_for(loaded.records, event.repo, event.pr_number)
         if loaded.file_unreadable:
-            unreadable = 0
+            unreadable: tuple[UnreadableLine, ...] = ()
+            detail = "the round log file could not be read"
+            if loaded.quarantined_to:
+                detail += (
+                    f"; it was moved aside to {loaded.quarantined_to} "
+                    "and this review starts fresh"
+                )
             omissions.append(
                 Omission(
                     SOURCE,
                     "round log file",
-                    "the round log file could not be read",
+                    detail,
                 )
             )
         else:
             key = event.repo.casefold()
-            unreadable = sum(
-                1
-                for repo, number in loaded.unreadable
-                if repo == key and number == event.pr_number
+            unreadable = tuple(
+                line
+                for line in loaded.unreadable
+                if line.repo == key and line.pr_number == event.pr_number
             )
         prior, prior_omissions = prior_blocks(
             mine,

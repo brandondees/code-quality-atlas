@@ -163,7 +163,35 @@ After that, restarts keep the queue and the post
 ledger. The queue refuses a new job when 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) belong to other pull requests. A newer head of a pull request that already has an active job takes that slot. Replacing a job that is still `running` or `posting` can leave the count at 2,000 plus those superseded jobs, and that extra is at most the worker concurrency. The dedupe list keeps every pull request's current head, so it
 can grow past 20,000 by one key per pull request. A run directory is
 removed when its job ends. A key is about 80 bytes. The 1 GB volume
-holds the queue file, `posted.json`, and `service.jsonl`.
+holds the queue file, `posted.json`, `service.jsonl`, and the per-PR
+round logs (D74): one append-only `/data/rounds/<repo>-<pr>.jsonl` per
+pull request, keyed by repository and PR number, not by head SHA, so the
+next push's review reads the earlier rounds. A review appends one record
+of at most about 8 KB per finished run. The queue's one-active-job-per-PR
+rule makes each log single-writer; the teardown window of a superseded
+review can still overlap the next head's first write. What a bad line
+then costs depends on what it hides: a line that lands torn names no
+pull request and charges nobody; a garbled or version-skewed line that
+names this pull request is charged to it only when it sits at the head
+under review -- at an older head it is superseded data -- and that
+charge holds the review at COMMENT until the log is repaired, which is
+why the reader also acts on what it can repair: a file whose bytes it
+cannot decode is moved aside automatically under a
+`.corrupt-<UTC timestamp>-<nanoseconds>` name beside the log, the
+review that saw it reports the omission once, and the next head starts
+a fresh log. A read that fails any other way -- a permission refusal,
+an unreachable parent, a directory at the log's path -- renames
+nothing: the operator's recovery for that, and for a garbled line at
+the current head the reader cannot clear, is to repair or remove
+`/data/rounds/<repo>-<pr>.jsonl` by hand; salvage the quarantined copy
+first, because deleting the log loses only prior-round context. No
+cleanup path removes a round log: the run
+directory that is removed when a job ends does not contain it, and the
+log stays on the volume until a later cleanup slice trims it. At one
+record per finished review, growth is slow enough that the 1 GB volume
+is not the binding constraint; if a repository's log ever grows past
+useful size, trimming it loses only prior-round context, the way
+deleting it does.
 
 `fly apps destroy` deletes the app's volumes and volume snapshots
 (Fly's delete-an-app page, read 2026-11-12). Copy what you need off
@@ -251,7 +279,9 @@ A plain `python -m atlas_reviewer sweep` reads `runners.ledger` in its
 state directory. The service does not write `/data/runners.ledger`. Each
 review writes its ledger under `/data/runs/<repo>-<pr>-<sha>/state/`, and
 that directory is removed when the job ends, so the plain sweep finds
-nothing.
+nothing. The per-PR round log (D74) lives at
+`/data/rounds/<repo>-<pr>.jsonl`, outside the run directory, and stays
+when the job ends.
 
 A leftover Sprite is named the way the README states it:
 `cqa-rev-pr<PR>-<first 12 of the head SHA>-<8 hex of a SHA-256 over repo,

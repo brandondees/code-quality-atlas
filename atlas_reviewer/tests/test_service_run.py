@@ -36,6 +36,7 @@ from atlas_reviewer.service_run import (
     child_env,
     make_runner,
     review_argv,
+    round_log_path,
     run_dir,
     run_process,
     section,
@@ -373,11 +374,12 @@ def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):
 
 
 def test_the_mode_selects_the_child_command(tmp_path):
+    event = PrEvent(REPO, 42, SHA)
     oneshot = review_argv(
-        RunConfig("offline", False, tmp_path, MODE_ONESHOT), tmp_path / "run"
+        RunConfig("offline", False, tmp_path, MODE_ONESHOT), tmp_path / "run", event
     )
     agentic = review_argv(
-        RunConfig("offline", False, tmp_path, MODE_AGENTIC), tmp_path / "run"
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), tmp_path / "run", event
     )
     for argv in (oneshot, agentic):
         assert argv[1:4] == ["-m", "atlas_reviewer", "--state-dir"]
@@ -392,16 +394,52 @@ def test_the_mode_selects_the_child_command(tmp_path):
     assert agentic[out_at + 1] == oneshot[out_at + 1]
     assert agentic[events_at + 1] == oneshot[events_at + 1]
     live = review_argv(
-        RunConfig("openrouter", True, tmp_path, MODE_ONESHOT), tmp_path / "run"
+        RunConfig("openrouter", True, tmp_path, MODE_ONESHOT), tmp_path / "run", event
     )
     assert live[-1] == "--allow-live-inference"
     live_agentic = review_argv(
-        RunConfig("openrouter", True, tmp_path, MODE_AGENTIC), tmp_path / "run"
+        RunConfig("openrouter", True, tmp_path, MODE_AGENTIC), tmp_path / "run", event
     )
     assert live_agentic[-1] == "--allow-live-inference"
     env = child_env({WEBHOOK_SECRET_ENV: SECRET, "ATLAS_SPRITES_TOKEN": "sprite"})
     assert WEBHOOK_SECRET_ENV not in env
     assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_the_agentic_child_reviews_with_a_per_pr_round_log(tmp_path):
+    """D74: the service's round log is keyed by repository and pull
+    request, so a later head of the same pull request reads the earlier
+    rounds. The path sits outside the per-head run directory -- the
+    mutant that keys it by head fails here -- and the oneshot child gets
+    none: the one-shot `review` command has no round log."""
+    first = PrEvent(REPO, 42, SHA)
+    second = PrEvent(REPO, 42, "d" * 40)
+    agentic = review_argv(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), tmp_path / "run", first
+    )
+    round_at = agentic.index("--round-log")
+    flagged = Path(agentic[round_at + 1])
+    assert flagged == tmp_path / "rounds" / "brandondees-code-quality-atlas-42.jsonl"
+    assert run_dir(tmp_path, first) not in flagged.parents
+    later = review_argv(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), tmp_path / "run", second
+    )
+    assert later[later.index("--round-log") + 1] == str(flagged)
+    oneshot = review_argv(
+        RunConfig("offline", False, tmp_path, MODE_ONESHOT), tmp_path / "run", first
+    )
+    assert "--round-log" not in oneshot
+
+
+def test_a_case_renamed_repository_resolves_to_the_same_round_log(tmp_path):
+    """D74 round 1, N1: the filename key is the reader's key -- a
+    case-only repository rename keeps the pull request's log instead of
+    silently starting a fresh one under the missing-file-is-first-round
+    rule."""
+    upper = PrEvent("Org/Repo", 42, SHA)
+    lower = PrEvent("org/repo", 42, SHA)
+    assert round_log_path(tmp_path, upper) == round_log_path(tmp_path, lower)
+    assert round_log_path(tmp_path, lower) == tmp_path / "rounds" / "org-repo-42.jsonl"
 
 
 def test_the_default_mode_is_agentic_and_an_unknown_mode_fails_closed():

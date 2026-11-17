@@ -255,6 +255,16 @@ def _state_dir(args: argparse.Namespace, env: Mapping[str, str]) -> Path:
     return Path(args.state_dir or env.get(ENV_STATE_DIR) or DEFAULT_STATE_DIR)
 
 
+def _round_log_path(args: argparse.Namespace, env: Mapping[str, str]) -> Path:
+    """The round log's location: `--round-log` when the caller names one
+    (D74 -- the service's per-pull-request path), else the unflagged
+    `<state dir>/rounds.jsonl` D67 chose, so a local run keeps the path
+    it always had."""
+    if getattr(args, "round_log", None):
+        return Path(args.round_log)
+    return _state_dir(args, env) / "rounds.jsonl"
+
+
 @dataclass(frozen=True)
 class _Wiring:
     deps: Deps
@@ -1064,7 +1074,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     bridge_root=bridge_root,
                     context=context,
                     context_omissions=context_omissions,
-                    round_log=RoundLog(_state_dir(args, env) / "rounds.jsonl"),
+                    round_log=RoundLog(_round_log_path(args, env)),
                     prior_chars=prior,
                     evidence_digest=snapshot_digest(
                         ci_collected, remarks, remarks_collected
@@ -1586,6 +1596,13 @@ def build_parser() -> argparse.ArgumentParser:
     _model_args(ag)
     _key_ceiling_arg(ag)
     ag.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
+    ag.add_argument(
+        "--round-log",
+        help=(
+            "round log path; the caller-chosen location D67 left open "
+            "(default: <state-dir>/rounds.jsonl)"
+        ),
+    )
     ag.add_argument(
         "--allow-live-inference",
         action="store_true",
