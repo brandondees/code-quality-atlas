@@ -2977,3 +2977,62 @@ last kept line's integrity. Mutants applied by hand and killed with
 M16 (the anchor dropped), M17 (the mid-line fallback). One measured pair
 each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 — CI moves to GitHub-hosted runners for every event (D78)
+
+main's `gate` runs had been stuck `queued` since roughly 3 AM CT: the
+workflow's `runs-on:` sent `pull_request` to `ubuntu-latest` but
+`push`(main)/`schedule` to `fromJSON('["self-hosted", "Linux"]')`, and the
+fleet's runner for this repo was down — the single point of failure the
+self-hosted guide's own Accepted Risks section had already recorded ("no
+automatic failover... a job with no available runner sits `queued` rather
+than erroring"). Brandon called the migration at 5:43 PM CT (D78): every
+event of every workflow under `.github/workflows/` now runs on GitHub-hosted
+runners — `runs-on: ubuntu-latest`, left floating rather than pinned to a
+dated image because every gate already version-pins its tools independently
+of the runner OS (hash-pinned `requirements.txt`, exact-pinned
+pip-tools/pip-audit/pip-licenses, checksum-verified upstream shellcheck and
+actionlint tarballs — the apt-pin breakage the tarballs replaced was itself
+coupling to a runner OS archive). Only `ci.yml` existed; no other workflow
+file carried a runner label.
+
+Workarounds retired with the persistent hardware, each in place: #366's
+fresh-venv install (its precondition — site-packages accumulating across
+jobs on one shared interpreter, silently skipping a pin's hash check —
+cannot occur on a per-run VM), the event-conditional `cache: 'pip'`
+(#475/#589), the fleet's arch-agnostic `runs-on:` notes, and the
+`$RUNNER_TEMP`-vs-`$HOME` persistent-host defense notes. Kept because still
+useful: the hash-verified `pip install --require-hashes` gate, the per-arch
+shellcheck/actionlint downloads (any hosted Linux arch), and the
+fail-fast step ordering. The concurrency block keeps
+`cancel-in-progress: ${{ github.event_name == 'pull_request' }}` on a new
+rationale: #378's single-runner queueing is gone, and what remains is that
+a scheduled run shares the group with main pushes (both resolve to the
+default branch's ref), so cancel-on-push would let a mid-week push kill the
+weekly path-independent pip-audit (#379) before it ran, and each main push
+keeps one complete recorded run at no extra cost on a public repo's free
+hosted minutes. D78 does not close #471's residual gap: GitHub evaluates a
+plain `pull_request` workflow from the PR's own head, so a hostile PR can
+still edit its own `runs-on:`; the protection is the Settings value
+("Require approval for all outside collaborators"), not this file.
+
+Guards moved with the decision: `tests/test_ci_runners_are_github_hosted.py`
+replaces `test_ci_pull_request_runner_is_hosted.py` (which pinned the split
+shape D78 removes — every job's `runs-on` must now be a plain hosted label,
+with no `self-hosted` and no event-conditional expression), and
+`test_ci_require_hashes_targets_fresh_venv.py` becomes the slimmer
+`test_ci_require_hashes_install.py` (the venv-shape assertions' rationale
+went with the shared interpreter; the `--require-hashes`-exists guard
+stays). `docs/self-hosted-runners.md` stays as the fleet how-to for the
+repos that still self-host, with this repo's state updated in its header
+and Per-repo notes; the review-lens content about self-hosted runners
+(`auditing-deployment-and-trust-boundaries` and its `collapsed/` copy) is
+guidance about other repos and was left alone, as were the historical logs.
+
+Deliberately not touched: the stuck runs on main (no cancel, re-run, or
+settings change), the runner registrations, and `docs/research/` (records
+of findings, not live state). Verification, all on the PR head:
+`pytest tests/` 878 passed / 14 skipped, coverage 95.20% (floor 94%);
+`pytest atlas_reviewer/tests` 3,216 passed, 96.39%; ruff check/format,
+mypy (84 files), `tooling.cli drift` clean; actionlint 1.7.12 clean on
+`ci.yml`. Offline only.

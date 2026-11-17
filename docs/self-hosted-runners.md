@@ -21,6 +21,15 @@ plus the gotchas that would otherwise resurface on every new host.
 > verbatim re-copy from the canonical could reintroduce them — there is no
 > guard against that beyond this note.
 >
+> **This repo's own CI is no longer on the fleet (2026-11-17, D78).** Every
+> event of every workflow under `.github/workflows/` now runs on
+> GitHub-hosted runners (`ubuntu-latest`), so nothing in this repo routes to
+> `[self-hosted, ...]` any more. The guide below remains the fleet how-to
+> for the other repos that still self-host, and the record of the trade-offs
+> self-hosting made here (see [Why self-hosted at all?](#why-self-hosted-at-all)
+> and [Accepted Risks](#accepted-risks)); this repo's own runner history is
+> under [Per-repo notes](#per-repo-notes).
+>
 > Fleet as of 2026-08-29: **three Linux hosts across two architectures.**
 > `<vm-name>` (an OrbStack Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB,
 > arm64) serves six repos as `orbstack-linux-mbp`; the Bazzite host (x86_64,
@@ -1085,14 +1094,23 @@ job whose labels no runner carries sits `queued` with no error:
 grep -rn 'runs-on:' .github/workflows/ | sed 's/:  */: /'
 ```
 
+**Every event now runs on GitHub-hosted runners (2026-11-17, D78).** This
+section's remaining paragraphs describe how the routing got here, not where
+it is. Today `ci.yml`'s single `gate` job is `runs-on: ubuntu-latest` for
+`pull_request`, `push`, and `schedule` alike, and this guide applies to this
+repo only as history (and to the other repos on the fleet). The `runs-on:`
+grep above still works as a self-check: on this repo it should now print one
+hosted line, per workflow.
+
 **Dependabot PRs no longer share this repo's self-hosted exposure (fixed by
-issue #471).** This section used to describe Dependabot dependency-bump PRs running
-unattended on the shared self-hosted runner before human review, on the
-reasoning that the fork-PR gate's "same repo" check couldn't distinguish a
-same-repo human PR from a same-repo Dependabot PR. That exposure is gone:
-`ci.yml`'s `gate` job now routes every `pull_request` event — Dependabot
-included — to `runs-on: ubuntu-latest`, an ephemeral GitHub-hosted VM, and
-only `push`(main)/`schedule` still land on the self-hosted fleet, neither of
-which carries Dependabot's own unreviewed content pre-merge. See
+issue #471, completed by D78).** This section used to describe Dependabot
+dependency-bump PRs running unattended on the shared self-hosted runner
+before human review, on the reasoning that the fork-PR gate's "same repo"
+check couldn't distinguish a same-repo human PR from a same-repo Dependabot
+PR. That exposure ended in two steps: #471 routed every `pull_request`
+event — Dependabot included — to `runs-on: ubuntu-latest`, an ephemeral
+GitHub-hosted VM, and D78 (2026-11-17) moved the remaining
+`push`(main)/`schedule` runs onto hosted runners too, so no event of this
+repo's CI touches the fleet at all any more. See
 [Known gotchas](#known-gotchas)'s fork-PR-gate entry for the routing
 mechanism and its own residual gap.
