@@ -2604,6 +2604,7 @@ branch's own unmerged entry. `deploy-service.md`'s recovery paragraph
 and `rounds.py`'s docstrings now state the narrowed rule. 3,119
 reviewer tests at 96.39% coverage, ruff/format/mypy/drift clean.
 Offline only.
+
 ## 2026-11-17 — the reviewer image carries every file the controller reads at review time (v6's synthesis.md crash)
 
 atlas-reviewer-service v6, the image built from main `d5a2a93f`, failed its
