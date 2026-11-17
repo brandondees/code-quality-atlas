@@ -241,10 +241,11 @@ def _skill_directories() -> set[str]:
 def _cited_picker_names(text: str) -> set[str]:
     """Lens names the picker skill cites, as its own `LENS_NAME` accepts
     them: backtick spans. A single-word backtick is prose (`acknowledge`,
-    `minor`), not a lens; no lens name is single-word, so the test fails
-    if that ever changes. A name the skill cites without backticks is not
-    read, rather than the reader guessing at the Routes section's table
-    and bullet shapes; the test fails loudly on such a name instead."""
+    `minor`), not a lens; no lens name is single-word, so the test's
+    completeness half fails if that ever changes. A name the skill cites
+    without backticks is not read, and the completeness half fails on it
+    too, rather than the reader guessing at the Routes section's table
+    and bullet shapes."""
     quoted = set(re.findall(rf"`({LENS_NAME.pattern})`", text))
     return {name for name in quoted if "-" in name}
 
@@ -254,6 +255,11 @@ def test_every_lens_the_picker_names_has_a_body():
     directories = _skill_directories()
     cited = _cited_picker_names(text)
     assert sorted(cited - directories) == []
+    # The other half of the guarantee: a partial extraction drift -- the
+    # generated skill naming a lens somewhere the reader does not read --
+    # would shrink `pickable` silently without this.
+    uncited = sorted(directories - cited - {"choosing-review-lenses"})
+    assert uncited == []
     library = LensLibrary()
     for name in _NOT_A_REVIEW_LENS:
         assert name in directories
