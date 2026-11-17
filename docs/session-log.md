@@ -2977,3 +2977,38 @@ last kept line's integrity. Mutants applied by hand and killed with
 M16 (the anchor dropped), M17 (the mid-line fallback). One measured pair
 each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #692: a later clean run of a lens supersedes its earlier NOT RUN for coverage
+
+Found in the Nov 14 model-trials rerun (Haiku #640): `sweeping-for-security`
+was NOT RUN after a Sprites 502, its continuation ran it to clean as entry
+L13, and the original NOT RUN entry (L2) stayed in `lenses` — so
+`_lens_gap`'s per-entry check read a standing gap out of an entry the lens
+had already made good, `coverage_complete` stayed false, the draft opened
+with REVIEW INCOMPLETE, the event was held at COMMENT, and the service post
+listed a lens under "Lenses not run" that had in fact run.
+
+The fix is in the shared coverage computation (`coordinator._lens_gap`), so
+every consumer agrees: a lens blocks coverage only when none of its own
+entries is clean. Supersession is by presence, not position — a later clean
+run supersedes an earlier NOT RUN, and a later NOT RUN does not undo an
+earlier clean run — with D42's per-file gate and the runner gate unchanged
+(a failed runner is still not approved away). Findings are untouched:
+D61/D73's keep-findings rules are coverage-independent, and minting still
+walks every attested entry. The record is not rewritten — the status line's
+per-entry counts keep the `not_run` count — and the draft marks the
+superseded entry with a controller note (`recovered by L<n>'s clean run`)
+appended last, outside the quoted reason; the service parser reads the
+marker off the line's end, so a quoted reason carrying the same words can
+never forge a recovery, and carries the whole ledger line among the limit
+stops so the posted COMMENT keeps the failure. Recorded as D76 in
+`docs/open-questions.md`.
+
+Tests pin both directions of the ordering semantics, the lens-identity
+isolation, the surviving failure record in the draft and in the post, and
+the unsuperseded NOT RUN still blocking. Mutants applied by hand and
+killed: M1 (the supersede check dropped, back to per-entry `any`), M2 (the
+grouping collapsed to one bucket — lens identity ignored), M3 (the
+recovered note dropped from the draft), M4 (the service's recovered branch
+dropped), M5 (last-entry-decides ordering). 3,225 reviewer tests at 96.40%,
+882 tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.

@@ -620,6 +620,59 @@ def test_an_incomplete_coverage_with_no_unread_file_names_no_cause():
     )
 
 
+def _recovered_draft():
+    """A draft from the real `coordinator.render_draft` in #692's state:
+    one lens whose first entry is NOT RUN and whose later clean run
+    supersedes it, so coverage is complete and the failure is a recovered
+    note on the earlier entry's line."""
+    lens = "tracing-correctness-and-invariants"
+    lost = LensResult(lens, 2, None, None, reason="Sprites HTTP 502 for POST")
+    rerun = LensResult(
+        lens, 3, None, AttemptOutcome(Attestation.ATTESTED, changed_files=2)
+    )
+    review = synthesize([lost, rerun])
+    return render_draft(review, Redactor())
+
+
+def test_a_recovered_not_run_is_run_in_the_report_with_the_failure_kept():
+    """#692: the service report agrees with the draft's coverage. A lens a
+    later clean run recovered counts as run -- not as a NOT RUN lens the
+    parity gate would fail -- and the failure survives as the recovered
+    note among the limit stops, never silently dropped."""
+    draft = _recovered_draft()
+    assert "recovered by L3's clean run" in draft
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.lenses_run == ("tracing-correctness-and-invariants",)
+    assert report.lenses_not_run == ()
+    assert report.recommended_event == "APPROVE"
+    assert "coverage_complete" in report.files_note or "complete" in report.files_note
+    stops = " ".join(report.limit_stops)
+    assert "recovered by L3's clean run" in stops
+    assert "Sprites HTTP 502" in stops
+
+
+def test_a_recovered_not_run_is_visible_in_the_posted_comment():
+    body = render_comment(
+        summarize_draft(_recovered_draft(), expect=MODE_AGENTIC),
+        post_key(PrEvent("example-org/example-app", 7, "a" * 40)),
+        lambda item: item,
+    )
+    assert "## Lenses not run\n\nNone." in body
+    assert "Sprites HTTP 502" in body
+    assert "recovered by L3's clean run" in body
+
+
+def test_a_not_run_without_a_clean_run_is_still_not_run_in_the_report():
+    """The supersede marker is the controller's, on the line's end: a NOT
+    RUN with no recovering clean run stays a not-run lens, reason and all."""
+    draft = _renderer_draft()
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.lenses_run == ()
+    assert report.lenses_not_run == (
+        "tracing-correctness-and-invariants: the review ended first",
+    )
+
+
 def test_the_agentic_runner_runs_the_agentic_command_with_the_limits(tmp_path):
     seen: dict[str, object] = {}
 

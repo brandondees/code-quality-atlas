@@ -523,6 +523,10 @@ def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
 _AGENTIC_COVERAGE = re.compile(r"^- L\d+ (.+?): \*\*(.+?)\*\*(?:; (.*))?$")
 _AGENTIC_RUN_STATES = frozenset({"clean", "partial"})
 _NOT_RUN_BULLET = "- NOT RUN: "
+# A coverage line's recovered note (#692): the controller appends it last,
+# outside the quoted reason, so only a line the coordinator wrote ends this
+# way -- a quoted reason carrying the same words is never at the line's end.
+_AGENTIC_RECOVERED = re.compile(r"recovered by L\d+'s clean run$")
 # Coverage-section prose that is not a limit: the runner report and the
 # round-log note sit in that section whenever the draft has no prompt-cache
 # section between them, and a runner that did not complete adds its own
@@ -539,9 +543,12 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
     """The posted report from an agentic draft. A lens counts as run when
     its ledger line says it ran with its body (``clean`` or ``partial``);
     ``failed`` and ``NOT RUN`` are not run, the way the parity gate reads
-    them. The coverage note is built from the status line's controller
-    counts, and the limit stops are the status line's first stop, the
-    context omissions, and the ceiling note the coverage section carries."""
+    them -- except a line the coordinator marked recovered (#692), whose
+    lens's later clean run supersedes the failure and whose failure text
+    is carried among the limit stops instead. The coverage note is built
+    from the status line's controller counts, and the limit stops are the
+    status line's first stop, the context omissions, and the ceiling note
+    the coverage section carries."""
     skipped: list[str] = []
     named: set[str] = set()
 
@@ -633,7 +640,11 @@ def _agentic_coverage(
     limit notes. A not-run line carries its reason only when the line is
     exactly the state and one quoted reason -- the shape a lens that was
     never attempted renders; a failed lens with an outcome has parts, not
-    a reason, and stays name-only."""
+    a reason, and stays name-only. A line the coordinator marked recovered
+    (#692) is neither: the same lens's later clean run supersedes the
+    failure for coverage, so the lens is run, and the failure stays
+    visible as the line itself, carried among the limit notes rather than
+    dropped."""
     run: list[str] = []
     not_run: list[tuple[str, str]] = []
     cost: list[str] = []
@@ -644,6 +655,8 @@ def _agentic_coverage(
             name, state, rest = match.group(1), match.group(2), match.group(3) or ""
             if state in _AGENTIC_RUN_STATES:
                 run.append(name)
+            elif _AGENTIC_RECOVERED.search(rest):
+                notes.append(line)
             elif "body sha256" not in rest:
                 quoted = _quoted_strings(rest)
                 not_run.append((name, quoted[0] if quoted else ""))
