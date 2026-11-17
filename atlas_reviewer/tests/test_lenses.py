@@ -232,7 +232,6 @@ _NOT_A_REVIEW_LENS = frozenset(
     }
 )
 _REPO = Path(__file__).resolve().parents[2]
-_TOKEN = re.compile(rf"\A`?({LENS_NAME.pattern})`?\Z")
 
 
 def _skill_directories() -> set[str]:
@@ -240,31 +239,14 @@ def _skill_directories() -> set[str]:
 
 
 def _cited_picker_names(text: str) -> set[str]:
-    """Names the picker's own `LENS_NAME` accepts.
-
-    A backtick span counts, including a single word. So does a bare token
-    in a route's Run cell or a catalog bullet, which is where the skill
-    names a lens. A single-word backtick outside those places is prose
-    (`acknowledge`, `minor`), not a lens."""
+    """Lens names the picker skill cites, as its own `LENS_NAME` accepts
+    them: backtick spans. A single-word backtick is prose (`acknowledge`,
+    `minor`), not a lens; no lens name is single-word, so the test fails
+    if that ever changes. A name the skill cites without backticks is not
+    read, rather than the reader guessing at the Routes section's table
+    and bullet shapes; the test fails loudly on such a name instead."""
     quoted = set(re.findall(rf"`({LENS_NAME.pattern})`", text))
-    named: set[str] = set()
-    chunk = text[text.index("## Routes") :]
-    for line in chunk.splitlines():
-        if line.startswith("- "):
-            head = line[2:].split("—", 1)[0].strip()
-            match = _TOKEN.match(head.split()[0] if head else "")
-            if match:
-                named.add(match.group(1))
-        elif line.startswith("| ") and not line.startswith("|---"):
-            cells = line.split("|")
-            if len(cells) < 3:
-                continue
-            for piece in cells[2].split("—", 1)[0].split(","):
-                match = _TOKEN.match(piece.strip())
-                if match:
-                    named.add(match.group(1))
-    prose = {name for name in quoted if "-" not in name and name not in named}
-    return (quoted - prose) | named
+    return {name for name in quoted if "-" in name}
 
 
 def test_every_lens_the_picker_names_has_a_body():
