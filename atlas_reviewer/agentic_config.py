@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 
-from atlas_reviewer.lens_loop import AgenticLimits
+from atlas_reviewer.lens_loop import MAX_CALL_RETRIES, AgenticLimits
 
 ENV = {
     "reservation_usd": "ATLAS_RESERVATION_USD",
@@ -144,7 +144,7 @@ def _apply_positive_int(
     if name == "per_lens_calls":
         return replace(limits, per_lens_calls=_positive_int(name, raw))
     if name == "call_retries":
-        return replace(limits, call_retries=_count(name, raw))
+        return replace(limits, call_retries=_bounded_int(name, raw, MAX_CALL_RETRIES))
     return None
 
 
@@ -183,13 +183,6 @@ def _bounded_int(name: str, raw: str, hi: int) -> int:
     if not 0 <= value <= hi:
         raise ValueError(f"{name} must be an integer from 0 to {hi}, not {raw!r}")
     return value
-
-
-def _count(name: str, raw: str) -> int:
-    try:
-        return int(raw)
-    except ValueError:
-        raise ValueError(f"{name} must be a whole number, not {raw!r}") from None
 
 
 def _positive_seconds(name: str, raw: str) -> float:

@@ -255,6 +255,29 @@ def test_the_span_names_a_timeout_retry():
     assert attrs["atlas.timeout_retry"] == 1
 
 
+def test_the_span_names_a_failed_call_retry():
+    """D49 (round-1 review of #654, M-1): the completion that is a failed
+    model call's resend names which attempt it is on its span. The lens
+    outcome stays silent about a retry that succeeded (D49), so the span
+    is where the retry shows."""
+    from atlas_reviewer.call_facts import note_call_retry
+
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            wrapper = trace.wrap_model(_Model(FinalReply("done", Decimal("0.01"))))
+            ask = TurnRequest("system", (), ())
+            wrapper.worst_case_usd(ask)
+            note_call_retry(2)
+            wrapper.turn(ask)
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert attrs["atlas.call_retry"] == 2
+
+
 def test_the_flush_wait_is_bounded_not_the_sdk_ignored_timeout():
     """Review Minor 6: SDK 1.45.2's `force_flush` ignores its timeout, so
     the wait is bounded by a thread join here: `flush` returns in about

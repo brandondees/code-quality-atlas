@@ -1167,8 +1167,11 @@ D41 records the 2026-11-12 probe that did.
   derivation. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1. `call_retries` is 0 to 3 and defaults
-  to 1: a failed model call is sent again after a 2s backoff, and each
-  call reserves its own worst case (D49). `pool_size` is 1 to 16. It defaults to
+  to 1: a failed model call is sent again after a backoff of 2s times
+  the number of failed calls so far (2s, then 4s, then 6s), and each
+  call reserves its own worst case (D49). Composed with the one timeout
+  retry (D58), one logical turn's request can be sent up to
+  2 × (`call_retries` + 1) times per attempt — 4 at the default. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
   `ATLAS_POOL_SIZE` is set. `create_retries` is how many times a 429'd
   Sprite create waits and retries before giving up (D62): 0 to 24,

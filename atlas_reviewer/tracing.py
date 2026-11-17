@@ -54,7 +54,12 @@ from opentelemetry.trace import Status, StatusCode, Tracer
 
 from atlas_reviewer.bridge import Bridge, BridgeResult
 from atlas_reviewer.bridge import Status as ToolStatus
-from atlas_reviewer.call_facts import take_call, take_nudge, take_timeout_retries
+from atlas_reviewer.call_facts import (
+    take_call,
+    take_call_retries,
+    take_nudge,
+    take_timeout_retries,
+)
 from atlas_reviewer.lens_loop import (
     FinalReply,
     LensModel,
@@ -447,14 +452,37 @@ class _TracedModel:
                 bound_note = self._bound_note
                 nudge = take_nudge()
                 retries = take_timeout_retries()
+                call_retries = take_call_retries()
                 self._reservation = None
                 self._bound_note = ""
                 _model_attributes(
                     note, self._model, request, reply, take_call(),
                     self._owner._clock() - start, caught, self._owner._bodies,
-                    reservation, bound_note, nudge, retries,
+                    reservation, bound_note, nudge, retries, call_retries,
                 )  # fmt: skip
         return reply
+
+
+def _retry_attributes(
+    note: _Note, nudge: str, timeout_retries: int, call_retries: int
+) -> None:
+    """The request-side markers the loop set before this call: the
+    harness-injected turn the completion answers, and which retry it is.
+    Split from `_model_attributes` so each stays under the complexity
+    gate."""
+    if nudge:
+        # The harness-injected turn this completion answers: one of
+        # `unread-files`, `no-progress`, `duplicate-calls`.
+        note.set("atlas.nudge", nudge)
+    if timeout_retries:
+        # This completion follows a timed-out request's one retry (review
+        # M2): the retry is its own reserved, counted call.
+        note.set("atlas.timeout_retry", timeout_retries)
+    if call_retries:
+        # This completion is a failed model call's resend (D49): the
+        # attempt count, 1 for the first. The outcome stays silent about a
+        # retry that succeeded (D49), so the span is where it shows.
+        note.set("atlas.call_retry", call_retries)
 
 
 def _routing_attributes(note: _Note, model: LensModel) -> None:
@@ -500,6 +528,7 @@ def _model_attributes(
     bound_note: str = "",
     nudge: str = "",
     timeout_retries: int = 0,
+    call_retries: int = 0,
 ) -> None:
     model_name = model.name
     if facts is not None and facts.model:
@@ -512,14 +541,7 @@ def _model_attributes(
         # computed: from the last response's reported usage plus an
         # estimate, or from bytes. A wrong estimate is visible here.
         note.set("atlas.input_bound", bound_note)
-    if nudge:
-        # The harness-injected turn this completion answers: one of
-        # `unread-files`, `no-progress`, `duplicate-calls`.
-        note.set("atlas.nudge", nudge)
-    if timeout_retries:
-        # This completion follows a timed-out request's one retry (review
-        # M2): the retry is its own reserved, counted call.
-        note.set("atlas.timeout_retry", timeout_retries)
+    _retry_attributes(note, nudge, timeout_retries, call_retries)
     if facts is not None:
         _tokens(note, facts)
         if facts.finish_reason:

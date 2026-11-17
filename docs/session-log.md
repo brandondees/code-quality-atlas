@@ -1285,7 +1285,8 @@ selection, and that blocks approval. D56 records it.
 
 A live lens failed at turn 20 when Bedrock returned
 `finish_reason=error`. The loop now sends a failed call again, once by
-default, after a 2s backoff. Each call still reserves its worst case
+default, after a backoff of 2s times the failed calls so far. Each call
+still reserves its worst case
 and counts toward the call cap, and the failed call's reservation stays
 committed. `--call-retries` and `ATLAS_CALL_RETRIES` set the count, 0
 to 3. D49 records it.

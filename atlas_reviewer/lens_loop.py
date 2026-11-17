@@ -116,7 +116,12 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.budget import BudgetRefusedError
-from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
+from atlas_reviewer.call_facts import (
+    note_call_retry,
+    note_nudge,
+    note_timeout_retry,
+    reset_events,
+)
 from atlas_reviewer.diffs import scope_text, split_files
 from atlas_reviewer.lens_contract import (
     _SEVERITY_ALIASES,
@@ -1623,8 +1628,9 @@ def run_attempt(
             failures.append(placed)
             if len(failures) > limits.call_retries:
                 return p.cut(Cause.MODEL_ERROR, _failed_calls(failures))
-            # The same request is sent again after a short backoff, once
-            # the clocks still allow a turn (D49).
+            # The same request is sent again after a backoff of 2s times
+            # the failed calls so far, once the clocks still allow a turn
+            # (D49). The resend's span names which attempt it is.
             sleep(CALL_RETRY_BACKOFF_S * len(failures))
             stopped = _time_up(
                 p, clock, limits, review_deadline, review_started,
@@ -1632,6 +1638,7 @@ def run_attempt(
             )  # fmt: skip
             if stopped is not None:
                 return stopped
+            note_call_retry(len(failures))
         if timeout_retry:
             continue
         if isinstance(placed, AttemptOutcome):
