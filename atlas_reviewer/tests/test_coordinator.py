@@ -30,7 +30,6 @@ from atlas_reviewer.coordinator import (
     LATE_REASON,
     LensResult,
     Verdict,
-    _blocks_coverage,
     _still_unread,
     render_draft,
     review_lens,
@@ -1907,9 +1906,59 @@ def test_a_file_unread_by_one_lens_is_covered_once_that_lens_reads_it():
 
 def test_a_partial_with_no_cause_still_blocks_coverage():
     unexplained = scoped(LENS, ["a.py"], attestation=Attestation.UNACKNOWLEDGED)
-    assert _blocks_coverage(unexplained)
+    assert not synthesize([unexplained]).coverage_complete
+
+
+def test_an_unread_only_partial_alone_is_incomplete_until_the_lens_runs_clean():
     only_unread = scoped(LENS, ["a.py"], unread=["a.py"])
-    assert not _blocks_coverage(only_unread)
+    result = synthesize([only_unread])
+    assert not result.coverage_complete
+    assert result.unreviewed_paths == ("a.py",)
+
+
+def test_an_unread_only_partial_does_not_excuse_a_failed_sibling():
+    """Round-1 Major on #744, the reviewer's repro: the unread-only
+    carve-out is not a clean run. A partial that left a file unread plus a
+    continuation that read everything but failed the quote contract give
+    the lens no clean entry, so coverage stays incomplete and the review
+    is held at COMMENT -- the shape origin/main held at COMMENT and this
+    branch briefly approved."""
+    partial = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    failed = LensResult(
+        LENS, 2, DIGEST,
+        AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.QUOTES_FAILED}),
+            changed_files=2,
+        ),
+        attempts=1,
+        scope=frozenset({"a.py", "b.py"}),
+    )  # fmt: skip
+    result = synthesize([partial, failed])
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "REVIEW INCOMPLETE" in render_draft(result, Redactor()).splitlines()[2]
+
+
+def test_a_clean_run_still_covers_an_unread_only_partial_and_a_failure():
+    """The positive control for the supersede rule: one clean run of the
+    lens covers an unread-only partial and a real-cause failure beside it,
+    and the unread gap clears because the clean run read every file."""
+    partial = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    failed = LensResult(
+        LENS, 2, DIGEST,
+        AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.QUOTES_FAILED}),
+            changed_files=2,
+        ),
+        attempts=1,
+        scope=frozenset({"a.py", "b.py"}),
+    )  # fmt: skip
+    rerun = replace(scoped(LENS, ["a.py", "b.py"]), index=3)
+    result = synthesize([partial, failed, rerun])
+    assert result.coverage_complete
+    assert result.unreviewed_paths == ()
 
 
 def test_a_byok_refusal_stops_the_lenses_that_have_not_started(tmp_path):
@@ -2325,7 +2374,7 @@ def test_an_attested_reply_that_skipped_files_and_failed_a_quote_still_blocks():
         changed_files=1,
     )
     result = LensResult(LENS, 1, DIGEST, outcome, attempts=1, scope=frozenset({"a.py"}))
-    assert _blocks_coverage(result)
+    assert not synthesize([result]).coverage_complete
 
 
 def test_an_unverified_runner_delete_is_named_in_a_multi_lens_draft():

@@ -3012,3 +3012,47 @@ grouping collapsed to one bucket — lens identity ignored), M3 (the
 recovered note dropped from the draft), M4 (the service's recovered branch
 dropped), M5 (last-entry-decides ordering). 3,225 reviewer tests at 96.40%,
 882 tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #744 round-1 fixes: the scoped path's carve-out hole closed, the `$` anchor pinned, the cross-references added
+
+The round-1 protocol review, Brandon's routine review and the
+atlas-reviewer-service review all returned COMMENT on the same Major, and
+the protocol review reproduced it before fixing: the scoped path implemented
+"none of its entries blocks" through `_blocks_coverage`, whose unread-only
+carve-out (PARTIAL, attested, `FILES_UNREAD` only) returns False for a
+partial that merely left a file unread — so such a partial excused a sibling
+that failed for a real cause. The repro (an unread-only partial plus a
+continuation that read every file and then failed `QUOTES_FAILED`) reached
+`coverage_complete` with no clean entry at all: APPROVE on the branch,
+COMMENT on origin/main, with the headline printing "Every selected lens ran
+whole, attested, with every quote verified" over a lens that never had a
+clean run. Exactly the parity failure the fix was meant to prevent,
+introduced by the fix's own first cut.
+
+The fix takes the stated rule literally: one per-lens predicate
+(`_uncovered_lens` — at least one clean entry, presence not position, per
+lens) now drives both the scoped and the no-scope paths, retiring
+`_blocks_coverage` and its two-definition divergence (the module-design note
+folded into the Major). The unread-only partial's files still gate through
+`_unread_paths` exactly as before, so nothing about D42's per-file gate
+moves; a lone unread-only partial stays incomplete, now charged to the state
+rule as well. Pinned by the reviewer's repro
+(`test_an_unread_only_partial_does_not_excuse_a_failed_sibling`, killing the
+carve-out-restored mutant) and by a positive control
+(`test_a_clean_run_still_covers_an_unread_only_partial_and_a_failure`)
+guarding against over-correction; the round-0 supersede and identity pins
+were re-verified against the new structure (M1′ per-entry `any`, M2 one
+bucket, M5 last-entry-decides all still die).
+
+The Minors: the `$` anchor on `_AGENTIC_RECOVERED` — load-bearing for
+forgery resistance and unpinned, M6 had survived all 179 round-0 tests — is
+now pinned by `test_a_quoted_reason_cannot_forge_the_recovered_marker`, a
+NOT RUN lens with no clean run whose quoted reason carries the marker's
+words and stays a not-run lens in the report and the post; and the vacuous
+`or "complete" in report.files_note` assertion is now the exact
+complete-coverage note text, so `incomplete` can no longer satisfy it. D40,
+D42, D44 and D70 gained their `Update (2026-11-17, D76 ...)` cross-reference
+notes, and D76 gained this correction. The module docstring's
+order-dependent wording ("whose own later run settled clean") is reworded to
+the presence-based rule. 3,229 reviewer tests, 882 tooling; ruff/format/
+mypy/drift clean. Offline only.

@@ -15,10 +15,11 @@ Coverage is complete only when every lens read every changed file's
 diff in full, through its own attempts or its own continuations (D42:
 a read by another lens does not cover a file for this one), no lens
 failed for another cause, and, when this review ran a runner, every
-runner completed. A lens whose own later run settled clean is covered
-however its earlier entries ended (#692): a continuation after a
-failed or never-started run supersedes that failure for coverage,
-while the failure stays in the draft as a recovered note. A single-lens
+runner completed. A lens with any clean run of its own is covered
+however its other entries ended (#692): a continuation after a
+failed or never-started run supersedes that failure for coverage, a
+later failure does not undo an earlier clean run, and the failure
+stays in the draft as a recovered note. A single-lens
 result with no assigned scope keeps the
 older rule: that lens itself must be clean and have read every file.
 A runner whose delete was not verified does not block approval, but the
@@ -1778,17 +1779,6 @@ def _scoped(lenses: Sequence[LensResult]) -> bool:
     return any(result.scope is not None for result in lenses)
 
 
-def _blocks_coverage(result: LensResult) -> bool:
-    """A lens that is partial only because it left a file unread does not
-    block once that same lens, or its continuation, has read the file."""
-    unread_only = (
-        result.outcome is not None
-        and result.outcome.attestation is Attestation.ATTESTED
-        and result.outcome.causes == frozenset({Cause.FILES_UNREAD})
-    )
-    return result.state is not LensState.CLEAN and not unread_only
-
-
 def _pending_by_lens(
     lenses: Sequence[LensResult], changed: frozenset[str] | None = None
 ) -> dict[str, frozenset[str]]:
@@ -1849,14 +1839,31 @@ def _entries_by_lens(lenses: Sequence[LensResult]) -> dict[str, list[LensResult]
     return grouped
 
 
+def _uncovered_lens(lenses: Sequence[LensResult]) -> bool:
+    """Whether any lens lacks a clean run of its own (#692, D76): a lens
+    blocks coverage unless at least one of its entries is clean, however
+    its other entries ended. Supersession is by presence, not position --
+    a later clean run supersedes an earlier NOT RUN, and a later NOT RUN
+    does not undo an earlier clean run -- and per lens, so one lens's
+    clean run never covers another lens's failure. The one "is this lens
+    covered" predicate: the headline and the draft's recovered notes read
+    `_clean_runs`, the same rule from the clean side."""
+    return any(
+        all(entry.state is not LensState.CLEAN for entry in entries)
+        for entries in _entries_by_lens(lenses).values()
+    )
+
+
 def _lens_gap(review: AgenticReview) -> str:
     """Why the lenses do not give complete coverage, or "" when they do.
     The one coverage rule: `coverage_complete`, the headline and the
     unread list all read it. A clean outcome can still lack coverage:
     unread paths, or no changed-file count from before the per-file gate.
-    A lens blocks only when none of its entries is clean (#692); an
-    earlier or later failing entry of a lens that also ran clean does
-    not."""
+    A lens blocks unless at least one of its entries is clean (#692), in
+    both the scoped and the no-scope paths -- an unread-only partial is
+    not a clean run, so it never excuses a sibling that failed for a real
+    cause; the files it left unread gate separately through
+    `_unread_paths`."""
     if review.context_omissions:
         return "partial context"
     if review.not_picked:
@@ -1868,20 +1875,14 @@ def _lens_gap(review: AgenticReview) -> str:
     if _unread_paths(review):
         return "unread files"
     if _scoped(review.lenses):
-        if any(
-            all(_blocks_coverage(entry) for entry in entries)
-            for entries in _entries_by_lens(review.lenses).values()
-        ):
+        if _uncovered_lens(review.lenses):
             return "a lens did not finish clean"
         return ""
     if any(
         r.outcome is not None and r.outcome.changed_files is None for r in review.lenses
     ):
         return "no recorded file coverage"
-    if any(
-        all(entry.state is not LensState.CLEAN for entry in entries)
-        for entries in _entries_by_lens(review.lenses).values()
-    ):
+    if _uncovered_lens(review.lenses):
         return "a lens did not finish clean"
     return ""
 

@@ -645,7 +645,9 @@ def test_a_recovered_not_run_is_run_in_the_report_with_the_failure_kept():
     assert report.lenses_run == ("tracing-correctness-and-invariants",)
     assert report.lenses_not_run == ()
     assert report.recommended_event == "APPROVE"
-    assert "coverage_complete" in report.files_note or "complete" in report.files_note
+    assert report.files_note == (
+        "Agentic file coverage complete: every changed file (2) was read in full."
+    )
     stops = " ".join(report.limit_stops)
     assert "recovered by L3's clean run" in stops
     assert "Sprites HTTP 502" in stops
@@ -671,6 +673,37 @@ def test_a_not_run_without_a_clean_run_is_still_not_run_in_the_report():
     assert report.lenses_not_run == (
         "tracing-correctness-and-invariants: the review ended first",
     )
+
+
+def test_a_quoted_reason_cannot_forge_the_recovered_marker():
+    """Round-1 Minor on #744: the `$` anchor on `_AGENTIC_RECOVERED` is
+    what keeps a recovery forgeable-free. A NOT RUN lens with no clean run
+    whose quoted reason carries the marker's words stays a not-run lens --
+    the words sit inside the reason's code span, whose closing backtick
+    always trails the line, so only a controller-appended note ends a line
+    with the marker. The unanchored mutant turns this lens into a
+    "recovered" note and empties Lenses not run."""
+    lens = "tracing-correctness-and-invariants"
+    lost = LensResult(
+        lens, 2, None, None,
+        reason="Sprites HTTP 502; recovered by L3's clean run",
+    )  # fmt: skip
+    draft = render_draft(synthesize([lost]), Redactor())
+    coverage = draft.split("## Lens coverage (attestation ledger)", 1)[1]
+    assert "Sprites HTTP 502; recovered by L3's clean run" in coverage
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.lenses_run == ()
+    assert report.lenses_not_run == (
+        "tracing-correctness-and-invariants: Sprites HTTP 502; recovered by L3's clean run",
+    )
+    assert not any("recovered by" in stop for stop in report.limit_stops)
+    body = render_comment(
+        report,
+        post_key(PrEvent("example-org/example-app", 7, "a" * 40)),
+        lambda item: item,
+    )
+    assert "## Lenses not run\n\nNone." not in body
+    assert "recovered by L3's clean run" in body.split("## Lenses not run", 1)[1]
 
 
 def test_the_agentic_runner_runs_the_agentic_command_with_the_limits(tmp_path):
