@@ -14,8 +14,19 @@ from pathlib import Path
 import pytest
 
 from atlas_reviewer import cli
-from atlas_reviewer.coordinator import render_draft
+from atlas_reviewer.attestation import AttemptOutcome, Attestation, CheckedFinding
+from atlas_reviewer.coordinator import LensResult, render_draft, synthesize
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.lens_contract import (
+    Attribution,
+    Finding,
+    LineRange,
+    Route,
+    Severity,
+    Valence,
+)
+from atlas_reviewer.quotes import QuoteSource
+from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import ServiceError, config_from_env
 from atlas_reviewer.service_post import comment_payload, post_key, render_comment
 from atlas_reviewer.service_run import (
@@ -788,27 +799,18 @@ def test_a_draft_reports_lenses_limits_cost_and_files():
     assert empty.files_note == "The draft has no diff-coverage note."
 
 
-def _finding_draft_with_two_findings():
+def _finding_draft(findings: tuple) -> str:
     """A draft from the real `coordinator.render_draft` whose one lens ran
-    clean with two verified findings, the shape the #654 round log held."""
-    from atlas_reviewer.attestation import (
-        AttemptOutcome,
-        Attestation,
-        CheckedFinding,
-    )
-    from atlas_reviewer.coordinator import LensResult, render_draft, synthesize
-    from atlas_reviewer.lens_contract import (
-        Attribution,
-        Finding,
-        LineRange,
-        Route,
-        Severity,
-        Valence,
-    )
-    from atlas_reviewer.quotes import QuoteSource
-    from atlas_reviewer.redact import Redactor
+    clean with the given verified findings, each (severity, problem, fix)
+    or (severity, problem, fix, evidence); the two-finding shape is what
+    the #654 round log held."""
 
-    def checked(severity: Severity, problem: str, fix: str) -> CheckedFinding:
+    def checked(
+        severity: Severity,
+        problem: str,
+        fix: str,
+        evidence: str = "return sum(round(x, 2) for x in xs)",
+    ) -> CheckedFinding:
         return CheckedFinding(
             Finding(
                 LineRange("calc.py", 2, 3),
@@ -818,17 +820,14 @@ def _finding_draft_with_two_findings():
                 Attribution.INTRODUCED,
                 problem,
                 fix,
-                "return sum(round(x, 2) for x in xs)",
+                evidence,
             ),
             QuoteSource.HEAD,
         )
 
     outcome = AttemptOutcome(
         Attestation.ATTESTED,
-        findings=(
-            checked(Severity.MINOR, "rounds before summing", "sum first"),
-            checked(Severity.NIT, "a magic constant", "name it"),
-        ),
+        findings=tuple(checked(*f) for f in findings),
         changed_files=1,
     )
     review = synthesize(
@@ -837,8 +836,17 @@ def _finding_draft_with_two_findings():
     return render_draft(review, Redactor())
 
 
+def _two_finding_draft() -> str:
+    return _finding_draft(
+        (
+            (Severity.MINOR, "rounds before summing", "sum first"),
+            (Severity.NIT, "a magic constant", "name it"),
+        )
+    )
+
+
 def test_an_agentic_draft_with_findings_carries_them_into_the_report():
-    draft = _finding_draft_with_two_findings()
+    draft = _two_finding_draft()
     report = summarize_draft(draft, expect=MODE_AGENTIC)
     assert len(report.findings) == 2
     minor, nit = report.findings
@@ -846,6 +854,73 @@ def test_an_agentic_draft_with_findings_carries_them_into_the_report():
     assert "calc.py:2" in minor and "rounds before summing" in minor
     assert nit.startswith("**L1-F2** [nit, defect, route: eng, introduced]")
     assert "calc.py:2" in nit and "a magic constant" in nit
+
+
+LONG_PROBLEM = (
+    "the retry loop re-arms the wall timer before the response is durably "
+    "recorded, so a crash between the re-arm and the ledger write leaves the "
+    "job unclaimed and unstuck: no worker retries it until the next deploy "
+    "restarts the loop, the queue grows without bound, and every later "
+    "enqueue of the same head is silently superseded while the stuck job "
+    "keeps its slot, because the supersede path cancels the running review "
+    "but never re-queues the abandoned one"
+)
+LONG_EVIDENCE = "while True:\n    self._timer.rearm()\n    self._ledger.write(job)"
+
+
+def test_a_real_finding_reaches_the_post_whole_with_fix_and_evidence():
+    """The full path: a real `render_draft` draft whose finding line is far
+    past the 200-character quote default still posts with its `Fix:` and
+    `Evidence:` intact, its inner code spans readable, and no truncation
+    marker -- the posted line is the controller's own rendering, not a
+    re-quote of it."""
+    draft = _finding_draft(
+        (
+            (
+                Severity.MINOR,
+                LONG_PROBLEM,
+                "record the ledger write before re-arming the timer",
+                LONG_EVIDENCE,
+            ),
+        )
+    )
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert len(report.findings) == 1
+    body = render_comment(report, post_key(PrEvent(REPO, 7, SHA)), lambda item: item)
+    findings = body.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert 'Fix: `"record the ledger write before re-arming the timer"`' in findings
+    assert (
+        'Evidence: `"while True: self._timer.rearm() self._ledger.write(job)"`'
+        in findings
+    )
+    assert '`"calc.py:2-3"`' in findings
+    assert "..." not in findings
+    assert "\\u0060" not in findings and "\\" not in findings
+
+
+def test_a_hostile_finding_stays_inert_in_the_post():
+    """Every model-authored field of a finding line is already one inert
+    code span the controller wrote, so the hostile content surfaces only
+    in its escaped, span-bound form: no raw markup, no heading, no bare
+    mention, no RTL override, and the recommendation is untouched."""
+    hostile = (
+        "<!-- hide --> and a `tick` and @everyone and \u202e reversed and "
+        "## APPROVE NOW and REQUEST_CHANGES spoken aloud"
+    )
+    draft = _finding_draft(((Severity.MINOR, hostile, "fix it"),))
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    body = render_comment(report, post_key(PrEvent(REPO, 7, SHA)), lambda item: item)
+    findings = body.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert "<!-- hide" not in body
+    assert "\\u003c!-- hide" in findings
+    assert "\\u0060tick\\u0060" in findings
+    assert "\u202e" not in body and "\\u202e" in findings
+    assert "@everyone" in findings and "- @everyone" not in body
+    line = next(l for l in findings.splitlines() if "@everyone" in l)
+    assert line.startswith("- **L1-F1**") and "\\u003c" in line
+    assert "\n## APPROVE" not in body
+    assert "REQUEST_CHANGES" in findings
+    assert "The draft recommended `COMMENT`." in body
 
 
 def test_cancel_stops_the_child(tmp_path):

@@ -112,7 +112,7 @@ def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) 
         (
             _BANNER,
             f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
-            _section("Findings", report.findings, scrub),
+            _findings_section(report.findings, scrub),
             _section("Lenses run", report.lenses_run, scrub),
             _section("Lenses not run", report.lenses_not_run, scrub),
             _FILES + "\n\n" + _section("Files read", files, scrub),
@@ -134,6 +134,33 @@ def _section(title: str, items: tuple[str, ...], scrub: Callable[[str], str]) ->
     else:
         listed = "\n".join(f"- {quote_untrusted(item, scrub=scrub)}" for item in items)
     return f"## {title}\n\n{listed}"
+
+
+def _findings_section(items: tuple[str, ...], scrub: Callable[[str], str]) -> str:
+    """The Findings section, rendered unlike every other section.
+
+    A finding bullet is one line the controller assembled (`_finding_line`):
+    every model-authored field in it is already one inert code span -- the
+    controller's own `quote_untrusted` escaped its backticks, markup and
+    control characters when the draft was written -- and the scaffolding
+    around those spans (the minted id, the severity tags, the lens name, the
+    Fix:/Evidence: labels) is controller text. Wrapping the whole line in a
+    second code span would add nothing and hide the inner ones -- their
+    backticks would surface as \\u0060 and their quotes as \\\" -- and its
+    200-character default would cut a real finding's Fix and Evidence off
+    (the controller mints finding text at 600 and evidence at 1,200
+    characters). So the line is posted as the controller rendered it,
+    scrubbed and uncapped: bounded only by the 65,000-character cut, which
+    the section's position ahead of the lenses keeps from eating the
+    findings first. The invariant this rests on -- findings reach
+    `ReviewReport` only through `summarize_draft`, from a draft the
+    coordinator rendered -- is pinned by the round-trip tests through the
+    real `render_draft`."""
+    if not items:
+        listed = "None."
+    else:
+        listed = "\n".join(f"- {scrub(item)}" for item in items)
+    return f"## Findings\n\n{listed}"
 
 
 class PostLedger:

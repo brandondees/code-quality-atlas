@@ -595,7 +595,13 @@ def _findings(draft: str) -> tuple[str, ...]:
     the draft wrote (id, severity tags, location, lens, text, fix), so
     severity and location survive into the post. The `No verified
     findings.` line is prose, not a bullet, and yields none; the one-shot
-    draft has no such section and yields none too."""
+    draft has no such section and yields none too. No CRLF or
+    wrapped-bullet hardening: the coordinator renders the draft with
+    ``"\\n".join`` (never ``\\r``) and every finding field is
+    whitespace-collapsed by `quote_untrusted` before it lands in a bullet,
+    so a draft violating either is not a draft this coordinator wrote --
+    and a marker miss degrades to an empty Findings section, never a
+    crash."""
     return tuple(_bullets(section(draft, "Findings (verified quotes only)")))
 
 

@@ -2821,9 +2821,10 @@ held seven verified findings (five Minor, two Nit).
 The fix is one field and one section: `ReviewReport` gains `findings`
 (default `()`, so every existing caller is unchanged), filled by a single
 `_findings(draft)` helper both builders call — the Findings section's bullets
-verbatim, minus the `No verified findings.` placeholder, each the whole
+verbatim, each the whole
 finding line (minted id, severity tags, location, lens, text, fix), so
-severity and location survive with no second rendering path — and
+severity and location survive with no second rendering path (the
+`No verified findings.` line is prose, not a bullet, and yields none) — and
 `render_comment` renders **Findings** right after the recommended-event line,
 ahead of lenses and cost, so the 65,000-character cut cannot eat the findings
 first. Each item goes through the section's existing `quote_untrusted`, the
@@ -2845,3 +2846,50 @@ is not a bullet, so the empty draft yields none without a placeholder filter. Th
 body is now documented with findings in `atlas_reviewer/README.md` and
 `atlas_reviewer/deploy-service.md`; the body-contract amendment is recorded
 as D75.
+
+## 2026-11-17 (same day) — #739 round-1 fixes: the posted findings are the controller's own rendering, not a re-quote of it
+
+Both round-1 reviews (the protocol review and the routine review, each
+COMMENT) caught the same Major in the round-0 shape: the Findings section
+re-quoted every finding line through `quote_untrusted`'s 200-character
+default, so the controller's 600- and 1,200-character minted fields were cut
+mid-line — a realistic 448-character finding posted as 225 characters and
+lost its `Fix:` and `Evidence:` — and each line's inner code spans were
+double-escaped inside the outer one (backticks as `\u0060`, quotes as
+`\"`). D75's Cost paragraph had claimed the only loss mechanism was the
+65,000-character cut; that was wrong on both counts, and the update
+paragraph appended there names them.
+
+The fix removes the second quoting layer instead of enlarging it: a finding
+bullet is controller-assembled text — every model-authored field in it is
+already one inert code span the controller's own `quote_untrusted` escaped
+at draft time, and the scaffolding (minted id, severity tags, lens name,
+the `Fix:`/`Evidence:` labels) is controller text — so
+`_findings_section` posts each bullet as the controller rendered it,
+scrubbed and uncapped. The inner spans stay readable, nothing is cut at
+200, and the only bound is the 65,000-character cut the section's position
+already survives. Every other section keeps the 200-character default,
+now pinned by a test on a 300-character limit stop.
+
+The Minor was real too: the round-0 post-side tests were a 135-character
+hand-written fixture and a real-draft test that never rendered the post,
+and a mutant raising the quote default to 100,000 survived all 84 of them.
+The new round-trip test goes from a real `render_draft` draft with a
+400-plus-character finding through `summarize_draft` and `render_comment`,
+asserting `Fix:` and `Evidence:` survive, the inner spans render as spans,
+and no truncation marker appears. Mutants applied by hand and killed, each
+with bytecode caching disabled after a same-size mutant restore was found
+serving a stale `__pycache__` (the round-0 battery's restores were
+same-size writes in the same mtime second, which briefly made a killed
+mutant look alive): the findings re-quoted at 200 (M6), the quote default
+raised to 100,000 (M7), the findings scrub dropped (M8), and the round-0
+kills M1, M3 and M5 re-applied against the new structure. The hostile
+round-trip test re-checks the r1 list on the new path — HTML comment,
+injected backtick, mention, fake heading, RTL override, and the
+APPROVE/REQUEST_CHANGES words each stay span-bound and escaped, and the
+recommendation line is unchanged. The CRLF-heading and wrapped-bullet
+hardening is noted as unreachable in `_findings`'s docstring rather than
+added, and the round-0 entry's "minus the placeholder" wording is
+corrected in place (this branch's own, unmerged entry). 3,182 reviewer
+tests at 96.38%, 882 tooling at 95.20%, ruff/format/mypy/drift clean.
+Offline only.

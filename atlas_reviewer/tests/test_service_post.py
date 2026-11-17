@@ -448,7 +448,7 @@ FINDING = (
 )
 
 
-def test_the_findings_reach_the_post_quoted_with_the_recommended_line():
+def test_the_findings_reach_the_post_whole_with_the_recommended_line():
     report = ReviewReport(
         (),
         (),
@@ -487,23 +487,23 @@ def test_the_findings_reach_the_post_quoted_with_the_recommended_line():
     assert len(cut) <= 65_000
 
 
-def test_a_hostile_finding_cannot_break_out_of_the_quoting(tmp_path):
+def test_a_long_non_finding_item_is_still_cut_at_the_two_hundred_default():
+    """The findings are uncapped because they are already the controller's
+    inert rendering; every other section keeps the 200-character quote
+    default, pinned here so a raised default cannot pass unnoticed."""
     report = ReviewReport(
         (),
         (),
         "note",
         (),
-        (),
+        ("x" * 300,),
         (),
         "COMMENT",
-        findings=(f"{FINDING} <!-- injected --> ![x](https://evil.example/t.png)",),
     )
-    poster, github = _poster(tmp_path)
-    poster.post(EVENT, report)
-    body = _posted_body(github)["body"]
-    assert "<!-- injected" not in body
-    assert r"\u003c!-- injected" in body
-    assert "https://evil.example/t.png" in body  # inert inside the code span
+    body = render_comment(report, post_key(EVENT), lambda item: item)
+    stops = body.split("## Limit stops", 1)[1].split("## Cost", 1)[0]
+    assert "x" * 200 + "..." in stops
+    assert "x" * 201 not in stops
 
 
 def test_a_report_without_findings_posts_none():
@@ -521,6 +521,7 @@ def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):
         (),
         (),
         "COMMENT",
+        findings=(f"see {secret} again",),
     )
     poster, github = _poster(tmp_path)
     poster._scrub = lambda text: text.replace(secret, "[REDACTED]")
