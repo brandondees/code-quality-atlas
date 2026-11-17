@@ -1239,7 +1239,13 @@ D41 records the 2026-11-12 probe that did.
   first, inside 16,384 characters. Leaving out a superseded round does
   not block approval. Leaving out a round at the head under review
   does. A line that names another pull request, or no pull request,
-  does not block this one. The `agentic-review` command is the shipped
+  does not block this one. A line that names this pull request but
+  cannot be parsed charges this review only when it sits at the head
+  under review; at an older head it is superseded data, and a line
+  whose head cannot be read charges nobody. A file the read cannot
+  decode is moved aside under a `.corrupt-` name, so the next review
+  starts fresh, and the review that saw it reports the loss once. The
+  `agentic-review` command is the shipped
   caller: it builds the log at `<state dir>/rounds.jsonl` unless
   `--round-log` names another path, reads it into the first turn, and
   appends the review's own record (D67; the service passes a

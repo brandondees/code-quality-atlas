@@ -296,10 +296,13 @@ def run_dir(root: Path, event: PrEvent) -> Path:
 def round_log_path(root: Path, event: PrEvent) -> Path:
     """The per-pull-request round log (D74), keyed by repository and PR
     number -- not by head SHA -- so a later head of the same pull request
-    reads the earlier rounds. It lives outside the per-head run
+    reads the earlier rounds. The repository key is casefolded to match
+    the reader's case-insensitive record key, so a case-only repository
+    rename keeps the log instead of silently starting a fresh one. It
+    lives outside the per-head run
     directory, on the volume, and survives the run directory's removal.
     The name flattens the repository the way `run_dir` does."""
-    repo = event.repo.replace("/", "-")
+    repo = event.repo.casefold().replace("/", "-")
     return root / "rounds" / f"{repo}-{event.pr_number}.jsonl"
 
 

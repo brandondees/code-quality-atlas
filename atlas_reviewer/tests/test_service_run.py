@@ -36,6 +36,7 @@ from atlas_reviewer.service_run import (
     child_env,
     make_runner,
     review_argv,
+    round_log_path,
     run_dir,
     run_process,
     section,
@@ -428,6 +429,17 @@ def test_the_agentic_child_reviews_with_a_per_pr_round_log(tmp_path):
         RunConfig("offline", False, tmp_path, MODE_ONESHOT), tmp_path / "run", first
     )
     assert "--round-log" not in oneshot
+
+
+def test_a_case_renamed_repository_resolves_to_the_same_round_log(tmp_path):
+    """D74 round 1, N1: the filename key is the reader's key -- a
+    case-only repository rename keeps the pull request's log instead of
+    silently starting a fresh one under the missing-file-is-first-round
+    rule."""
+    upper = PrEvent("Org/Repo", 42, SHA)
+    lower = PrEvent("org/repo", 42, SHA)
+    assert round_log_path(tmp_path, upper) == round_log_path(tmp_path, lower)
+    assert round_log_path(tmp_path, lower) == tmp_path / "rounds" / "org-repo-42.jsonl"
 
 
 def test_the_default_mode_is_agentic_and_an_unknown_mode_fails_closed():

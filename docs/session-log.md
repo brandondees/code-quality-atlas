@@ -2544,3 +2544,39 @@ each dies on its named test, and the two-heads-of-one-PR dry run shows
 the second head's first turn opening with the first round's fenced
 block. 3,109 reviewer tests passed at 96.37% coverage, ruff/mypy clean
 on the touched files. Offline only.
+
+## 2026-11-17 (same day) — round-1 fixes for #732: the per-PR log's omissions no longer outlive the head that caused them
+
+The round-1 protocol review (COMMENT) confirmed the routine's Major,
+which this PR's own design had introduced: under D67's per-head logs a
+garbled round-log line died with its run directory, but under the
+per-PR file it held every later review of the pull request at COMMENT
+forever — a `ROUND_VERSION` bump or a rollback turned every existing
+line into an `unreadable record`, an undecodable file never healed
+because `append` reopens the same path, and a teardown-window garble
+was the same standing omission. Two fixes. The `unreadable record`
+charge is head-scoped in `prior_blocks`, mirroring how it already
+scoped the budget omission: a line that names the PR but is not a
+current record carries the head it claims (`UnreadableLine`, extracted
+by `_owner`), and only a line sitting at the head under review blocks
+— at an older head it is set-aside superseded data, and a line with no
+readable head charges nobody (it cannot be proven to hide current-head
+context). `RoundLog.read` now quarantines a file it cannot decode:
+`os.replace` moves it aside under a `.corrupt-<UTC stamp>-<ns>` name,
+the review that saw it reports the `round log file` omission once with
+the quarantine path named, and the next review starts fresh; a parent
+the process cannot reach stays the operator's case, now documented in
+`deploy-service.md` along with the persistence truth the first wording
+understated (a charged line holds every later review until the log is
+repaired, not just the next draft). The Nits: `round_log_path`
+casefolds the repository so a case-only rename keeps the log (N1); the
+corrupt-log test's docstring now names causes that can actually
+produce such bytes — this reader's own appends are ASCII, so a torn
+write is `unattributed`, never `file_unreadable` (N2); and
+`RoundLog`'s stale "nothing in the service builds one yet" docstring
+names both paths now (N3). Four mutants applied by hand and killed:
+charge-any-named-line, set-aside-everything, no-quarantine, and the
+reverted casefold, each on its named test; the coordinator pin that a
+head-less bad line blocks the PR it names was re-pinned to the new
+rule. 3,116 reviewer tests, ruff/mypy clean, drift clean. Offline
+only.

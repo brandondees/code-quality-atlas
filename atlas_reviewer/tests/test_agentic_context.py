@@ -45,7 +45,12 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.lens_script import LensScriptModel
 from atlas_reviewer.ports import Listing
 from atlas_reviewer.redact import MIN_FIT_CHARS, TRUNCATION_MARKER_CHARS, Redactor
-from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog, RoundRecord
+from atlas_reviewer.rounds import (
+    PRIOR_ROUND_CHARS,
+    RoundLog,
+    RoundRecord,
+    UnreadableLine,
+)
 from atlas_reviewer.tests.helpers import FIXTURE
 
 EVENT = str(FIXTURE / "event.json")
@@ -320,10 +325,11 @@ def test_a_missing_round_log_is_the_first_round_not_a_crash(tmp_path):
 
 
 def test_a_corrupt_round_log_is_a_named_omission_not_a_crash(tmp_path):
-    """D74: the per-PR log the service points at holds bytes no record
-    parser accepts -- a torn or binary file left by a mid-write. The
-    review runs, the draft names the unreadable round log file, and the
-    review cannot approve on it."""
+    """D74: the per-PR log the service points at holds bytes no reader
+    can decode -- disk corruption, or a file written by something else.
+    The review runs, the draft names the unreadable round log file, and
+    the review cannot approve on it. The quarantine that lets the next
+    head start fresh is its own test."""
     rounds = tmp_path / "per-pr" / "corrupt.jsonl"
     rounds.parent.mkdir(parents=True)
     rounds.write_bytes(b"\x00\xffbinary not json")
@@ -332,6 +338,122 @@ def test_a_corrupt_round_log_is_a_named_omission_not_a_crash(tmp_path):
     assert "the round log file could not be read" in "\n".join(
         _context_omission_lines(draft)
     )
+
+
+def test_a_quarantined_log_heals_the_next_head(tmp_path):
+    """D74 round 1: the corrupt log's review names its omission and the
+    undecodable file is moved aside, so the next head's review starts
+    fresh -- no round-log omission, the first review's own record read
+    back as a prior round, and its own record appended (the
+    no-quarantine mutant leaves the corrupt file in place and the next
+    head inherits the omission, failing here)."""
+    rounds = tmp_path / "per-pr" / "corrupt.jsonl"
+    rounds.parent.mkdir(parents=True)
+    rounds.write_bytes(b"\x00\xffbinary not json")
+    code, _draft, err = _run(tmp_path, "--round-log", str(rounds), "--depth", "review")
+    assert code == cli.EXIT_INCOMPLETE, err
+    quarantined = list(rounds.parent.glob("*.corrupt-*"))
+    assert len(quarantined) == 1
+    assert quarantined[0].read_bytes() == b"\x00\xffbinary not json"
+    # The review's own record started the fresh file the quarantine left.
+    assert [
+        json.loads(line)["head_sha"] for line in rounds.read_text("utf-8").splitlines()
+    ] == [HEAD_SHA]
+    fixtures, event = _second_head(tmp_path)
+    code, draft, err = _run(
+        tmp_path,
+        "--round-log",
+        str(rounds),
+        "--event",
+        str(event),
+        "--fixtures",
+        str(fixtures),
+        "--depth",
+        "review",
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    assert "round log" not in "\n".join(_context_omission_lines(draft))
+    records = [json.loads(line) for line in rounds.read_text("utf-8").splitlines()]
+    assert [record["head_sha"] for record in records] == [HEAD_SHA, SECOND_SHA]
+
+
+def test_a_version_skewed_line_at_an_older_head_does_not_block_the_next_head(
+    tmp_path,
+):
+    """D74 round 1, the routine's requested test: a line this reader
+    cannot parse that names this pull request at an older head -- a
+    future ROUND_VERSION, or a rollback's older-format line -- is
+    set-aside superseded data, and the review at the new head runs to
+    its verdict with no `unreadable record` omission (the
+    charge-any-named-line mutant fails here)."""
+    rounds = tmp_path / "per-pr" / "skew.jsonl"
+    rounds.parent.mkdir(parents=True)
+    rounds.write_text(
+        json.dumps(
+            {
+                "v": 99,
+                "repo": "example-org/example-app",
+                "pr": 42,
+                "head_sha": HEAD_SHA,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fixtures, event = _second_head(tmp_path)
+    code, draft, err = _run(
+        tmp_path,
+        "--round-log",
+        str(rounds),
+        "--event",
+        str(event),
+        "--fixtures",
+        str(fixtures),
+        "--depth",
+        "review",
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    assert "unreadable record" not in "\n".join(_context_omission_lines(draft))
+    loaded = RoundLog(rounds).read()
+    assert [record.head_sha for record in loaded.records] == [SECOND_SHA]
+    assert loaded.unreadable == (
+        UnreadableLine("example-org/example-app", 42, HEAD_SHA),
+    )
+
+
+def test_an_unparseable_line_at_the_current_head_still_blocks(tmp_path):
+    """The mirror of the older-head scoping: a line that names this
+    pull request at the head under review may be hiding that head's
+    round, so it stays the review's named omission and holds the review
+    at COMMENT (the set-aside-everything mutant fails here)."""
+    rounds = tmp_path / "per-pr" / "skew-current.jsonl"
+    rounds.parent.mkdir(parents=True)
+    rounds.write_text(
+        json.dumps(
+            {
+                "v": 99,
+                "repo": "example-org/example-app",
+                "pr": 42,
+                "head_sha": SECOND_SHA,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    fixtures, event = _second_head(tmp_path)
+    code, draft, err = _run(
+        tmp_path,
+        "--round-log",
+        str(rounds),
+        "--event",
+        str(event),
+        "--fixtures",
+        str(fixtures),
+        "--depth",
+        "review",
+    )
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "unreadable record" in "\n".join(_context_omission_lines(draft))
 
 
 def test_prior_rounds_that_no_longer_fit_the_room_are_omitted_by_name(tmp_path):

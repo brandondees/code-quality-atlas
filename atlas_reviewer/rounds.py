@@ -13,16 +13,22 @@ Nothing is cut silently. A round that does not fit the budget is left
 out whole. That omission blocks approval only when the record is the
 head under review. A superseded head is not this review's scope, so
 leaving it out does not block a later round. A line that does not
-parse is an omission only for the pull request it names, including a
-future `ROUND_VERSION` that still carries `repo` and `pr`. A line that
+parse is an omission only when it names the pull request under review
+and sits at that review's head, including a future `ROUND_VERSION`
+that still carries `repo` and `pr`; at an older head it is superseded
+data, and a line whose head cannot be read is not proven to hide
+current-head context, so it charges nobody. A line that
 names no pull request blocks no pull request: this reader cannot tell
 whose review it was, and charging every review in the file is the
-failure that rule avoids.
+failure that rule avoids. A file the read cannot decode is moved aside
+(quarantined) once, so no later review inherits the loss.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -53,25 +59,47 @@ class RoundRecord:
 
 
 @dataclass(frozen=True)
+class UnreadableLine:
+    """A line that named a pull request but is not a current record.
+
+    `head_sha` is the head the line claims, when that field itself is
+    readable; a line whose head cannot be read carries None. The caller
+    scopes the charge by it: only a line at the head under review can
+    hide that review's context."""
+
+    repo: str
+    pr_number: int
+    head_sha: str | None
+
+
+@dataclass(frozen=True)
 class LogRead:
     """What `RoundLog.read` could recover.
 
-    `unreadable` is one `(repository, pull request)` pair per line that
-    names a pull request and is not a current record, including a
-    future `ROUND_VERSION`. `unattributed` counts lines that name no
-    pull request. An unattributed line blocks no pull request.
-    `file_unreadable` means the file itself could not be read, which
-    the caller reports for the review that tried."""
+    `unreadable` is one entry per line that names a pull request and is
+    not a current record, including a future `ROUND_VERSION`, carrying
+    the head the line claims when that is readable. `unattributed`
+    counts lines that name no pull request. An unattributed line blocks
+    no pull request. `file_unreadable` means the file itself could not
+    be read; the reader quarantined it aside -- named on
+    `quarantined_to`, empty when the file could not be moved -- so the
+    next review starts fresh, and the review that saw it reports the
+    omission for itself."""
 
     records: tuple[RoundRecord, ...] = ()
-    unreadable: tuple[tuple[str, int], ...] = ()
+    unreadable: tuple[UnreadableLine, ...] = ()
     unattributed: int = 0
     file_unreadable: bool = False
+    quarantined_to: str = ""
 
 
 class RoundLog:
     """Append-only JSON lines, mode 0600 on every write, one file for
     every pull request.
+
+    The path is chosen by the caller: the unflagged CLI keeps
+    `<state dir>/rounds.jsonl` (D67), and the service builds the
+    per-pull-request path on the volume (D74).
 
     `read` returns every current record. A line that names a repository
     and a pull request but is not a current record is listed on
@@ -80,8 +108,12 @@ class RoundLog:
     pull request. A future `ROUND_VERSION` that still carries `repo`
     and `pr` is charged to that pull request only. The repository key is compared
     case-insensitively. `records_for` reports how many other pull
-    requests were set aside. That drop is not an omission. The path is
-    chosen by the caller. Nothing in the service builds one yet."""
+    requests were set aside. That drop is not an omission.
+
+    A file the read cannot decode is quarantined: moved aside under a
+    `.corrupt-` name, reported once by the review that saw it, and gone
+    from the log's path, so the next review starts fresh instead of
+    inheriting the omission for the life of the pull request."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -98,9 +130,10 @@ class RoundLog:
                 return LogRead()
             text = self.path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
-            return LogRead(file_unreadable=True)
+            moved = self._quarantine()
+            return LogRead(file_unreadable=True, quarantined_to=moved)
         records: list[RoundRecord] = []
-        unreadable: list[tuple[str, int]] = []
+        unreadable: list[UnreadableLine] = []
         unattributed = 0
         for line in text.splitlines():
             if line.strip() == "":
@@ -115,6 +148,25 @@ class RoundLog:
             else:
                 unreadable.append(owner)
         return LogRead(tuple(records), tuple(unreadable), unattributed)
+
+    def _quarantine(self) -> str:
+        """Move an undecodable log aside so the next review starts
+        fresh, and return the quarantine path, or "" when the file
+        could not be moved -- a file another reader quarantined first
+        needs no second move, and a parent directory this process
+        cannot reach leaves the file in place for the next attempt.
+        The stamp is UTC to the second plus the move's nanoseconds, so
+        two quarantines cannot collide on one name."""
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        target = self.path.with_name(
+            f"{self.path.name}.corrupt-{stamp}-{time.time_ns() % 1_000_000_000:09d}"
+        )
+        try:
+            os.replace(self.path, target)
+        except OSError:
+            return ""
+        _sync_dir(self.path.parent)
+        return str(target)
 
 
 def same_pull_request(record: RoundRecord, repo: str, pr_number: int) -> bool:
@@ -164,14 +216,19 @@ def prior_blocks(
     current_head: str,
     budget: int,
     *,
-    unreadable: int,
+    unreadable: Sequence[UnreadableLine],
     scrub: Callable[[str], str],
 ) -> tuple[tuple[UntrustedBlock, ...], tuple[Omission, ...]]:
     """Newest records that fit whole, fenced later by the caller.
 
     `budget` is characters of rendered block text. A record is kept or
-    left out. It is never sliced. `unreadable` lines that did not parse
-    are an omission even when every parsed record fits."""
+    left out. It is never sliced. An unreadable line is charged only
+    when it claims the head under review: a garbled or version-skewed
+    line at a superseded head is set-aside data, the way a
+    budget-skipped superseded record is, and a line whose head cannot
+    be read is not proven to hide current-head context, so it charges
+    nobody. A charged line is an omission even when every parsed record
+    fits."""
     if isinstance(budget, bool) or not isinstance(budget, int) or budget < 1:
         raise ValueError("prior-round budget must be a positive integer")
     rendered = [(record, _render(record, current_head, scrub)) for record in records]
@@ -199,12 +256,13 @@ def prior_blocks(
                 f"{len(blocking)} earlier round(s) at this head not shown",
             )
         )
-    if unreadable:
+    charged = [line for line in unreadable if line.head_sha == current_head]
+    if charged:
         omissions.append(
             Omission(
                 SOURCE,
                 "unreadable record",
-                f"{unreadable} line(s) could not be parsed",
+                f"{len(charged)} line(s) could not be parsed",
             )
         )
     for record, _text in kept:
@@ -309,12 +367,15 @@ def _parse(line: str) -> RoundRecord | None:
     )
 
 
-def _owner(line: str) -> tuple[str, int] | None:
+def _owner(line: str) -> UnreadableLine | None:
     """The pull request a line names, when that can be read.
 
-    A future `ROUND_VERSION` still carries `repo` and `pr`. A torn line
-    does not. The caller charges the first and charges the second to
-    nobody."""
+    A future `ROUND_VERSION` still carries `repo` and `pr`; the head it
+    claims is kept when readable, so the caller can tell a superseded
+    head's line from one at the head under review. A torn line does
+    not. The caller charges the first kind to its pull request only at
+    that pull request's current head, and charges a line with no
+    readable head to nobody."""
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
@@ -323,6 +384,7 @@ def _owner(line: str) -> tuple[str, int] | None:
         return None
     repo = data.get("repo")
     pr = data.get("pr")
+    head = data.get("head_sha")
     if (
         not isinstance(repo, str)
         or repo == ""
@@ -331,4 +393,5 @@ def _owner(line: str) -> tuple[str, int] | None:
         or pr < 1
     ):
         return None
-    return repo.casefold(), pr
+    readable_head = head if isinstance(head, str) and head else None
+    return UnreadableLine(repo.casefold(), pr, readable_head)

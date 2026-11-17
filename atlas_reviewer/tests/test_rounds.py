@@ -13,6 +13,7 @@ from atlas_reviewer.rounds import (
     LogRead,
     RoundLog,
     RoundRecord,
+    UnreadableLine,
     _dump,
     _parse,
     fit_record,
@@ -56,7 +57,7 @@ def test_a_record_over_the_cap_keeps_no_finding_prefix(tmp_path):
     assert stored.findings_omitted == 1
     assert huge not in json.dumps(stored.findings)
     blocks, omissions = prior_blocks(
-        (stored,), "a" * 40, 16_384, unreadable=0, scrub=lambda text: text
+        (stored,), "a" * 40, 16_384, unreadable=(), scrub=lambda text: text
     )
     assert huge not in blocks[0].content.text
     assert "y" * 40 not in blocks[0].content.text
@@ -97,11 +98,11 @@ def test_the_budget_keeps_the_newest_record_when_only_one_fits():
     older = record(findings=("older-round-finding",), head_sha="c" * 40)
     newer = record(findings=("newer-round-finding",), head_sha="c" * 40)
     (newer_block,), _ = prior_blocks(
-        (newer,), "c" * 40, 100_000, unreadable=0, scrub=lambda text: text
+        (newer,), "c" * 40, 100_000, unreadable=(), scrub=lambda text: text
     )
     budget = len(newer_block.content.text)
     blocks, omissions = prior_blocks(
-        (older, newer), "c" * 40, budget, unreadable=0, scrub=lambda text: text
+        (older, newer), "c" * 40, budget, unreadable=(), scrub=lambda text: text
     )
     assert len(blocks) == 1
     assert "newer-round-finding" in blocks[0].content.text
@@ -167,32 +168,75 @@ def test_an_existing_0644_log_is_forced_to_0600_on_append(tmp_path):
     assert oct(path.stat().st_mode & 0o777) == "0o600"
 
 
-def test_an_unreadable_log_is_one_skipped_record_and_does_not_raise(tmp_path):
+def test_an_undecodable_file_is_quarantined_and_the_next_read_starts_fresh(
+    tmp_path,
+):
+    """D74 round 1: a file no reader can decode does not poison this
+    pull request's log forever. The read that fails reports it once and
+    moves the file aside; the next read -- the next head's review --
+    finds an empty log, and an append starts a fresh one (the
+    no-quarantine mutant leaves the file in place and fails here)."""
     binary = tmp_path / "binary.jsonl"
     binary.write_bytes(b"\xff\xfe")
-    assert RoundLog(binary).read() == LogRead(file_unreadable=True)
+    first = RoundLog(binary).read()
+    assert first.file_unreadable is True
+    assert ".corrupt-" in first.quarantined_to
+    quarantined = Path(first.quarantined_to)
+    assert quarantined.is_file()
+    assert quarantined.read_bytes() == b"\xff\xfe"
+    assert not binary.exists()
+    assert RoundLog(binary).read() == LogRead()
+    RoundLog(binary).append(record())
+    loaded = RoundLog(binary).read()
+    assert loaded.records == (record(),)
+    assert loaded.file_unreadable is False
 
+
+def test_a_directory_at_the_log_path_is_quarantined_too(tmp_path):
     directory = tmp_path / "a-directory"
     directory.mkdir()
-    assert RoundLog(directory).read() == LogRead(file_unreadable=True)
+    moved = RoundLog(directory).read()
+    assert moved.file_unreadable is True
+    assert ".corrupt-" in moved.quarantined_to
+    assert Path(moved.quarantined_to).is_dir()
+    assert not directory.exists()
 
+
+def test_a_locked_file_is_quarantined_when_the_directory_allows_it(tmp_path):
     locked = tmp_path / "locked.jsonl"
     locked.write_text('{"v": 1}\n', encoding="utf-8")
     locked.chmod(0)
     try:
-        assert RoundLog(locked).read() == LogRead(file_unreadable=True)
+        moved = RoundLog(locked).read()
+        assert moved.file_unreadable is True
+        assert not locked.exists()
     finally:
-        locked.chmod(0o600)
+        restored = Path(moved.quarantined_to)
+        restored.chmod(0o600)
+        restored.unlink()
 
+
+def test_a_child_the_process_cannot_reach_stays_put_and_stays_unreadable(
+    tmp_path,
+):
+    """A parent directory the process cannot enter cannot be repaired
+    from here: the file stays, and every review that tries keeps its
+    named omission -- the operator's recovery, not the reader's."""
     hidden = tmp_path / "hidden"
     hidden.mkdir()
     child = hidden / "rounds.jsonl"
     child.write_text("", encoding="utf-8")
     hidden.chmod(0)
     try:
-        assert RoundLog(child).read() == LogRead(file_unreadable=True)
+        # The parent directory cannot be entered, so nothing here can
+        # stat the child either: the pinned facts are the unreadable
+        # read and the failed quarantine, and the operator recovers.
+        stuck = RoundLog(child).read()
+        assert stuck.file_unreadable is True
+        assert stuck.quarantined_to == ""
     finally:
         hidden.chmod(0o700)
+    assert child.is_file()
 
 
 def test_a_pr_number_that_is_not_an_integer_is_unreadable(tmp_path):
@@ -219,7 +263,7 @@ def test_prior_finding_lines_are_quoted_and_markup_stays_inert():
         (record(findings=payloads),),
         "b" * 40,
         16_384,
-        unreadable=0,
+        unreadable=(),
         scrub=lambda text: text,
     )
     assert omissions == ()
@@ -259,11 +303,11 @@ def test_a_superseded_record_that_does_not_fit_does_not_hide_the_current_head():
     current = record(head_sha="b" * 40, findings=("current-small",))
     old = record(head_sha="a" * 40, findings=("o" * 800,))
     (current_block,), _ = prior_blocks(
-        (current,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+        (current,), "b" * 40, 10**6, unreadable=(), scrub=lambda text: text
     )
     budget = len(current_block.content.text)
     blocks, omissions = prior_blocks(
-        (current, old), "b" * 40, budget, unreadable=0, scrub=lambda text: text
+        (current, old), "b" * 40, budget, unreadable=(), scrub=lambda text: text
     )
     assert blocks
     assert "current-small" in blocks[0].content.text
@@ -274,7 +318,7 @@ def test_a_superseded_record_that_does_not_fit_does_not_hide_the_current_head():
 def test_a_finding_overflow_does_not_also_say_the_context_was_partial():
     stored = fit_record(record(findings=("y" * (RECORD_CHARS + 50),)))
     blocks, _ = prior_blocks(
-        (stored,), stored.head_sha, 100_000, unreadable=0, scrub=lambda text: text
+        (stored,), stored.head_sha, 100_000, unreadable=(), scrub=lambda text: text
     )
     text = blocks[0].content.text
     assert "were not stored" in text
@@ -295,9 +339,9 @@ def test_a_blank_line_is_not_an_unreadable_record(tmp_path):
 
 def test_a_prior_budget_must_be_a_positive_integer():
     with pytest.raises(ValueError, match="positive integer"):
-        prior_blocks((), "b" * 40, 0, unreadable=0, scrub=lambda text: text)
+        prior_blocks((), "b" * 40, 0, unreadable=(), scrub=lambda text: text)
     with pytest.raises(ValueError, match="positive integer"):
-        prior_blocks((), "b" * 40, True, unreadable=0, scrub=lambda text: text)
+        prior_blocks((), "b" * 40, True, unreadable=(), scrub=lambda text: text)
 
 
 def test_owner_casefolds_the_repository(tmp_path):
@@ -307,21 +351,21 @@ def test_owner_casefolds_the_repository(tmp_path):
         encoding="utf-8",
     )
     loaded = RoundLog(path).read()
-    assert loaded.unreadable == (("example-org/example-app", 7),)
+    assert loaded.unreadable == (UnreadableLine("example-org/example-app", 7, None),)
 
 
 def test_packed_prior_text_stays_within_the_budget_including_separators():
     current = record(head_sha="b" * 40, findings=("current-block",))
     older = record(head_sha="b" * 40, findings=("older-block",))
     (one,), _ = prior_blocks(
-        (current,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+        (current,), "b" * 40, 10**6, unreadable=(), scrub=lambda text: text
     )
     (two,), _ = prior_blocks(
-        (older,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+        (older,), "b" * 40, 10**6, unreadable=(), scrub=lambda text: text
     )
     budget = len(one.content.text) + len(two.content.text) + 1
     blocks, _ = prior_blocks(
-        (older, current), "b" * 40, budget, unreadable=0, scrub=lambda text: text
+        (older, current), "b" * 40, budget, unreadable=(), scrub=lambda text: text
     )
     assert len(blocks) == 1
     assert len(blocks[0].content.text) <= budget
@@ -341,7 +385,7 @@ def test_a_long_finding_is_quoted_whole():
         (record(findings=(finding,), head_sha="b" * 40),),
         "b" * 40,
         PRIOR_ROUND_CHARS,
-        unreadable=0,
+        unreadable=(),
         scrub=lambda text: text,
     )
     assert omissions == ()
@@ -351,7 +395,7 @@ def test_a_long_finding_is_quoted_whole():
 
 def _rendered_length(item: RoundRecord) -> int:
     blocks, _ = prior_blocks(
-        (item,), "b" * 40, 10**7, unreadable=0, scrub=lambda text: text
+        (item,), "b" * 40, 10**7, unreadable=(), scrub=lambda text: text
     )
     return len(blocks[0].content.text)
 
@@ -388,7 +432,7 @@ def test_the_default_prior_budget_keeps_16384_and_drops_16385():
             (older, newer),
             "b" * 40,
             budget,
-            unreadable=0,
+            unreadable=(),
             scrub=lambda text: text,
         )
 
@@ -404,13 +448,13 @@ def test_the_default_prior_budget_keeps_16384_and_drops_16385():
 def test_a_superseded_round_outside_the_budget_does_not_block():
     older = record(head_sha="a" * 40, findings=("old-round-finding",))
     (one,), _ = prior_blocks(
-        (older,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+        (older,), "b" * 40, 10**6, unreadable=(), scrub=lambda text: text
     )
     blocks, omissions = prior_blocks(
         (older,),
         "b" * 40,
         len(one.content.text) - 1,
-        unreadable=0,
+        unreadable=(),
         scrub=lambda text: text,
     )
     assert blocks == ()
@@ -441,13 +485,77 @@ def test_a_future_version_blocks_only_its_pull_request(tmp_path):
     assert loaded.records == ()
     assert loaded.unattributed == 1
     assert loaded.unreadable == (
-        ("example-org/example-app", 7),
-        ("other-org/other-app", 9),
+        UnreadableLine("example-org/example-app", 7, None),
+        UnreadableLine("other-org/other-app", 9, None),
     )
 
 
-def test_an_unreadable_line_is_an_omission_even_when_the_record_fits():
+def test_a_version_skewed_line_keeps_its_head_for_the_scoping(tmp_path):
+    """A line this reader cannot parse still names its head when that
+    field is readable, so the caller can tell a superseded head's line
+    from one at the head under review."""
+    path = tmp_path / "rounds.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "v": 99,
+                "repo": "example-org/example-app",
+                "pr": 7,
+                "head_sha": "a" * 40,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = RoundLog(path).read()
+    assert loaded.unreadable == (
+        UnreadableLine("example-org/example-app", 7, "a" * 40),
+    )
+
+
+def test_an_unreadable_line_at_an_older_head_is_set_aside_not_charged():
+    """D74 round 1: a garbled or version-mismatched line at a superseded
+    head is set-aside data, the way a budget-skipped superseded record
+    is -- only something that actually hides current-head context blocks
+    (the charge-any-named-line mutant fails here)."""
+    older = UnreadableLine("example-org/example-app", 7, "a" * 40)
     _blocks, omissions = prior_blocks(
-        (record(),), "b" * 40, 16_384, unreadable=1, scrub=lambda text: text
+        (record(head_sha="b" * 40),),
+        "b" * 40,
+        16_384,
+        unreadable=(older,),
+        scrub=lambda text: text,
     )
-    assert any(item.limit == "unreadable record" for item in omissions)
+    assert omissions == ()
+
+
+def test_an_unreadable_line_at_the_current_head_is_an_omission_even_when_the_record_fits():
+    """The mirror: a line that names this pull request at the head under
+    review may be hiding that head's round, so it stays the review's
+    named omission even when every parsed record fits (the
+    set-aside-everything mutant fails here)."""
+    current = UnreadableLine("example-org/example-app", 7, "b" * 40)
+    blocks, omissions = prior_blocks(
+        (record(),),
+        "b" * 40,
+        16_384,
+        unreadable=(current,),
+        scrub=lambda text: text,
+    )
+    assert blocks
+    assert [item.limit for item in omissions] == ["unreadable record"]
+
+
+def test_an_unreadable_line_with_no_readable_head_is_set_aside():
+    """A line whose head cannot be read is not proven to hide
+    current-head context, so it does not block -- and unlike a charged
+    line it can never block a later head forever."""
+    unknown = UnreadableLine("example-org/example-app", 7, None)
+    _blocks, omissions = prior_blocks(
+        (record(head_sha="b" * 40),),
+        "b" * 40,
+        16_384,
+        unreadable=(unknown,),
+        scrub=lambda text: text,
+    )
+    assert omissions == ()

@@ -169,10 +169,21 @@ pull request, keyed by repository and PR number, not by head SHA, so the
 next push's review reads the earlier rounds. A review appends one record
 of at most about 8 KB per finished run. The queue's one-active-job-per-PR
 rule makes each log single-writer; the teardown window of a superseded
-review can still overlap the next head's first write, and a line that
-lands torn is charged to nobody while a garbled line that names this
-pull request is its named omission in the next draft -- never a crash.
-No cleanup path removes a round log: the run
+review can still overlap the next head's first write. What a bad line
+then costs depends on what it hides: a line that lands torn names no
+pull request and charges nobody; a garbled or version-skewed line that
+names this pull request is charged to it only when it sits at the head
+under review -- at an older head it is superseded data -- and that
+charge holds the review at COMMENT until the log is repaired, which is
+why the reader also acts: a file it cannot decode at all is moved aside
+automatically under a `.corrupt-<UTC timestamp>-<nanoseconds>` name
+beside the log, the review that saw it reports the omission once, and
+the next head starts a fresh log. The operator's recovery for a
+standing charge the reader cannot clear -- a garbled line at the
+current head, or an unreadable file the process cannot move -- is to
+repair or remove `/data/rounds/<repo>-<pr>.jsonl` by hand; salvage the
+quarantined copy first, because deleting the log loses only prior-round
+context. No cleanup path removes a round log: the run
 directory that is removed when a job ends does not contain it, and the
 log stays on the volume until a later cleanup slice trims it. At one
 record per finished review, growth is slow enough that the 1 GB volume
