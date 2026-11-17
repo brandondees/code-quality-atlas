@@ -16,12 +16,13 @@ import subprocess
 import sys
 import time
 import tomllib
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 
-from atlas_reviewer import cli
+from atlas_reviewer import cli, harness, lens_loop, lenses, picker
 from atlas_reviewer.domain import CleanupStatus
 from atlas_reviewer.notes import CLEANUP_SENTENCE
 
@@ -112,25 +113,117 @@ def test_image_is_pinned_python_312_slim_installed_with_hashes_as_non_root():
         assert name not in DOCKERFILE
 
 
-def test_image_copies_exactly_the_files_the_controller_reads():
-    sources = [rest.split()[0] for rest in args_of("COPY")]
-    assert sources == [
-        "requirements.txt",
-        "atlas_reviewer/*.py",
-        "atlas_reviewer/fixtures/eval-references",
-        "collapsed/skills/reviewing-a-change/SKILL.md",
-        "collapsed/skills/reviewing-a-change/reference/lenses",
-        "skills/choosing-review-lenses/SKILL.md",
-        "atlas_reviewer/docker-entrypoint.sh",
+def runtime_read_files() -> list[Path]:
+    """The checkout files the controller reads from the skill trees at
+    review time, derived from the modules that read them: the change
+    bundle (`harness.DEFAULT_BUNDLE`), its synthesis section
+    (`lens_loop.SYNTHESIS`, read by `finding_contract()` when a lens run
+    starts), the picker skill (`picker.PICKER_PATH`), and every collapsed
+    entrypoint's lens bodies -- `LensLibrary.body` falls back to another
+    entrypoint's bodies when the picker names a lens the change bundle
+    does not ship, so a fallback entrypoint whose bodies are absent is a
+    lens NOT RUN, not a crash."""
+    bundle = lenses.BUNDLE_ROOT
+    collapsed = bundle.parent
+    entrypoints = [
+        bundle,
+        *sorted(p for p in collapsed.iterdir() if p.is_dir() and p != bundle),
     ]
-    assert (ROOT / "collapsed/skills/reviewing-a-change/SKILL.md").is_file()
-    assert (ROOT / "skills/choosing-review-lenses/SKILL.md").is_file()
-    bodies = list(
-        (ROOT / "collapsed/skills/reviewing-a-change/reference/lenses").glob(
-            "*/body.md"
-        )
+    files = {
+        harness.DEFAULT_BUNDLE,
+        lens_loop.SYNTHESIS,
+        picker.PICKER_PATH,
+    }
+    for entry in entrypoints:
+        files.update((entry / "reference" / "lenses").glob("*/body.md"))
+    return sorted(files)
+
+
+def image_copies() -> list[tuple[str, str]]:
+    """(source, destination) pairs from the Dockerfile's COPY
+    instructions."""
+    pairs = []
+    for rest in args_of("COPY"):
+        source, dest = rest.split()
+        pairs.append((source, dest.rstrip("/")))
+    return pairs
+
+
+def image_path_of(rel: Path, copies: list[tuple[str, str]]) -> str | None:
+    """Where a checkout file at repo-relative `rel` lands in the image,
+    or None when no COPY covers it. A directory COPY carries its
+    contents, so a file under a copied directory lands at the destination
+    plus its path below that directory; a glob COPY keeps each match's
+    basename under the destination."""
+    for source, dest in copies:
+        if "*" in source:
+            directory, _, pattern = source.rpartition("/")
+            full = f"{directory}/{pattern}" if directory else pattern
+            if fnmatch(str(rel), full) and dest == f"/opt/atlas/{directory}":
+                return f"{dest}/{rel.name}"
+            continue
+        source_rel = Path(source)
+        if rel == source_rel:
+            return dest
+        if source_rel in rel.parents:
+            return f"{dest}/{rel.relative_to(source_rel)}"
+    return None
+
+
+def test_image_carries_every_file_the_controller_reads():
+    files = runtime_read_files()
+    assert files, "the derivation found no runtime reads"
+    bundle = lenses.BUNDLE_ROOT
+    # The two files the v6 image missed, kept as named assertions so a
+    # later refactor of the derivation cannot silently drop them.
+    assert (bundle / "reference" / "synthesis.md") in files
+    assert any(
+        path.name == "body.md" and path.parent.parent != bundle for path in files
+    ), "the derivation missed the fallback entrypoints' lens bodies"
+    for path in files:
+        assert path.is_file(), path
+    missing = []
+    for path in files:
+        rel = path.relative_to(ROOT)
+        landed = image_path_of(rel, image_copies())
+        if landed != f"/opt/atlas/{rel}":
+            missing.append((rel.as_posix(), landed))
+    assert missing == [], (
+        "files the controller reads at review time that the image does not "
+        f"carry at /opt/atlas/<repo path>: {missing}"
     )
-    assert len(bodies) >= 4
+
+
+def _dockerignore_hides(rule: str, rel: str) -> bool:
+    """True when a `.dockerignore` rule can exclude the file at `rel`.
+    `*` and `?` stay within one path segment and `**` crosses them; a rule
+    that names a directory hides everything under it; a leading `**/`
+    matches at any depth."""
+    pattern = rule.rstrip("/").removeprefix("**/")
+    pattern = (
+        pattern.replace("**/", ".*")
+        .replace("**", ".*")
+        .replace("*", "[^/]*")
+        .replace("?", "[^/]")
+    )
+    regex = re.compile(f"^{pattern}$")
+    segments = rel.split("/")
+    candidates = ["/".join(segments[: i + 1]) for i in range(len(segments))]
+    if rule.rstrip("/").startswith("**/"):
+        candidates += ["/".join(segments[i:]) for i in range(len(segments))]
+    return any(regex.fullmatch(candidate) for candidate in candidates)
+
+
+def test_no_dockerignore_rule_hides_a_runtime_read():
+    rules = [
+        line.strip()
+        for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    for path in runtime_read_files():
+        rel = path.relative_to(ROOT).as_posix()
+        hidden = [rule for rule in rules if _dockerignore_hides(rule, rel)]
+        assert hidden == [], (rel, hidden)
 
 
 def test_secret_files_stay_out_of_git_and_the_build_context():
