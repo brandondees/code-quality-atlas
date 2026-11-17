@@ -24,8 +24,11 @@ stays.
 
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
-wall clock, the output cap when the model stops at it, a failed model
-call, or the runner's deadline. A final reply outside the finding
+wall clock, the output cap when the model stops at it, a model call
+that still fails after its retries (`call_retries`, one by default,
+each after a short backoff), or the runner's deadline. A retried call
+reserves and settles like any other call, and the failed call's
+reservation stays committed. A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
 second such reply is the attempt's result. A final reply a quote check
 rejects earns a bounded quote-repair turn in the same conversation (D64):
@@ -113,7 +116,12 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, render
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.budget import BudgetRefusedError
-from atlas_reviewer.call_facts import note_nudge, note_timeout_retry, reset_events
+from atlas_reviewer.call_facts import (
+    note_call_retry,
+    note_nudge,
+    note_timeout_retry,
+    reset_events,
+)
 from atlas_reviewer.diffs import scope_text, split_files
 from atlas_reviewer.lens_contract import (
     _SEVERITY_ALIASES,
@@ -179,6 +187,9 @@ DEFAULT_QUOTE_TOLERANCE = 3
 DEFAULT_PER_LENS_CALLS = DEFAULT_MAX_CALLS
 DEFAULT_PER_LENS_USD = DEFAULT_RESERVATION_USD
 DEFAULT_REVIEW_CEILING_USD = Decimal("10.00")
+DEFAULT_CALL_RETRIES = 1
+MAX_CALL_RETRIES = 3
+CALL_RETRY_BACKOFF_S = 2.0
 
 # ------------------------------------------------------------------ limits
 
@@ -209,6 +220,7 @@ class Limits:
     diff_prefix_share: float
     quote_repairs: int
     quote_tolerance: int
+    call_retries: int = DEFAULT_CALL_RETRIES
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     max_input_tokens: int | None = None
@@ -230,7 +242,9 @@ class AgenticLimits:
     defaults are Brandon's headroom (2026-11-11); pass a value to override
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
-    is one). `no_progress_turns` and `duplicate_calls` are the no-progress
+    is one). `call_retries` is how many times a failed model call is sent
+    again within one turn (0 to 3; the default is one). `no_progress_turns`
+    and `duplicate_calls` are the no-progress
     detector's thresholds (D58, D66): consecutive turns without new
     content -- a successful call the attempt has not made before, or a new
     verified finding -- and identical calls, before one finalize nudge is
@@ -274,6 +288,7 @@ class AgenticLimits:
     per_lens_calls: int | None = None
     per_lens_usd: Decimal | None = None
     review_ceiling_usd: Decimal | None = None
+    call_retries: int = DEFAULT_CALL_RETRIES
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -365,7 +380,11 @@ def _check_limits(limits: Limits, *, cross_limits: bool = True) -> None:
     ):
         raise ValueError("pool_size must be an integer from 1 to 16")
     _check_diff_prefix_share(limits)
-    for name, low, high in (("create_retries", 0, 24), ("create_concurrency", 1, 64)):
+    for name, low, high in (
+        ("create_retries", 0, 24),
+        ("create_concurrency", 1, 64),
+        ("call_retries", 0, MAX_CALL_RETRIES),
+    ):
         _check_in_range(limits, name, low, high)
     for name in _DERIVED:
         value = getattr(limits, name)
@@ -1456,6 +1475,81 @@ def _refusal_cause(exc: BoundaryError) -> Cause:
     return Cause.MODEL_ERROR
 
 
+def _failed_calls(failures: list[str]) -> str:
+    if len(failures) == 1:
+        return failures[0]
+    return f"{len(failures)} calls failed: " + "; ".join(failures)
+
+
+class _TimeoutRetry:
+    """The call timed out and earned its one retry (D58 item 5): the
+    attempt's outer loop resends the same request, noted and reserved as
+    its own call."""
+
+
+def _place_call(
+    request: TurnRequest,
+    model: LensModel,
+    spend: Spend,
+    p: _Progress,
+    clock: Clock,
+    wait_until: float,
+    retried_request: TurnRequest | None,
+    lens_deadline: float,
+    review_deadline: float,
+) -> ModelTurn | AttemptOutcome | str | _TimeoutRetry:
+    """One model call: price it, reserve that, send it, settle it. Split
+    from `run_attempt` so each stays under the complexity gate. An
+    `AttemptOutcome` is a cut already recorded on `p`; a str is a failed
+    call the loop may retry (D49), its reservation committed, since the
+    provider may still have billed it; `_TimeoutRetry` sends the outer
+    loop back around with the request queued as D58's timeout retry."""
+    priced = _reserve_call(model, request, spend, clock, wait_until)
+    if not isinstance(priced, Decimal):
+        return p.cut(*priced)
+    worst = priced
+    _flush_pending_repair(p)
+    try:
+        reply = model.turn(request)
+    except LimitRefused as exc:
+        # The turn completed at the output cap: billed, kept at its
+        # reservation.
+        spend.settle(worst, None)
+        return p.cut(*_stopped(exc.hit))
+    except ByokRefusedError as exc:
+        # The refusal still leaves the loop. The turns and tool calls
+        # already completed travel with it, so the ledger records them.
+        # No other lens in this review makes another model call.
+        spend.settle(worst, None)
+        spend.halt()
+        exc.turns = p.turns
+        exc.tools = tuple(p.tools)
+        raise
+    except TransportTimeoutError as first:
+        # The timed-out request keeps its full reservation as spent
+        # (D58 item 5); it may still have been billed, and it will
+        # never report an actual, so it is not in flight.
+        spend.settle(worst, None)
+        if not _retry_earned(
+            request, retried_request, model, clock, lens_deadline,
+            review_deadline,
+        ):  # fmt: skip
+            return p.cut(Cause.TRANSPORT_ERROR, str(first))
+        return _TimeoutRetry()
+    except TransportError as exc:
+        spend.settle(worst, None)
+        return p.cut(Cause.TRANSPORT_ERROR, str(exc))
+    except BoundaryError as exc:
+        spend.settle(worst, None)
+        if _refusal_cause(exc) == Cause.MODEL_REFUSED:
+            # A ZDR or a worst-case pricing refusal is a decision, not a
+            # failure: it is not retried (D49).
+            return p.cut(Cause.MODEL_REFUSED, str(exc))
+        return str(exc)
+    spend.settle(worst, reply.cost_usd)
+    return reply
+
+
 def run_attempt(
     job: LensJob,
     bridge: Bridge,
@@ -1468,6 +1562,7 @@ def run_attempt(
     retry_of: AttemptOutcome | None = None,
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> AttemptOutcome:
     """Run one attempt to its end. `review_deadline` and `review_started`
     are on `clock.monotonic`. Each possible committed secret a tool result
@@ -1512,49 +1607,46 @@ def run_attempt(
             # completion span names it.
             request, retry_request = retry_request, None
             note_timeout_retry()
-        priced = _reserve_call(
-            model, request, spend, clock, min(lens_deadline, review_deadline)
-        )
-        if not isinstance(priced, Decimal):
-            return p.cut(*priced)
-        worst = priced
-        _flush_pending_repair(p)
-        try:
-            reply = model.turn(request)
-        except LimitRefused as exc:
-            # The turn completed at the output cap: billed, kept at its
-            # reservation.
-            spend.settle(worst, None)
-            return p.cut(*_stopped(exc.hit))
-        except ByokRefusedError as exc:
-            # The refusal still leaves the loop. The turns and tool calls
-            # already completed travel with it, so the ledger records them.
-            # No other lens in this review makes another model call.
-            spend.settle(worst, None)
-            spend.halt()
-            exc.turns = p.turns
-            exc.tools = tuple(p.tools)
-            raise
-        except TransportTimeoutError as first:
-            # The timed-out request keeps its full reservation as spent
-            # (D58 item 5); it may still have been billed, and it will
-            # never report an actual, so it is not in flight.
-            spend.settle(worst, None)
-            if not _retry_earned(
-                request, retried_request, model, clock, lens_deadline,
-                review_deadline,
-            ):  # fmt: skip
-                return p.cut(Cause.TRANSPORT_ERROR, str(first))
-            retried_request = request
-            retry_request = request
+        failures: list[str] = []
+        timeout_retry = False
+        while True:
+            # Every call prices and reserves its own worst case and counts
+            # toward max_calls (D49). A failed call's reservation stays
+            # committed: the provider may still have billed it.
+            placed = _place_call(
+                request, model, spend, p, clock,
+                min(lens_deadline, review_deadline), retried_request,
+                lens_deadline, review_deadline,
+            )  # fmt: skip
+            if isinstance(placed, _TimeoutRetry):
+                retried_request = request
+                retry_request = request
+                timeout_retry = True
+                break
+            if not isinstance(placed, str):
+                break
+            failures.append(placed)
+            if len(failures) > limits.call_retries:
+                return p.cut(Cause.MODEL_ERROR, _failed_calls(failures))
+            # The same request is sent again after a backoff of 2s times
+            # the failed calls so far, once the clocks still allow a turn
+            # (D49). The resend's span names which attempt it is.
+            sleep(CALL_RETRY_BACKOFF_S * len(failures))
+            stopped = _time_up(
+                p, clock, limits, review_deadline, review_started,
+                lens_deadline, attempt_start,
+            )  # fmt: skip
+            if stopped is not None:
+                return stopped
+            note_call_retry(len(failures))
+        if timeout_retry:
             continue
-        except TransportError as exc:
-            spend.settle(worst, None)
-            return p.cut(Cause.TRANSPORT_ERROR, str(exc))
-        except BoundaryError as exc:
-            spend.settle(worst, None)
-            return p.cut(_refusal_cause(exc), str(exc))
-        spend.settle(worst, reply.cost_usd)
+        if isinstance(placed, AttemptOutcome):
+            return placed
+        # The loop breaks with a reply only after `_place_call` returned
+        # one; the `_TimeoutRetry` break continues above.
+        assert not isinstance(placed, _TimeoutRetry)
+        reply = placed
         p.turns += 1
         _mark_held_placed(p, reply)
         if isinstance(reply, FinalReply):

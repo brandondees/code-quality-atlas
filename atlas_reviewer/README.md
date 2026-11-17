@@ -495,6 +495,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is one endpoint, `google-vertex/global`, for an Anthropic-family model (`anthropic/...`), and `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us` for any other model (#695, D63). One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement and still refuses a tag the ZDR list marks Safety Retention unless the opt-in is on. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
+| `ATLAS_CALL_RETRIES` | agentic lens entry | Times a failed model call is sent again within a turn, 0 to 3. Unset is 1 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
@@ -1165,7 +1166,12 @@ D41 records the 2026-11-12 probe that did.
   which D68 derives above the configured values and re-checks after the
   derivation. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
-  ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
+  ledger work. `retries` is 1. `call_retries` is 0 to 3 and defaults
+  to 1: a failed model call is sent again after a backoff of 2s times
+  the number of failed calls so far (2s, then 4s, then 6s), and each
+  call reserves its own worst case (D49). Composed with the one timeout
+  retry (D58), one logical turn's request can be sent up to
+  2 × (`call_retries` + 1) times per attempt — 4 at the default. `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
   `ATLAS_POOL_SIZE` is set. `create_retries` is how many times a 429'd
   Sprite create waits and retries before giving up (D62): 0 to 24,
@@ -1185,7 +1191,7 @@ D41 records the 2026-11-12 probe that did.
   completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
   the share of the model's resolved input cap the shared diff prefix may
   take; 0 pages every review, as before the prefix existed.
-  `coordinator.limits_for_lens` reads the nineteen limits through
+  `coordinator.limits_for_lens` reads the twenty limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.

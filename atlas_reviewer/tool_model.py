@@ -37,7 +37,9 @@ bridge, which rejects an unknown tool or bad arguments before anything
 executes and returns that refusal, nonce-fenced, as the next tool
 result. This module does not execute a tool and sends one request per
 turn: a read timeout raises `TransportTimeoutError`, and the loop owns
-the one retry, reserving it as its own call against the shared budget.
+the retries -- the timed-out request's one retry, and a failed call's
+retries (D49) -- each priced and reserved again as its own call against
+the shared budget.
 """
 
 from __future__ import annotations

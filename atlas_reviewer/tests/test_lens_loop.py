@@ -21,6 +21,7 @@ from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
 from atlas_reviewer.lens_loop import (
+    CALL_RETRY_BACKOFF_S,
     CONTRACT_HEADING,
     DIFF_PREFIX_LABEL,
     INSTRUCTIONS,
@@ -102,6 +103,7 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
     model = model or ScriptedLensModel(list(script))
     clock = clock or FakeClock()
     spend = spend or Spend(limits.resolve())
+    kw.setdefault("sleep", clock.advance)
     out = {}
 
     def body(bridge):
@@ -196,7 +198,7 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         def turn(self, request):
             raise BoundaryError("the model refused")
 
-    for model in (Refused(), TransportFails(), ModelFails()):
+    for model in (Refused(), TransportFails()):
         spend = Spend(LIMITS.resolve())
         clock = FakeClock()
         outcome = run_attempt(
@@ -207,6 +209,21 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         assert spend.calls == 1
         assert spend.committed_usd == Decimal("0.10")
         assert spend.settled_usd == Decimal("0.10"), model.name
+    # A model error is retried once (D49): the failed call keeps its full
+    # reservation as spent, and the retry is its own reserved, settled
+    # call before the lens fails.
+    spend = Spend(LIMITS.resolve())
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), ModelFails(), spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+        sleep=clock.advance,
+    )  # fmt: skip
+    assert spend.calls == 2
+    assert spend.committed_usd == Decimal("0.20")
+    assert spend.settled_usd == Decimal("0.20")
+    assert Cause.MODEL_ERROR in outcome.causes
     # The timed-out request keeps its full reservation as spent (D58 item
     # 5) and its retry is its own reserved, settled call.
     spend = Spend(LIMITS.resolve())
@@ -412,6 +429,9 @@ def test_a_pool_from_one_to_sixteen_is_accepted():
         {"pool_size": 0},
         {"pool_size": 17},
         {"pool_size": True},
+        {"call_retries": -1},
+        {"call_retries": 4},
+        {"call_retries": True},
     ],
 )
 def test_a_limit_outside_its_range_is_refused(change):
@@ -1601,13 +1621,121 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     assert outcome.limit_hit.configured == "600"
 
 
-def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):
-    outcome, _, spend = attempt(tmp_path, [BoundaryError("OpenRouter HTTP 502")])
+def test_a_model_call_that_keeps_failing_fails_the_lens(tmp_path):
+    clock = FakeClock()
+    script = [
+        BoundaryError("OpenRouter HTTP 502"),
+        BoundaryError("finish_reason=error"),
+    ]
+    outcome, model, spend = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.MODEL_ERROR, Cause.FILES_UNREAD}
+    assert outcome.detail == "2 calls failed: OpenRouter HTTP 502; finish_reason=error"
     assert set(outcome.unread) == set(CHANGED)
     assert outcome.state is LensState.FAILED
     assert not outcome.retryable
-    assert spend.committed_usd == ScriptedLensModel([]).worst_usd
+    assert len(model.requests) == 2
+    assert (spend.calls, spend.committed_usd) == (2, 2 * model.worst_usd)
+    assert clock.t == CALL_RETRY_BACKOFF_S
+
+
+def test_the_resend_of_a_failed_call_names_its_attempt_in_telemetry(
+    tmp_path, monkeypatch
+):
+    """Round-1 review of #654, M-1: the D49 retry is visible in the
+    review's telemetry the way D58's timeout retry is — the resend's call
+    facts name which attempt it is, so the span can show it while the
+    lens outcome stays silent about a retry that succeeded (D49)."""
+    import atlas_reviewer.lens_loop as loop_module
+
+    noted: list[int] = []
+    monkeypatch.setattr(loop_module, "note_call_retry", noted.append)
+    outcome, _, _ = attempt(tmp_path, [BoundaryError("boom"), READ_ALL, final()])
+    assert noted == [1]
+    assert outcome.state is LensState.CLEAN
+
+
+def test_a_failed_model_call_is_sent_once_more_and_the_lens_goes_on(tmp_path):
+    script = [BoundaryError("model turn did not finish (finish_reason=error)")]
+    outcome, model, spend = attempt(tmp_path, [*script, READ_ALL, final()])
+    assert outcome.state is LensState.CLEAN
+    assert model.requests[0] == model.requests[1]
+    assert outcome.turns == 2
+    assert spend.calls == 3
+
+
+def test_with_no_call_retries_one_failed_call_fails_the_lens(tmp_path):
+    no_retry = replace(LIMITS, call_retries=0)
+    outcome, model, spend = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502")], limits=no_retry
+    )
+    assert outcome.causes == {Cause.MODEL_ERROR, Cause.FILES_UNREAD}
+    assert outcome.detail == "OpenRouter HTTP 502"
+    assert (len(model.requests), spend.calls) == (1, 1)
+
+
+def test_a_retry_still_needs_a_reservation(tmp_path):
+    one_call = replace(LIMITS, max_calls=1, max_turns=1)
+    outcome, model, _ = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502"), final()], limits=one_call
+    )
+    assert Cause.CALL_CAP in outcome.causes
+    assert len(model.requests) == 1
+
+
+def test_a_backoff_past_the_lens_clock_stops_the_lens(tmp_path):
+    clock = FakeClock()
+    outcome, model, _ = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502"), final()], clock=clock,
+        sleep=lambda s: clock.advance(400),
+    )  # fmt: skip
+    assert Cause.LENS_CLOCK in outcome.causes
+    assert len(model.requests) == 1
+
+
+def test_a_call_retry_then_a_timeout_retry_in_one_attempt(tmp_path):
+    """Round-1 review of #654, N-5: the two retry mechanisms compose in
+    one attempt. The first call fails and its D49 retry succeeds with a
+    tool-call reply; that reply's next turn times out and earns D58's one
+    retry, which succeeds. A successful call retry leaves the outcome
+    silent about itself (D49), and it does not consume or disturb the
+    once-per-attempt timeout-retry guard."""
+    script = [
+        BoundaryError("OpenRouter HTTP 502"),
+        READ_ALL,
+        TransportTimeoutError("the request timed out"),
+        final(),
+    ]
+    outcome, model, spend = attempt(tmp_path, script)
+    assert outcome.state is LensState.CLEAN
+    assert Cause.MODEL_ERROR not in outcome.causes
+    # The failed call's resend, the timed-out send, and D58's retry of it,
+    # each its own reserved call.
+    assert len(model.requests) == 4
+    assert model.requests[0] == model.requests[1]
+    assert model.requests[2] == model.requests[3]
+    assert spend.calls == 4
+
+
+def test_a_timeout_retry_then_a_call_retry_in_one_attempt(tmp_path):
+    """Round-1 review of #654, N-5, the other order: the timed-out
+    request's D58 retry succeeds with a tool-call reply, and that turn's
+    next call fails and earns its own D49 retry. The timeout that
+    abandoned nothing leaves no `MODEL_ERROR` detail behind, and the
+    D49 budget is fresh on the later turn."""
+    script = [
+        TransportTimeoutError("the request timed out"),
+        READ_ALL,
+        BoundaryError("finish_reason=error"),
+        final(),
+    ]
+    outcome, model, spend = attempt(tmp_path, script)
+    assert outcome.state is LensState.CLEAN
+    assert Cause.MODEL_ERROR not in outcome.causes
+    assert Cause.TRANSPORT_ERROR not in outcome.causes
+    assert len(model.requests) == 4
+    assert model.requests[0] == model.requests[1]
+    assert model.requests[2] == model.requests[3]
+    assert spend.calls == 4
 
 
 def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):

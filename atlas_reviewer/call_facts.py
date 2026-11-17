@@ -5,11 +5,13 @@ harness-injected turn that call answers.
 `tool_model._turn` records the facts. The span wrapper reads them. A
 scripted model records nothing, and the span then omits the token
 attributes. The facts live in a context variable so the loop's `LensModel`
-return type stays `ModelTurn`. The nudge label and the timeout-retry count
-are the same mechanism on the request side: `lens_loop` names the injected
-turn, or counts the retry, before building the next request, and the span
-wrapper consumes them, so a trace shows which completion answered a nudge
-or followed a retry without exporting bodies. Both are per-context state:
+return type stays `ModelTurn`. The nudge label, the timeout-retry count
+and the failed-call retry count are the same mechanism on the request
+side: `lens_loop` names the injected turn, or counts which retry the next
+call is, before building or resending the request, and the span wrapper
+consumes them, so a trace shows which completion answered a nudge,
+followed a timeout retry, or is a failed call's resend (D49) without
+exporting bodies. Both are per-context state:
 `reset_events` clears them, which `run_attempt` does at every attempt start
 so a follow-up that never ran cannot stain the next attempt's span.
 """
@@ -22,6 +24,7 @@ from dataclasses import dataclass
 _FACTS: ContextVar[CallFacts | None] = ContextVar("atlas_call_facts", default=None)
 _NUDGE: ContextVar[str] = ContextVar("atlas_nudge", default="")
 _RETRIES: ContextVar[int] = ContextVar("atlas_timeout_retries", default=0)
+_CALL_RETRIES: ContextVar[int] = ContextVar("atlas_call_retries", default=0)
 
 
 @dataclass(frozen=True)
@@ -72,9 +75,24 @@ def take_timeout_retries() -> int:
     return retries
 
 
+def note_call_retry(attempt: int) -> None:
+    """Name the failed-call retry the next model call is (D49): `attempt`
+    is which resend this is, 1 for the first. The span carries it, the
+    lens outcome does not (D49 keeps the outcome silent about a retry
+    that succeeded)."""
+    _CALL_RETRIES.set(attempt)
+
+
+def take_call_retries() -> int:
+    retries = _CALL_RETRIES.get()
+    _CALL_RETRIES.set(0)
+    return retries
+
+
 def reset_events() -> None:
     """Clear the request-side markers. `run_attempt` calls this at every
     attempt start: a follow-up turn that was queued but never ran must not
     stain the next attempt's spans (review Minor 5)."""
     _NUDGE.set("")
     _RETRIES.set(0)
+    _CALL_RETRIES.set(0)

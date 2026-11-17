@@ -381,6 +381,30 @@ def test_the_reasoning_hint_is_capped_outside_anthropic():
     assert resolve_per_call(overridden, deepseek).reasoning_max_tokens == 2000
 
 
+def test_call_retries_default_to_one_and_can_be_turned_off():
+    assert load_agentic_limits({}).call_retries == 1
+    assert load_agentic_limits({"ATLAS_CALL_RETRIES": "3"}).call_retries == 3
+    assert (
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "3"}, call_retries="0").call_retries
+        == 0
+    )
+    # The env layer range-checks at parse, like its sibling bounded counts
+    # (round-1 review of #654, N-1), and `resolve` keeps the same bound as
+    # a backstop.
+    with pytest.raises(
+        ValueError, match=r"call_retries must be an integer from 0 to 3, not 'once'$"
+    ):
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "once"})
+    with pytest.raises(
+        ValueError, match=r"call_retries must be an integer from 0 to 3, not '4'$"
+    ):
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "4"})
+    with pytest.raises(
+        ValueError, match=r"call_retries must be an integer from 0 to 3, not '-1'$"
+    ):
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "-1"})
+
+
 def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():
     with pytest.raises(ValueError, match="max_input_tokens"):
         AgenticLimits(max_input_tokens=True).resolve()
