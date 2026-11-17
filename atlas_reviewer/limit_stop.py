@@ -20,6 +20,7 @@ SETTINGS: dict[str, str] = {
     "max_turns": "--max-turns or ATLAS_MAX_TURNS",
     "lens_wall_s": "--lens-wall-seconds or ATLAS_LENS_WALL_S",
     "review_wall_s": "--review-wall-seconds or ATLAS_REVIEW_WALL_S",
+    "session_limits": "the bridge's session limits (SessionLimits in bridge.py)",
     "max_input_tokens": "--max-input-tokens or ATLAS_MAX_INPUT_TOKENS",
     "max_output_tokens": "--max-output-tokens or ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "--reasoning-max-tokens or ATLAS_REASONING_MAX_TOKENS",

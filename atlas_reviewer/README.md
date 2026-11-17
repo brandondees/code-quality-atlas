@@ -1128,8 +1128,12 @@ a `Bridge` to the caller.
   rev, prefix, fixed-string unless `regex`). `rev` is BASE, HEAD or a
   staged DEFAULT. Anything else is rejected before an exec, with a fixed
   code and a controller-written reason that echoes neither the tool name
-  nor any value sent. A session serves at most 64 calls and 1 MiB of
-  output in all, then refuses calls without running them.
+  nor any value sent. One attempt may spend at most 64 calls and 1 MiB of
+  output of its session (#693): the coordinator starts that budget over
+  for each attempt, so a retry begins whole, and a refusal names the
+  attempt that spent it. `SESSION_REFUSAL_LIMIT` consecutive refusals
+  end the attempt at a limit stop naming the lens, the attempt and the
+  cap.
 - **Exec.** Each call is a fixed git argv with every value shell-quoted,
   under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
   and repository attributes disable config, hooks, pagers, transports,
@@ -1255,7 +1259,11 @@ D41 records the 2026-11-12 probe that did.
   on every write, keyed by repository and pull request number. The
   repository key is case-insensitive. An older head is labelled
   superseded and is not this review's scope. A record over 8,192
-  characters stores no finding text. Prior blocks stay whole, newest
+  characters stores no finding text. A record also carries the review's
+  first limit stop, as its own message naming the lens, the attempt and
+  the cap (#693), and the next round's first turn shows it back; a line
+  from before the field existed parses with an empty stop. Prior blocks
+  stay whole, newest
   first, inside 16,384 characters. Leaving out a superseded round does
   not block approval. Leaving out a round at the head under review
   does. A line that names another pull request, or no pull request,
@@ -1326,14 +1334,18 @@ D41 records the 2026-11-12 probe that did.
   the unread list never occurs — coverage is attested from what the
   prefix held — so the unread-list nudge and the `diff_file` page
   bookkeeping are retired there; the paged path keeps both, and its
-  coverage stays honest: a lens never attests coverage it did not get. A timed-out, unavailable or
+  coverage stays honest: a lens never attests coverage it did not get.   A timed-out, unavailable or
   over-limit tool call makes the lens partial. Every `diff_file` page
-  counts against the bridge's session output budget (`SessionLimits`,
-  1 MiB by default). A PR whose diff is larger than that budget cannot
+  counts against the bridge's per-attempt output budget (`SessionLimits`,
+  1 MiB by default; #693 starts it over for each attempt, so a retry does
+  not inherit what its predecessor spent). A PR whose diff is larger than
+  that budget cannot
   come clean on this path: the call past the budget is refused
   `OVER_SESSION_LIMIT`, its file stays unread, and the review fails closed.
   Raising the budget is the only remedy built; no path-exclusion option
-  exists.
+  exists. Three consecutive refusals end the attempt at a limit stop
+  naming the lens, the attempt and the cap, instead of sending the
+  results back for another turn of re-issued refused calls (#693).
 - **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an
   append-only ledger when it starts and again when it ends, keyed by
   repository, PR, head SHA, lens and body digest. A failed attestation, an

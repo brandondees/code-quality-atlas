@@ -426,6 +426,46 @@ def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
     }
 
 
+def test_a_retry_gets_a_full_bridge_budget_and_a_spent_one_stops_the_attempt(tmp_path):
+    """Issue #693. Attempt 1 spends the bridge session's whole call budget
+    (66 calls: 64 refused nothing, the burst's last two were refused) and
+    fails its acknowledgement, which is retried. The retry runs on the
+    same runner session and still has its own full budget: its 64 calls
+    run. When the retry then takes SESSION_REFUSAL_LIMIT consecutive
+    refusals, the attempt ends at a limit stop that names the lens, the
+    attempt and the cap -- in the ledger, the status line, the round log
+    and so the service report -- instead of nudging the model to re-issue
+    refused calls. The shared-counter mutant, where attempt 2 inherits
+    attempt 1's spend, fails here: its reads refuse and the lens dies
+    before its own budget is ever spent."""
+    from atlas_reviewer.rounds import RoundLog
+
+    burst = tools(*[("read_file", {"path": "calc.py"})] * 64)
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 3)
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    result, model, _ = review(
+        tmp_path, [READ_ALL, burst, MISACK, burst, spent], round_log=log
+    )
+    (lens,) = result.lenses
+    assert (lens.state, lens.attempts) == (LensState.PARTIAL, 2)
+    stop = lens.outcome.limit_hit
+    assert stop is not None
+    assert stop.limit == "session_limits"
+    assert stop.observed == (
+        "3 consecutive session-limit refusals ended "
+        "tracing-correctness-and-invariants attempt 2; the last: "
+        "session-limit: all 64 calls of this attempt made "
+        "(tracing-correctness-and-invariants attempt 2)"
+    )
+    assert status(result)["limit_stop"]["limit"] == "session_limits"
+    assert "attempt 2" in status(result)["limit_stop"]["observed"]
+    (recorded,) = log.read().records
+    assert "session_limits stopped the review" in recorded.limit_stop
+    assert "attempt 2" in recorded.limit_stop
+    # Five model calls: three turns in attempt 1, two in the retry.
+    assert len(model.requests) == 5
+
+
 def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     tmp_path,
 ):

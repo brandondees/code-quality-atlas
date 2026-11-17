@@ -2977,3 +2977,39 @@ last kept line's integrity. Mutants applied by hand and killed with
 M16 (the anchor dropped), M17 (the mid-line fallback). One measured pair
 each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #693: the bridge session budget is per lens attempt, and repeated session-limit refusals end the attempt
+
+Found in the Nov 14 model-trials rerun: `SessionLimits.max_calls = 64` was
+per runner session, and a lens's attempt 1 and its retry share that
+session, so eight DeepSeek #661 retries, DeepSeek #640's
+decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals) and one Kimi
+#640 retry started nearly out of tool calls and ended `TOOL_GAP` and
+`FILES_UNREAD`, every duplicate-call nudge earned from re-issuing refused
+calls. D77 records the decision.
+
+The budget moved to the attempt: the coordinator calls
+`Bridge.begin_attempt(lens, number)` before each attempt it runs on a
+bridge, the attempt's call and shown-output counters start over, and a
+refusal names the attempt that spent the budget
+("all 64 calls of this attempt made (lens attempt 2)"). The session
+ledger (`Bridge.calls`) still keeps every call across the attempts. The
+loop then cuts an attempt at `SESSION_REFUSAL_LIMIT` (3) consecutive
+`OVER_SESSION_LIMIT` results, mid-turn, at a limit stop
+(`limit: session_limits`, cause `TOOL_GAP`) naming the lens, the attempt
+and the cap -- carried into the ledger's per-attempt `limit` record, the
+status line, and the round log's new `limit_stop` field, which the next
+round's first turn shows back (a pre-field line parses with an empty
+stop). The dollar ceiling and the wall clocks still bound the whole
+review; D42's structural rule (a diff over 1 MiB cannot come clean in one
+attempt) stands; the cap is deliberately not model-aware yet, and the
+attempt the threshold stops is not retried, like every other limit stop.
+
+Tests pin a retry starting with a full budget (one loop-level and one
+end-to-end, the latter also pinning the round-log record), the threshold
+cut mid-turn with the stop's text, and the field's round-trip. Mutants
+applied by hand and killed with `PYTHONDONTWRITEBYTECODE=1`: M1 (the
+session-wide counter restored), M2 (the threshold raised out of reach),
+M3 (`begin_attempt` not called by the coordinator), M4 (the attempt
+number not passed to the loop). 3,224 reviewer tests at 96.40%, 882
+tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.

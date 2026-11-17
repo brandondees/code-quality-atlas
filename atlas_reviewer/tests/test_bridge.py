@@ -910,7 +910,7 @@ def test_a_session_refuses_calls_past_its_call_limit_without_running_them(tmp_pa
     ]
     assert render(results[2]) == (
         "diff_stat: session limit reached\n"
-        "error: session-limit: all 2 calls of this session made\n"
+        "error: session-limit: all 2 calls of this attempt made\n"
     )
     bridge_execs = [
         s for s in sprites.calls if s[0] == "exec" and "__ATLAS_BRIDGE__" in s[2]
@@ -932,7 +932,7 @@ def test_a_session_shows_no_more_output_than_it_has_left(tmp_path):
     assert (first.shown_bytes, first.truncated) == (size, False)
     assert (second.shown_bytes, second.truncated) == (10, True)
     assert third.status is Status.OVER_SESSION_LIMIT
-    assert f"all {size + 10} output bytes of this session shown" in third.error.text
+    assert f"all {size + 10} output bytes of this attempt shown" in third.error.text
     assert sum(c.shown_bytes for c in bridge.calls) == size + 10
 
 
@@ -944,3 +944,63 @@ def test_session_limits_must_be_positive_integers(limits):
 
 def test_the_session_defaults_are_64_calls_and_1_mib_of_output():
     assert SessionLimits() == SessionLimits(64, 1024 * 1024)
+
+
+def test_a_begun_attempt_gets_its_own_call_budget(tmp_path):
+    """The session budget is per attempt (#693): a retry begun on the same
+    bridge starts its call count over, and a refusal names the attempt
+    that spent the budget. The session ledger keeps every call."""
+    seen = []
+    ledgers = []
+
+    def body(bridge):
+        ledgers.append(bridge)
+        bridge.begin_attempt("decision-lifecycle", 2)
+        seen.append(bridge.call("diff_stat", {}))
+        seen.append(bridge.call("diff_stat", {}))
+        seen.append(bridge.call("diff_stat", {}))
+        bridge.begin_attempt("decision-lifecycle", 3)
+        seen.append(bridge.call("diff_stat", {}))
+        return "done"
+
+    report, *_ = bridge_run(tmp_path, body, session_limits=SessionLimits(max_calls=2))
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    third = seen[2]
+    assert [r.status for r in seen] == [
+        Status.OK,
+        Status.OK,
+        Status.OVER_SESSION_LIMIT,
+        Status.OK,
+    ]
+    assert (
+        "session-limit: all 2 calls of this attempt made "
+        "(decision-lifecycle attempt 2)" in third.error.text
+    )
+    (bridge,) = ledgers
+    assert len(bridge.calls) == 4
+
+
+def test_a_begun_attempt_gets_its_own_output_budget(tmp_path):
+    size = len(HEAD_FILES["calc.py"])
+    seen = []
+
+    def body(bridge):
+        bridge.begin_attempt("tracing-correctness-and-invariants", 1)
+        seen.append(bridge.call("read_file", {"path": "calc.py"}))
+        seen.append(bridge.call("read_file", {"path": "calc.py"}))
+        seen.append(bridge.call("read_file", {"path": "calc.py"}))
+        bridge.begin_attempt("tracing-correctness-and-invariants", 2)
+        seen.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    report, *_ = bridge_run(
+        tmp_path, body, session_limits=SessionLimits(max_output_bytes=size + 10)
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    first, second, third, fourth = seen
+    assert (first.shown_bytes, first.truncated) == (size, False)
+    assert (second.shown_bytes, second.truncated) == (10, True)
+    assert third.status is Status.OVER_SESSION_LIMIT
+    assert "output bytes of this attempt shown" in third.error.text
+    assert fourth.status is Status.OK
+    assert (fourth.shown_bytes, fourth.truncated) == (size, False)

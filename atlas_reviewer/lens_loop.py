@@ -26,7 +26,12 @@ An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
 wall clock, the output cap when the model stops at it, a model call
 that still fails after its retries (`call_retries`, one by default,
-each after a short backoff), or the runner's deadline. A retried call
+each after a short backoff), the runner's deadline, or the bridge's own
+per-attempt session budget: the coordinator starts that budget over for
+each attempt (#693), so a retry does not inherit what its predecessor
+spent, and `SESSION_REFUSAL_LIMIT` consecutive `OVER_SESSION_LIMIT`
+results end the attempt at a named limit stop instead of letting the
+model re-issue refused calls. A retried call
 reserves and settles like any other call, and the failed call's
 reservation stays committed. A call the reservation cannot cover at its
 full output cap is sent with the largest cap it can cover, when that is
@@ -179,6 +184,17 @@ DIFF_PREFIX_LABEL = "pull-request-diff"
 # citation, not levers to make reviews cheaper.
 DEFAULT_QUOTE_REPAIRS = 1
 DEFAULT_QUOTE_TOLERANCE = 3
+
+# The repeated-refusal stop (issue #693): this many consecutive
+# `OVER_SESSION_LIMIT` tool results end the attempt. A bridge budget the
+# attempt has spent refuses every further call, so past the threshold the
+# model is only re-issuing refused calls -- the Nov 14 model trials
+# measured a DeepSeek retry burning 16 of them, each earning a
+# duplicate-call nudge -- and a finalize nudge would ask it for more of
+# the same. The threshold ends the attempt instead: the turns and
+# findings it has stand, and the limit stop names the lens, the attempt
+# and the cap. A constant, not a knob: the budget itself is the setting.
+SESSION_REFUSAL_LIMIT = 3
 
 # D68: the per-lens values a multi-lens review's review-wide limits
 # derive from, and the absolute per-review dollar ceiling they clamp to.
@@ -1402,6 +1418,12 @@ class _Progress:
     held_outcome: AttemptOutcome | None = None
     held_placed: bool = False
     finding_hold: AttemptOutcome | None = None
+    # The repeated-refusal window (issue #693): consecutive
+    # `OVER_SESSION_LIMIT` tool results this attempt has taken, reset by
+    # any result that ran, and the last refusal's own reason, so the
+    # attempt's stop can name the cap that was hit.
+    session_refusals: int = 0
+    last_refusal: str = ""
 
     def unread(self) -> tuple[str, ...]:
         """The changed files this attempt has not read the whole diff of.
@@ -1475,6 +1497,7 @@ _LIMIT_CAUSES = {
     "max_turns": Cause.TURN_CAP,
     "lens_wall_s": Cause.LENS_CLOCK,
     "review_wall_s": Cause.REVIEW_CLOCK,
+    "session_limits": Cause.TOOL_GAP,
     "max_input_tokens": Cause.INPUT_CAP,
     "max_output_tokens": Cause.OUTPUT_CAP,
     "reasoning_max_tokens": Cause.REASONING_CAP,
@@ -1656,12 +1679,15 @@ def run_attempt(
     review_deadline: float,
     review_started: float,
     retry_of: AttemptOutcome | None = None,
+    attempt: int = 1,
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
     sleep: Callable[[float], None] = time.sleep,
 ) -> AttemptOutcome:
     """Run one attempt to its end. `review_deadline` and `review_started`
-    are on `clock.monotonic`. Each possible committed secret a tool result
+    are on `clock.monotonic`; `attempt` is the attempt's number in its
+    ledger key, which the repeated-refusal stop's text names. Each
+    possible committed secret a tool result
     reports (location and pattern, never the value) is appended to `secrets`."""
     limits = spend.limits
     prefix, prefix_note = diff_prefix_for(job, limits, model)
@@ -1751,14 +1777,70 @@ def run_attempt(
                 return done
             continue
         p.new_content = False
-        try:
-            results = tuple(_tool(job, bridge, call, p) for call in reply.calls)
-        except DeadlineExceededError as exc:
-            elapsed = clock.monotonic() - review_started
-            found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
-            return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
-        messages += [AssistantCalls(reply.calls), ToolResults(results)]
+        turn_tools = _run_turn_tools(
+            job, bridge, reply, p, attempt, clock, limits, review_started
+        )
+        if isinstance(turn_tools, AttemptOutcome):
+            return turn_tools
+        messages += [AssistantCalls(reply.calls), ToolResults(turn_tools)]
         _inject_stall_nudge(p, limits, messages)
+
+
+def _run_turn_tools(
+    job: LensJob,
+    bridge: Bridge,
+    reply: ToolCalls,
+    p: _Progress,
+    attempt: int,
+    clock: Clock,
+    limits: Limits,
+    review_started: float,
+) -> tuple[str, ...] | AttemptOutcome:
+    """Run a tool turn's calls in order. The repeated-refusal stop (issue
+    #693) ends the attempt mid-turn, once `SESSION_REFUSAL_LIMIT`
+    consecutive results have been `OVER_SESSION_LIMIT` -- the budget is
+    spent, so the turn's remaining calls would only refuse again -- and
+    so does a runner deadline inside a call."""
+    results: list[str] = []
+    try:
+        for call in reply.calls:
+            results.append(_tool(job, bridge, call, p))
+            stopped = _refusal_cut(job, attempt, bridge, p)
+            if stopped is not None:
+                return stopped
+    except DeadlineExceededError as exc:
+        elapsed = clock.monotonic() - review_started
+        found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
+        return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
+    return tuple(results)
+
+
+def _refusal_cut(
+    job: LensJob, attempt: int, bridge: Bridge, p: _Progress
+) -> AttemptOutcome | None:
+    """The repeated-refusal stop (issue #693): once
+    `SESSION_REFUSAL_LIMIT` consecutive tool results have been
+    `OVER_SESSION_LIMIT`, the attempt's bridge budget is spent and the
+    model is only re-issuing refused calls -- end the attempt at a limit
+    stop that names the lens, the attempt and the cap, rather than send
+    the results back and invite another turn of the same. Mid-turn, so a
+    turn past the threshold stops at the threshold instead of running the
+    rest of its calls into the same refusal."""
+    if p.session_refusals < SESSION_REFUSAL_LIMIT:
+        return None
+    limits = bridge.session_limits
+    found = hit(
+        "session_limits",
+        (
+            f"{limits.max_calls} call(s) and {limits.max_output_bytes} "
+            "output bytes per attempt"
+        ),
+        (
+            f"{p.session_refusals} consecutive session-limit refusals ended "
+            f"{job.lens} attempt {attempt}; the last: {p.last_refusal}"
+        ),
+    )
+    return p.cut(*_stopped(found))
 
 
 def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -> None:
@@ -1935,6 +2017,15 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
     p.secrets.extend(result.secrets)
     if result.status in GAP_STATUSES:
         p.causes.add(Cause.TOOL_GAP)
+    if result.status is Status.OVER_SESSION_LIMIT:
+        # The attempt's bridge budget is spent (issue #693): count the
+        # refusal and keep its reason, so the repeated-refusal stop can
+        # name the cap that was hit. Any result that ran resets the count.
+        p.session_refusals += 1
+        if result.error is not None:
+            p.last_refusal = result.error.text
+    else:
+        p.session_refusals = 0
     if result.status is Status.OK and (result.tool, result.args) not in p.seen_calls:
         # First-time content: a call the attempt has not successfully run
         # before returned something the lens has not seen (D66's progress

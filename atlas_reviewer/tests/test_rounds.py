@@ -576,3 +576,61 @@ def test_an_unreadable_line_with_no_readable_head_is_set_aside():
         scrub=lambda text: text,
     )
     assert omissions == ()
+
+
+STOP = (
+    "session_limits stopped the review: configured 64 call(s) and 1048576 "
+    "output bytes per attempt, observed 3 consecutive session-limit "
+    "refusals ended tracing-correctness-and-invariants attempt 2. Change "
+    "it with the bridge's session limits (SessionLimits in bridge.py)."
+)
+
+
+def test_a_record_carries_its_limit_stop_and_a_line_without_one_still_parses(
+    tmp_path,
+):
+    """Issue #693: the round log records the review's limit stop, and a
+    line written before the field existed still parses, with an empty
+    stop."""
+    path = tmp_path / "rounds.jsonl"
+    log = RoundLog(path)
+    log.append(record(limit_stop=STOP))
+    base = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    del base["limit_stop"]
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(base, sort_keys=True) + "\n")
+    loaded = log.read()
+    assert loaded.unreadable == ()
+    assert [item.limit_stop for item in loaded.records] == [STOP, ""]
+
+
+def test_a_limit_stop_that_is_not_text_is_not_a_record(tmp_path):
+    path = tmp_path / "rounds.jsonl"
+    log = RoundLog(path)
+    log.append(record())
+    base = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({**base, "limit_stop": 3}, sort_keys=True) + "\n")
+    loaded = log.read()
+    assert len(loaded.records) == 1
+    assert loaded.unreadable == (
+        UnreadableLine("example-org/example-app", 7, "a" * 40),
+    )
+
+
+def test_the_limit_stop_is_fenced_back_into_the_next_round():
+    blocks, omissions = prior_blocks(
+        (record(limit_stop=STOP),),
+        "a" * 40,
+        16_384,
+        unreadable=(),
+        scrub=lambda text: text,
+    )
+    assert omissions == ()
+    text = blocks[0].content.text
+    assert "That round stopped on a limit:" in text
+    assert STOP in text
+    (plain,), _ = prior_blocks(
+        (record(),), "a" * 40, 16_384, unreadable=(), scrub=lambda text: text
+    )
+    assert "stopped on a limit" not in plain.content.text

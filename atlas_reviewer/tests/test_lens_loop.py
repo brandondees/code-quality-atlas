@@ -1750,6 +1750,95 @@ def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     assert outcome.state is LensState.PARTIAL
 
 
+def test_consecutive_session_limit_refusals_end_the_attempt(tmp_path):
+    """Issue #693: once SESSION_REFUSAL_LIMIT consecutive results have
+    been OVER_SESSION_LIMIT, the attempt ends at a limit stop instead of
+    going back for another turn of re-issued refused calls. The cut is
+    mid-turn: the turn's calls past the threshold never run."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    outcome, model, _ = attempt(
+        tmp_path,
+        [tools(("diff_file", {"path": "calc.py"})), spent],
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.causes == {Cause.TOOL_GAP, Cause.FILES_UNREAD}
+    assert outcome.attestation is Attestation.UNACKNOWLEDGED
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "session_limits"
+    assert outcome.limit_hit.configured == (
+        "1 call(s) and 1048576 output bytes per attempt"
+    )
+    assert outcome.limit_hit.observed == (
+        "3 consecutive session-limit refusals ended "
+        "tracing-correctness-and-invariants attempt 1; the last: "
+        "session-limit: all 1 calls of this attempt made"
+    )
+    assert outcome.limit_hit.setting == (
+        "the bridge's session limits (SessionLimits in bridge.py)"
+    )
+    assert "session_limits stopped the review" in outcome.detail
+    # One turn that ran, one turn cut at the third refusal: the fourth
+    # refused call was never made, and no third turn was asked for.
+    assert [t.status for t in outcome.tools] == [
+        "OK",
+        "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
+    ]
+    assert len(model.requests) == 2
+
+
+def test_a_retry_begins_with_a_full_bridge_budget(tmp_path):
+    """Issue #693: attempt 1 spends the bridge's whole call budget, and
+    the retry begun on the same bridge session still has all of its own:
+    its reads run and the lens settles clean. The shared-counter mutant,
+    where the retry inherits what attempt 1 spent, fails here."""
+    bad = final(text="not json")
+    # Attempt 1 reads the whole diff (so no unread-list nudge holds it),
+    # spends the budget doing it, then fails its contract twice, which
+    # is retryable; the retry re-reads on a fresh budget and settles
+    # clean.
+    script = [READ_ALL, bad, bad, READ_ALL, final()]
+    model = ScriptedLensModel(list(script))
+    clock = FakeClock()
+    spend = Spend(LIMITS.resolve())
+    outcomes = []
+
+    def body(bridge):
+        started = clock.monotonic()
+        for number in (1, 2):
+            bridge.begin_attempt(LENS, number)
+            outcomes.append(
+                run_attempt(
+                    job(),
+                    bridge,
+                    model,
+                    spend,
+                    clock,
+                    review_deadline=started + 600,
+                    review_started=started,
+                    retry_of=outcomes[-1] if outcomes else None,
+                    attempt=number,
+                    sleep=clock.advance,
+                )
+            )
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(), MemoryLedger(), trees(), body,
+        redactor=Redactor(), changed=CHANGED, name="cqa-lens-test",
+        deadline_s=900, clock=clock, root=str(tmp_path / "bridge"),
+        session_limits=SessionLimits(max_calls=2),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    first, second = outcomes
+    assert first.causes == {Cause.UNPARSED}
+    assert first.state is LensState.FAILED
+    assert second.state is LensState.CLEAN
+    assert [t.status for t in second.tools] == ["OK", "OK"]
+
+
 def test_a_rejected_tool_call_is_answered_and_the_lens_goes_on(tmp_path):
     bad = tools(("shell", {"cmd": "cat /etc/passwd"}))
     outcome, model, _ = attempt(tmp_path, [bad, READ_ALL, final()])
