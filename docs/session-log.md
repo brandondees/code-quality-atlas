@@ -2640,3 +2640,38 @@ the tree to the wrong destination. `tool-evidence.md` rides along in the tree
 copy but is not a runtime read. 3,106 reviewer tests, ruff/mypy clean.
 Offline only. After merge, a Fly redeploy of atlas-reviewer-service is needed
 to pick this up; not deployed from here.
+
+## 2026-11-17 (same day) — round-1 fixes for #733: the dockerignore guard failed open on interior `**`, and the eval references left the derivation
+
+The round-1 review's Major: the new `.dockerignore` guard's `str.replace`
+translation chain destroyed its own `**` semantics — the `.*` emitted for
+`**` was rewritten by the later `*` pass into `.[^/]*`, which cannot cross a
+`/` — so the most natural rule for the v6 crash file
+(`collapsed/**/synthesis.md`, mutant M6) hid it from Docker while the guard
+stayed green, and a middle-directory rule (`**/reference`) was unreachable
+too because the leading-`**/` candidates only ran from each segment to the
+path's end. The guard now translates each rule token by token (`**/` → zero
+or more whole segments at any depth, `**` → crossing, `*`/`?` within one
+segment, character classes member-for-member, literals `re.escape`d) and
+walks the file's path node by node the way docker build walks the context:
+the last matching rule decides each node, and a directory the walk leaves
+excluded prunes its subtree, which is what makes the committed
+`atlas_reviewer/fixtures/*` + two `!` re-include rules behave as Docker
+behaves — and a `!` cannot resurrect a file whose parent directory the walk
+pruned. Nineteen single-rule and four multi-rule parametrized cases pin the
+semantics (M6, `**/reference`, `a/**/b` at zero and deep segments, `.git`
+vs `xgit`, root-anchored `*.md`, `**/*.py[cod]`, the committed negation
+triple, and the caveat cases). The Minor: the deleted snapshot had been the
+only guard on the non-skill COPY lines, so dropping
+`atlas_reviewer/fixtures/eval-references` (the `eval` subcommand's
+reference set, read by `eval_harness._REFERENCES`) or the whole
+`atlas_reviewer/*.py` package COPY left every test green (mutant M7). Both
+are now in the derived set — the `pr-*.json` fixtures and the top-level
+package modules — so each drop fails
+`test_image_carries_every_file_the_controller_reads`, and the glob COPY's
+`*` is matched with the same within-segment semantics. The Nits shipped
+with them: the PR body's count corrected to 33 files (1 synthesis + 32
+fallback lens bodies), the Dockerfile comment narrowed to the
+collapsed/skills tree, and the `!` walk semantics documented in the guard's
+docstring. Mutants M6, `**/reference`, M7, and the package-COPY drop each
+kill exactly one test. 3,129 reviewer tests, ruff/mypy clean. Offline only.

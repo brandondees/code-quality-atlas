@@ -16,13 +16,12 @@ import subprocess
 import sys
 import time
 import tomllib
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import NamedTuple
 
 import pytest
 
-from atlas_reviewer import cli, harness, lens_loop, lenses, picker
+from atlas_reviewer import cli, eval_harness, harness, lens_loop, lenses, picker
 from atlas_reviewer.domain import CleanupStatus
 from atlas_reviewer.notes import CLEANUP_SENTENCE
 
@@ -114,15 +113,17 @@ def test_image_is_pinned_python_312_slim_installed_with_hashes_as_non_root():
 
 
 def runtime_read_files() -> list[Path]:
-    """The checkout files the controller reads from the skill trees at
-    review time, derived from the modules that read them: the change
-    bundle (`harness.DEFAULT_BUNDLE`), its synthesis section
-    (`lens_loop.SYNTHESIS`, read by `finding_contract()` when a lens run
-    starts), the picker skill (`picker.PICKER_PATH`), and every collapsed
-    entrypoint's lens bodies -- `LensLibrary.body` falls back to another
-    entrypoint's bodies when the picker names a lens the change bundle
-    does not ship, so a fallback entrypoint whose bodies are absent is a
-    lens NOT RUN, not a crash."""
+    """The checkout files the controller needs in the image, derived from
+    the modules that read them: the package's own top-level modules
+    (imported at startup), the eval-reference fixtures `eval_harness`
+    loads for the `eval` subcommand, the skill trees read at review time
+    -- the change bundle (`harness.DEFAULT_BUNDLE`), its synthesis
+    section (`lens_loop.SYNTHESIS`, read by `finding_contract()` when a
+    lens run starts), the picker skill (`picker.PICKER_PATH`), and every
+    collapsed entrypoint's lens bodies -- `LensLibrary.body` falls back
+    to another entrypoint's bodies when the picker names a lens the
+    change bundle does not ship, so a fallback entrypoint whose bodies
+    are absent is a lens NOT RUN, not a crash."""
     bundle = lenses.BUNDLE_ROOT
     collapsed = bundle.parent
     entrypoints = [
@@ -133,6 +134,8 @@ def runtime_read_files() -> list[Path]:
         harness.DEFAULT_BUNDLE,
         lens_loop.SYNTHESIS,
         picker.PICKER_PATH,
+        *ROOT.glob("atlas_reviewer/*.py"),
+        *eval_harness._REFERENCES.glob("pr-*.json"),
     }
     for entry in entrypoints:
         files.update((entry / "reference" / "lenses").glob("*/body.md"))
@@ -154,20 +157,25 @@ def image_path_of(rel: Path, copies: list[tuple[str, str]]) -> str | None:
     or None when no COPY covers it. A directory COPY carries its
     contents, so a file under a copied directory lands at the destination
     plus its path below that directory; a glob COPY keeps each match's
-    basename under the destination."""
+    basename under the destination, and its `*`/`?` stay within one
+    segment. A later COPY that covers the same file wins, as in Docker."""
+    landing = None
     for source, dest in copies:
-        if "*" in source:
-            directory, _, pattern = source.rpartition("/")
-            full = f"{directory}/{pattern}" if directory else pattern
-            if fnmatch(str(rel), full) and dest == f"/opt/atlas/{directory}":
-                return f"{dest}/{rel.name}"
+        if "*" in source or "?" in source:
+            directory, _, _ = source.rpartition("/")
+            if not re.fullmatch(_path_glob_regex(source), rel.as_posix()):
+                continue
+            base = f"/opt/atlas/{directory}" if directory else "/opt/atlas"
+            if dest != base:
+                continue
+            landing = f"{dest}/{rel.name}"
             continue
         source_rel = Path(source)
         if rel == source_rel:
-            return dest
-        if source_rel in rel.parents:
-            return f"{dest}/{rel.relative_to(source_rel)}"
-    return None
+            landing = dest
+        elif source_rel in rel.parents:
+            landing = f"{dest}/{rel.relative_to(source_rel)}"
+    return landing
 
 
 def test_image_carries_every_file_the_controller_reads():
@@ -180,6 +188,9 @@ def test_image_carries_every_file_the_controller_reads():
     assert any(
         path.name == "body.md" and path.parent.parent != bundle for path in files
     ), "the derivation missed the fallback entrypoints' lens bodies"
+    assert sum("eval-references" in path.parts for path in files) >= 10, (
+        "the derivation missed the eval-reference fixtures"
+    )
     for path in files:
         assert path.is_file(), path
     missing = []
@@ -194,24 +205,178 @@ def test_image_carries_every_file_the_controller_reads():
     )
 
 
-def _dockerignore_hides(rule: str, rel: str) -> bool:
-    """True when a `.dockerignore` rule can exclude the file at `rel`.
-    `*` and `?` stay within one path segment and `**` crosses them; a rule
-    that names a directory hides everything under it; a leading `**/`
-    matches at any depth."""
-    pattern = rule.rstrip("/").removeprefix("**/")
-    pattern = (
-        pattern.replace("**/", ".*")
-        .replace("**", ".*")
-        .replace("*", "[^/]*")
-        .replace("?", "[^/]")
-    )
-    regex = re.compile(f"^{pattern}$")
+def _path_glob_regex(pattern: str) -> str:
+    """A path glob as an anchored regex over `/`-separated paths, the
+    matcher `.dockerignore` rules and COPY sources use: `*` and `?` stay
+    within one segment, a character class translates member for member,
+    and `**` crosses segments -- a `**/` consumes zero or more whole
+    segments, so it matches at any depth. Literals are escaped."""
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        elif pattern[i] == "[":
+            end = _class_end(pattern, i)
+            if end is None or end - i <= 2 or pattern[i + 1 : end - 1] in ("!", "^"):
+                out.append(re.escape("["))
+                i += 1
+            else:
+                members = pattern[i + 1 : end - 1]
+                negated = members[0] in "!^"
+                body = members[1:] if negated else members
+                escaped = body.replace("\\", "\\\\")
+                out.append("[" + ("^" if negated else "") + escaped + "]")
+                i = end
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return "".join(out)
+
+
+def _class_end(pattern: str, start: int) -> int | None:
+    """Index just past the `]` closing the class opened at `start`, or
+    None when the bracket is a literal: a leading `!`/`^` and a leading
+    `]` member are skipped, as Go's filepath.Match treats them."""
+    i = start + 1
+    if i < len(pattern) and pattern[i] in "!^":
+        i += 1
+    if i < len(pattern) and pattern[i] == "]":
+        i += 1
+    while i < len(pattern):
+        if pattern[i] == "]":
+            return i + 1
+        i += 1
+    return None
+
+
+def _dockerignore_hides(rules: list[str], rel: str) -> bool:
+    """Whether `.dockerignore` excludes the file at `rel`, walked the way
+    docker build walks the context: the rules are evaluated node by node
+    down the file's path, the last matching rule decides each node, and a
+    directory the walk leaves excluded prunes its subtree -- so a `!`
+    re-include rule reaches a file only when nothing excluded one of its
+    parent directories without re-including it."""
     segments = rel.split("/")
-    candidates = ["/".join(segments[: i + 1]) for i in range(len(segments))]
-    if rule.rstrip("/").startswith("**/"):
-        candidates += ["/".join(segments[i:]) for i in range(len(segments))]
-    return any(regex.fullmatch(candidate) for candidate in candidates)
+    included = True
+    for depth in range(1, len(segments) + 1):
+        if not included:
+            return True
+        node = "/".join(segments[:depth])
+        decision = True
+        for rule in rules:
+            pattern = rule.removeprefix("!")
+            pattern = pattern.rstrip("/").lstrip("/")
+            if pattern in ("", ".", ".."):
+                continue
+            if re.fullmatch(_path_glob_regex(pattern), node):
+                decision = rule.startswith("!")
+        included = decision
+    return not included
+
+
+@pytest.mark.parametrize(
+    ("rule", "rel", "hides"),
+    [
+        (
+            "collapsed/skills",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        (
+            "collapsed/**",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        # M6: the most natural glob idiom for the v6 crash file.
+        (
+            "collapsed/**/synthesis.md",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        (
+            "collapsed/skills/**/synthesis.md",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        (
+            "collapsed/**/reference/*",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        # A middle directory, not only suffixes that run to the path's end.
+        (
+            "**/reference",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        (
+            "**/*.md",
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        # `**` also matches zero segments: `a/**/b` reaches `a/b`.
+        ("a/**/b", "a/b/c.md", True),
+        ("a/**/b", "a/x/y/b/c.md", True),
+        ("a/**/b", "a/b.md", False),
+        ("a/**/b", "a/x/b.md/c", False),
+        # A literal dot is escaped, not a regex any-char.
+        (".git", "xgit", False),
+        (".git", ".git/config", True),
+        # Without `**`, a rule is anchored at the context root.
+        ("*.md", "collapsed/skills/x.md", False),
+        ("docs/research/*.md", "docs/research/x.md", True),
+        ("**/__pycache__", "atlas_reviewer/__pycache__/x.pyc", True),
+        ("**/*.py[cod]", "atlas_reviewer/cli.pyc", True),
+        ("**/*.py[cod]", "atlas_reviewer/cli.py", False),
+        (
+            "atlas_reviewer/fixtures/*",
+            "atlas_reviewer/fixtures/eval-references/x.json",
+            True,
+        ),
+    ],
+)
+def test_a_dockerignore_rule_hides_exactly_what_docker_would(
+    rule: str, rel: str, hides: bool
+):
+    assert _dockerignore_hides([rule], rel) is hides
+
+
+@pytest.mark.parametrize(
+    ("rules", "rel", "hides"),
+    [
+        # The committed fixtures negation: last matching rule wins, so the
+        # `!` rules re-include what `atlas_reviewer/fixtures/*` excluded.
+        (
+            [
+                "atlas_reviewer/fixtures/*",
+                "!atlas_reviewer/fixtures/eval-references",
+                "!atlas_reviewer/fixtures/eval-references/**",
+            ],
+            "atlas_reviewer/fixtures/eval-references/x.json",
+            False,
+        ),
+        # dockerignore's caveat: a file under an excluded directory stays
+        # out even when a later `!` names it, because the walk pruned the
+        # directory and never reached the file.
+        (["dir", "!dir/file.md"], "dir/file.md", True),
+        (["dir/*", "!dir"], "dir/x.md", True),
+        # A file-level exclude is re-includable by a later `!`.
+        (["*.md", "!README.md"], "README.md", False),
+    ],
+)
+def test_dockerignore_rules_apply_in_order(rules: list[str], rel: str, hides: bool):
+    assert _dockerignore_hides(rules, rel) is hides
 
 
 def test_no_dockerignore_rule_hides_a_runtime_read():
@@ -222,8 +387,7 @@ def test_no_dockerignore_rule_hides_a_runtime_read():
     ]
     for path in runtime_read_files():
         rel = path.relative_to(ROOT).as_posix()
-        hidden = [rule for rule in rules if _dockerignore_hides(rule, rel)]
-        assert hidden == [], (rel, hidden)
+        assert not _dockerignore_hides(rules, rel), rel
 
 
 def test_secret_files_stay_out_of_git_and_the_build_context():
