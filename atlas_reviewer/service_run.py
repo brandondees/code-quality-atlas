@@ -10,7 +10,11 @@ the model key, the Sprites token, a read-only installation token,
 ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``, ``ATLAS_ALLOW_SAFETY_RETENTION``,
 ``ATLAS_REQUIRE_ZDR``, ``ATLAS_KEY_CEILING_USD``, and the agentic limit
 variables (``agentic_config.ENV``, D68's derived limits and the $10
-per-review ceiling included). The one-shot command reads the route
+per-review ceiling included). The agentic child also takes
+``--round-log`` naming the per-pull-request round log on the volume
+(D74), outside the per-head run directory, so a later head of the same
+pull request reads the earlier rounds; the one-shot command takes no
+round log. The one-shot command reads the route
 variables and does not read the agentic limits, so passing them in that
 mode costs nothing; the agentic child reads them. The webhook secret, the
 App private key, and anything else the parent holds, including a Fly API
@@ -289,10 +293,23 @@ def run_dir(root: Path, event: PrEvent) -> Path:
     return root / "runs" / f"{repo}-{event.pr_number}-{event.head_sha}"
 
 
-def review_argv(config: RunConfig, directory: Path) -> list[str]:
+def round_log_path(root: Path, event: PrEvent) -> Path:
+    """The per-pull-request round log (D74), keyed by repository and PR
+    number -- not by head SHA -- so a later head of the same pull request
+    reads the earlier rounds. It lives outside the per-head run
+    directory, on the volume, and survives the run directory's removal.
+    The name flattens the repository the way `run_dir` does."""
+    repo = event.repo.replace("/", "-")
+    return root / "rounds" / f"{repo}-{event.pr_number}.jsonl"
+
+
+def review_argv(config: RunConfig, directory: Path, event: PrEvent) -> list[str]:
     """The child command the mode names: ``agentic-review`` by default,
     the one-shot ``review`` in oneshot mode. Both take the same
-    ``--event``, ``--out``, ``--events`` and ``--provider`` wiring."""
+    ``--event``, ``--out``, ``--events`` and ``--provider`` wiring. The
+    agentic child also takes the per-pull-request ``--round-log`` (D74):
+    the child cannot derive it, because its ``--state-dir`` is the
+    per-head run directory's."""
     argv = [
         sys.executable,
         "-m",
@@ -309,6 +326,8 @@ def review_argv(config: RunConfig, directory: Path) -> list[str]:
         "--provider",
         config.provider,
     ]
+    if config.mode == MODE_AGENTIC:
+        argv += ["--round-log", str(round_log_path(config.state_root, event))]
     if config.provider == "openrouter" and config.allow_live_inference:
         argv.append("--allow-live-inference")
     return argv
@@ -344,7 +363,7 @@ def make_runner(
         make_private_dirs(directory)
         _write_event(directory / "event.json", event)
         stderr_path = directory / "stderr.txt"
-        argv = review_argv(config, directory)
+        argv = review_argv(config, directory, event)
         token, mint_error = mint(env, event)
         if mint_error:
             return ReviewRun(False, error=mint_error)

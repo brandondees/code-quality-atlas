@@ -251,7 +251,9 @@ itself, and a timeout is a coverage gap.
   into the next review of the same pull request (D52). The first turn
   lists every file in the current diff. Prior findings are quoted
   input. They do not drop a file. The shipped caller is `agentic-review`
-  (D67): it keeps `rounds.jsonl` under its state directory and passes
+  (D67): it keeps `rounds.jsonl` under its state directory -- or the
+  path `--round-log` names, which the service sets to a per-pull-request
+  file on the volume (D74) -- and passes
   the log into every review it runs.
 - **Scoring.** Score issue-hit precision and recall against pilot PRs the
   owner labels: did the review name the issues a human cared about, and

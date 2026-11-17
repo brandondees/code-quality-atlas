@@ -2513,3 +2513,34 @@ instead of a leaked `mkdtemp`; and the abandoned-latest-attempt dropped
 note documented. Six mutants applied by hand and killed, each attributed
 in the D73 Update's round-2 paragraph. 3,105 reviewer tests, tooling 882
 passed at 95.20%, ruff/mypy/drift clean. Offline only.
+
+## 2026-11-17 — #728: the service's round log is now one file per pull request, so prior-round context survives a pushed head
+
+The deployed agentic review lost its round log on every push:
+`_cmd_agentic_review` hardcoded the log at `<state dir>/rounds.jsonl`
+and the service passes `--state-dir <run dir>/state` with `run_dir`
+keyed by head SHA, so round N never read round N-1 (found in #727's
+round-1 protocol review, D70's correction (3); CodeRabbit raised it
+too). The fix is the seam D67 deferred: `agentic-review` takes
+`--round-log`, and `service_run.review_argv` — now required to take the
+event — appends the per-PR path `<state root>/rounds/<repo>-<pr>.jsonl`
+to the agentic child only. The unflagged CLI default is unchanged, so a
+local run keeps its path; `rounds.py` itself is untouched, and the
+contents stay untrusted fenced data under D67's budgets. Storage
+(D74): `/data/rounds/<repo>-<pr>.jsonl` on the existing Fly volume,
+outside the per-head run directory the job's end removes, no janitor in
+this slice — the log stays until a later cleanup slice; the queue's
+one-active-job-per-PR rule is the single-writer story, and the reader's
+existing semantics absorb the supersede teardown's overlap window (a
+torn line charges nobody, a garbled line that names the PR is its
+omission, an unreadable file is the `round log file` omission). One
+decision made against the issue's wording, recorded in D74: a missing
+log is a first review's normal shape — no omission, because D42 holds a
+review with an omission at COMMENT and every first review would land
+there — while a corrupt log stays the named omission it already was.
+Three mutants applied by hand and killed: the service omitting the
+flag, the per-PR path keyed by head, and the CLI ignoring the flag;
+each dies on its named test, and the two-heads-of-one-PR dry run shows
+the second head's first turn opening with the first round's fenced
+block. 3,109 reviewer tests passed at 96.37% coverage, ruff/mypy clean
+on the touched files. Offline only.
