@@ -2708,3 +2708,45 @@ skills` appended to `.dockerignore` each now fail
 `test_no_dockerignore_rule_hides_a_runtime_read`; Clean-equivalence and
 refusal cases are pinned parametrized. 3,139 reviewer tests, ruff/mypy
 clean. Offline only.
+
+## 2026-11-17 (same day) — round-3 fixes for #733: the guard refuses POSIX bracket classes, and Clean keeps a leading `/` like Go
+
+Two more fail-open classes in the `.dockerignore` guard, both closed the
+round-2 way — refuse or mirror, never mis-translate:
+
+- POSIX bracket classes: `_class_end` closed a class at the first `]`, so
+  `[[:alpha:]]` compiled as the Python members set `{[, :, a, l, p, h}` plus
+  a literal `]`, while Go passes `[` and `]` raw into RE2, where
+  `[[:alpha:]]` is any letter — the mutant `[[:alpha:]]ollapsed/**` hid the
+  whole `collapsed/` tree in Docker while every dockerignore test stayed
+  green. `_unsupported_syntax` now scans rule-by-rule and refuses `[[:`
+  (RE2 compiles it; Python re does not), a `[` nested inside a class, a `[!`
+  class, and a backslash escape, all with the same "unsupported
+  .dockerignore syntax; extend the guard" error; plain `[...]`/`[^...]`
+  classes stay modeled (the committed `**/*.py[cod]` needs one).
+- `_clean` dropped a leading `/`, which Go's Clean keeps — and the kept
+  slash compiles to a `^/...$` regex that never matches a relative context
+  path, so a leading-slash rule is inert in Docker in BOTH directions. For
+  an exclude rule the drop only over-reported; for a `!` exception
+  (`!/collapsed/skills` against a preceding exclude) it re-included a file
+  Docker hides — fail-open. `_clean` now keeps the slash (and drops a `..`
+  that would climb above the root, as Go does), so the model is inert
+  exactly where Docker is. The mutant kill is the parametrized pair
+  `["collapsed/skills", "!/collapsed/skills"]` (a lone appended
+  `!/collapsed/skills` is inert in both engines, since no committed rule
+  excludes the tree); the review's three fuzz shapes (`["[^a]", "!//?"]`,
+  `["y", "!/?"]`, `["**//", "c*", "!/**/**/y/"]`) are pinned too, and the
+  two docstrings no longer claim the dropped slash only over-reported.
+
+Cleaning the raw rule before reading `!` also exposed a third divergence
+the fuzz found on its own: Go's Clean resolves `..` against the segment
+carrying the `!`, so `![a]/../y` Cleans to the exclude rule `y` — the
+negation vanishes — while strip-first ordering made the model see an
+exception. The guard now Cleans first and reads `!` off the cleaned rule,
+as `patternmatcher.New` does. Verified against a fresh transcription of
+`moby/patternmatcher` and BuildKit's fsutil walk (seed 11): 19,533
+comparable cases, 0 fail-opens, 878 fail-closed over-reports, and 0
+divergences across the committed `.dockerignore` × all 158 runtime reads.
+The COPY glob sources now pass the same refusal gate (`image_path_of`
+raises on `\`, `[!`, `[[:`, nested-`[`), closing the round-3 Nit. 3,167
+reviewer tests at 96.37%, ruff/format/mypy clean. Offline only.

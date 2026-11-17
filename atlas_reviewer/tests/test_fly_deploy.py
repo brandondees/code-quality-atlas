@@ -158,7 +158,16 @@ def image_path_of(rel: Path, copies: list[tuple[str, str]]) -> str | None:
     contents, so a file under a copied directory lands at the destination
     plus its path below that directory; a glob COPY keeps each match's
     basename under the destination, and its `*`/`?` stay within one
-    segment. A later COPY that covers the same file wins, as in Docker."""
+    segment. A later COPY that covers the same file wins, as in Docker.
+    A source the translator cannot model raises, like a `.dockerignore`
+    rule the guard cannot model."""
+    for source, _ in copies:
+        unsupported = _unsupported_syntax(source)
+        if unsupported:
+            raise ValueError(
+                "unsupported .dockerignore syntax; extend the guard: "
+                f"{source!r} uses {unsupported}"
+            )
     landing = None
     for source, dest in copies:
         if "*" in source or "?" in source:
@@ -265,22 +274,25 @@ def _class_end(pattern: str, start: int) -> int | None:
 
 
 def _clean(rule: str) -> str:
-    """Go's filepath.Clean for a slash-separated rule, then the leading
-    and trailing separators dropped: empty segments collapse, `.` drops,
-    and `..` resolves against the segments before it. Docker runs every
-    rule through Clean before compiling, so `a//b`, `./a`, and `a/./b`
-    are the rules they look like, not the strings they are written as.
-    Docker's Clean keeps a leading `/` (which then never matches a
-    relative path); dropping it here only over-reports hiding."""
+    """Go's filepath.Clean for a slash-separated rule: empty segments
+    collapse, `.` drops, `..` resolves against the segments before it,
+    and a leading `/` stays, as Go's Clean keeps it. Docker compiles the
+    kept slash into an anchored regex that never matches a relative
+    context path, so a leading-slash rule is inert in Docker -- in its
+    exclude form and, the fail-open trap, in its `!` exception form
+    too."""
+    absolute = rule.startswith("/")
     segments = []
     for segment in rule.split("/"):
         if segment in ("", "."):
             continue
         if segment == ".." and segments and segments[-1] != "..":
             segments.pop()
+        elif segment == ".." and absolute and not segments:
+            continue
         else:
             segments.append(segment)
-    return "/".join(segments)
+    return "/" + "/".join(segments) if absolute else "/".join(segments)
 
 
 def _unsupported_syntax(rule: str) -> str | None:
@@ -288,29 +300,50 @@ def _unsupported_syntax(rule: str) -> str | None:
     refused construct can fail open -- hide a file in Docker while the
     modeled translation still calls it visible -- so the guard raises
     instead. A backslash escape (`\\*`, `\\.`) is a plausible authoring
-    mistake, and a `[!` class is a positive class in Go but a negated
-    one in gitignore; a plain `[...]` or `[^...]` class is modeled."""
-    if "\\" in rule:
-        return "a backslash escape"
-    if "[!" in rule:
-        return "a gitignore-style [! negated class (Go reads ! as a member)"
+    mistake. A `[!` class is a positive class in Go but a negated one in
+    gitignore. A `[[:` POSIX class passes raw into Go's RE2, which knows
+    `[[:alpha:]]` as any letter, while Python's `re` reads the same
+    characters as a members-and-literal-`]` class of a different
+    language. A `[` inside a class is RE2-legal but outside what the
+    translator models. A plain `[...]` or `[^...]` class is modeled."""
+    index = 0
+    while index < len(rule):
+        if rule[index] == "\\":
+            return "a backslash escape"
+        if rule.startswith("[!", index):
+            return "a gitignore-style [! negated class (Go reads ! as a member)"
+        if rule.startswith("[[:", index):
+            return "a POSIX bracket class (RE2 compiles it; Python re does not)"
+        if rule[index] == "[":
+            end = _class_end(rule, index)
+            if end is not None and "[" in rule[index + 1 : end - 1]:
+                return "a nested [ inside a character class"
+            index = end if end is not None else index + 1
+            continue
+        index += 1
     return None
 
 
 def _dockerignore_hides(rules: list[str], rel: str) -> bool:
     """Whether `.dockerignore` excludes the file at `rel`. The guard is
-    at least as strict as Docker, not exactly Docker: each rule is
-    Cleaned the way Go's filepath.Clean does, then the rules are
-    evaluated node by node down the file's path with the last matching
-    rule deciding each node, and a directory the walk leaves excluded
-    prunes its subtree. Where that can diverge from BuildKit it only
-    over-reports hiding: BuildKit descends into an excluded directory
-    when an exception's literal reaches below it, which this walk does
-    not model, and the wider mid-segment `**` and the dropped leading
-    `/` noted above over-report too. A `!` re-include reaches a file
-    only when nothing excluded one of its parent directories without
-    re-including it. Syntax that could fail open -- a backslash escape,
-    a `[!` class -- raises instead of being mis-translated."""
+    at least as strict as Docker, and on the modeled syntax agrees with
+    it exactly where it does not over-report: each rule is Cleaned the
+    way Go's filepath.Clean does -- on the raw rule, before the `!` is
+    read, so a `..` that cancels the segment carrying the `!` consumes
+    the negation exactly as Docker's Clean does -- and a leading `/`
+    stays, with the compiled `^/...$` regex inert against relative
+    paths, in both the exclude and the `!` exception form -- exactly as
+    in Docker. The rules are then evaluated node by node down the
+    file's path with the last matching rule deciding each node, and a
+    directory the walk leaves excluded prunes its subtree. Where that
+    can diverge from BuildKit it only over-reports hiding: BuildKit
+    descends into an excluded directory when an exception's literal
+    reaches below it, which this walk does not model, and a `**` inside
+    a path segment is wider here than Docker compiles it. A `!`
+    re-include reaches a file only when nothing excluded one of its
+    parent directories without re-including it. Syntax that could fail
+    open -- a backslash escape, a `[!` class, a `[[:` POSIX class, a `[`
+    nested in a class -- raises instead of being mis-translated."""
     for rule in rules:
         unsupported = _unsupported_syntax(rule)
         if unsupported:
@@ -320,17 +353,21 @@ def _dockerignore_hides(rules: list[str], rel: str) -> bool:
             )
     segments = rel.split("/")
     included = True
+    cleaned = []
+    for rule in rules:
+        pattern = _clean(rule)
+        negated = pattern.startswith("!")
+        cleaned.append((pattern[1:] if negated else pattern, negated))
     for depth in range(1, len(segments) + 1):
         if not included:
             return True
         node = "/".join(segments[:depth])
         decision = True
-        for rule in rules:
-            pattern = _clean(rule.removeprefix("!"))
+        for pattern, negated in cleaned:
             if not pattern:
                 continue
             if re.fullmatch(_path_glob_regex(pattern), node):
-                decision = rule.startswith("!")
+                decision = negated
         included = decision
     return not included
 
@@ -401,15 +438,19 @@ def _dockerignore_hides(rules: list[str], rel: str) -> bool:
         ("collapsed/./skills", "collapsed/skills/x.md", True),
         ("a/../b", "b/c.md", True),
         ("collapsed/", "collapsed/skills/x.md", True),
+        # Go's Clean keeps a leading `/`, and the compiled `^/...$` never
+        # matches a relative context path: the rule is inert in Docker,
+        # exclude or not.
+        ("/collapsed", "collapsed/skills/x.md", False),
+        ("/collapsed/skills", "collapsed/skills/x.md", False),
     ],
 )
 def test_a_dockerignore_rule_hides_at_least_what_docker_would(
     rule: str, rel: str, hides: bool
 ):
-    """The guard is at least as strict as Docker: where it diverges from
-    BuildKit -- an exception's descent into an excluded directory, a
-    wider mid-segment `**`, a dropped leading `/` -- it only over-reports
-    hiding."""
+    """The guard is at least as strict as Docker, and where it diverges
+    from BuildKit -- an exception's descent into an excluded directory,
+    a wider mid-segment `**` -- it only over-reports hiding."""
     assert _dockerignore_hides([rule], rel) is hides
 
 
@@ -425,11 +466,33 @@ def test_a_dockerignore_rule_hides_at_least_what_docker_would(
         # refuses instead of picking one reading.
         ("[!n]ollapsed/skills", "collapsed/skills/x.md"),
         ("![!a]", "a/x.md"),
+        # A POSIX class passes raw into Go's RE2, where `[[:alpha:]]` is
+        # any letter -- `[[:alpha:]]ollapsed/**` hides the whole tree --
+        # while Python re reads those characters as a different language.
+        ("[[:alpha:]]ollapsed/**", "collapsed/skills/x.md"),
+        ("[[:^alpha:]]/x", "1/x"),
+        # RE2 allows `[` inside a class; the translator does not model it.
+        ("[a[b]/x", "ab/x"),
     ],
 )
 def test_a_rule_the_guard_cannot_model_fails_closed(rule: str, rel: str):
     with pytest.raises(ValueError, match="unsupported .dockerignore syntax"):
         _dockerignore_hides([rule], rel)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "atlas_reviewer/[!a]*.py",
+        "atlas_reviewer/[[:alpha:]]*.py",
+        "atlas_reviewer/\\*.py",
+    ],
+)
+def test_a_copy_source_the_translator_cannot_model_fails_closed(source: str):
+    with pytest.raises(ValueError, match="unsupported .dockerignore syntax"):
+        image_path_of(
+            Path("atlas_reviewer/cli.py"), [(source, "/opt/atlas/atlas_reviewer")]
+        )
 
 
 @pytest.mark.parametrize(
@@ -452,13 +515,52 @@ def test_a_rule_the_guard_cannot_model_fails_closed(rule: str, rel: str):
         # guard models the classic walk, so this is its known strictness
         # gap: over-reporting only, never under.
         (["dir", "!dir/file.md"], "dir/file.md", True),
-        # BuildKit descends here too (`!dir/sub/x.md`, `!dir/x/*.md`
-        # would rescue their file), but not for a bare trailing `**`
-        # exception, which both builders prune on.
+        # BuildKit's exception descent into an excluded directory is not
+        # modeled by this walk: when the guard prunes, it may report a
+        # file hidden that a `!` exception reaching below the dir would
+        # ship. This case is that known strictness gap -- over-reporting
+        # only, never under.
         (["dir", "!dir/sub/**"], "dir/sub/x.md", True),
         (["dir/*", "!dir"], "dir/x.md", True),
         # A file-level exclude is re-includable by a later `!`.
         (["*.md", "!README.md"], "README.md", False),
+        # A leading-slash `!` exception is inert in Docker: Clean keeps
+        # the slash and the compiled `^/...$` never matches a relative
+        # path, so the dir the exclude hid stays hidden. The pre-fix
+        # guard dropped the slash, the active exception rescued the
+        # excluded dir node, and the walk then reached the file --
+        # the fail-open shape of `!/collapsed/skills`.
+        (
+            ["collapsed/skills", "!/collapsed/skills"],
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        # The three fail-open fuzz shapes from the round-3 review, with
+        # the leading-slash exception inert again: hidden, like Docker.
+        (["[^a]", "!//?"], "y", True),
+        (["y", "!/?"], "y/c", True),
+        (["**//", "c*", "!/**/**/y/"], "y", True),
+        # A leading-slash file-level exception cannot rescue through the
+        # prune either; Docker prunes the same way (its literal starts
+        # with `/`, so it never reaches below the excluded dir).
+        (
+            [
+                "collapsed/skills",
+                "!/collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            ],
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            True,
+        ),
+        # The same exception without the slash, where Docker acts on it:
+        # it rescues the file at the node the walk reaches.
+        (
+            [
+                "collapsed/**/synthesis.md",
+                "!collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            ],
+            "collapsed/skills/reviewing-a-change/reference/synthesis.md",
+            False,
+        ),
     ],
 )
 def test_dockerignore_rules_apply_in_order(rules: list[str], rel: str, hides: bool):
