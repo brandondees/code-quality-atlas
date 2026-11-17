@@ -208,9 +208,13 @@ def test_image_carries_every_file_the_controller_reads():
 def _path_glob_regex(pattern: str) -> str:
     """A path glob as an anchored regex over `/`-separated paths, the
     matcher `.dockerignore` rules and COPY sources use: `*` and `?` stay
-    within one segment, a character class translates member for member,
-    and `**` crosses segments -- a `**/` consumes zero or more whole
-    segments, so it matches at any depth. Literals are escaped."""
+    within one segment, a character class translates member for member
+    with only `^` negating it (Go's filepath.Match reads a leading `!`
+    as an ordinary member), and `**` crosses segments -- a `**/`
+    consumes zero or more whole segments, so it matches at any depth.
+    Literals are escaped. A `**` inside a segment is translated wider
+    than Docker compiles it (Docker keeps it to whole segments); the
+    divergence only over-reports hiding."""
     out = []
     i = 0
     while i < len(pattern):
@@ -228,12 +232,12 @@ def _path_glob_regex(pattern: str) -> str:
             i += 1
         elif pattern[i] == "[":
             end = _class_end(pattern, i)
-            if end is None or end - i <= 2 or pattern[i + 1 : end - 1] in ("!", "^"):
+            if end is None or end - i <= 2 or pattern[i + 1 : end - 1] == "^":
                 out.append(re.escape("["))
                 i += 1
             else:
                 members = pattern[i + 1 : end - 1]
-                negated = members[0] in "!^"
+                negated = members[0] == "^"
                 body = members[1:] if negated else members
                 escaped = body.replace("\\", "\\\\")
                 out.append("[" + ("^" if negated else "") + escaped + "]")
@@ -246,10 +250,10 @@ def _path_glob_regex(pattern: str) -> str:
 
 def _class_end(pattern: str, start: int) -> int | None:
     """Index just past the `]` closing the class opened at `start`, or
-    None when the bracket is a literal: a leading `!`/`^` and a leading
-    `]` member are skipped, as Go's filepath.Match treats them."""
+    None when the bracket is a literal: a leading `^` and a leading `]`
+    member are skipped, as Go's filepath.Match treats them."""
     i = start + 1
-    if i < len(pattern) and pattern[i] in "!^":
+    if i < len(pattern) and pattern[i] == "^":
         i += 1
     if i < len(pattern) and pattern[i] == "]":
         i += 1
@@ -260,13 +264,60 @@ def _class_end(pattern: str, start: int) -> int | None:
     return None
 
 
+def _clean(rule: str) -> str:
+    """Go's filepath.Clean for a slash-separated rule, then the leading
+    and trailing separators dropped: empty segments collapse, `.` drops,
+    and `..` resolves against the segments before it. Docker runs every
+    rule through Clean before compiling, so `a//b`, `./a`, and `a/./b`
+    are the rules they look like, not the strings they are written as.
+    Docker's Clean keeps a leading `/` (which then never matches a
+    relative path); dropping it here only over-reports hiding."""
+    segments = []
+    for segment in rule.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment == ".." and segments and segments[-1] != "..":
+            segments.pop()
+        else:
+            segments.append(segment)
+    return "/".join(segments)
+
+
+def _unsupported_syntax(rule: str) -> str | None:
+    """What the guard refuses to translate about a rule, or None. Each
+    refused construct can fail open -- hide a file in Docker while the
+    modeled translation still calls it visible -- so the guard raises
+    instead. A backslash escape (`\\*`, `\\.`) is a plausible authoring
+    mistake, and a `[!` class is a positive class in Go but a negated
+    one in gitignore; a plain `[...]` or `[^...]` class is modeled."""
+    if "\\" in rule:
+        return "a backslash escape"
+    if "[!" in rule:
+        return "a gitignore-style [! negated class (Go reads ! as a member)"
+    return None
+
+
 def _dockerignore_hides(rules: list[str], rel: str) -> bool:
-    """Whether `.dockerignore` excludes the file at `rel`, walked the way
-    docker build walks the context: the rules are evaluated node by node
-    down the file's path, the last matching rule decides each node, and a
-    directory the walk leaves excluded prunes its subtree -- so a `!`
-    re-include rule reaches a file only when nothing excluded one of its
-    parent directories without re-including it."""
+    """Whether `.dockerignore` excludes the file at `rel`. The guard is
+    at least as strict as Docker, not exactly Docker: each rule is
+    Cleaned the way Go's filepath.Clean does, then the rules are
+    evaluated node by node down the file's path with the last matching
+    rule deciding each node, and a directory the walk leaves excluded
+    prunes its subtree. Where that can diverge from BuildKit it only
+    over-reports hiding: BuildKit descends into an excluded directory
+    when an exception's literal reaches below it, which this walk does
+    not model, and the wider mid-segment `**` and the dropped leading
+    `/` noted above over-report too. A `!` re-include reaches a file
+    only when nothing excluded one of its parent directories without
+    re-including it. Syntax that could fail open -- a backslash escape,
+    a `[!` class -- raises instead of being mis-translated."""
+    for rule in rules:
+        unsupported = _unsupported_syntax(rule)
+        if unsupported:
+            raise ValueError(
+                "unsupported .dockerignore syntax; extend the guard: "
+                f"{rule!r} uses {unsupported}"
+            )
     segments = rel.split("/")
     included = True
     for depth in range(1, len(segments) + 1):
@@ -275,9 +326,8 @@ def _dockerignore_hides(rules: list[str], rel: str) -> bool:
         node = "/".join(segments[:depth])
         decision = True
         for rule in rules:
-            pattern = rule.removeprefix("!")
-            pattern = pattern.rstrip("/").lstrip("/")
-            if pattern in ("", ".", ".."):
+            pattern = _clean(rule.removeprefix("!"))
+            if not pattern:
                 continue
             if re.fullmatch(_path_glob_regex(pattern), node):
                 decision = rule.startswith("!")
@@ -344,12 +394,42 @@ def _dockerignore_hides(rules: list[str], rel: str) -> bool:
             "atlas_reviewer/fixtures/eval-references/x.json",
             True,
         ),
+        # Docker runs filepath.Clean over every rule first, so these are
+        # the rules they look like.
+        ("a//b", "a/b/c.md", True),
+        ("./collapsed", "collapsed/skills/x.md", True),
+        ("collapsed/./skills", "collapsed/skills/x.md", True),
+        ("a/../b", "b/c.md", True),
+        ("collapsed/", "collapsed/skills/x.md", True),
     ],
 )
-def test_a_dockerignore_rule_hides_exactly_what_docker_would(
+def test_a_dockerignore_rule_hides_at_least_what_docker_would(
     rule: str, rel: str, hides: bool
 ):
+    """The guard is at least as strict as Docker: where it diverges from
+    BuildKit -- an exception's descent into an excluded directory, a
+    wider mid-segment `**`, a dropped leading `/` -- it only over-reports
+    hiding."""
     assert _dockerignore_hides([rule], rel) is hides
+
+
+@pytest.mark.parametrize(
+    ("rule", "rel"),
+    [
+        # An escaped wildcard is a plausible authoring mistake; the guard
+        # refuses rather than mis-translating it.
+        ("foo\\*bar", "a/b.md"),
+        ("collapsed/**/synthesis\\.md", "collapsed/skills/x.md"),
+        # `[!` is a positive class in Go and a negated one in gitignore,
+        # so `[!n]ollapsed/skills` hides the tree in Docker; the guard
+        # refuses instead of picking one reading.
+        ("[!n]ollapsed/skills", "collapsed/skills/x.md"),
+        ("![!a]", "a/x.md"),
+    ],
+)
+def test_a_rule_the_guard_cannot_model_fails_closed(rule: str, rel: str):
+    with pytest.raises(ValueError, match="unsupported .dockerignore syntax"):
+        _dockerignore_hides([rule], rel)
 
 
 @pytest.mark.parametrize(
@@ -366,16 +446,25 @@ def test_a_dockerignore_rule_hides_exactly_what_docker_would(
             "atlas_reviewer/fixtures/eval-references/x.json",
             False,
         ),
-        # dockerignore's caveat: a file under an excluded directory stays
-        # out even when a later `!` names it, because the walk pruned the
-        # directory and never reached the file.
+        # Docker (classic builder) prunes an excluded directory, so this
+        # file stays out; BuildKit instead descends when the exception's
+        # literal reaches below the excluded dir and would ship it. The
+        # guard models the classic walk, so this is its known strictness
+        # gap: over-reporting only, never under.
         (["dir", "!dir/file.md"], "dir/file.md", True),
+        # BuildKit descends here too (`!dir/sub/x.md`, `!dir/x/*.md`
+        # would rescue their file), but not for a bare trailing `**`
+        # exception, which both builders prune on.
+        (["dir", "!dir/sub/**"], "dir/sub/x.md", True),
         (["dir/*", "!dir"], "dir/x.md", True),
         # A file-level exclude is re-includable by a later `!`.
         (["*.md", "!README.md"], "README.md", False),
     ],
 )
 def test_dockerignore_rules_apply_in_order(rules: list[str], rel: str, hides: bool):
+    """The last matching rule decides each node the walk reaches. The
+    first caveat case is the guard's known strictness gap against
+    BuildKit (see its comment); the rest agree with Docker."""
     assert _dockerignore_hides(rules, rel) is hides
 
 
@@ -385,6 +474,8 @@ def test_no_dockerignore_rule_hides_a_runtime_read():
         for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
+    unsupported = [(rule, why) for rule in rules if (why := _unsupported_syntax(rule))]
+    assert unsupported == [], "unsupported .dockerignore syntax; extend the guard"
     for path in runtime_read_files():
         rel = path.relative_to(ROOT).as_posix()
         assert not _dockerignore_hides(rules, rel), rel

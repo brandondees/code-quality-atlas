@@ -2675,3 +2675,36 @@ fallback lens bodies), the Dockerfile comment narrowed to the
 collapsed/skills tree, and the `!` walk semantics documented in the guard's
 docstring. Mutants M6, `**/reference`, M7, and the package-COPY drop each
 kill exactly one test. 3,129 reviewer tests, ruff/mypy clean. Offline only.
+
+## 2026-11-17 (same day) — round-2 fixes for #733: the dockerignore guard fails closed on what it cannot model, and the `!`-rescue claim corrected to BuildKit
+
+Correction first: the round-1 entry's "a `!` cannot resurrect a file whose
+parent directory the walk pruned" states classic-builder behavior as
+Docker's. Modern Docker (BuildKit's fsutil walk) descends into an excluded
+directory when an exception's literal reaches below it, so under rules
+`dir` + `!dir/file.md` the file ships — also under `!dir/sub/x.md` and a
+wildcarded child exception, though a bare trailing-`**` exception still
+prunes. The guard keeps the classic walk, so that case is its known
+strictness gap: it can report a file hidden where BuildKit would ship it,
+never the reverse — the test now says "at least what docker would", the
+case is annotated as the gap, and the agreeing shapes are pinned.
+
+The Major: the round-1 translator still had three fail-open divergences
+from moby/patternmatcher, each a future rule that hides a file in Docker
+while the guard stays green — no `filepath.Clean` preprocessing
+(`collapsed//skills` and `./collapsed` forms compile to regexes that can
+never match a real path), no backslash-escape handling
+(`synthesis\.md`), and `[!` read as a negated class where Go reads `!` as
+an ordinary member. Rather than chase full Docker emulation, the guard
+now fails closed: every rule is Cleaned Go-faithfully (empty segments
+collapse, `.` drops, `..` resolves; leading and trailing `/` dropped,
+which only over-reports), and a rule carrying a backslash escape or a
+`[!` class raises "unsupported .dockerignore syntax; extend the guard"
+instead of being mis-translated — the two constructs whose faithful
+behavior is ambiguous or easy to get wrong, while the plain and `[^`-
+negated classes the committed `.dockerignore` uses stay modeled. Mutants
+`collapsed//skills`, `collapsed/**/synthesis\.md`, and `[!n]ollapsed/
+skills` appended to `.dockerignore` each now fail
+`test_no_dockerignore_rule_hides_a_runtime_read`; Clean-equivalence and
+refusal cases are pinned parametrized. 3,139 reviewer tests, ruff/mypy
+clean. Offline only.
