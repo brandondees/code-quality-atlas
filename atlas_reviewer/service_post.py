@@ -112,6 +112,7 @@ def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) 
         (
             _BANNER,
             f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
+            _section("Findings", report.findings, scrub),
             _section("Lenses run", report.lenses_run, scrub),
             _section("Lenses not run", report.lenses_not_run, scrub),
             _FILES + "\n\n" + _section("Files read", files, scrub),

@@ -311,6 +311,7 @@ def test_a_finished_review_is_one_comment_with_the_banner_and_the_lists(tmp_path
         "src/a.py",
         "too large for one review pass",
         "actual $0.10",
+        "## Findings",
         "## Lenses run",
         "## Lenses not run",
         "## Files read",
@@ -438,6 +439,76 @@ def test_a_huge_comment_keeps_the_idempotency_marker():
     assert text.endswith(marker_for(key))
     assert "comment cut to fit the post limit" in text
     assert len(text) <= 65_000
+
+
+FINDING = (
+    "**L1-F1** [minor, defect, route: eng, introduced] calc.py:2 "
+    "(tracing-correctness-and-invariants): rounds before summing. "
+    "Fix: sum first"
+)
+
+
+def test_the_findings_reach_the_post_quoted_with_the_recommended_line():
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+        findings=(
+            FINDING,
+            "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it",
+        ),
+    )
+    key = post_key(EVENT)
+    body = render_comment(report, key, lambda item: item)
+    findings = body.split("## Findings", 1)[1].split("## Lenses run", 1)[0]
+    assert FINDING in findings
+    assert (
+        "**L1-F2** [nit] calc.py:9 (lens): a magic constant. Fix: name it" in findings
+    )
+    # The section sits right after the recommended-event line, so a cut to
+    # the post limit that trims lenses and cost still keeps the findings.
+    huge = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        tuple(f"stop-{i:04d}" for i in range(6000)),
+        (),
+        "COMMENT",
+        findings=(FINDING,),
+    )
+    cut = render_comment(huge, key, lambda item: item)
+    assert FINDING in cut
+    assert cut.endswith(marker_for(key))
+    assert len(cut) <= 65_000
+
+
+def test_a_hostile_finding_cannot_break_out_of_the_quoting(tmp_path):
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+        findings=(f"{FINDING} <!-- injected --> ![x](https://evil.example/t.png)",),
+    )
+    poster, github = _poster(tmp_path)
+    poster.post(EVENT, report)
+    body = _posted_body(github)["body"]
+    assert "<!-- injected" not in body
+    assert r"\u003c!-- injected" in body
+    assert "https://evil.example/t.png" in body  # inert inside the code span
+
+
+def test_a_report_without_findings_posts_none():
+    body = render_comment(REPORT, post_key(EVENT), lambda item: item)
+    assert "## Findings\n\nNone." in body
 
 
 def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):

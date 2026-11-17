@@ -252,8 +252,8 @@ posts nothing and writes a telemetry event under the Machine's state
 directory.
 
 The comment says it is advisory and not a substitute for the full Claude
-Code protocol review, then lists lenses run, lenses not run, the
-file-coverage note, limit stops, and cost.
+Code protocol review, then lists the draft's verified findings, lenses
+run, lenses not run, the file-coverage note, limit stops, and cost.
 
 ## Tear down
 

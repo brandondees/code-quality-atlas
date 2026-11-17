@@ -765,6 +765,7 @@ def test_an_agentic_draft_reports_selection_stops_and_cost():
     )
     assert report.cost_lines == ("Model calls: 12; committed: $0.34.",)
     assert report.recommended_event == "COMMENT"
+    assert report.findings == ()
 
 
 def test_a_draft_reports_lenses_limits_cost_and_files():
@@ -780,9 +781,71 @@ def test_a_draft_reports_lenses_limits_cost_and_files():
     )
     assert report.cost_lines == ("reserved $1.00 actual $0.10",)
     assert report.recommended_event == "APPROVE"
+    assert report.findings == ()
     empty = summarize_draft("no sections\n")
     assert empty.lenses_run == ()
+    assert empty.findings == ()
     assert empty.files_note == "The draft has no diff-coverage note."
+
+
+def _finding_draft_with_two_findings():
+    """A draft from the real `coordinator.render_draft` whose one lens ran
+    clean with two verified findings, the shape the #654 round log held."""
+    from atlas_reviewer.attestation import (
+        AttemptOutcome,
+        Attestation,
+        CheckedFinding,
+    )
+    from atlas_reviewer.coordinator import LensResult, render_draft, synthesize
+    from atlas_reviewer.lens_contract import (
+        Attribution,
+        Finding,
+        LineRange,
+        Route,
+        Severity,
+        Valence,
+    )
+    from atlas_reviewer.quotes import QuoteSource
+    from atlas_reviewer.redact import Redactor
+
+    def checked(severity: Severity, problem: str, fix: str) -> CheckedFinding:
+        return CheckedFinding(
+            Finding(
+                LineRange("calc.py", 2, 3),
+                severity,
+                Valence.DEFECT,
+                Route.ENG,
+                Attribution.INTRODUCED,
+                problem,
+                fix,
+                "return sum(round(x, 2) for x in xs)",
+            ),
+            QuoteSource.HEAD,
+        )
+
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=(
+            checked(Severity.MINOR, "rounds before summing", "sum first"),
+            checked(Severity.NIT, "a magic constant", "name it"),
+        ),
+        changed_files=1,
+    )
+    review = synthesize(
+        [LensResult("tracing-correctness-and-invariants", 1, "ab12", outcome)]
+    )
+    return render_draft(review, Redactor())
+
+
+def test_an_agentic_draft_with_findings_carries_them_into_the_report():
+    draft = _finding_draft_with_two_findings()
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert len(report.findings) == 2
+    minor, nit = report.findings
+    assert minor.startswith("**L1-F1** [minor, defect, route: eng, introduced]")
+    assert "calc.py:2" in minor and "rounds before summing" in minor
+    assert nit.startswith("**L1-F2** [nit, defect, route: eng, introduced]")
+    assert "calc.py:2" in nit and "a magic constant" in nit
 
 
 def test_cancel_stops_the_child(tmp_path):

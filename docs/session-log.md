@@ -2807,3 +2807,41 @@ ReadAll's, and the fuzz's own fail-open cases are pinned parametrized. The
 round-3 refusals (`\`, `[!`, `[[:`, nested `[`) and the COPY-source refusal
 gate are unchanged. 3,175 reviewer tests at 96.37%, ruff/format/mypy clean.
 Offline only.
+
+## 2026-11-17 (same day) — #738: the service-posted review now carries the draft's verified findings
+
+The service's posted COMMENT review never contained a finding: `ReviewReport`
+had no findings field, both report builders read the draft's lens, coverage,
+limit and cost sections but skipped `## Findings (verified quotes only)`, and
+`render_comment` posted the banner, the recommendation, the lenses, files,
+limit stops and cost — the shape the post has had since a3219f9b. On #654 at
+badc60e5 the live service posted a review with no findings while its round log
+held seven verified findings (five Minor, two Nit).
+
+The fix is one field and one section: `ReviewReport` gains `findings`
+(default `()`, so every existing caller is unchanged), filled by a single
+`_findings(draft)` helper both builders call — the Findings section's bullets
+verbatim, minus the `No verified findings.` placeholder, each the whole
+finding line (minted id, severity tags, location, lens, text, fix), so
+severity and location survive with no second rendering path — and
+`render_comment` renders **Findings** right after the recommended-event line,
+ahead of lenses and cost, so the 65,000-character cut cannot eat the findings
+first. Each item goes through the section's existing `quote_untrusted`, the
+unverified findings section stays unposted, and posts stay COMMENT-only. The
+one-shot draft has no findings section and posts `None.`.
+
+Tests: a real `render_draft` agentic draft with two verified findings yields
+both in order with severity and location (`test_an_agentic_draft_with_
+findings_carries_them_into_the_report`); the posted body carries each finding
+and keeps them under a cut to the post limit
+(`test_the_findings_reach_the_post_quoted_with_the_recommended_line`); markup
+in a finding cannot break out of the quoting
+(`test_a_hostile_finding_cannot_break_out_of_the_quoting`); no findings posts
+`None.` (`test_a_report_without_findings_posts_none`). Mutants applied by
+hand and killed: `_findings` always empty (M1), the section after the cost
+lines (M3), the section dropped from the post (M5), the findings posted raw
+outside their inert code spans (M4) — the `No verified findings.` prose line
+is not a bullet, so the empty draft yields none without a placeholder filter. The posted
+body is now documented with findings in `atlas_reviewer/README.md` and
+`atlas_reviewer/deploy-service.md`; the body-contract amendment is recorded
+as D75.
