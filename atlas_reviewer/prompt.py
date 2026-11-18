@@ -118,7 +118,7 @@ def build_prompt(
     """`subject` must come from the validated operator event, never from PR
     data. `instructions` and `skill_bundle` must be trusted text."""
     system = (
-        f"{instructions}\n\n{_fence_rule(nonce)}\n\n--- {procedure} ---\n{skill_bundle}"
+        f"{instructions}\n\n{fence_rule(nonce)}\n\n--- {procedure} ---\n{skill_bundle}"
     )
     if lenses or lens_coverage:
         system += f"\n\n--- lens bodies ---\n{_lens_section(lenses, lens_coverage)}"
@@ -133,7 +133,7 @@ def _lens_section(lenses: Sequence[LoadedLens], coverage: str) -> str:
     return "\n\n".join((f"Lens coverage: {coverage}", *bodies))
 
 
-def _fence_rule(nonce: str) -> str:
+def fence_rule(nonce: str) -> str:
     """The nonce only protects the fences if the model is told to rely on
     it; PR text can copy any label, including controller-notes."""
     return (

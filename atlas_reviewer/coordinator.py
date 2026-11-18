@@ -324,6 +324,13 @@ class AgenticReview:
     record's own text, quoted verbatim in the draft's carried section and
     re-recorded, so the chain never loses them. Empty outside a delta
     review."""
+    carried_omitted: int = 0
+    """Verified findings the earlier record could not store (its
+    8,192-character cap), carried forward as a count (#702, round-2
+    Major B): the delta review cannot recover their text, but the
+    omission is written into this review's own round record, so the next
+    hop re-states the gap instead of the chain losing it after one hop.
+    Zero outside a delta review."""
     resolved: tuple[tuple[str, str, Finding], ...] = ()
     """Prior findings the delta's new commits fixed (#702), each with its
     carry-forward label and the stated reason the carry-forward call
@@ -1568,6 +1575,8 @@ def _with_carryforward(
             changed,
             delta.resolution_paths,
             delta.gate_reason,
+            delta.range_diff,
+            delta.removed,
             spend,
             resolved,
             clock,
@@ -1583,8 +1592,9 @@ def _with_carryforward(
             (),
             (
                 (
-                    f"the carry-forward call failed ({type(exc).__name__}); every "
-                    "prior finding is carried as the earlier review recorded it"
+                    f"the carry-forward call failed ({type(exc).__name__}: {exc}); "
+                    "every prior finding is carried as the earlier review "
+                    "recorded it"
                 ),
             ),
         )
@@ -1634,6 +1644,8 @@ def _carry_call(
     changed: frozenset[str],
     resolution_paths: frozenset[str],
     gate_reason: str,
+    range_diff: str,
+    range_removed: Mapping[str, tuple[tuple[int, str], ...]],
     spend: Spend,
     resolved: Limits,
     clock: Clock,
@@ -1649,19 +1661,25 @@ def _carry_call(
     (D68) and settled like any turn; a BYOK refusal halts the review's
     spend the way one in the loop does. The resolution gate is the
     caller's: `resolution_paths` when the delta is established, empty
-    when it is not, and the removed-line evidence the reply's proposals
-    quote is checked against the delta diff's own removed lines."""
-    sources = read_sources(trees.head, diff, changed)
-    removed = {
-        path: frozenset(line.strip() for run in runs for line in run if line.strip())
-        for path, runs in sources.removed.items()
-    }
+    when it is not; the turn shows the RANGE's own per-file patches
+    (`delta_from..head` -- the restricted pull-request diff cannot show
+    a delta commit deleting PR-added code, and its pool carries
+    pre-delta removals), and the removed-line evidence the reply's
+    proposals quote is checked against that range's pool, span-bounded
+    to the finding's citation (round-2 review of #748, Major A, a2)."""
+    # The assessor's readable content and the judge's quote sources are
+    # the range's own diff: a re-statement quoting the range's added
+    # lines verifies against the head tree (they are head content), and
+    # its removed runs are the range's deletions.
+    sources = read_sources(trees.head, range_diff or diff, changed)
     checked_prior = [
         CheckedFinding(finding, QuoteSource.HEAD) for _id, finding in prior
     ]
     delta_block = (
-        UntrustedBlock("delta-diff", RepoText(_capped(diff, CARRY_DIFF_CHARS)))
-        if diff
+        UntrustedBlock(
+            "delta-diff", RepoText(_capped(range_diff or diff, CARRY_DIFF_CHARS))
+        )
+        if (range_diff or diff)
         else None
     )
     request = TurnRequest(
@@ -1676,8 +1694,7 @@ def _carry_call(
     )  # fmt: skip
     reserved = _reserve_call(traced_model, request, spend, clock, deadline, fit=False)
     if not isinstance(reserved, _Reserved):
-        found = reserved[2] if len(reserved) > 2 else None
-        raise CarryCallRefused(reserved[1], found)
+        raise CarryCallRefused(reserved[1])
     worst = reserved.worst
     try:
         reply = traced_model.turn(request)
@@ -1706,8 +1723,9 @@ def _carry_call(
         revises,
         parsed.withdrawn,
         resolution_paths,
-        removed,
+        range_removed,
         gate_reason,
+        resolved.quote_tolerance,
     )
 
 
@@ -1716,9 +1734,8 @@ class CarryCallRefused(Exception):
     sent. The caller falls back to carrying every prior finding as
     recorded, and the refusal's text is named in the draft."""
 
-    def __init__(self, detail: str, found: LimitHit | None) -> None:
+    def __init__(self, detail: str) -> None:
         super().__init__(detail)
-        self.found = found
 
 
 def _compose_carry(
@@ -1796,6 +1813,7 @@ def _compose_carry(
         ),
         carried_unverified=result.unanchored,
         carried_raw=tuple(raw_lines),
+        carried_omitted=omitted,
         resolved=result.resolved,
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
@@ -1812,11 +1830,13 @@ def _merge_note(seeded: str, note: str) -> str:
 
 
 def _capped(text: str, cap: int) -> str:
-    """The delta diff as the carry-forward turn carries it: cut with the
+    """The delta block as the carry-forward turn carries it: cut with the
     truncation marker when it is over the cap, so the per-call token check
     is never the reason a carry-forward loses its evidence. A truncated
-    delta still judges resolutions safely: a resolution is accepted only
-    for a file the delta touched, whatever the model saw of it."""
+    delta still judges resolutions safely: the evidence pool is the
+    scope's own structured record, and an assessor that cannot see a
+    removed line cannot quote it, so its resolution is refused either way
+    (round-2 a4)."""
     if len(text) <= cap:
         return text
     return text[: cap - TRUNCATION_MARKER_CHARS] + TRUNCATION_MARKER
@@ -2018,7 +2038,7 @@ def _round_record(
     )
     lines += tuple(scrub(line) for line in review.carried_raw)
     stop = _first_limit_stop(review)
-    return fit_record(
+    record = fit_record(
         RoundRecord(
             event.repo,
             event.pr_number,
@@ -2030,6 +2050,16 @@ def _round_record(
             limit_stop="" if stop is None else scrub(stop.message()),
         )
     )
+    if review.carried_omitted:
+        # The earlier record's unstorable findings ride into this record's
+        # own omission count (round-2 review of #748, Major B): the text
+        # is unrecoverable, but the gap stays in the durable chain, so the
+        # next hop re-states it instead of the omission dying with the
+        # draft. `fit_record`'s own drops, if any, are on top.
+        record = replace(
+            record, findings_omitted=record.findings_omitted + review.carried_omitted
+        )
+    return record
 
 
 def first_turn(

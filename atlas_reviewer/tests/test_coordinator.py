@@ -3037,12 +3037,23 @@ def _delta_scope(
     resolution_paths=frozenset({"calc.py", "config/keys.py"}),
     note="",
     gate_reason="",
+    removed=None,
+    range_diff="",
 ):
     """The delta scope the CLI would thread in: the review's changed
-    paths as the resolution gate, unless the test narrows it."""
+    paths as the resolution gate, and the range's own removed-line pool,
+    unless the test narrows either."""
     from atlas_reviewer.delta import DeltaScope
 
-    return DeltaScope(OLD, "", frozenset(resolution_paths), note, gate_reason)
+    return DeltaScope(
+        OLD,
+        "",
+        frozenset(resolution_paths),
+        note,
+        gate_reason,
+        removed or {},
+        range_diff,
+    )
 
 
 def test_a_delta_review_carries_a_prior_finding_re_anchored(tmp_path):
@@ -3097,7 +3108,11 @@ def test_a_resolution_with_removed_code_evidence_is_accepted_and_leaves_the_chai
         ]
     )
     result, _sprites = _lenses(
-        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(removed={"calc.py": ((2, REMOVED_LINE),)}),
     )
     assert result.findings == ()
     assert result.verdict is Verdict.APPROVE
@@ -3350,6 +3365,96 @@ def test_a_delta_review_never_posts_the_same_finding_twice(tmp_path):
         ("P1", True),
         ("L1-F2", False),
     ]
+
+
+def test_the_evidence_pool_is_the_range_not_the_restricted_diff(tmp_path):
+    """The two diffs are distinguished (round-2 a3, Major A): the review
+    runs on the restricted pull-request diff, whose removed lines carry
+    a removal the PR made before `delta_from`; the evidence pool is the
+    range's own patch pool, which does not. A resolution quoting the
+    stale net-diff removal is refused; one quoting the range's real
+    deletion is accepted. Mutant: the pool rebuilt from the review's own
+    diff -- the stale removal clears the gate and the real deletion
+    never does."""
+    log = _round_log_with_prior(tmp_path)
+    pool = {"calc.py": ((2, REMOVED_LINE),)}
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (),
+                (("P1", "quotes the stale net-diff removal", "config = load()"),),
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope(removed=pool)
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" not in draft
+    assert "not among the lines" in draft
+    # The range's own deletion resolves (a separate root: its own ledger,
+    # so the lens runs fresh instead of reusing the first review's).
+    model2 = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply((), (("P1", "the delta removed the rounding", REMOVED_LINE),)),
+        ]
+    )
+    log2 = _round_log_with_prior(tmp_path / "second")
+    result2, _sprites2 = _lenses(
+        tmp_path / "second",
+        [LENS],
+        model2,
+        round_log=log2,
+        delta=_delta_scope(removed=pool),
+    )
+    assert [reason for _id, reason, _f in result2.resolved] == [
+        "the delta removed the rounding"
+    ]
+
+
+def test_the_omission_count_rides_through_the_record_across_two_hops(tmp_path):
+    """The durable chain keeps the omission (round-2 Major B): a record
+    that could not store its findings passes the count into the delta
+    review's own record, and the next hop re-states it from there --
+    with a test that runs two hops. Mutant: the count written only into
+    the draft, which loses it from the chain after one hop."""
+    from atlas_reviewer.rounds import RECORD_CHARS, RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (),
+            False,
+            findings_omitted=3,
+        )
+    )
+    first = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    one, _s1 = _lenses(tmp_path, [LENS], first, round_log=log, delta=_delta_scope())
+    record_one = [r for r in log.read().records if r.head_sha == HEAD][-1]
+    assert record_one.findings_omitted == 3
+    draft_one = render_draft(one, Redactor())
+    assert "3 verified finding(s) from the review at" in draft_one
+    # The second hop builds on THIS review's record: the lens reuses its
+    # settled result (same head and body, no newer evidence), so the
+    # scripted model answers only the carry-forward turn, which reads the
+    # omission back from the record at its delta base.
+    second = ScriptedLensModel([_carry_reply(())])
+    two, _s2 = _lenses(tmp_path, [LENS], second, round_log=log, delta=_delta_scope())
+    draft_two = render_draft(two, Redactor())
+    assert "3 verified finding(s) from the review at" in draft_two
+    record_two = [r for r in log.read().records if r.head_sha == HEAD][-1]
+    assert record_two.findings_omitted == 3
+    # The cap constant the wording names is the record's own.
+    assert RECORD_CHARS == 8_192
 
 
 def test_two_records_carrying_the_same_finding_post_it_once(tmp_path):

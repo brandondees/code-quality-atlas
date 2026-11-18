@@ -3554,3 +3554,40 @@ rollback: a release without the queue file's `pending` key and
 `delta_from` strands kept heads (their redelivery is refused), so drain
 before downgrading, with the boot log's `pending follow-ups N` as the
 observable (R2-F9).
+
+## 2026-11-18 (same day) — #748 round 2: the evidence pool is the range's, and the omission rides the chain
+
+The round-2 protocol review's two Majors, fixed on the delta branch
+(the correction appended to D79 carries the list). The resolution
+evidence pool was the pull request's `base...head` net diff restricted
+to range paths — the removed lines of the very diff the review runs on
+— not the `delta_from..head` range's own deletions: a delta commit
+deleting PR-added code is invisible in a net diff (the line exists at
+neither end), so the dominant legitimate resolution could never produce
+evidence, while a pre-delta PR removal sat in the pool and could clear
+the gate. The pool is now `DeltaScope.removed`, read from the
+comparison's per-file `patch` fields with each removed line's old-side
+line number — the range measures its patches from `delta_from`, so
+those are the coordinates the prior findings cite — and the carry turn
+shows the range's own patches, so the assessor can quote what the
+commits actually deleted; the judge's quote sources come from the same
+range diff. The evidence check is span-bounded (round-2 a2): every
+quoted line must sit within the finding's cited span widened by the
+quote tolerance, so any removed line in the file — down to a one-line
+brace — no longer clears the gate. The summed `findings_omitted` now
+rides on the review (`carried_omitted`) and into `_round_record`, added
+on top of `fit_record`'s own drops, so the gap stays in the durable
+chain across hops — pinned by a two-hop test. The Minors: a comparison
+with no readable merge base is untrusted (a1); `_capped`'s truncation
+branch is pinned (a4), its docstring stating why a truncated delta
+still judges resolutions safely (the pool is structured; an assessor
+that cannot see a removed line cannot quote it); the D79 Update's dead
+`delta_review_diff` reference and superseded gate prose corrected in
+place (a5). The Nits: `prompt.fence_rule` public (n5, the last
+underscore reach-through); `CarryCallRefused` no longer stores the
+never-read `found` (n6); the failed-carry note names the exception's
+detail. Skipped with reasons, recorded in D79: n7 (the fabricated
+`ReassessReply` shim — harmless while the carry path stores no
+attestation, and un-fabricating it splits the judge for one caller) and
+n8 (the 16-parameter clump is the existing `review_lens`/`_review_one`
+convention; a delta-only context object would be a second convention).

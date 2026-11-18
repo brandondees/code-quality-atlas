@@ -12,7 +12,9 @@ import json
 import pytest
 
 from atlas_reviewer.attestation import CheckedFinding
+from atlas_reviewer.coordinator import CARRY_DIFF_CHARS, _capped
 from atlas_reviewer.delta import (
+    _patch_removed,
     apply_carry,
     carry_system,
     carry_turn,
@@ -34,6 +36,7 @@ from atlas_reviewer.lens_contract import (
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
+from atlas_reviewer.redact import TRUNCATION_MARKER
 
 OLD = "a" * 40
 NEW = "b" * 40
@@ -287,8 +290,10 @@ def test_a_silent_prior_is_carried_as_recorded():
     assert result.resolved == ()
 
 
-def _removed(*lines: str) -> dict[str, frozenset[str]]:
-    return {"calc.py": frozenset(line.strip() for line in lines)}
+def _removed(*entries: tuple[int, str]) -> dict[str, tuple[tuple[int, str], ...]]:
+    """The range's removed-line pool as a patch yields it: `(old-side
+    line number, text)` pairs for one file."""
+    return {"calc.py": entries}
 
 
 def test_a_resolution_with_evidence_on_a_delta_path_is_accepted():
@@ -299,7 +304,8 @@ def test_a_resolution_with_evidence_on_a_delta_path_is_accepted():
         [],
         [("P1", "the delta replaced the rounding", "return sum(xs)")],
         frozenset({"calc.py"}),
-        _removed("    return sum(xs)", "    other = 1"),
+        _removed((2, "    return sum(xs)"), (7, "    other = 1")),
+        tolerance=3,
     )
     # The quoted code is among the lines the delta removed: real evidence
     # the new commits took the cited code out (round-1 M2).
@@ -315,7 +321,8 @@ def test_a_resolution_whose_evidence_still_stands_is_refused():
         [],
         [("P1", "claims the fix", "unrelated_line()")],
         frozenset({"calc.py"}),
-        _removed("    return sum(xs)"),
+        _removed((2, "    return sum(xs)")),
+        tolerance=3,
     )
     # Mutant: the evidence check dropped -- a resolution would be
     # accepted for code the delta never removed (round-1 M2).
@@ -335,7 +342,8 @@ def test_a_resolution_whose_evidence_partially_matches_is_refused():
         [],
         [("P1", "partial rewrite", "return sum(xs)\n    kept = 2")],
         frozenset({"calc.py"}),
-        _removed("    return sum(xs)"),
+        _removed((2, "    return sum(xs)")),
+        tolerance=3,
     )
     assert result.resolved == ()
     assert result.unanchored == (("P1", prior[0][1]),)
@@ -371,7 +379,7 @@ def test_an_unestablished_delta_refuses_every_resolution():
         [],
         [("P1", "claims the fix", "return sum(xs)")],
         frozenset(),
-        _removed("    return sum(xs)"),
+        _removed((2, "    return sum(xs)")),
         gate_reason="the delta range could not be established",
     )
     # Mutant: the empty gate treated as "everything is touchable", which
@@ -587,3 +595,176 @@ def test_the_instructions_do_not_invite_findings_the_composition_drops():
     work the composition throws away (round-1 m5)."""
     system = carry_system("", NONCE)
     assert "add a finding the delta reveals" not in system
+
+
+# ------------------------------------------------- round-2 fixes (#748)
+
+
+def test_the_pool_is_the_range_patch_not_the_restricted_pr_diff():
+    """Major A (round 2): the evidence pool comes from the comparison's
+    per-file patches -- the `delta_from..head` range's own deletions --
+    not from the pull request's `base...head` net diff restricted to
+    range paths. A delta commit deleting PR-added code is invisible in
+    the net diff (the line exists at neither end) and a pre-`delta_from`
+    PR removal sits in the net diff while having nothing to do with the
+    new commits. Mutant: the pool rebuilt from the restricted diff,
+    which loses the deletion and keeps the stale one."""
+    compare = {
+        "merge_base_commit": {"sha": OLD},
+        "files": [
+            {
+                "filename": "calc.py",
+                "patch": (
+                    "@@ -2,3 +2,2 @@\n"
+                    " context\n"
+                    "-deleted by the delta\n"
+                    "+added by the delta\n"
+                ),
+            }
+        ],
+    }
+    github = _FakeGitHub(compare)
+    pr_diff = (
+        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        "-removed before the delta\n"
+        "+kept by the delta\n"
+    )
+    scope = delta_scope(github, EVENT, pr_diff)
+    assert scope.removed["calc.py"] == ((3, "deleted by the delta"),)
+    assert "deleted by the delta" in scope.range_diff
+    assert "removed before the delta" not in scope.range_diff
+    # The pool and the restricted PR diff genuinely disagree: a
+    # resolution quoting the PR diff's stale removal is refused, one
+    # quoting the range's real deletion is accepted.
+    prior = [_prior("P1", "rounds early")]
+    refused = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "quotes the stale net-diff removal", "removed before the delta")],
+        scope.resolution_paths,
+        scope.removed,
+        tolerance=3,
+    )
+    assert refused.resolved == ()
+    accepted = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "quotes the range's deletion", "deleted by the delta")],
+        scope.resolution_paths,
+        scope.removed,
+        tolerance=3,
+    )
+    assert accepted.resolved == (("P1", "quotes the range's deletion", prior[0][1]),)
+
+
+def test_a_patch_is_parsed_with_its_old_side_numbers():
+    """The pool carries old-side positions, so the span bound can check
+    a quote against the coordinates the prior finding cites: hunks set
+    the counter, `-` lines consume it, `+` lines and context do not."""
+    patch = "@@ -10,4 +10,3 @@\n keep\n-first out\n ctx\n-second out\n+in\n"
+    assert _patch_removed(patch) == ((11, "first out"), (13, "second out"))
+
+
+def test_a_missing_merge_base_reads_as_diverged():
+    """The one malformed shape the fail-closed rework missed (round-2
+    a1): a comparison with no readable merge base must not have its file
+    list trusted as the range's. Mutant: the missing sha read as
+    not-diverged, which would trust the pool on a malformed reply."""
+    github = _FakeGitHub(
+        {"files": [{"filename": "calc.py", "patch": "@@ -1,1 +1,1 @@\n-x\n"}]}
+    )
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    assert scope.resolution_paths == frozenset()
+    assert scope.removed == {}
+    assert "diverged" in scope.note
+
+
+def test_the_range_patches_render_into_the_turns_diff():
+    """The carry turn's delta block is the range's own patches, with one
+    `diff --git` header per file, so the assessor can quote what the
+    commits between the heads actually changed."""
+    compare = {
+        "merge_base_commit": {"sha": OLD},
+        "files": [
+            {"filename": "calc.py", "patch": "@@ -1,1 +1,1 @@\n-a\n+b\n"},
+            {"filename": "docs/x.md", "patch": "@@ -1,1 +1,1 @@\n-c\n+d\n"},
+        ],
+    }
+    scope = delta_scope(_FakeGitHub(compare), EVENT, PR_DIFF)
+    assert scope.range_diff.count("diff --git") == 2
+    assert 'label="delta-diff"' not in scope.range_diff
+
+
+def test_a_delta_over_its_cap_is_cut_with_the_marker():
+    """The carry turn's delta block is capped with the truncation marker,
+    never shipped oversized to the per-call token check (round-2 a4)."""
+    text = _capped("x" * (CARRY_DIFF_CHARS + 100), CARRY_DIFF_CHARS)
+    assert len(text) == CARRY_DIFF_CHARS
+    assert text.endswith(TRUNCATION_MARKER)
+    whole = _capped("x" * 10, CARRY_DIFF_CHARS)
+    assert whole == "x" * 10
+
+
+def test_evidence_outside_the_cited_span_is_refused():
+    """The evidence check is bounded to the finding's cited span, widened
+    by the tolerance: any removed line in the file -- down to a one-line
+    deletion far from the finding -- does not clear the gate (round-2
+    a2). Mutant: the span bound dropped, which accepts a resolution on
+    an unrelated removal."""
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "claims the fix", "unrelated = 1")],
+        frozenset({"calc.py"}),
+        _removed((90, "    unrelated = 1")),
+        tolerance=3,
+    )
+    assert result.resolved == ()
+    assert result.unanchored == (("P1", prior[0][1]),)
+    assert any("not among the lines" in note for note in result.notes)
+
+
+def test_evidence_within_the_tolerance_of_the_span_is_accepted():
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "the fix", "shifted = 1")],
+        frozenset({"calc.py"}),
+        _removed((5, "    shifted = 1")),
+        tolerance=3,
+    )
+    assert result.resolved == (("P1", "the fix", prior[0][1]),)
+
+
+def test_a_whole_file_finding_takes_any_removed_line_of_the_file():
+    prior = [
+        (
+            "P1",
+            Finding(
+                WholeFile("calc.py"),
+                Severity.MAJOR,
+                Valence.DEFECT,
+                Route.ENG,
+                Attribution.INTRODUCED,
+                "this file is wrong",
+                "",
+            ),
+        )
+    ]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "the file is gone", "anything at all")],
+        frozenset({"calc.py"}),
+        _removed((4, "    anything at all")),
+        tolerance=3,
+    )
+    assert result.resolved == (("P1", "the file is gone", prior[0][1]),)

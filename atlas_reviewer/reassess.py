@@ -115,7 +115,7 @@ from atlas_reviewer.lens_contract import (
     last_fenced_object,
 )
 from atlas_reviewer.lens_loop import retry_reasons
-from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
+from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence, fence_rule
 from atlas_reviewer.quotes import (
     SourceText,
     Verified,
@@ -375,7 +375,7 @@ def reassess_system(lens: str, body: str, contract: str, nonce: str) -> str:
     instructions, the fence rule for the review's one nonce, the lens body
     whole between its attested markers, and the Finding contract."""
     return "\n\n".join(
-        (REASSESS_INSTRUCTIONS, _fence_rule(nonce), inject_body(lens, body), contract)
+        (REASSESS_INSTRUCTIONS, fence_rule(nonce), inject_body(lens, body), contract)
     )
 
 

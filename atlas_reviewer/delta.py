@@ -55,7 +55,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from atlas_reviewer.attestation import CheckedFinding
@@ -80,7 +80,7 @@ from atlas_reviewer.lens_contract import (
     last_fenced_object,
 )
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
-from atlas_reviewer.prompt import UntrustedBlock, _fence_rule, fence
+from atlas_reviewer.prompt import UntrustedBlock, fence, fence_rule
 from atlas_reviewer.quotes import QuoteSource, SourceText
 from atlas_reviewer.reassess import (
     PRIOR_LABEL_CHARS,
@@ -117,14 +117,15 @@ each against the delta:
   verify is not carried as verified.
 - A prior finding the new commits fixed: name its label in `withdrawn`
   with a `reason` key stating what fixed it, and an `evidence` key
-  quoting the line or lines of the prior finding's code that the delta
-  removed -- the `-` lines of the delta diff for that file. The
-  controller accepts a resolution only when every line you quote is
-  among the delta's removed lines for the finding's file: that is the
-  evidence the new commits took the cited code out. Anywhere else -- a
-  file the delta never touched, a quote that is not among the removed
-  lines -- the resolution is recorded as your proposal and the finding
-  stands.
+  quoting the line or lines of the prior finding's code that the
+  commits between the two heads removed -- the `-` lines of the delta
+  diff's patches for that file, at a position within the finding's
+  cited lines. The controller accepts a resolution only when every line
+  you quote is among those removed lines, near where the finding
+  cited: that is the evidence the new commits took the cited code out.
+  Anywhere else -- a file the delta never touched, a quote that is not
+  among the removed lines or not near the citation -- the resolution is
+  recorded as your proposal and the finding stands.
 - A prior finding you cannot judge: say nothing about it. It is carried
   in its original wording, never silently dropped.
 
@@ -153,7 +154,7 @@ def carry_system(contract: str, nonce: str) -> str:
     rule for the review's one nonce, and the Finding contract. There is
     no lens body to attest: the assessor is the controller's own, not a
     lens."""
-    return "\n\n".join((CARRY_INSTRUCTIONS, _fence_rule(nonce), contract))
+    return "\n\n".join((CARRY_INSTRUCTIONS, fence_rule(nonce), contract))
 
 
 def carry_turn(
@@ -281,6 +282,21 @@ class DeltaScope:
     resolution_paths: frozenset[str]
     note: str = ""
     gate_reason: str = ""
+    removed: Mapping[str, tuple[tuple[int, str], ...]] = field(default_factory=dict)
+    """The range's own removed lines, per file, as ``(old-side line
+    number, text)`` pairs read from the comparison's per-file patches --
+    the `delta_from..head` range's deletions, not the pull request's
+    `base...head` net diff. This is the pool a resolution's evidence is
+    checked against, so evidence always means "the new commits removed
+    this code": a line the PR removed before `delta_from` is not here,
+    and a delta commit's deletion of PR-added code is (round-2 review of
+    #748, Major A). Empty whenever the delta is not established."""
+    range_diff: str = ""
+    """The range's own per-file patches, rendered for the carry-forward
+    turn: what the commits between the heads actually changed, which the
+    restricted pull-request diff cannot show (a delta commit deleting
+    PR-added code is invisible in a net diff where the line exists at
+    neither end). Empty when the delta is not established."""
 
 
 def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScope:
@@ -339,7 +355,74 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
             "accepted",
             "the delta's touched paths are not fully known",
         )
-    return DeltaScope(event.delta_from, scope_text(pr_diff, paths), frozenset(paths))
+    removed, range_diff = _range_removals(compare, names)
+    return DeltaScope(
+        event.delta_from,
+        scope_text(pr_diff, paths),
+        frozenset(paths),
+        removed=removed,
+        range_diff=range_diff,
+    )
+
+
+def _range_removals(
+    compare: Json, names: Sequence[str]
+) -> tuple[Mapping[str, tuple[tuple[int, str], ...]], str]:
+    """The range's own removed lines, from the comparison's per-file
+    patches, and the patches rendered as one diff for the carry-forward
+    turn.
+
+    The comparison of `delta_from..head` measures its patches from the
+    old head, so a removed line's old-side number is a line of the head
+    the earlier review verified -- the coordinates the prior findings'
+    locations cite. A file whose patch is absent (an empty or binary
+    change, or a patch GitHub declined to serve) contributes no pool
+    entries: a resolution for it then finds no evidence and is refused,
+    the safe direction, without touching the scope's own trustworthiness
+    (the paths are still known from the file list)."""
+    files = compare.get("files")
+    if not isinstance(files, list):
+        return {}, ""
+    removed: dict[str, tuple[tuple[int, str], ...]] = {}
+    rendered: list[str] = []
+    seen: set[str] = set()
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("filename")
+        patch = item.get("patch")
+        if not isinstance(name, str) or not name or not isinstance(patch, str):
+            continue
+        entries = _patch_removed(patch)
+        if name not in seen:
+            seen.add(name)
+            header = f"diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n"
+            rendered.append(header + patch)
+        if entries:
+            removed[name] = entries
+    return removed, "\n".join(rendered)
+
+
+_HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+")
+
+
+def _patch_removed(patch: str) -> tuple[tuple[int, str], ...]:
+    """A unified-diff patch's removed lines with their old-side line
+    numbers: each `@@ -a,b` hunk header sets the old side's counter, and
+    each `-` line (the `---` header is not a hunk line) consumes one."""
+    removed: list[tuple[int, str]] = []
+    old_side = 0
+    for line in patch.splitlines():
+        header = _HUNK.match(line)
+        if header is not None:
+            old_side = int(header.group(1))
+            continue
+        if old_side and line.startswith("-") and not line.startswith("---"):
+            removed.append((old_side, line[1:]))
+            old_side += 1
+        elif old_side and not line.startswith("+"):
+            old_side += 1
+    return tuple(removed)
 
 
 _COMPARE_FILES_CAP = 300
@@ -370,9 +453,14 @@ def _range_paths(compare: Json) -> tuple[tuple[str, ...], bool]:
 
 
 def _diverged(compare: Json, delta_from: str) -> bool:
+    """True unless the comparison proves its own base: a merge base that
+    is missing, malformed, or not `delta_from` all read as diverged --
+    the one malformed shape the fail-closed rework missed read as
+    trusted, and benign kinds are claimed on evidence, never by default
+    (round-2 review of #748, a1)."""
     base = compare.get("merge_base_commit")
     sha = base.get("sha") if isinstance(base, dict) else None
-    return isinstance(sha, str) and sha != delta_from
+    return not (isinstance(sha, str) and sha == delta_from)
 
 
 # ------------------------------------------------- the reply and its judge
@@ -526,8 +614,9 @@ def apply_carry(
     revises: Sequence[tuple[int, str, str]],
     withdrawn: Sequence[tuple[str, str, str]],
     resolution_paths: frozenset[str],
-    removed_lines: Mapping[str, frozenset[str]],
+    removed_lines: Mapping[str, tuple[tuple[int, str], ...]],
     gate_reason: str = "",
+    tolerance: int = 0,
 ) -> CarryResult:
     """The reply's judgment composed over the prior findings.
 
@@ -542,8 +631,15 @@ def apply_carry(
     delta could not be established, which refuses every resolution); and
     real evidence that the new commits removed the cited code -- every
     non-blank line of the proposal's `evidence` quoting a line among the
-    delta diff's removed lines for that file. Without any one of the
-    three the finding stays carried, and the refusal is named.
+    RANGE's own removed lines for that file (`delta_from..head`, the
+    comparison's per-file patches -- not the pull request's net diff,
+    where a delta commit's deletion of PR-added code is invisible and a
+    pre-delta removal sits in the pool; round-2 review of #748, Major
+    A), and each quoted line's old-side position within the finding's
+    cited span widened by `tolerance` (round-2 a2: any removed line in
+    the file, down to a one-line brace, used to clear the gate).
+    Without any one of the three the finding stays carried, and the
+    refusal is named.
 
     An entry with no `revises` key is not a re-statement and is not a
     prior disposition; it is dropped from the buckets and named in the
@@ -577,7 +673,9 @@ def apply_carry(
             )
             _label, reason, evidence = proposal
             path = _cited_path(finding.location)
-            quoted = _quoted_removed(evidence, path, removed_lines)
+            quoted = _quoted_removed(
+                evidence, finding.location, path, removed_lines, tolerance
+            )
             if path is not None and path in resolution_paths and quoted:
                 resolved.append((identifier, reason, finding))
                 continue
@@ -603,18 +701,38 @@ def apply_carry(
 
 def _quoted_removed(
     evidence: str,
+    location: Location,
     path: str | None,
-    removed_lines: Mapping[str, frozenset[str]],
+    removed_lines: Mapping[str, tuple[tuple[int, str], ...]],
+    tolerance: int,
 ) -> bool:
     """Whether every non-blank line of a resolution's quoted evidence is a
-    line the delta removed from the finding's file. Whitespace is
-    ignored on both sides: the model quotes the code, the diff holds it
-    with its indentation."""
+    line the delta's range removed from the finding's file, at a position
+    within the finding's cited span widened by `tolerance` -- the same
+    slack the quote checker reads citations with. Whitespace is ignored
+    on both sides: the model quotes the code, the diff holds it with its
+    indentation. A whole-file location has no span to bound, so any
+    removed line of the file is in bounds; a design reference cites no
+    file and is refused by the caller's path check."""
     if path is None or not evidence.strip():
         return False
-    removed = removed_lines.get(path, frozenset())
+    entries = removed_lines.get(path, ())
+    if not entries:
+        return False
     quoted = [line.strip() for line in evidence.splitlines() if line.strip()]
-    return bool(quoted) and all(line in removed for line in quoted)
+    for line in quoted:
+        if not any(
+            text.strip() == line and _in_span(number, location, tolerance)
+            for number, text in entries
+        ):
+            return False
+    return True
+
+
+def _in_span(number: int, location: Location, tolerance: int) -> bool:
+    if isinstance(location, LineRange):
+        return location.start - tolerance <= number <= location.end + tolerance
+    return isinstance(location, WholeFile)
 
 
 def _cited_path(location: Location) -> str | None:

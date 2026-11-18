@@ -163,18 +163,32 @@ call** judges the earlier review's findings — the round log's records at
   restatement is carried into the findings set under its `P` label;
 - a finding the new commits fixed is marked **resolved** only on real
   evidence: the proposal's `evidence` must quote code that is among the
-  lines the delta's diff removed for that file, alongside the file being
-  one the established delta touched. A withdrawal without that evidence
-  is recorded as the proposal it is and the finding stands carried — a
-  withdrawal never removes a finding on the model's say-so alone, the
-  D73 path's rule;
+  **range's own removed lines** for that file — read from the
+  comparison's per-file patches (`delta_from..head`), with each line's
+  old-side position — not the pull request's net diff, where a delta
+  commit's deletion of PR-added code is invisible and a pre-delta PR
+  removal sits in the pool (round-2 review of #748, Major A); and every
+  quoted line must sit within the finding's cited span widened by the
+  quote tolerance, so any removed line in the file does not clear the
+  gate (round-2 a2) — alongside the file being one the established delta
+  touched. A withdrawal without that evidence is recorded as the proposal
+  it is and the finding stands carried — a withdrawal never removes a
+  finding on the model's say-so alone, the D73 path's rule;
+- the carry turn shows the range's own patches, so the assessor quotes
+  what the commits between the heads actually changed; a comparison with
+  no readable merge base is untrusted like every other malformed shape
+  (round-2 a1), and a delta block over its cap is cut with the
+  truncation marker (round-2 a4);
 - everything else is carried as the record stored it, in the draft's
   `Carried, not re-verified` section and back into the round record, so
   the next review re-offers it — including a line that does not parse,
   which travels as the record's raw text verbatim (round-1 review of
   #748, M3), and a record whose finding lines did not fit the record
   cap, whose `findings_omitted` count the draft states rather than
-  reading as "no findings recorded" (round-1 M5). A carried finding
+  reading as "no findings recorded" (round-1 M5) — and that rides into
+  this review's own round record, so the omission stays in the durable
+  chain across hops instead of dying with the draft (round-2 Major B).
+  A carried finding
   that did not re-anchor still counts for the verdict — a prior Blocker
   can never become an approval because its quote moved (round-1 M4);
   an unreadable round log names the read failure instead of claiming
