@@ -3645,7 +3645,7 @@ above Nit; the round-3 mutants were re-applied by the reviewer and all
 
 ## 2026-11-18 (same day) — #748 round 5: the unproven scope never bounds a review
 
-#747 merged (main `9b5f8841`); #748 retargeted to main and restacked
+PR #747 merged (main `9b5f8841`); #748 retargeted to main and restacked
 (`83dbc6c7`, the round-4 tree). CodeRabbit finished after the round-4
 APPROVE, and Brandon's round-10 routine review verified three of its
 Majors and approved the round. The fixes, each pinned by a named test
