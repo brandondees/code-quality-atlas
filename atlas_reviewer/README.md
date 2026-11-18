@@ -84,7 +84,7 @@ of review (round-1 review of #756, Major 1). The keys:
 ```text
 review_base_include: <branch>[, <branch>...]    # only PRs targeting these base branches are reviewed
 review_base_exclude: <branch>[, <branch>...]    # ...unless the base branch matches one of these: exclude wins
-review_skip_events: <event>[, <event>...]       # opened / synchronize / ready_for_review deliveries to skip
+review_skip_events: <event>[, <event>...]       # deliveries to skip: a coverage-reducing opt-out, see below
 ```
 
 Every key is one line whose value is a comma-separated list, running to a
@@ -101,6 +101,25 @@ These are this schema's
 own bounds, not GitHub's: an entry is at most 64 characters, a line
 carries at most 32 entries, and a `review_skip_events:` entry must be one
 of the three accepted event names.
+
+**`review_skip_events` is a coverage-reducing opt-out, and the repo owner
+is the one opting out.** A skipped event's deliveries produce no review,
+so what that event would have reviewed is gone with it and can land
+unreviewed — this key is an opt-out, not a safety feature, and the
+consequence differs per event:
+
+- skipping `synchronize` means only the pull request's opening state is
+  ever reviewed; every later push — up to and including what merges —
+  lands unreviewed;
+- skipping `ready_for_review` means a pull request opened as a draft is
+  never reviewed at all: drafts are already outside the operator's
+  envelope, and the ready transition is the only trigger left;
+- skipping `opened` defers the first review to a later push (the
+  `synchronize` delivery reviews the whole diff, not just the delta);
+- skipping all three means the repository is never reviewed.
+
+The owner decides; the service records every skip with its reason so the
+decision's effect is visible in the telemetry.
 
 Narrowing runs after the operator's envelope has passed — the delivery is
 a non-draft `pull_request` event of the three accepted kinds on an
@@ -122,9 +141,13 @@ excluded (or unlisted) base branch and then retargeted to an included one
 is not re-evaluated: the retarget arrives as an `edited` event with
 `changes.base`, which is outside the operator's three-event envelope, and
 admitting it would widen the operator's event set — an operator decision,
-not a repo-config one. Until the operator widens the envelope, such a PR
-can reach a mergeable state without a review; the gap is recorded here
-rather than silently assumed away.
+not a repo-config one. The gap is bounded, not open-ended: the next push
+to the PR arrives as a `synchronize` delivery, which is admitted and
+re-evaluated against the narrowing, so a retargeted PR is picked up at
+its next push; only a PR that retargets and merges without any further
+push slips through unreviewed. Issue #758 tracks closing the gap
+properly by re-running admission on `edited` events that carry
+`changes.base`.
 
 There are deliberately no label-based or head-branch-based filters: the
 PR author controls both, so a skip rule matching either would let an

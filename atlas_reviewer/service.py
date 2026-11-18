@@ -1562,8 +1562,13 @@ def _repo_admission_reader(
         return None, reason
 
     def read(repo: str, default_branch: str) -> bytes | None:
+        # Only the file read catches NotFoundError: no REVIEW.md on the
+        # default branch is the ordinary unconfigured repo. The fallback
+        # lookup's own 404 propagates -- a repository the delivery named
+        # but the API cannot find is a gap the telemetry records, not a
+        # silent stand-down (round-2 nit on #756).
+        ref = default_branch or _default_branch_via_api(client, repo)
         try:
-            ref = default_branch or _default_branch_via_api(client, repo)
             return client.get_file(repo, ref, REVIEW_MD, MAX_ADMISSION_BYTES)
         except NotFoundError:
             return None
@@ -1574,7 +1579,8 @@ def _repo_admission_reader(
 def _default_branch_via_api(client: GitHubClient, repo: str) -> str:
     """The repository's default branch, recovered with one read-only
     lookup when the payload's shape did not carry it. A reply without a
-    usable name is a boundary failure -- the gap, not a guess."""
+    usable name is a boundary failure, and a lookup that 404s raises --
+    both are the gap, not a guess and not the silent unconfigured case."""
     repository = client.get_repository(repo)
     branch = repository.get("default_branch") if isinstance(repository, dict) else None
     if not isinstance(branch, str) or not branch:

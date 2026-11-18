@@ -38,9 +38,11 @@ ACCEPTED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
 # envelope (non-draft, those three events, the allowlisted repos), never
 # widen it: every check below can only remove a review, and a value
 # that is unusable falls back to the default -- no narrowing of that
-# kind -- with a named note. The parse and the narrowing are local and
-# minimal here so the shared config parser (slice S1) can absorb them
-# later.
+# kind -- with a named note. "Only removes" is not "safe": an event
+# skip is a coverage-reducing opt-out the repo owner chooses, and what
+# it removes can land unreviewed (see `RepoAdmission`). The parse and
+# the narrowing are local and minimal here so the shared config parser
+# (slice S1) can absorb them later.
 SIGNATURE_HEADER = "X-Hub-Signature-256"
 EVENT_HEADER = "X-GitHub-Event"
 _SHA256_PREFIX = "sha256="
@@ -196,7 +198,16 @@ class RepoAdmission:
 
     ``base_include`` is the base branches review is for, ``base_exclude``
     the ones it is not -- exclude wins; ``skip_events`` the accepted
-    events the repo does not want a review on. The draft state and the
+    events the repo does not want a review on. ``skip_events`` is a
+    coverage-reducing opt-out, not a safety feature: what a skipped
+    event would have reviewed lands unreviewed. Skipping ``synchronize``
+    reviews only a PR's opening state, so every later push -- up to and
+    including what merges -- is unreviewed; skipping ``ready_for_review``
+    means a PR opened as a draft is never reviewed, because drafts are
+    already outside the operator envelope and the ready transition is
+    the only trigger left; skipping ``opened`` defers the first review
+    to a later push, and skipping all three means the repository is
+    never reviewed. The draft state and the
     head branch are never narrowable here: the PR author controls both,
     and a rule on either would let an author opt their own PR out of
     review. ``notes`` names the unusable lines, non-empty only when some
@@ -307,7 +318,9 @@ def narrow(payload: Mapping[str, Any], admission: RepoAdmission) -> Ignored | No
     reviewed merges; what they match is the delivery's base branch,
     which the author chose but cannot rewrite -- the config source, not
     the match target, is what keeps the author from opting out. A base
-    ref the shape does not carry matches nothing."""
+    ref the shape does not carry matches nothing. Removing a review is
+    the point and the risk: a skipped event's coverage is gone with it,
+    and the skipped changes can land unreviewed."""
     action = payload.get("action")
     if isinstance(action, str) and action in admission.skip_events:
         return Ignored(SKIP_EVENT_REASON)

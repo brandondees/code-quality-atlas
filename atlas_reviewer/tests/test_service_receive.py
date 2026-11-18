@@ -3531,7 +3531,9 @@ def test_the_worker_keys_the_followup_on_the_reports_coverage(tmp_path):
 # queued or posted; a read that fails stands on the operator's envelope.
 
 
-def _labeled_body(*labels, base_ref="main", action="opened", sha=SHA_A):
+def _labeled_body(
+    *labels, base_ref="main", action="opened", sha=SHA_A, default_branch="trunk"
+):
     pull = {
         "number": 7,
         "updated_at": "2026-11-12T20:00:00Z",
@@ -3540,13 +3542,16 @@ def _labeled_body(*labels, base_ref="main", action="opened", sha=SHA_A):
         "base": {"ref": base_ref, "repo": {"full_name": REPO}},
         "labels": [{"name": label} for label in labels],
     }
+    repository = {"full_name": REPO}
+    if default_branch:
+        repository["default_branch"] = default_branch
     return json.dumps(
         {
             "action": action,
             # The default branch differs from the base ref the fixtures
             # deliver, so a read of the base ref cannot pass for a read
             # of the default branch (round-1 review of #756, Major 1).
-            "repository": {"full_name": REPO, "default_branch": "trunk"},
+            "repository": repository,
             "pull_request": pull,
         }
     ).encode()
@@ -3749,8 +3754,9 @@ def test_the_admission_reader_reads_one_bounded_file(tmp_path, monkeypatch):
 def test_the_admission_reader_recovers_an_unnamed_default_branch(tmp_path, monkeypatch):
     """Major 1's fallback (round-1 review of #756): a payload shape that
     does not carry the default branch is recovered with one read-only
-    lookup; a lookup that fails is the ordinary no-config repo, and a
-    reply without a usable name is the gap, not a guess."""
+    lookup. A lookup that fails -- a 404 or a reply without a usable
+    name -- is the recorded gap, not a guess and not a silent
+    stand-down (round-2 nit on #756)."""
     import atlas_reviewer.service as service_module
     from atlas_reviewer.ports import BoundaryError, NotFoundError
     from atlas_reviewer.service_admit import MAX_ADMISSION_BYTES, REVIEW_MD
@@ -3784,13 +3790,16 @@ def test_the_admission_reader_recovers_an_unnamed_default_branch(tmp_path, monke
     calls.clear()
     assert reader("o/r", "main") == b"config"
     assert calls == [("file", "o/r", "main", REVIEW_MD, MAX_ADMISSION_BYTES)]
-    # A lookup that 404s is the ordinary unconfigured repo, silently.
+    # A lookup that 404s is a recorded gap, not the silent unconfigured
+    # repo (round-2 nit on #756): the NotFoundError propagates to the
+    # caller, which records it on a `repo admission` event.
     missing = _Client(None)
     monkeypatch.setattr(
         service_module, "_read_client", lambda config, env: (missing, "")
     )
     reader, _ = service_module._repo_admission_reader(_config(tmp_path), {})
-    assert reader("o/r", "") is None
+    with pytest.raises(NotFoundError):
+        reader("o/r", "")
     # A reply without a usable default branch is the gap, not a guess.
     nameless = _Client({})
     monkeypatch.setattr(
@@ -3917,3 +3926,40 @@ def test_a_misbehaving_classifier_is_unclassifiable_not_a_crash(tmp_path):
     finally:
         release.set()
         worker.stop()
+
+
+def test_a_fallback_lookup_404_is_a_recorded_gap_and_not_a_stand_down(
+    tmp_path, monkeypatch
+):
+    """The fallback lookup's own 404 (a payload without the default
+    branch, and a repository the API cannot find) is a gap on a
+    `repo admission` event, and the delivery still queues on the
+    operator's envelope -- not the silent unconfigured case, which is
+    the file read's 404 only (round-2 nit on #756)."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.ports import NotFoundError
+
+    class _Repo404:
+        def get_repository(self, repo):
+            raise NotFoundError("GitHub 404 for /repos/o/r")
+
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (_Repo404(), "")
+    )
+    reader, _ = service_module._repo_admission_reader(_config(tmp_path), {})
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(default_branch=""),
+        admission_reader=reader,
+        telemetry=telemetry,
+    )
+    assert result.body == b"queued\n"
+    assert len(board.states()) == 1
+    gaps = [e for e in telemetry.events if e.step == "repo admission"]
+    assert len(gaps) == 1
+    assert gaps[0].status == "error"
+    assert "NotFoundError" in gaps[0].error
