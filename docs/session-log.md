@@ -3089,6 +3089,7 @@ run / the lens's own later runs" to the presence-based rule the code
 implements. Nit 2: the forgery test's "forgeable-free" typo is now "keeps
 the marker unforgeable by a quoted reason". 3,230 reviewer tests, 882
 tooling; ruff/format/mypy/drift clean. Offline only.
+
 ## 2026-11-17 — CI moves to GitHub-hosted runners for every event (D78)
 
 main's `gate` runs had been stuck `queued` since roughly 3 AM CT: the
