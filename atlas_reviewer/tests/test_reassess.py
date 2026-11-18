@@ -22,7 +22,7 @@ from atlas_reviewer.attestation import (
     LensKey,
     LensState,
 )
-from atlas_reviewer.coordinator import Verdict, render_draft
+from atlas_reviewer.coordinator import Verdict, _scope_digest, render_draft
 from atlas_reviewer.domain import (
     Conclusion,
     Missing,
@@ -48,7 +48,7 @@ from atlas_reviewer.redact import Redactor, redact
 from atlas_reviewer.tracing import memory_trace
 from atlas_reviewer.verdict import ReviewEvent
 
-from .agentic import COST, DIGEST, LENS, READ_ALL, final, finding, tools
+from .agentic import CHANGED, COST, DIGEST, LENS, READ_ALL, final, finding, tools
 from .helpers import HEAD, NOW
 from .helpers import item as evidence_item
 from .test_coordinator import EVENT, ledger, review
@@ -58,7 +58,16 @@ UNCHANGED = "1" * 64
 NEWER = "2" * 64
 REASON = "the CI check at this head now fails; the totals drift shows in the run"
 
-REASSESS_KEY = LensKey(EVENT.repo, EVENT.pr_number, HEAD, f"{LENS}#reassess", DIGEST)
+# The reassess key derives from the run's own scoped lens key (round-5
+# review of #748): the scope digest sits between the lens name and the
+# reassess suffix.
+REASSESS_KEY = LensKey(
+    EVENT.repo,
+    EVENT.pr_number,
+    HEAD,
+    f"{LENS}@{_scope_digest(CHANGED)}#reassess",
+    DIGEST,
+)
 
 
 def reassess_reply(*findings, withdrawn=(), lens=LENS, digest=DIGEST, text=None):

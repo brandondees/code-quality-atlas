@@ -2725,3 +2725,91 @@ def test_the_agentic_command_default_pool_stays_four():
     assert cli.AGENTIC_POOL == 4
     limits = cli._agentic_limits(argparse.Namespace(), {})
     assert limits.pool_size == 4
+
+
+# --------------------------------------------------- the delta review (#702)
+
+DELTA_FIXTURE = FIXTURE.parent / "sample-pr-delta"
+DELTA_EVENT = str(DELTA_FIXTURE / "event.json")
+DELTA_OLD = "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
+DELTA_TEXT = (
+    "each line's discount is rounded on its own before the line totals are "
+    "summed, so a multi-item cart can settle up to a cent per line away "
+    "from the same cart discounted once on its aggregate"
+)
+
+
+def _delta_round_log(tmp_path) -> str:
+    """The earlier review's round record at the delta base, as the
+    service's per-PR log holds it (D74): the finding line the controller
+    wrote at that head."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            DELTA_OLD,
+            "tracing-correctness-and-invariants",
+            "COMMENT",
+            (f"L1-F1 blocker calc.py:4 {DELTA_TEXT}",),
+            False,
+        )
+    )
+    return str(path)
+
+
+def test_a_delta_dry_run_carries_the_earlier_finding_forward(tmp_path):
+    """The delta review end to end through the real CLI's dry run (#702):
+    the delta scope comes from the fixture's range comparison (calc.py
+    and the new test file, not settings.ini, which the range never
+    touched), the scripted lens reports the same finding the earlier
+    review recorded, the carry-forward re-anchors it, and the dedupe
+    keeps the carried copy alone -- the finding is posted once, under
+    its carried label, citing the review it builds on."""
+    log = _delta_round_log(tmp_path)
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", DELTA_EVENT, "--depth", "review", "--pool-size", "1",
+        "--lens-script", str(DELTA_FIXTURE / "scenarios" / "blocker.json"),
+        "--round-log", log,
+    )  # fmt: skip
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    assert f"Delta review: builds on the review of `{DELTA_OLD[:12]}`" in out
+    assert "- **P1** [carried, blocker]" in out
+    assert DELTA_TEXT in out
+    # The lens's own identical finding is the dedupe's dropped copy: the
+    # finding appears once, carried (issue #702: never posted twice).
+    assert out.count("L1-F1") == 0
+    assert "- **L1-" not in out
+    from atlas_reviewer.verdict import parse_status
+
+    status = parse_status(out.splitlines()[0])
+    assert status["carried"] == 1
+    assert status["resolved"] == 0
+    assert status["changed_files"] == 2
+    # The record at the new head carries the line under its carried
+    # label, so the next delta builds on it.
+    record = _last_round_record(log)
+    assert record.head_sha == "4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5"
+    assert record.findings == (f'P1 blocker "calc.py:4" {DELTA_TEXT}',)
+
+
+def _last_round_record(path: str):
+    from atlas_reviewer.rounds import RoundLog
+
+    return RoundLog(Path(path)).read().records[-1]
+
+
+def test_a_delta_dry_run_without_an_earlier_review_names_the_gap(tmp_path):
+    """A delta whose base has no recorded review carries nothing and says
+    so in the draft, instead of an unexplained empty carry."""
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", DELTA_EVENT, "--depth", "review", "--pool-size", "1",
+        "--lens-script", str(DELTA_FIXTURE / "scenarios" / "approve.json"),
+    )  # fmt: skip
+    assert code == cli.EXIT_OK, err
+    assert "no findings are recorded for the review at 3f6c1e9b2a7d" in out
+    assert "Delta review: builds on the review of `3f6c1e9b2a7d`" in out

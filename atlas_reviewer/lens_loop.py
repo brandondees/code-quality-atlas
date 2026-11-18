@@ -3,7 +3,7 @@
 read-only bridge until it gives its final findings (D31, D34).
 
 The lens worker's system prompt is the controller's instructions, then the
-nonce fence rule (`prompt._fence_rule`), then the lens's whole `body.md`
+nonce fence rule (`prompt.fence_rule`), then the lens's whole `body.md`
 between attested markers (`attestation.inject_body`), then `synthesis.md`'s
 whole *Finding contract* section. Nothing in it is ever cut: a lens runs
 whole or not at all. The first user turn and every tool result are fenced
@@ -155,7 +155,7 @@ from atlas_reviewer.ports import (
     TransportTimeoutError,
 )
 from atlas_reviewer.pricing import ModelTerms, PricingUnknownError
-from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
+from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence, fence_rule
 from atlas_reviewer.quotes import SourceText, Verified, check_all, with_head_files
 from atlas_reviewer.runner import (
     DEFAULT_CREATE_CONCURRENCY,
@@ -939,7 +939,7 @@ def lens_system(
     """`retry_of` is the attempt this one retries: its reasons are stated
     and the body is injected whole again. `nonce` is the review's fence
     nonce, and the prompt states the rule for it."""
-    parts = [INSTRUCTIONS, _fence_rule(nonce)]
+    parts = [INSTRUCTIONS, fence_rule(nonce)]
     if retry_of is not None:
         parts.append(_retry_preamble(retry_of))
     parts += [inject_body(lens, body), contract]
@@ -974,7 +974,7 @@ def shared_system(contract: str, *, nonce: str) -> str:
     nonce, and the Finding contract. No lens name, body or PR text is in
     it, so it is byte-identical across the review's lenses and across a
     lens's retry."""
-    return "\n\n".join((PREFIX_INSTRUCTIONS, _fence_rule(nonce), contract))
+    return "\n\n".join((PREFIX_INSTRUCTIONS, fence_rule(nonce), contract))
 
 
 @dataclass(frozen=True)

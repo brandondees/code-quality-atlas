@@ -1,0 +1,34 @@
+{
+  "findings": {
+    "tracing-correctness-and-invariants": [
+      {
+        "location": "calc.py:4",
+        "evidence": "discount = round(gross * discount_pct / 100)",
+        "severity": "blocker",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "each line's discount is rounded on its own before the line totals are summed, so a multi-item cart can settle up to a cent per line away from the same cart discounted once on its aggregate",
+        "fix": "accumulate the gross and the unrounded discounts across the cart and round once at the end"
+      }
+    ]
+  },
+  "unread": [],
+  "carryforward": {
+    "findings": [
+      {
+        "location": "calc.py:4",
+        "evidence": "discount = round(gross * discount_pct / 100)",
+        "severity": "blocker",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "each line's discount is rounded on its own before the line totals are summed, so a multi-item cart can settle up to a cent per line away from the same cart discounted once on its aggregate",
+        "fix": "accumulate the gross and the unrounded discounts across the cart and round once at the end",
+        "revises": "P1",
+        "reason": "the delta added a test file and touched calc.py; the rounding line is unchanged at this head"
+      }
+    ],
+    "withdrawn": []
+  }
+}

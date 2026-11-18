@@ -1,0 +1,34 @@
+{
+  "status": "ahead",
+  "ahead_by": 2,
+  "behind_by": 0,
+  "merge_base_commit": {
+    "sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
+  },
+  "commits": [
+    {
+      "sha": "5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7",
+      "parents": [
+        {
+          "sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
+        }
+      ]
+    },
+    {
+      "sha": "4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5",
+      "parents": [
+        {
+          "sha": "5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7"
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "filename": "calc.py"
+    },
+    {
+      "filename": "tests/test_calc.py"
+    }
+  ]
+}

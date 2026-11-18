@@ -3,6 +3,7 @@
 bridge (`LocalSprites`), a scripted model, verification and the draft. No
 model, Sprite or GitHub call is made."""
 
+import json
 import re
 import threading
 import time
@@ -30,6 +31,7 @@ from atlas_reviewer.coordinator import (
     LATE_REASON,
     LensResult,
     Verdict,
+    _scope_digest,
     _still_unread,
     render_draft,
     review_lens,
@@ -68,6 +70,7 @@ from atlas_reviewer.verdict import ReviewEvent, parse_status
 
 from .agentic import (
     BODY,
+    CHANGED,
     DIFF,
     DIGEST,
     LENS,
@@ -84,7 +87,16 @@ from .agentic import (
 from .helpers import HEAD, OLD, FakeClock, LocalSprites, StubLibrary, source_tarball
 
 EVENT = PrEvent("example-org/example-app", 7, HEAD)
-KEY = LensKey(EVENT.repo, EVENT.pr_number, HEAD, LENS, DIGEST)
+# The ledger key a run over the standard DIFF computes (round-5 review
+# of #748): the lens name carries the run's scope digest, so the entry
+# is scope-specific.
+KEY = LensKey(
+    EVENT.repo,
+    EVENT.pr_number,
+    HEAD,
+    f"{LENS}@{_scope_digest(CHANGED)}",
+    DIGEST,
+)
 MISACK = final(digest="0" * 64)
 
 
@@ -1852,7 +1864,8 @@ def _acknowledge(request):
 
 def _lenses(
     tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
-    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None, **kw,
+    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None, redactor=None,
+    **kw,
 ):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
@@ -1878,7 +1891,7 @@ def _lenses(
             ledger=ledger(tmp_path),
             sprites=sprites,
             runner_ledger=MemoryLedger(),
-            redactor=Redactor(),
+            redactor=redactor or Redactor(),
             clock=clock or FakeClock(),
             nonce=lambda: "f00dfeedf00dfeed",
             bridge_root=str(tmp_path / "bridge"),
@@ -2967,3 +2980,847 @@ def _last_progress_lens(path):
         if data.get("phase") == PROGRESS_PHASE:
             last = data.get("lens")
     return last
+
+
+# ----------------------------------------------------- the delta review (#702)
+
+PRIOR_TEXT = "rounds each item before summing, so totals drift"
+PRIOR_LINE = f"L1-F1 major calc.py:2 {PRIOR_TEXT}"
+# The line of calc.py the diff removes: a resolution's evidence must
+# quote a line the delta actually removed.
+REMOVED_LINE = "return sum(xs)"
+
+
+def _carry_reply(
+    findings: tuple[dict[str, str], ...],
+    withdrawn: tuple[tuple[str, str, str], ...] = (),
+):
+    from atlas_reviewer.lens_loop import FinalReply
+
+    return FinalReply(
+        json.dumps(
+            {
+                "findings": list(findings),
+                "withdrawn": [
+                    {"id": identifier, "reason": reason, "evidence": evidence}
+                    for identifier, reason, evidence in withdrawn
+                ],
+            }
+        ),
+        Decimal("0.02"),
+    )
+
+
+def _carry_raw(text: str):
+    from atlas_reviewer.lens_loop import FinalReply
+
+    return FinalReply(text, Decimal("0.02"))
+
+
+def _restated(**overrides: str) -> dict[str, str]:
+    from .agentic import finding
+
+    return {
+        **finding(),
+        "revises": "P1",
+        "reason": "the code is unchanged at this head",
+        **overrides,
+    }
+
+
+def _round_log_with_prior(tmp_path, head: str = OLD, line: str = PRIOR_LINE):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            head,
+            LENS,
+            "COMMENT",
+            (line,),
+            False,
+        )
+    )
+    return log
+
+
+def _delta_scope(
+    delta_from=OLD,
+    resolution_paths=frozenset({"calc.py", "config/keys.py"}),
+    note="",
+    gate_reason="",
+    removed=None,
+    range_diff="",
+):
+    """The delta scope the CLI would thread in: the review's changed
+    paths as the resolution gate, and the range's own removed-line pool,
+    unless the test narrows either."""
+    from atlas_reviewer.delta import DeltaScope
+
+    return DeltaScope(
+        delta_from,
+        "",
+        frozenset(resolution_paths),
+        note,
+        gate_reason,
+        removed or {},
+        range_diff,
+    )
+
+
+def test_a_delta_review_carries_a_prior_finding_re_anchored(tmp_path):
+    """The carry-forward's happy path (#702): the earlier review's finding
+    is re-stated with a quote that verifies at this head, so it is carried
+    into the findings set under its carry-forward label, the verdict
+    counts it, and this review's own round record carries the line for the
+    next review. Mutant: the carry-forward call dropped -- the review
+    would report only its own lenses' findings and the earlier review's
+    work would vanish from the chain."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply((_restated(),))])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    carried = [f for f in result.findings if f.carried]
+    assert [(f.id, f.verified) for f in carried] == [("P1", True)]
+    assert carried[0].finding.finding == PRIOR_TEXT
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    draft = render_draft(result, Redactor())
+    assert f"Delta review: builds on the review of `{OLD[:12]}`" in draft
+    assert "- **P1** [carried, major]" in draft
+    assert "## Carried, not re-verified" not in draft
+    status = parse_status(draft)
+    assert status["carried"] == 1
+    assert status["carried_unverified"] == 0
+    assert status["resolved"] == 0
+    # The record at this head carries the re-anchored line, with the
+    # location quoted, for the next delta to build on.
+    record = log.read().records[-1]
+    assert record.head_sha == HEAD
+    assert record.findings == (f'P1 major "calc.py:2" {PRIOR_TEXT}',)
+
+
+def test_a_resolution_with_removed_code_evidence_is_accepted_and_leaves_the_chain(
+    tmp_path,
+):
+    """A prior finding the delta's new commits fixed is resolved with its
+    stated reason -- but only when its evidence quotes code the delta
+    actually removed (round-1 M2), and its file is one the delta touched.
+    The resolution leaves the chain: the record at this head has no line
+    for it."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (),
+                (("P1", "the delta replaced the rounding", REMOVED_LINE),),
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(removed={"calc.py": ((2, REMOVED_LINE),)}),
+    )
+    assert result.findings == ()
+    assert result.verdict is Verdict.APPROVE
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" in draft
+    assert "the delta replaced the rounding" in draft
+    status = parse_status(draft)
+    assert status["resolved"] == 1
+    record = log.read().records[-1]
+    assert record.findings == ()
+
+
+def test_a_resolution_without_removed_code_evidence_stays_carried(tmp_path):
+    """A resolution whose quoted code is not among the lines the delta
+    removed is refused: the cited code still stands, and the finding is
+    carried as recorded (round-1 M2). Mutant: the evidence check dropped,
+    which would accept a resolution on the model's say-so."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply((), (("P1", "claims the fix", "unrelated_code()"),)),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" not in draft
+    assert "## Carried, not re-verified" in draft
+    assert PRIOR_TEXT in draft
+    assert "not among the lines" in draft
+    record = log.read().records[-1]
+    assert record.findings == (f'P1 major "calc.py:2" {PRIOR_TEXT}',)
+
+
+def test_a_resolution_on_an_unestablished_delta_is_refused_and_named(tmp_path):
+    """The gate fails closed (round-1 M1): when the delta could not be
+    established, the scope's resolution paths are empty, and a resolution
+    is refused with the scope's own reason -- the finding is carried.
+    Mutant: the gate threaded as the review's whole changed set, which
+    would accept resolutions on the fallback path."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (),
+                (("P1", "claims the fix", REMOVED_LINE),),
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(
+            resolution_paths=(),
+            note="the delta range could not be fetched; the review ran on "
+            "the full pull request diff, and no resolution is accepted",
+            gate_reason="the delta range could not be established",
+        ),
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" not in draft
+    assert "## Carried, not re-verified" in draft
+    assert "the delta range could not be established" in draft
+    record = log.read().records[-1]
+    assert record.findings == (f'P1 major "calc.py:2" {PRIOR_TEXT}',)
+
+
+def test_an_off_delta_resolution_is_a_proposal_and_the_finding_stands(tmp_path):
+    log = _round_log_with_prior(
+        tmp_path, line=f"L1-F1 major docs/notes.md:1 {PRIOR_TEXT}"
+    )
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply((), (("P1", "claims the delta fixed it", REMOVED_LINE),)),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    # The delta touched calc.py and config/keys.py, not docs/notes.md, so
+    # the resolution is refused and the finding is carried as recorded.
+    assert result.findings == ()
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" not in draft
+    assert "## Carried, not re-verified" in draft
+    assert PRIOR_TEXT in draft
+    assert "did not touch" in draft
+    # The chain keeps it: the record carries the line in its original
+    # wording for the next review to re-offer.
+    record = log.read().records[-1]
+    assert record.findings == (f'P1 major "docs/notes.md:1" {PRIOR_TEXT}',)
+
+
+def test_a_failed_carry_forward_carries_every_prior_as_recorded(tmp_path):
+    """A carry-forward reply that never meets the contract keeps every
+    prior finding as the record stored it, and names the failure (D73's
+    never-silently-dropped rule). Mutant: the failure swallowed into an
+    empty findings set, which would silently drop the earlier review's
+    work."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel([READ_ALL, final(), _carry_raw("not json at all")])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Carried, not re-verified" in draft
+    assert PRIOR_TEXT in draft
+    assert "carry-forward call failed" in draft
+    record = log.read().records[-1]
+    assert record.findings == (f'P1 major "calc.py:2" {PRIOR_TEXT}',)
+
+
+def test_a_prior_blocker_that_fails_to_re_anchor_still_sets_the_verdict(tmp_path):
+    """A carried Blocker whose re-anchor failed -- here because the whole
+    carry-forward call failed -- still counts for the verdict (round-1
+    M4): the earlier review verified that finding, and a failed
+    re-anchor is not evidence the defect is fixed, so the review can
+    never approve with a standing prior Blocker. Mutant: the carried
+    severities dropped from the verdict's set, which would approve."""
+    blocker_line = "L1-F1 blocker calc.py:2 the rounding rounds per line"
+    log = _round_log_with_prior(tmp_path, line=blocker_line)
+    model = ScriptedLensModel([READ_ALL, final(), _carry_raw("not json at all")])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.findings == ()
+    # Mutant target: without the carried severities this is APPROVE.
+    assert result.verdict is Verdict.BLOCK
+    assert "## Carried, not re-verified" in render_draft(result, Redactor())
+
+
+def test_an_unparsed_prior_line_is_carried_as_raw_text_and_re_recorded(tmp_path):
+    """A prior finding line that does not parse travels as the record's
+    raw text: shown in the carried section, re-recorded into this
+    review's round record, and counted once -- not twice (round-1 M3,
+    m2). Mutant: the raw line dropped, which would lose it from the
+    chain while the draft claimed it carried."""
+    garbled = "this line is not a finding line at all"
+    log = _round_log_with_prior(tmp_path, line=garbled)
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Carried, not re-verified" in draft
+    assert garbled in draft
+    assert draft.split("-->", 1)[1].count("could not be parsed") == 1
+    assert "1 finding line(s)" in draft
+    record = log.read().records[-1]
+    assert record.findings == (garbled,)
+
+
+def test_a_record_over_the_cap_names_its_omitted_findings(tmp_path):
+    """A prior record whose finding lines did not fit the record cap
+    (round-1 M5) is not read as "no findings recorded": the draft states
+    the omission with the count the record carries, and nothing pretends
+    the carry was complete. Mutant: `findings_omitted` ignored, which
+    would announce a false "no findings are recorded"."""
+    from atlas_reviewer.rounds import RECORD_CHARS, RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (),
+            False,
+            findings_omitted=3,
+        )
+    )
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert f"no findings are recorded for the review at {OLD[:12]}" not in draft
+    assert "3 verified finding(s) from the review at" in draft
+    assert f"{RECORD_CHARS}-character cap" in draft
+    assert "cannot be carried" in draft
+
+
+def test_an_unreadable_round_log_names_the_read_failure(tmp_path):
+    """A round log that cannot be read is not "no findings recorded":
+    the read failure is named (round-1 m1). Mutant: the unreadable log
+    read as an empty one, which would state a falsehood in the draft."""
+
+    class UnreadableLog:
+        class _Read:
+            file_unreadable = True
+            quarantined_to = ""
+            records = ()
+
+        def read(self):
+            return self._Read()
+
+        def append(self, record):
+            pass
+
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=UnreadableLog(), delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert "the round log file could not be read" in draft
+    assert "no findings are recorded" not in draft
+
+
+def test_a_delta_review_never_posts_the_same_finding_twice(tmp_path):
+    """A lens that re-reports a finding identical to a carried one adds
+    nothing: the carried copy stays, the duplicate is dropped, and the
+    draft shows the finding once (#702) -- while a distinct new finding
+    still stands beside it. Mutant: the dedupe dropped outright fails on
+    the duplicate's second copy; an inverted dedupe (every new finding
+    dropped, duplicates or not) fails on the distinct finding's
+    survival."""
+    log = _round_log_with_prior(tmp_path)
+    from .agentic import finding
+
+    duplicate = finding()
+    distinct = finding(
+        location="config/keys.py:1",
+        evidence=f'TOKEN = "{TOKEN}"',
+        severity="minor",
+        finding="a hard-coded credential in a changed file",
+        fix="move it to the secret store",
+    )
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(duplicate, distinct),
+            _carry_reply((_restated(),)),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert [(f.id, f.carried) for f in result.findings] == [
+        ("P1", True),
+        ("L1-F2", False),
+    ]
+
+
+def test_the_evidence_pool_is_the_range_not_the_restricted_diff(tmp_path):
+    """The two diffs are distinguished (round-2 a3, Major A): the review
+    runs on the restricted pull-request diff, whose removed lines carry
+    a removal the PR made before `delta_from`; the evidence pool is the
+    range's own patch pool, which does not. A resolution quoting the
+    stale net-diff removal is refused; one quoting the range's real
+    deletion is accepted. Mutant: the pool rebuilt from the review's own
+    diff -- the stale removal clears the gate and the real deletion
+    never does."""
+    log = _round_log_with_prior(tmp_path)
+    pool = {"calc.py": ((2, REMOVED_LINE),)}
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (),
+                (("P1", "quotes the stale net-diff removal", "config = load()"),),
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope(removed=pool)
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Resolved by the new commits" not in draft
+    assert "not among the lines" in draft
+    # The range's own deletion resolves (a separate root: its own ledger,
+    # so the lens runs fresh instead of reusing the first review's).
+    model2 = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply((), (("P1", "the delta removed the rounding", REMOVED_LINE),)),
+        ]
+    )
+    log2 = _round_log_with_prior(tmp_path / "second")
+    result2, _sprites2 = _lenses(
+        tmp_path / "second",
+        [LENS],
+        model2,
+        round_log=log2,
+        delta=_delta_scope(removed=pool),
+    )
+    assert [reason for _id, reason, _f in result2.resolved] == [
+        "the delta removed the rounding"
+    ]
+
+
+def test_the_omission_count_rides_through_the_record_across_two_hops(tmp_path):
+    """The durable chain keeps the omission (round-2 Major B; round-3
+    a6 makes hop two read hop one's OWN record, not the seeded one): a
+    record that could not store its findings passes the count into the
+    delta review's record, and the next hop -- whose delta base is hop
+    one's head -- re-states the gap from THAT record. Mutant: the count
+    written only into the draft, which loses it from the chain after
+    one hop; or a second hop that re-reads the seeded record, which
+    proves nothing about the chain."""
+    from atlas_reviewer.rounds import RECORD_CHARS, RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (),
+            False,
+            findings_omitted=3,
+        )
+    )
+    first = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    one, _s1 = _lenses(tmp_path, [LENS], first, round_log=log, delta=_delta_scope())
+    record_one = [r for r in log.read().records if r.head_sha == HEAD][-1]
+    assert record_one.findings_omitted == 3
+    draft_one = render_draft(one, Redactor())
+    assert "3 verified finding(s) from the review at" in draft_one
+    # Hop two's delta base is hop one's HEAD: its scope re-reads hop
+    # one's record, not the seeded OLD one. The lens reuses its settled
+    # result (same head and body, no newer evidence), so the scripted
+    # model answers only the carry-forward turn.
+    second = ScriptedLensModel([_carry_reply(())])
+    two, _s2 = _lenses(
+        tmp_path, [LENS], second, round_log=log, delta=_delta_scope(delta_from=HEAD)
+    )
+    draft_two = render_draft(two, Redactor())
+    # The sha in the note is hop two's own delta base: hop one's head,
+    # not the seeded OLD record's -- the assertion that dies when hop
+    # two re-reads the seeded record (round-3 a6's mutant).
+    assert f"3 verified finding(s) from the review at {HEAD[:12]}" in draft_two
+    assert f"from the review at {OLD[:12]}" not in draft_two
+    record_two = [r for r in log.read().records if r.head_sha == HEAD][-1]
+    assert record_two is not record_one
+    assert record_two.findings_omitted == 3
+    # The cap constant the wording names is the record's own.
+    assert RECORD_CHARS == 8_192
+
+
+def test_two_records_carrying_the_same_finding_post_it_once(tmp_path):
+    """Two finished reviews of the same head (a redelivery) can leave two
+    records at the delta base listing the same finding; the carry carries
+    it once, under the first label (round-1 m4)."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    for _n in range(2):
+        log.append(
+            RoundRecord(
+                EVENT.repo,
+                EVENT.pr_number,
+                OLD,
+                LENS,
+                "COMMENT",
+                (PRIOR_LINE,),
+                False,
+            )
+        )
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply((_restated(),))])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert [(f.id, f.carried) for f in result.findings] == [("P1", True)]
+
+
+def test_a_delta_review_with_no_prior_findings_says_so(tmp_path):
+    """A delta whose base has no recorded findings carries nothing and
+    names that, instead of an unexplained empty carry section. The
+    prior record here sits at another head, so it is not the delta
+    base's."""
+    log = _round_log_with_prior(tmp_path, head="f" * 40)
+    from .agentic import finding
+
+    model = ScriptedLensModel([READ_ALL, final(finding()), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert f"no findings are recorded for the review at {OLD[:12]}" in draft
+    assert [f.id for f in result.findings] == ["L1-F1"]
+    assert "## Carried, not re-verified" not in draft
+
+
+def test_a_carried_blocker_restated_as_a_nit_cannot_approve(tmp_path):
+    """Major C end to end through the coordinator (round 3): the
+    earlier review's Blocker is restated -- verified, re-anchored -- as
+    a nit, and the delta review's verdict stays BLOCK, because the
+    recorded severity stands. Mutant: the downgrade guard dropped --
+    the carried finding carries the nit and the review approves."""
+    blocker_line = "L1-F1 blocker calc.py:2 the rounding rounds per line"
+    log = _round_log_with_prior(tmp_path, line=blocker_line)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (_restated(severity="nit", finding="the rounding rounds per line"),)
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    carried = [f for f in result.findings if f.carried]
+    assert [f.finding.severity for f in carried] == [Severity.BLOCKER]
+    assert result.verdict is not Verdict.APPROVE
+    assert result.verdict is Verdict.BLOCK
+    draft = render_draft(result, Redactor())
+    assert "proposed lowering" in draft
+
+
+# ------------------------------------------------- round-5 fixes (#748)
+
+
+def test_omitted_priors_keep_a_clean_delta_off_plain_approval(tmp_path):
+    """A base record whose `findings_omitted` says finding lines were
+    lost to the record cap leaves the delta unassessable -- the missing
+    lines could have been Blockers -- so the review's coverage stays
+    incomplete and no plain approval rides on it (round-5 review of
+    #748, Major 2). Mutant: the unassessable-prior gap dropped from the
+    coverage rule, which approves over findings no one can see."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo, EVENT.pr_number, OLD, LENS, "COMMENT", (), False,
+            findings_omitted=2,
+        )
+    )  # fmt: skip
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.findings == ()
+    assert result.carried_omitted == 2
+    # Mutant target: coverage complete and a plain approval.
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "could not assess" in render_draft(result, Redactor())
+
+
+def test_a_legacy_whole_file_prior_keeps_the_delta_off_plain_approval(tmp_path):
+    """A legacy record's unquoted whole-file location parses only as raw
+    text (the round-1 ambiguity rule): an unknown-shape prior is not
+    evidence the defect is gone, so the coverage stays incomplete
+    (round-5 review of #748, Major 2, with CodeRabbit's legacy-Blocker
+    case). Mutant: the unassessable-prior gap dropped, which approves
+    over a prior nobody can assess."""
+    log = _round_log_with_prior(tmp_path, line="L1-F1 blocker calc.py the rounding")
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.carried_raw
+    assert result.verdict is Verdict.APPROVE
+    # Mutant target: coverage complete on an unassessable prior.
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "could not assess" in render_draft(result, Redactor())
+
+
+def test_a_complete_record_with_no_prior_findings_still_approves(tmp_path):
+    """The gap is the unassessable prior's, not the delta chain's: a
+    complete base record with no standing findings leaves the clean
+    delta's approval intact (round-5 review of #748, Major 2's bound)."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "rounds.jsonl")
+    log.append(
+        RoundRecord(EVENT.repo, EVENT.pr_number, OLD, LENS, "COMMENT", (), False)
+    )
+    model = ScriptedLensModel([READ_ALL, final()])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.findings == ()
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+
+
+def test_a_failed_carry_calls_exception_text_is_scrubbed_in_the_status_line(
+    tmp_path,
+):
+    """The carry-forward's exception note is scrubbed where it is
+    recorded (round-5 review of #748, Major 3): the status line writes
+    the delta note without the body's quote-and-scrub, so an unscrubbed
+    note puts the exception's content -- which can echo request or
+    response data -- into the draft's posted first line. Mutant: the
+    scrub dropped, which leaves the secret in both sinks."""
+    from atlas_reviewer.ports import BoundaryError
+
+    secret = "sk-live-carry-secret-0001"
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [READ_ALL, final(), BoundaryError(f"transport dropped the turn ({secret})")]
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        redactor=Redactor(known_secrets=(secret,)),
+    )
+    draft = render_draft(result, Redactor())
+    assert "carry-forward call failed" in draft
+    assert secret not in draft
+    status = parse_status(draft)
+    assert status is not None
+    assert secret not in json.dumps(status)
+
+
+def test_a_duplicate_pair_keeps_the_stronger_finding(tmp_path):
+    """The dedupe's representative is the pair's strongest finding
+    (round-5 review of #748): a verified Blocker the lens re-found is
+    not dropped under a carried Major restating the same text. Mutant:
+    first-match restored, which flips the BLOCK to
+    approve-with-changes."""
+    log = _round_log_with_prior(tmp_path, line=f'L1-F1 major "calc.py:2" {PRIOR_TEXT}')
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(finding(severity="blocker", finding=PRIOR_TEXT)),
+            _carry_reply((_restated(),)),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    # Mutant target: the carried Major kept, the verified Blocker
+    # dropped -- approve-with-changes over a standing Blocker.
+    assert result.verdict is Verdict.BLOCK
+    assert len(result.findings) == 1
+    assert result.findings[0].finding.severity.value == "blocker"
+
+
+def test_a_carry_call_past_the_review_deadline_is_not_sent():
+    """The wall check before the reservation (round-5 review of #748):
+    a carry call that starts after the lens loop's deadline neither
+    reserves nor sends -- the reservation would only be the first half
+    of a billable request past the wall the lens loop respects -- and
+    the caller's carry fallback carries every prior finding as recorded.
+    Mutant: the pre-reserve check dropped, which prices and reserves a
+    call past the wall."""
+    from atlas_reviewer.coordinator import CarryCallRefused, _carry_call
+    from atlas_reviewer.lens_loop import Spend
+
+    prior_finding = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.MAJOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        PRIOR_TEXT,
+        "",
+    )
+    model = ScriptedLensModel([])
+    spend = Spend(LIMITS.resolve(cross_limits=False))
+    with pytest.raises(CarryCallRefused, match="before the carry-forward could run"):
+        _carry_call(
+            EVENT,
+            [("P1", prior_finding)],
+            DIFF,
+            trees(),
+            CHANGED,
+            frozenset({"calc.py"}),
+            "",
+            "",
+            {},
+            spend,
+            LIMITS.resolve(cross_limits=False),
+            FakeClock(),
+            0.0,
+            "f00dfeed",
+            "FINDING CONTRACT",
+            model,
+        )
+    # Mutant target: the model was asked to price the call.
+    assert model.requests == []
+    assert spend.calls == 0
+
+
+def test_a_carry_call_crossing_the_deadline_mid_reservation_is_not_sent():
+    """The wall check between the reservation and the send (round-5
+    review of #748): pricing the carry request can take the review past
+    its deadline; the reserved call is then accounted -- the dollars
+    were held -- but not sent, and the caller's carry fallback runs.
+    Mutant: the post-reservation check dropped, which sends the call."""
+    from atlas_reviewer.coordinator import CarryCallRefused, _carry_call
+    from atlas_reviewer.lens_loop import Spend
+
+    clock = FakeClock()
+    deadline = 600.0
+
+    class Pricer(ScriptedLensModel):
+        def worst_case_usd(self, request):
+            clock.advance(deadline + 1.0)
+            return super().worst_case_usd(request)
+
+    prior_finding = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.MAJOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        PRIOR_TEXT,
+        "",
+    )
+    model = Pricer([])
+    spend = Spend(LIMITS.resolve(cross_limits=False))
+    with pytest.raises(CarryCallRefused, match="while the carry-forward reserved"):
+        _carry_call(
+            EVENT,
+            [("P1", prior_finding)],
+            DIFF,
+            trees(),
+            CHANGED,
+            frozenset({"calc.py"}),
+            "",
+            "",
+            {},
+            spend,
+            LIMITS.resolve(cross_limits=False),
+            clock,
+            deadline,
+            "f00dfeed",
+            "FINDING CONTRACT",
+            model,
+        )
+    # Mutant target: the turn was sent anyway.
+    assert model.requests == []
+    # The reservation stays accounted: the dollars were held against the
+    # review's cap while the decision was made.
+    assert spend.calls == 1
+    assert spend.committed_usd > 0
+
+
+def test_a_dropped_restatement_is_named_in_the_draft(tmp_path):
+    """A carry entry the parser drops -- an unknown severity -- leaves
+    the prior finding standing AND names the drop (round-5 review of
+    #748): the note travels to the draft instead of vanishing with the
+    reply (D54's dropped-finding rule). Mutant: the propagation dropped,
+    which loses the note while the prior silently stands."""
+    log = _round_log_with_prior(tmp_path, line=f'L1-F1 major "calc.py:2" {PRIOR_TEXT}')
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(severity="urgent"),))]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    draft = render_draft(result, Redactor())
+    assert "raw severity 'urgent'" in draft
+    # The prior stands: the refused restatement is not a re-anchor.
+    assert "## Carried, not re-verified" in draft
+
+
+def test_a_delta_scoped_ledger_entry_is_not_reused_by_a_full_run(tmp_path):
+    """The scope is part of the lens ledger entry's identity (round-5
+    review of #748, check 4): a delta run's settled lens at this head
+    shares the key a later full run at the same head computes -- without
+    the scope in the key, the full run reuses the delta's settled result
+    and its unread list, and claims files no lens ever read. Mutant: the
+    scope suffix dropped, which reuses the delta's attempt."""
+    narrow = (
+        "diff --git a/docs/notes.md b/docs/notes.md\n"
+        "--- a/docs/notes.md\n+++ b/docs/notes.md\n"
+        "@@ -1,1 +1,1 @@\n-rounding notes\n+rounding notes v2\n"
+    )
+    first, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        ScriptedLensModel([tools(("diff_file", {"path": "docs/notes.md"})), final()]),
+        diff=narrow,
+    )
+    assert first.coverage_complete
+    model = ScriptedLensModel([READ_ALL, final()])
+    second, _sprites = _lenses(tmp_path, [LENS], model, diff=DIFF)
+    # Mutant target: the full run reused the delta's settled attempt --
+    # zero requests -- and claimed the files it never read.
+    assert len(model.requests) == 2
+    assert second.coverage_complete

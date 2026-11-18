@@ -1,0 +1,27 @@
+{
+  "findings": {
+    "sweeping-for-security": [
+      {
+        "location": "calc.py:3-5",
+        "evidence": "gross = price_cents * quantity\ndiscount = round(gross * discount_pct / 100)\nreturn gross - discount",
+        "severity": "major",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "the discount is computed from a float division and rounded per line, so the billed total depends on rounding order rather than on the cart's aggregate",
+        "fix": "compute the discount in integer minor units and round once over the cart total"
+      },
+      {
+        "location": "calc.py:3",
+        "evidence": "return price_cents * quantity * (100 - discount_pct) // 100",
+        "severity": "minor",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "the floor-division form this change removes rounded half down, so historical line totals can differ by a cent from the new rounding",
+        "fix": "state the rounding change in the release notes and backfill any stored totals that must stay comparable"
+      }
+    ]
+  },
+  "unread": []
+}

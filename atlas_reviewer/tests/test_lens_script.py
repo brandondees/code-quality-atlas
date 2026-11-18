@@ -94,7 +94,8 @@ def test_the_shipped_default_scenario_loads_and_names_a_blocker():
 
 def test_an_unknown_top_level_key_is_refused(tmp_path):
     with pytest.raises(
-        LensScriptError, match="keys outside findings, unread and reassessment"
+        LensScriptError,
+        match="keys outside findings, unread, reassessment and carryforward",
     ):
         script(tmp_path, {"findings": {}, "unread": [], "depth": 2})
 
@@ -355,6 +356,122 @@ def test_the_reassessment_turn_is_answered_from_the_scenario(tmp_path):
     reply = model.turn(TurnRequest(system(), (reassess_message(),), ()))
     payload = json.loads(reply.text)
     assert payload["withdrawn"] == [{"id": "P1", "reason": "the check passes"}]
+    assert payload["findings"] == []
+    walk = model.turn(request_with(base_message()))
+    assert isinstance(walk, ToolCalls)
+
+
+# ------------------------------------------- #702: the carry-forward turn
+
+
+def _carry_message():
+    from atlas_reviewer.delta import carry_turn
+    from atlas_reviewer.prompt import RepoText, UntrustedBlock
+
+    return UserText(
+        carry_turn(
+            EVENT,
+            UntrustedBlock(
+                "prior-findings", RepoText("P1 blocker calc.py:4 rounds per line")
+            ),
+            UntrustedBlock("delta-diff", RepoText("diff --git a/calc.py b/calc.py")),
+            NONCE,
+        )
+    )
+
+
+def test_the_carryforward_section_loads_and_validates_its_entries(tmp_path):
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {},
+            "unread": [],
+            "carryforward": {
+                "findings": [
+                    {
+                        "location": "calc.py:4",
+                        "evidence": "discount = round(gross * discount_pct / 100)",
+                        "severity": "blocker",
+                        "valence": "defect",
+                        "route": "eng",
+                        "attribution": "introduced",
+                        "finding": "rounds per line, restated",
+                        "fix": "round once",
+                        "revises": "P1",
+                        "reason": "the code is unchanged",
+                    }
+                ],
+                "withdrawn": [
+                    {
+                        "id": "P2",
+                        "reason": "the delta replaced it",
+                        "evidence": "old_call(x)",
+                    }
+                ],
+            },
+        },
+    )
+    (finding,) = loaded.carryforward.findings
+    assert finding["revises"] == "P1"
+    (withdrawn,) = loaded.carryforward.withdrawn
+    assert withdrawn == {
+        "id": "P2",
+        "reason": "the delta replaced it",
+        "evidence": "old_call(x)",
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"findings": [{"location": "calc.py:4"}]},
+        {"withdrawn": [{"id": "P1"}]},
+        {"withdrawn": [{"id": "P1", "reason": "r"}]},
+        {"extra": []},
+        {"findings": "not a list"},
+    ],
+    ids=[
+        "bad-finding",
+        "no-reason",
+        "no-evidence",
+        "unknown-key",
+        "findings-not-a-list",
+    ],
+)
+def test_a_malformed_carryforward_entry_is_refused_at_load(tmp_path, raw):
+    with pytest.raises(LensScriptError):
+        script(tmp_path, {"findings": {}, "unread": [], "carryforward": raw})
+
+
+def test_the_carryforward_turn_is_answered_from_the_scenario(tmp_path):
+    """The delta review's carry-forward turn (#702) opens with the
+    controller's carry-forward subject and offers no tools and no lens
+    body markers; the scripted reviewer answers it with the scenario's
+    `carryforward` reply -- and an ordinary first turn still starts the
+    coverage walk (the mutant that answers every marker-less turn as a
+    carry-forward fails the second half)."""
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {LENS: []},
+            "unread": [],
+            "carryforward": {
+                "withdrawn": [
+                    {
+                        "id": "P1",
+                        "reason": "the delta replaced it",
+                        "evidence": "old_code()",
+                    }
+                ]
+            },
+        },
+    )
+    model = LensScriptModel(loaded)
+    reply = model.turn(TurnRequest("no body markers here", (_carry_message(),), ()))
+    payload = json.loads(reply.text)
+    assert payload["withdrawn"] == [
+        {"id": "P1", "reason": "the delta replaced it", "evidence": "old_code()"}
+    ]
     assert payload["findings"] == []
     walk = model.turn(request_with(base_message()))
     assert isinstance(walk, ToolCalls)

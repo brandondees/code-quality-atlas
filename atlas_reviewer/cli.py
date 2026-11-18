@@ -74,6 +74,7 @@ from atlas_reviewer.coordinator import (
     render_draft,
     review_lenses,
 )
+from atlas_reviewer.delta import CARRY_TARGET_PREFIX, DeltaScope, delta_scope
 from atlas_reviewer.diffs import diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -691,6 +692,11 @@ class _DryRunLensModel:
             # D73's re-assessment turn: the dry run confirms every prior
             # finding by silence.
             payload["withdrawn"] = []
+        if first.startswith(CARRY_TARGET_PREFIX):
+            # The delta review's carry-forward turn (#702): the dry run
+            # says nothing, so every prior finding is carried as the
+            # record stored it -- the never-silently-dropped default.
+            payload = {"findings": []}
         return FinalReply(json.dumps(payload), Decimal("0.01"))
 
 
@@ -921,6 +927,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         if not isinstance(ref, str) or not ref:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
+        diff, delta = _delta_input(event, github, diff)
         # The derivation's refusals are planned-count independent (D68;
         # round-1 review of #717, m-3): validate them here, before the
         # picker can spend, so a misconfiguration is a clean usage error
@@ -1083,6 +1090,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     evidence_digest=snapshot_digest(
                         ci_collected, remarks, remarks_collected
                     ),
+                    delta=delta,
                 )
                 review = replace(
                     review,
@@ -1116,6 +1124,29 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     if review.proposed_event is ReviewEvent.REQUEST_CHANGES:
         return EXIT_CHANGES_REQUESTED
     return EXIT_OK
+
+
+def _delta_input(
+    event: PrEvent, github: FixtureGitHub | GitHubClient, diff: str
+) -> tuple[str, DeltaScope | None]:
+    """The diff to review and the delta review's scope from the event
+    (#702, D79); the scope is None on a full review.
+
+    A delta review's diff is the pull request's diff at this head,
+    restricted to the paths the range `delta_from..head` touched -- the
+    range diff with merge-from-base content excluded, which the pull
+    request's diff never carries anyway. The scope also carries the
+    resolution gate: empty whenever the delta could not actually be
+    established, so no resolution is accepted on evidence the delta
+    cannot back. A delta base equal to the head is a usage error: it
+    reviews nothing."""
+    delta_from = event.delta_from
+    if not delta_from:
+        return diff, None
+    if delta_from == event.head_sha:
+        raise UsageError("the event's delta_from equals its head_sha")
+    scope = delta_scope(github, event, diff)
+    return scope.diff, scope
 
 
 def _with_preference_note(

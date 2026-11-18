@@ -256,7 +256,23 @@ docs-or-tests-only change, or a push touching no file the review is
 still reading keeps the review; a code push cancels a review that is
 still early, under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION`), and a kept head
 is recorded as the pull request's pending follow-up, queued when the
-running review settles. Setting the policy to `cancel` restores the
+running review settles. The follow-up of a settled success is a delta
+review only when that review read every changed file (its draft's
+`coverage_complete` flag): a review that finished with incomplete
+coverage cannot stand in for the files it never read, so its follow-up
+is an ordinary full review of the pull request. A delta review's lens
+scope is the changed paths the range between the settled head and the
+new head touched — every hunk the pull request's diff shows on such a
+path, older hunks included; when the range cannot be established at all
+(an unfetchable range, a diverged history after a rebase or force-push,
+or a comparison file list cut at GitHub's cap), the review runs on the
+full pull request diff and accepts no resolutions. The delta review
+carries the earlier review's findings forward through
+one bounded carry-forward call (re-anchored through the quote checker,
+the new commits' fixes marked resolved), and its post cites the review
+it builds on and quotes the carry-forward's own note, so an unreadable
+round record is never posted as a review with no prior findings.
+Setting the policy to `cancel` restores the
 blanket supersede. The decision and the review costs are telemetry
 events in `/data/service.jsonl` (`head change`, `review cost`,
 `follow-up queued`). A review

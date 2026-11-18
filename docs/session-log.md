@@ -3369,6 +3369,88 @@ on the PR head: `pytest tests/` 880 passed / 14 skipped, coverage
 96.06%; ruff check/format, mypy (85 files), `tooling.cli drift` clean.
 Offline only.
 
+## 2026-11-18 (same day) — #702 part 2: the delta review and its carry-forward (D79 update, PR 2 of the stack)
+
+The follow-up a kept head materializes as (PR 1's `take_pending`) is now
+a delta review. Its diff is the pull request's diff at the new head
+restricted to the paths the range `delta_from..head` touched — the pull
+request's diff never carries merge-from-base content (merging the base
+moves the merge base forward, and the base's changes drop out of the
+three-dot diff), so the restriction IS the range diff with that content
+excluded, with no per-commit reads; a merge-only push yields an empty
+delta, whose review exists to carry the earlier findings forward. After
+the delta's lenses settle, one bounded, tool-less carry-forward call —
+built like D73's re-assessment and quote-checked through the same judge,
+so the two paths' quote checks cannot drift — judges the earlier
+review's findings (the round log's records at `delta_from`, parsed back
+from `{id} {severity} {location} {finding}` lines, labeled by position
+`P1`, `P2`, ...): a verified re-statement joins the findings set under
+its `P` label and counts for the verdict (reconstructed
+defect-introduced, the conservative direction); a resolution is accepted
+only when the prior finding's location is a path the delta touched (the
+mechanical gate that keeps PR content from resolving a finding on a file
+the new commits never changed — a refused resolution is recorded as the
+proposal it is); everything else is carried as the record stored it, in
+the draft's `Carried, not re-verified` section AND back into this
+review's round record, so the next review re-offers it — nothing
+silently dropped (D73). A finding identical to a carried one is posted
+once, as the carried copy. The delta post cites the review it builds on;
+the status line carries `carried`/`resolved` on a delta review; an
+unfetchable range falls back to the full diff, recorded in the draft.
+The dry-run lens script grew a `carryforward` scenario section
+(controller-level), validated at load with the real carry-forward parser;
+the scripted reviewer answers the carry turn from it — checked before
+the body markers, because the carry system prompt carries no lens body
+(the scripted model's `_markers` used to run first and refused the turn,
+which is how the fixture dry run found the ordering bug). Tests: 25 in
+`atlas_reviewer/tests/test_delta.py`, 5 delta flows in
+`test_coordinator.py`, 2 in `test_service_run.py`, 2 in
+`test_service_post.py`, 6 in `test_lens_script.py`, and two delta dry
+runs over the new `fixtures/sample-pr-delta/` in `test_cli.py` (the
+delta scope's two files, the carried blocker, the dedupe, the record's
+carried line, and the no-prior gap named). Verification, all on the PR
+head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
+94%); `pytest atlas_reviewer/tests` 3,332 passed, 95.78%; ruff
+check/format, mypy (86 files), `tooling.cli drift` clean. Offline only.
+
+## 2026-11-18 (same day) — #748 round 1: the carry-forward's gate fails closed, resolutions need evidence, nothing leaves the chain
+
+The protocol review's five Majors, fixed on the delta branch (the
+correction appended to D79 carries the full list and its tests):
+the resolution gate no longer fails open where the delta is not the
+delta — `DeltaScope.resolution_paths` is empty on an unfetchable range,
+a diverged compare (rebase or force-push), and a malformed or
+cap-cut `files` list, refusing every resolution and naming the reason;
+a resolution now requires evidence the new commits removed the cited
+code (every quoted line among the delta diff's removed lines for that
+file), not the model's say-so; an unparsed prior line travels as the
+record's raw text verbatim — shown and re-recorded — instead of
+vanishing behind a note that claimed it carried, and the location in a
+record's finding line is now quoted, so a path with a space parses
+whole instead of silently corrupting (the legacy unquoted form still
+parses when its token is unambiguously a line range, and an ambiguous
+one is refused rather than guessed); a carried prior that fails to
+re-anchor still counts for the verdict, so a standing prior Blocker can
+never become an approval — including when the carry call fails whole;
+and a record whose finding lines did not fit the 8 KB cap is named as
+the omission it is instead of reading as "no findings recorded". The
+Minors: the unreadable-log naming, the double-counted raw lines (one
+walk now), the compare-cap and malformed-`files` shapes, the
+carried-vs-carried dedupe across two records at one head (the
+paraphrase case stated as the exact-match limitation it is), the
+instructions no longer inviting findings the composition drops (a
+non-`revises` entry is dropped and named), the D79 test list and the
+"5 delta flows" count corrected (13 in `test_coordinator.py` now), the
+no-delta-sections test parsing a real full-review draft, and the shared
+parsers promoted to public names so `delta.py` stops reaching into
+underscore internals. The Nits: the docstring churn reverted, the dead
+helper removed and the shadowed parameter renamed, the carry call's
+model now wrapped by the lens trace (it was the one review-stage call
+with no span), and the status line carrying `carried_unverified` beside
+`carried` and `resolved`. One test flake observed once
+(`test_instrumented.py::test_every_read_returns_what_the_inner_reader_returned`,
+a tarball read) and not on retry or in the full re-run; left alone.
+
 ## 2026-11-18 (same day) — #747 round 1: finishing is the default, the race installs, the gap is recorded
 
 The protocol review's three Majors, fixed on the bottom layer (the
@@ -3472,3 +3554,162 @@ rollback: a release without the queue file's `pending` key and
 `delta_from` strands kept heads (their redelivery is refused), so drain
 before downgrading, with the boot log's `pending follow-ups N` as the
 observable (R2-F9).
+
+## 2026-11-18 (same day) — #748 round 2: the evidence pool is the range's, and the omission rides the chain
+
+The round-2 protocol review's two Majors, fixed on the delta branch
+(the correction appended to D79 carries the list). The resolution
+evidence pool was the pull request's `base...head` net diff restricted
+to range paths — the removed lines of the very diff the review runs on
+— not the `delta_from..head` range's own deletions: a delta commit
+deleting PR-added code is invisible in a net diff (the line exists at
+neither end), so the dominant legitimate resolution could never produce
+evidence, while a pre-delta PR removal sat in the pool and could clear
+the gate. The pool is now `DeltaScope.removed`, read from the
+comparison's per-file `patch` fields with each removed line's old-side
+line number — the range measures its patches from `delta_from`, so
+those are the coordinates the prior findings cite — and the carry turn
+shows the range's own patches, so the assessor can quote what the
+commits actually deleted; the judge's quote sources come from the same
+range diff. The evidence check is span-bounded (round-2 a2): every
+quoted line must sit within the finding's cited span widened by the
+quote tolerance, so any removed line in the file — down to a one-line
+brace — no longer clears the gate. The summed `findings_omitted` now
+rides on the review (`carried_omitted`) and into `_round_record`, added
+on top of `fit_record`'s own drops, so the gap stays in the durable
+chain across hops — pinned by a two-hop test. The Minors: a comparison
+with no readable merge base is untrusted (a1); `_capped`'s truncation
+branch is pinned (a4), its docstring stating why a truncated delta
+still judges resolutions safely (the pool is structured; an assessor
+that cannot see a removed line cannot quote it); the D79 Update's dead
+`delta_review_diff` reference and superseded gate prose corrected in
+place (a5). The Nits: `prompt.fence_rule` public (n5, the last
+underscore reach-through); `CarryCallRefused` no longer stores the
+never-read `found` (n6); the failed-carry note names the exception's
+detail. Skipped with reasons, recorded in D79: n7 (the fabricated
+`ReassessReply` shim — harmless while the carry path stores no
+attestation, and un-fabricating it splits the judge for one caller) and
+n8 (the 16-parameter clump is the existing `review_lens`/`_review_one`
+convention; a delta-only context object would be a second convention).
+
+## 2026-11-18 (same day) — #748 round 3: a re-statement cannot lower the recorded severity
+
+The round-3 protocol review's Major C, fixed on the delta branch: a
+verified carry-forward re-statement replaced the recorded prior finding
+wholesale — severity, valence and attribution all from the model's reply
+— so a carried Blocker restated as a nit flipped the delta verdict to
+APPROVE; the round-1 M4 guard covered only the unanchored priors. The
+rule is now D73's own: a re-statement re-anchors location, evidence and
+wording, but a replacement that would leave the verdict-setting set
+weaker — a lower severity, or valence/attribution moved off
+defect-introduced — carries the RECORDED severity and shape with its
+re-anchored copy, and the proposal is named in the draft; a raise is
+taken (the conservative direction). Pinned by the delta-level tests
+(Blocker→nit keeps BLOCKER and names the proposal; a raise is taken;
+the valence trade refused the same way) and the coordinator-level probe
+(Blocker restated as a nit keeps the verdict at BLOCK). The Minors: the
+two-hop omission test's second hop now points its scope at hop one's
+own head and asserts the note's sha is hop one's — the assertion that
+dies when the hop re-reads the seeded record (a6); `_patch_removed`
+treats a `---`-shaped line as a header only before the first hunk (a
+SQL or Lua comment inside a hunk is content) and the
+`\ No newline at end of file` marker moves no counter (a7); the delta
+note goes through the quote discipline like every other model-adjacent
+field (a8); the D79 Update's parse-format sentence was to name the
+quoted-location form (a9 — claimed in this entry and not applied; the
+round-4 fix corrects it, below); the #747-owned session-log heading
+restored to its own layer's text (a10). The Nits: the unused `names` parameter
+dropped from `_range_removals` (n9); the module docstring's acceptance
+sentence names `DeltaScope.removed` and the span bound (n10). Skipped
+with reason: n11 (the coordinator-level pool test injects its pool
+synthetically — the real `delta_scope`→`_carry_call` wiring is pinned
+at the delta.py level with a compare fixture; wiring the coordinator
+test through a fixture-backed reader would duplicate that pin).
+
+## 2026-11-18 (same day) — #748 round 4: the a9 sentence actually corrected (b1)
+
+The round-4 protocol review's one Minor (b1): the round-3 fix claimed —
+in its commit message and in the round-3 entry above — that the D79
+Update's parse-format sentence named the quoted-location form, but the
+fix commit touched no `docs/open-questions.md`, and the Update still
+described the record's finding line as the unquoted
+`{id} {severity} {location} {finding}`, while `_round_record` has
+written the quoted-location form `{id} {severity} "{location}" {finding}`
+since the round-1 fix (the location quoted so a path containing a space
+cannot be misread as the finding's first word). The sentence now names
+the shipped form, with the correction owned in place, and the round-3
+entry's a9 clause above was corrected to say the fix was claimed and
+not applied. The round-4 verdict is APPROVE with nothing else at or
+above Nit; the round-3 mutants were re-applied by the reviewer and all
+13 died.
+
+## 2026-11-18 (same day) — #748 round 5: the unproven scope never bounds a review
+
+PR #747 merged (main `9b5f8841`); #748 retargeted to main and restacked
+(`83dbc6c7`, the round-4 tree). CodeRabbit finished after the round-4
+APPROVE, and Brandon's round-10 routine review verified three of its
+Majors and approved the round. The fixes, each pinned by a named test
+whose mutant dies: **Major 1** — a diverged history or a cut comparison
+file list cannot prove what the range touched, so `delta_scope` no
+longer narrows the lens diff to such a list (the review runs the full
+pull request diff, the unfetchable case's own fallback), and the
+service-side family case is fixed where the shape is decided:
+`ReviewReport` carries the status line's `coverage_complete` flag and
+`Board.settle` keys the follow-up's shape on it, so a finished review
+that did not read every changed file queues its kept head as an
+ordinary full review, never a delta on an unread base. **Major 2** — a
+prior finding the delta cannot assess (a raw-text line, a legacy
+unquoted whole-file location among them, or a record-cap omission)
+marks coverage incomplete through `_lens_gap`, the one coverage rule,
+so a clean delta over it posts COMMENT and never a plain approval; a
+complete record with no standing findings still approves. **Major 3** —
+the carry-forward's exception note is scrubbed where it is recorded, so
+the status line and the body carry the same redacted text
+(`_status_log_note` never scrubbed). **The check** — `LensKey` carried
+no scope, and the deployment-wide attestation ledger would let a later
+full run at the same head reuse a delta run's settled lens and its
+unread list; the run's scope digest now suffixes the key
+(`lens@<12-hex>`), same-scope reuse intact. The cheap CodeRabbit
+fixes: the resolution gate is the range's own touched paths (a deleted
+file's resolutions accepted; renames contribute `previous_filename` to
+the gate and the removed pool), the patch reader splits on LF only, a
+double quote is refused in a finding's location at the mint-side
+contract, the dedupe keeps the duplicate pair's stronger finding, the
+carry call checks the review wall before its reservation and again
+before sending (a reservation that crosses the wall is accounted, not
+sent), the parser's dropped restatements are named in the draft (D54),
+the post quotes the draft's delta note instead of asserting a carry,
+and the post's resolved and carried sections render the controller's
+bullets scrubbed and uncapped. The fixture tree's dry-run realism fixes
+landed with it (the head commit in `pull-commits.json`, the hunk
+counts, `changed_files`, the scenario's cited line, the SPDX header,
+the runner's ruff response matching reality). Skipped with one-line
+reasons in the PR body: the record's valence/attribution fields, the
+stale-anchor SHA check, the withdrawal quote's content match (the last
+two and the first fail closed or over-count conservatively today; the
+first and third need the record-format change), the base-merge path
+separation (documented deliberate over-inclusion), the quarantined-log
+note wording (the context omission already blocks approval), and the
+fixture withdrawal scenario (pinned at the delta and coordinator
+levels). Seventeen mutants applied by hand this round; all died.
+
+## 2026-11-18 (same day) — #748 round 6: the record catches up with its own justification
+
+The round-6 protocol review's verdict is APPROVE — all three round-5
+Majors and the LensKey scope fix verified, 17 mutants dead, the six
+skips' reasons each re-traced and held. Two residuals, both records:
+**b2** — the round-5 correction justified the one-shot CLI's delta
+narrowing with "no round log is read in that mode", which is false (the
+one-shot delta path reads the round log through `--round-log`, and the
+branch's own end-to-end dry run does exactly that); the clause is
+corrected in place in D79, and the justification now names what
+actually makes the exception safe — the delta's own coverage is held to
+the same `_lens_gap` gate every review runs, so unread files and
+unassessable priors still block a plain approval there. **b3** — the
+mint-side double-quote refusal makes findings on a double-quoted path
+unreportable (the finding fails the reply's contract, the lens retries
+into the same wall until its attempts exhaust, the lens ends failed and
+coverage incomplete, and the review lands COMMENT — never an approval
+over the gap); recorded in D79 as a known limitation with the
+record-format follow-up as its escape, not a behavior change. Docs
+only; no code touched.

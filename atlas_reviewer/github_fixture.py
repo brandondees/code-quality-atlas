@@ -108,6 +108,13 @@ class FixtureGitHub:
 
     def get_compare(self, repo: str, base: str, head: str) -> Json:
         self.calls.append(("get_compare", repo, f"{base}...{head}"))
+        # A `compare-<first 7 of base>-<first 7 of head>.json` file, when
+        # the fixture ships one, is served for that exact pair -- the
+        # delta review's range comparison (#702) is a second comparison
+        # the merge-base one cannot double for.
+        override = self._root / f"compare-{base[:7]}-{head[:7]}.json"
+        if override.is_file():
+            return self._json(override.name)
         return self._json("compare.json")
 
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:

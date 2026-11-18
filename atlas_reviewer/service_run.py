@@ -295,6 +295,29 @@ class ReviewReport:
     cost_lines: tuple[str, ...]
     recommended_event: str
     findings: tuple[str, ...] = ()
+    resolved: tuple[str, ...] = ()
+    """A delta review's resolved findings (#702): the draft's
+    resolved-section bullets, each the whole line the draft wrote, so the
+    posted comment shows what the new commits fixed and why."""
+    coverage_complete: bool | None = None
+    """The draft status line's coverage flag: True when the review read
+    every changed file, False when it did not, None when the draft's
+    status line does not say (a pre-#702 draft, say). The queue keys the
+    follow-up's shape on it (round-5 review of #748): a finished review
+    that did not cover the pull request cannot stand in for the files it
+    never read, so its follow-up is queued as an ordinary full review,
+    not as a delta on top of it."""
+    delta_note: str = ""
+    """The draft status line's carry-forward note (#702), as the
+    coordinator recorded it. The post cites it instead of asserting that
+    the earlier findings were carried forward when the note says
+    otherwise -- an unreadable round record is not a review with no
+    prior findings (round-5 review of #748)."""
+    carried_unverified: tuple[str, ...] = ()
+    """A delta review's carried findings without a re-anchored, verified
+    quote (#702): the draft's carried-section bullets. They are not
+    findings, but the post shows them, so a carried finding is never
+    silently dropped between the draft and the comment."""
 
 
 @dataclass(frozen=True)
@@ -501,6 +524,16 @@ class DraftParseError(ValueError):
     """A draft the service cannot map to a report for the mode it ran."""
 
 
+def _status_flag(status: Mapping[str, object], key: str) -> Any:
+    """The status field only when it has the type the field promises:
+    a draft the coordinator did not write yields None/empty, not a
+    guess."""
+    value = status.get(key)
+    if key == "coverage_complete":
+        return value if isinstance(value, bool) else None
+    return value if isinstance(value, str) else ""
+
+
 def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
     recommended = status.get("review_event")
     run: list[str] = []
@@ -531,6 +564,8 @@ def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         tuple(_bullets(section(draft, "Model usage"))),
         recommended if isinstance(recommended, str) else "",
         findings=_findings(draft),
+        coverage_complete=_status_flag(status, "coverage_complete"),
+        delta_note=_status_flag(status, "delta_note"),
     )
 
 
@@ -605,6 +640,10 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         tuple(cost),
         recommended if isinstance(recommended, str) else "",
         findings=_findings(draft),
+        resolved=tuple(_bullets(section(draft, "Resolved by the new commits"))),
+        carried_unverified=tuple(_bullets(section(draft, "Carried, not re-verified"))),
+        coverage_complete=_status_flag(status, "coverage_complete"),
+        delta_note=_status_flag(status, "delta_note"),
     )
 
 

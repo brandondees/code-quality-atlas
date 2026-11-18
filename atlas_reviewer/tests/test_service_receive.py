@@ -50,7 +50,14 @@ SHA_C = "c" * 40
 REPO = "brandondees/code-quality-atlas"
 OTHER = "other/repo"
 REPORT = ReviewReport(
-    ("tracing",), ("concurrency: over budget",), "note", (), (), (), "COMMENT"
+    ("tracing",),
+    ("concurrency: over budget",),
+    "note",
+    (),
+    (),
+    (),
+    "COMMENT",
+    coverage_complete=True,
 )
 
 
@@ -985,9 +992,9 @@ def test_a_supersede_during_a_deferred_post_is_not_logged_as_a_retry(tmp_path):
     assert job is not None
     real = board.settle
 
-    def settle(current, state):
+    def settle(current, state, **kw):
         current.superseded = True
-        return real(current, state)
+        return real(current, state, **kw)
 
     board.settle = settle
     worker._defer_post(job, "github down")
@@ -1069,7 +1076,7 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
         finishes: list[JobState] = []
         real = board.settle
 
-        def settle(job, state):
+        def settle(job, state, **kw):
             committed, _follow_up = real(job, state)
             finishes.append(committed)
             return committed, _follow_up
@@ -1111,7 +1118,7 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
     finishes: list[JobState] = []
     real = board.settle
 
-    def settle(job, state):
+    def settle(job, state, **kw):
         committed, _follow_up = real(job, state)
         finishes.append(committed)
         return committed, _follow_up
@@ -1657,7 +1664,7 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
     worker = _worker(board, runner, root=tmp_path)
     real = board.settle
 
-    def settle(job, state):
+    def settle(job, state, **kw):
         job.superseded = True
         return real(job, state)
 
@@ -3423,3 +3430,90 @@ def test_a_candidate_that_crosses_into_posting_during_the_window_is_kept(
     assert verdict.reason == "the review was already posting its comment"
     decisions = [e for e in telemetry.events if e.step == "head change"]
     assert decisions[0].fields["decision"] == "keep"
+
+
+# ------------------------------------------------- round-5 fixes (#748)
+
+
+def test_an_incomplete_reviews_follow_up_queues_as_a_full_review(tmp_path):
+    """The follow-up's shape (round-5 review of #748, Major 1): a
+    finished review whose coverage was incomplete cannot stand in for
+    the files it never read, so the kept head queues as an ordinary
+    full review of the pull request, not as a delta on top of it -- the
+    delta's narrowing would leave exactly those files to no review at
+    all. Mutant: the covered flag dropped from settle, which queues a
+    delta over an unread base."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    committed, follow_up = board.settle(job, JobState.DONE, covered=False)
+    assert committed is JobState.DONE
+    assert follow_up is not None
+    # Mutant target: a delta base on top of an unread review.
+    assert follow_up.delta_from == ""
+    reloaded = Board(path)
+    requeued = reloaded.claim()
+    assert requeued is not None
+    assert requeued.event.head_sha == SHA_B
+    assert requeued.event.delta_from == ""
+
+
+def test_the_worker_keys_the_followup_on_the_reports_coverage(tmp_path):
+    """The worker passes its report's coverage flag into the settle
+    (round-5 review of #748, Major 1): an incomplete report's follow-up
+    runs as an ordinary review, with no delta base on the event. Mutant:
+    the flag not threaded from the report, which queues the follow-up
+    as a delta."""
+    from dataclasses import replace
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[tuple[str, str]] = []
+    incomplete = replace(REPORT, coverage_complete=False)
+
+    def runner(event, cancel):
+        seen.append((event.head_sha, event.delta_from))
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, incomplete)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and len(seen) < 2:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    # Mutant target: the follow-up ran as a delta on the unread base.
+    assert seen == [(SHA_A, ""), (SHA_B, "")]
+    queued = [e for e in telemetry.events if e.step == "follow-up queued"]
+    assert [e.fields["sha12"] for e in queued] == [SHA_B[:12]]
+    assert all("delta_from" not in e.fields for e in queued)

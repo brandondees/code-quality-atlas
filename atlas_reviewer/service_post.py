@@ -101,7 +101,12 @@ def marker_for(key: str) -> str:
     return f"{_MARKER}{key} -->"
 
 
-def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) -> str:
+def render_comment(
+    report: ReviewReport,
+    key: str,
+    scrub: Callable[[str], str],
+    delta_from: str = "",
+) -> str:
     recommended = report.recommended_event
     if recommended not in _EVENTS:
         recommended = "unreported"
@@ -109,14 +114,45 @@ def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) 
         report.files_note,
         *(f"not reviewed in full: {path}" for path in report.files_not_read),
     )
-    head = (
+    head: tuple[str, ...] = (
         _BANNER,
         f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
     )
+    if delta_from:
+        # A delta review cites the review it builds on (#702): the head
+        # whose review carried these findings forward. The carry
+        # forward's own note, when the draft carries one, replaces the
+        # carried-forward claim -- an unreadable round record is not a
+        # review with no prior findings, and the note is what tells the
+        # two apart (round-5 review of #748).
+        if report.delta_note:
+            head += (
+                f"Follows the review of `{delta_from[:12]}`; {scrub(report.delta_note)}",
+            )
+        else:
+            head += (
+                f"Follows the review of `{delta_from[:12]}`; the findings it reported are carried forward below.",
+            )
     tail = (
         _section("Lenses run", report.lenses_run, scrub),
         _section("Lenses not run", report.lenses_not_run, scrub),
         _FILES + "\n\n" + _section("Files read", files, scrub),
+        # A delta review's resolved and carried sections (#702); a full
+        # review's post carries no empty delta sections.
+        *(
+            (_carried_section("Resolved by the new commits", report.resolved, scrub),)
+            if report.resolved
+            else ()
+        ),
+        *(
+            (
+                _carried_section(
+                    "Carried, not re-verified", report.carried_unverified, scrub
+                ),
+            )
+            if report.carried_unverified
+            else ()
+        ),
         _section("Limit stops", report.limit_stops, scrub),
         _section("Cost", report.cost_lines, scrub),
     )
@@ -160,6 +196,25 @@ def _section(title: str, items: tuple[str, ...], scrub: Callable[[str], str]) ->
         listed = "None."
     else:
         listed = "\n".join(f"- {quote_untrusted(item, scrub=scrub)}" for item in items)
+    return f"## {title}\n\n{listed}"
+
+
+def _carried_section(
+    title: str, items: tuple[str, ...], scrub: Callable[[str], str]
+) -> str:
+    """The delta post's resolved and carried sections, rendered unlike
+    the ordinary ones: each bullet is one line the controller assembled
+    and already quoted when the draft was written, so it is posted
+    scrubbed and uncapped -- the same rule the Findings section runs on
+    -- instead of re-quoted and cut at the quoting default, which cut a
+    resolution's reason off a bullet that was well under the post limit
+    (round-5 review of #748). The invariant is the Findings section's:
+    these bullets reach `ReviewReport` only through `summarize_draft`,
+    from a draft the coordinator rendered."""
+    if not items:
+        listed = "None."
+    else:
+        listed = "\n".join(f"- {scrub(item)}" for item in items)
     return f"## {title}\n\n{listed}"
 
 
@@ -304,7 +359,7 @@ class ReviewPoster:
                 raise PostNotCurrent(
                     "the head moved or the post was stopped before the review was sent"
                 )
-            body = render_comment(report, key, self._scrub)
+            body = render_comment(report, key, self._scrub, delta_from=event.delta_from)
             review_id = self._create(event, comment_payload(event.head_sha, body))
             self._ledger.record(key, review_id)
         finally:

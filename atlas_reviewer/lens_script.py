@@ -55,6 +55,7 @@ from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
 
+from atlas_reviewer.delta import CARRY_TARGET_PREFIX, parse_carry_reply
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lens_loop import (
     AssistantCalls,
@@ -98,6 +99,18 @@ class ReassessScript:
 
 
 @dataclass(frozen=True)
+class CarryScript:
+    """The scenario's delta carry-forward reply (#702): the findings the
+    assessor re-states (each `revises`-ing a prior label with its
+    reason) and the prior labels it proposes resolving, each with its
+    reason. The carry-forward assessor is the controller's own, not a
+    lens, so there is no per-lens mapping."""
+
+    findings: tuple[Mapping[str, str], ...] = ()
+    withdrawn: tuple[Mapping[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class LensScript:
     """`findings` maps a lens name to the finding objects it reports, in
     reply order. `unread` names changed files no lens ever reads.
@@ -108,6 +121,7 @@ class LensScript:
     reassessment: ReassessScript = ReassessScript(
         MappingProxyType({}), MappingProxyType({})
     )
+    carryforward: CarryScript = CarryScript()
 
     def findings_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
         return self.findings.get(lens, ())
@@ -130,16 +144,17 @@ def load_lens_script(path: Path) -> LensScript:
         raise LensScriptError(f"cannot read lens script {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise LensScriptError(f"lens script {path} must hold a JSON object")
-    unknown = set(raw) - {"findings", "unread", "reassessment"}
+    unknown = set(raw) - {"findings", "unread", "reassessment", "carryforward"}
     if unknown:
         raise LensScriptError(
-            f"lens script {path} has keys outside findings, unread and "
-            f"reassessment: {', '.join(sorted(unknown))}"
+            f"lens script {path} has keys outside findings, unread, "
+            f"reassessment and carryforward: {', '.join(sorted(unknown))}"
         )
     return LensScript(
         _findings(path, raw.get("findings", {})),
         _unread(path, raw),
         _reassessment(path, raw.get("reassessment", {})),
+        _carryforward(path, raw.get("carryforward", {})),
     )
 
 
@@ -283,6 +298,57 @@ def _reassess_withdrawn(
     return MappingProxyType(parsed)
 
 
+def _carryforward(path: Path, raw: object) -> CarryScript:
+    """The scenario's delta carry-forward reply (#702), validated entry
+    by entry with the real carry-forward parser: an entry that breaks
+    the reply's shape is refused at load, not discovered as a contract
+    refusal mid-run. The reply is controller-level, so the entries are
+    not mapped by lens."""
+    if not isinstance(raw, dict):
+        raise LensScriptError(f"lens script {path}: carryforward must be an object")
+    unknown = set(raw) - {"findings", "withdrawn"}
+    if unknown:
+        raise LensScriptError(
+            f"lens script {path}: carryforward has keys outside findings "
+            f"and withdrawn: {', '.join(sorted(unknown))}"
+        )
+    findings = raw.get("findings", [])
+    withdrawn = raw.get("withdrawn", [])
+    if not isinstance(findings, list) or not isinstance(withdrawn, list):
+        raise LensScriptError(
+            f"lens script {path}: carryforward findings and withdrawn must be lists"
+        )
+    for i, entry in enumerate((*findings, *withdrawn), 1):
+        reply = json.dumps(
+            {
+                "findings": [entry] if i <= len(findings) else [],
+                "withdrawn": [] if i <= len(findings) else [entry],
+            }
+        )
+        try:
+            parse_carry_reply(reply)
+        except ContractError as exc:
+            raise LensScriptError(
+                f"lens script {path}: carryforward entry {i} breaks the "
+                f"carry-forward reply's shape: {exc}"
+            ) from exc
+    try:
+        # The complete reply too (round-5 review of #748): the caps are
+        # reply-level, so a scenario whose entries are each valid but
+        # number over the reply's cap loads per entry and then fails at
+        # parse time mid-run, silently carrying every prior finding.
+        parse_carry_reply(json.dumps({"findings": findings, "withdrawn": withdrawn}))
+    except ContractError as exc:
+        raise LensScriptError(
+            f"lens script {path}: carryforward breaks the carry-forward "
+            f"reply's shape: {exc}"
+        ) from exc
+    return CarryScript(
+        tuple(MappingProxyType(dict(entry)) for entry in findings),
+        tuple(MappingProxyType(dict(entry)) for entry in withdrawn),
+    )
+
+
 class LensScriptModel:
     """The scripted reviewer one lens run talks to. Each run gets a fresh
     instance, so a continuation starts with its own coverage state and
@@ -314,6 +380,14 @@ class LensScriptModel:
         return 0
 
     def turn(self, request: TurnRequest) -> ModelTurn:
+        if _is_carryforward(request.messages):
+            # The delta review's carry-forward turn (#702): the controller
+            # offers no tools and asks for one reply, which the scenario's
+            # `carryforward` section holds (silence keeps every prior
+            # finding as the record stored it). Checked before the body
+            # markers: the carry-forward system prompt carries no lens
+            # body, because the assessor is the controller's own.
+            return self._carry_final()
         lens, digest = _markers(request.system)
         if _is_reassessment(request.messages):
             # D73's re-assessment turn: the reuse path offers no tools and
@@ -373,6 +447,18 @@ class LensScriptModel:
         }
         return FinalReply(json.dumps(payload), self._cost)
 
+    def _carry_final(self) -> FinalReply:
+        """The scenario's carry-forward reply (#702): the prior labels it
+        re-states, each with its re-anchored location, and the prior
+        labels it proposes resolving, each with its reason."""
+        payload = {
+            "findings": [
+                dict(finding) for finding in self._script.carryforward.findings
+            ],
+            "withdrawn": [dict(entry) for entry in self._script.carryforward.withdrawn],
+        }
+        return FinalReply(json.dumps(payload), self._cost)
+
     def _reassess_final(self, lens: str, digest: str) -> FinalReply:
         """The scenario's re-assessment reply: the findings it reports --
         each optionally revising a prior label -- and the prior labels it
@@ -418,6 +504,19 @@ class LensScriptModel:
             self._pages[path] = int(page.group(1)) if page is not None else None
         elif call.tool == "read_file" and _OK in first:
             self._read.add(path)
+
+
+def _is_carryforward(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the delta review's carry-forward
+    turn (#702): its first message opens with the controller's own
+    carry-forward subject, which no PR-written text can be the first
+    line of. Checked before the re-assessment turn's, because both are
+    one-message, tool-less turns."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(CARRY_TARGET_PREFIX)
+    )
 
 
 def _is_reassessment(messages: tuple[object, ...]) -> bool:

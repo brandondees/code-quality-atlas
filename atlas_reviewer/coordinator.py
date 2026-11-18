@@ -92,6 +92,16 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
 from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
+from atlas_reviewer.delta import (
+    CarryResult,
+    DeltaScope,
+    apply_carry,
+    carry_system,
+    carry_turn,
+    judged_carry,
+    parse_carry_reply,
+    parse_prior_line,
+)
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -157,10 +167,11 @@ from atlas_reviewer.reassess import (
     reassess_system,
     reassess_turn,
 )
-from atlas_reviewer.redact import Redactor
+from atlas_reviewer.redact import TRUNCATION_MARKER, TRUNCATION_MARKER_CHARS, Redactor
 from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
+    RECORD_CHARS,
     SOURCE,
     RoundLog,
     RoundRecord,
@@ -191,6 +202,11 @@ from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 QUOTED_CHARS = 600
 EVIDENCE_CHARS = 1_200
 NONCE_BYTES = 8
+# The delta diff the carry-forward turn carries, capped with the
+# truncation marker: a delta over this size is judged on its first
+# CARRY_DIFF_CHARS characters rather than costing the whole carry-forward
+# call its evidence to the per-call token check (#702).
+CARRY_DIFF_CHARS = 32_768
 # Continuation rounds per review. Each round re-runs the lenses that still
 # have unread files; a round that does not shrink the gap ends it earlier.
 MAX_CONTINUATIONS = 4
@@ -246,6 +262,11 @@ class MintedFinding:
     # A verified window match's line distance from the citation (D64); 0
     # otherwise. The draft builds the source tag from it.
     drift: int = 0
+    carried: bool = False
+    """True for a prior finding the delta review carried forward (#702):
+    `id` is the carry-forward label (`P1`, ...), `lens` is the earlier
+    record's lens attribution, and the finding was quote-verified against
+    this head like any other."""
 
 
 class Verdict(StrEnum):
@@ -289,6 +310,40 @@ class AgenticReview:
     `review_ceiling_usd:` line that could not be used (round-1 review of
     #717, m-5), so a meant ceiling that silently fell back to the default
     is visible in the draft."""
+    carried_unverified: tuple[tuple[str, Finding], ...] = ()
+    """Prior findings the delta review carries without a re-anchored,
+    verified quote (#702): each with its carry-forward label and the
+    finding exactly as the earlier record stored it. They are not
+    reported as findings (a quote that does not verify at this head is
+    not reported), but they are named in the draft and carried in the
+    round record, so the next review re-offers them -- never silently
+    dropped (D73) -- and their severities still count for the verdict,
+    because a failed re-anchor is not evidence the defect is fixed."""
+    carried_raw: tuple[str, ...] = ()
+    """Prior finding lines that do not parse (#702, round-1 M3): the
+    record's own text, quoted verbatim in the draft's carried section and
+    re-recorded, so the chain never loses them. Empty outside a delta
+    review."""
+    carried_omitted: int = 0
+    """Verified findings the earlier record could not store (its
+    8,192-character cap), carried forward as a count (#702, round-2
+    Major B): the delta review cannot recover their text, but the
+    omission is written into this review's own round record, so the next
+    hop re-states the gap instead of the chain losing it after one hop.
+    Zero outside a delta review."""
+    resolved: tuple[tuple[str, str, Finding], ...] = ()
+    """Prior findings the delta's new commits fixed (#702), each with its
+    carry-forward label and the stated reason the carry-forward call
+    gave. A resolution is accepted only for a finding whose file the
+    delta touched."""
+    delta_note: str = ""
+    """Controller text about the delta review's own shape (#702): the
+    fallback to the full diff when the delta range could not be fetched,
+    or the note that nothing was carried because no earlier findings are
+    recorded at the delta base."""
+    delta_from: str = ""
+    """The head this delta review builds on (#702), empty on a full
+    review. The draft cites it; the service post cites it too."""
 
     @property
     def unreviewed_paths(self) -> tuple[str, ...]:
@@ -382,13 +437,25 @@ def rank(findings: Sequence[MintedFinding]) -> tuple[MintedFinding, ...]:
     )
 
 
-def decide(findings: Sequence[MintedFinding]) -> Verdict:
+def decide(
+    findings: Sequence[MintedFinding],
+    *,
+    carried_setting: Sequence[Severity] = (),
+) -> Verdict:
     """From the verified verdict-setting findings: only an introduced
     defect sets the verdict. A Blocker requests changes. A Major or a
-    Minor means approve with changes (D55)."""
+    Minor means approve with changes (D55).
+
+    `carried_setting` is the delta review's extra (#702): the severities
+    of the carried-but-unre-anchored prior findings, which count as
+    verdict-setting without being verified at this head -- they were
+    verified findings of the earlier review of this pull request's code,
+    and a failed re-anchor is not evidence the defect is fixed, so a
+    standing prior Blocker can never become an approval."""
     setting = [
         f.finding.severity for f in findings if f.verified and f.finding.sets_verdict
     ]
+    setting.extend(carried_setting)
     if any(s.rank <= Severity.BLOCKER.rank for s in setting):
         return Verdict.BLOCK
     if any(s is Severity.MAJOR or s is Severity.MINOR for s in setting):
@@ -566,6 +633,7 @@ def review_lenses(
     picker_spend: tuple[int, Decimal] = (0, Decimal(0)),
     trace: ReviewTrace | None = None,
     evidence_digest: str | None = None,
+    delta: DeltaScope | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -594,7 +662,17 @@ def review_lenses(
     `reassess.snapshot_digest`). It is stored with every attempt this
     review finishes, and a reused settled lens whose stored digest differs
     from it -- or that carries none -- earns one bounded re-assessment call
-    against this review's shared spend and wall clock."""
+    against this review's shared spend and wall clock.
+
+    D79: `delta` marks this as a delta review -- the follow-up to a
+    review that finished while a push was held back. The lenses run on
+    the delta diff the scope carries, and after they settle the earlier
+    review's findings (the round log's records at the scope's
+    `delta_from`) are carried forward through one bounded carry-forward
+    call: re-stated findings re-anchored and quote-checked against this
+    head, the new commits' fixes marked resolved on evidence the delta
+    removed their cited code, everything else carried as it was
+    recorded, never silently dropped."""
     read = review_md_ceiling(trees.base)
     derived, derivation = derive_review_wide(
         limits,
@@ -636,6 +714,7 @@ def review_lenses(
             derivation=derivation,
             picker_spend=picker_spend,
             evidence_digest=evidence_digest,
+            delta=delta,
         ),
     )
 
@@ -669,6 +748,7 @@ def _review_lenses(
     derivation: Derivation,
     picker_spend: tuple[int, Decimal],
     evidence_digest: str | None,
+    delta: DeltaScope | None = None,
 ) -> AgenticReview:
     changed = frozenset(f.path for f in split_files(diff))
     blocks, omissions, other_pull_requests = _review_context(
@@ -805,8 +885,35 @@ def _review_lenses(
         other_pull_requests=other_pull_requests,
         ceiling_note=derivation.ceiling_note,
     )
+    if delta is not None:
+        review = _with_carryforward(
+            review,
+            event,
+            delta,
+            round_log,
+            diff,
+            trees,
+            changed,
+            model,
+            spend,
+            resolved,
+            clock,
+            deadline,
+            fence_nonce,
+            contract or finding_contract(),
+            trace,
+            redactor,
+        )
     return _record_round(
-        round_log, event, replace(review, changed=changed, runners=reports), redactor
+        round_log,
+        event,
+        replace(
+            review,
+            changed=changed,
+            runners=reports,
+            delta_from=delta.delta_from if delta is not None else "",
+        ),
+        redactor,
     )
 
 
@@ -1021,8 +1128,18 @@ def _review_one(
         # A continuation is its own ledger entry. The lens's own attempt
         # stays settled when it left files unread (D42); this entry is the
         # coordinator assigning those files, not a retry of that attempt.
-        digest = hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
-        ledger_lens = f"{lens}#{digest}"
+        ledger_lens = f"{lens}#{_scope_digest(scope)}"
+    else:
+        # The run's scope is part of the entry's identity (round-5
+        # review of #748): the ledger is deployment-wide, and a delta
+        # run's settled lens at this head shares the key a later full
+        # run at the same head would compute -- the reused result's
+        # unread list is the delta's, and the full review would claim
+        # files no lens ever read. The `@` marker cannot collide with
+        # the continuation's `#`-hex suffix or `#reassess`; the same
+        # scope at the same head still reuses its settled attempt, so a
+        # crash-and-resume of one review bills nothing twice.
+        ledger_lens = f"{lens}@{_scope_digest(scope)}"
     key = LensKey(
         event.repo, event.pr_number, event.head_sha, ledger_lens, body_digest(body)
     )
@@ -1394,6 +1511,403 @@ def _reassess_call(
     )
 
 
+def _with_carryforward(
+    review: AgenticReview,
+    event: PrEvent,
+    delta: DeltaScope,
+    round_log: RoundLog | None,
+    diff: str,
+    trees: SourceTrees,
+    changed: frozenset[str],
+    model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+    fence_nonce: str,
+    contract: str,
+    trace: ReviewTrace,
+    redactor: Redactor,
+) -> AgenticReview:
+    """The delta review's carry-forward step (#702, D79): the earlier
+    review's findings -- the round log's records at `delta_from` -- are
+    carried forward through one bounded, tool-less call, then composed
+    into the review's findings, verdict and draft.
+
+    Every prior finding ends somewhere visible: re-anchored and verified
+    in the findings set, resolved with its stated reason and its
+    evidence, or carried as the record stored it -- in the draft's
+    carried section and back into this review's round record, so the
+    next review re-offers it. Nothing is silently dropped (D73): a line
+    that does not parse travels as raw text, and a record whose finding
+    lines did not fit the record cap is named as the omission it is. The
+    resolution gate is `resolution_paths`, empty whenever the delta
+    could not actually be established -- a resolution is then refused
+    however the assessor proposed it. A carry-forward call that fails --
+    a contract refusal, a transport error, a spent-out review -- falls
+    back to carrying every prior finding as recorded, with the failure
+    named; the composition itself never raises."""
+    review = replace(review, delta_note=delta.note)
+    delta_from = delta.delta_from
+    records, log_note = _records_at(round_log, event, delta_from)
+    prior: list[tuple[str, Finding, str]] = []
+    raw_lines: list[str] = []
+    for record in records:
+        for line in record.findings:
+            found = parse_prior_line(line)
+            if found is None:
+                # Never dropped (D73): the raw line travels to the draft's
+                # carried section and back into this review's record.
+                raw_lines.append(line)
+            else:
+                # The carry-forward labels the priors by position (P1,
+                # P2, ...), the labels `prior_findings_block` renders and
+                # the reply's `revises`/`withdrawn` entries resolve
+                # against; the record's own stored id stays in the record.
+                prior.append((f"P{len(prior) + 1}", found[1], record.lens))
+    omitted = sum(record.findings_omitted for record in records)
+    if not prior and not raw_lines and not omitted:
+        # An unreadable log is not "no findings recorded" -- nothing is
+        # known -- so only the read failure is named (round-1 m1).
+        note = log_note or (
+            f"no findings are recorded for the review at {delta_from[:12]}; "
+            "nothing carried forward"
+        )
+        return replace(review, delta_note=_merge_note(review.delta_note, note))
+    scrubber = Redactor(redactor.known_secrets, redactor.sources)
+    lens_trace = trace.with_scrub(lambda text: scrubber(text).text)
+    try:
+        result = _carry_call(
+            event,
+            [(identifier, finding) for identifier, finding, _lens in prior],
+            diff,
+            trees,
+            changed,
+            delta.resolution_paths,
+            delta.gate_reason,
+            delta.range_diff,
+            delta.removed,
+            spend,
+            resolved,
+            clock,
+            deadline,
+            fence_nonce,
+            contract,
+            lens_trace.wrap_model(model),
+        )
+    except Exception as exc:  # noqa: BLE001 -- a failed carry-forward keeps every prior finding
+        result = CarryResult(
+            (),
+            tuple((identifier, finding) for identifier, finding, _lens in prior),
+            (),
+            (
+                (
+                    f"the carry-forward call failed ({type(exc).__name__}: "
+                    f"{scrubber(str(exc)).text}); "
+                    "every prior finding is carried as the earlier review "
+                    "recorded it"
+                ),
+            ),
+        )
+    return _compose_carry(
+        review,
+        prior,
+        result,
+        delta_from,
+        spend,
+        raw_lines,
+        omitted,
+        log_note,
+    )
+
+
+def _records_at(
+    round_log: RoundLog | None,
+    event: PrEvent,
+    delta_from: str,
+) -> tuple[tuple[RoundRecord, ...], str]:
+    """The round log's records for this pull request at the delta base,
+    and a controller note when the log itself could not be read --
+    "nothing carried" over an unreadable log is a false statement, so
+    the read failure is named instead. The records' finding lines are
+    the caller's to walk: the same walk collects the parsed findings and
+    the raw lines that do not parse, so neither is counted twice."""
+    if round_log is None:
+        return (), ""
+    loaded = round_log.read()
+    if loaded.file_unreadable:
+        detail = (
+            "the round log file could not be read, so no earlier findings "
+            "could be carried"
+        )
+        if loaded.quarantined_to:
+            detail += f"; it was moved aside to {loaded.quarantined_to}"
+        return (), detail
+    mine, _others = records_for(loaded.records, event.repo, event.pr_number)
+    return tuple(record for record in mine if record.head_sha == delta_from), ""
+
+
+def _carry_call(
+    event: PrEvent,
+    prior: Sequence[tuple[str, Finding]],
+    diff: str,
+    trees: SourceTrees,
+    changed: frozenset[str],
+    resolution_paths: frozenset[str],
+    gate_reason: str,
+    range_diff: str,
+    range_removed: Mapping[str, tuple[tuple[int, str], ...]],
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+    fence_nonce: str,
+    contract: str,
+    traced_model: LensModel,
+) -> CarryResult:
+    """One bounded carry-forward call (#702): the prior findings and the
+    delta diff in, one final reply out, quote-checked through the
+    re-assessment judge against the head files. No tools are offered; the
+    call is reserved at its worst case against the review's shared spend
+    (D68) and settled like any turn; a BYOK refusal halts the review's
+    spend the way one in the loop does. The resolution gate is the
+    caller's: `resolution_paths` when the delta is established, empty
+    when it is not; the turn shows the RANGE's own per-file patches
+    (`delta_from..head` -- the restricted pull-request diff cannot show
+    a delta commit deleting PR-added code, and its pool carries
+    pre-delta removals), and the removed-line evidence the reply's
+    proposals quote is checked against that range's pool, span-bounded
+    to the finding's citation (round-2 review of #748, Major A, a2)."""
+    # The assessor's readable content and the judge's quote sources are
+    # the range's own diff: a re-statement quoting the range's added
+    # lines verifies against the head tree (they are head content), and
+    # its removed runs are the range's deletions.
+    sources = read_sources(trees.head, range_diff or diff, changed)
+    checked_prior = [
+        CheckedFinding(finding, QuoteSource.HEAD) for _id, finding in prior
+    ]
+    delta_block = (
+        UntrustedBlock(
+            "delta-diff", RepoText(_capped(range_diff or diff, CARRY_DIFF_CHARS))
+        )
+        if (range_diff or diff)
+        else None
+    )
+    request = TurnRequest(
+        carry_system(contract, fence_nonce),
+        (
+            UserText(
+                carry_turn(event, prior_findings_block(checked_prior), delta_block, fence_nonce)
+            ),
+        ),
+        (),
+        None,
+    )  # fmt: skip
+    if clock.monotonic() >= deadline:
+        # The wall check before the reservation (round-5 review of
+        # #748): a carry call that starts after the lens loop's deadline
+        # must not reserve -- let alone send -- a billable request; the
+        # carry fallback carries every prior finding as recorded.
+        raise CarryCallRefused(
+            "the review's deadline passed before the carry-forward could run"
+        )
+    reserved = _reserve_call(traced_model, request, spend, clock, deadline, fit=False)
+    if not isinstance(reserved, _Reserved):
+        raise CarryCallRefused(reserved[1])
+    worst = reserved.worst
+    if clock.monotonic() >= deadline:
+        # The reservation fits immediately and never consults the clock,
+        # so the wall check is ours (round-5 review of #748): the lens
+        # loop ended at the deadline, and a billable call sent after it
+        # spends past the wall the review respects. The reservation
+        # stays accounted at its worst case -- the dollars were held --
+        # and the call is not sent; the carry fallback carries every
+        # prior finding as recorded.
+        spend.settle(worst, None)
+        raise CarryCallRefused(
+            "the review's deadline passed while the carry-forward "
+            "reserved; the call was not sent"
+        )
+    try:
+        reply = traced_model.turn(request)
+    except ByokRefusedError:
+        spend.settle(worst, None)
+        spend.halt()
+        raise
+    except TransportError:
+        spend.settle(worst, None)
+        raise
+    except BoundaryError:
+        spend.settle(worst, None)
+        raise
+    spend.settle(worst, reply.cost_usd)
+    if not isinstance(reply, FinalReply):
+        raise ContractError(
+            "the carry-forward reply was a tool call, and the turn has none"
+        )
+    parsed = parse_carry_reply(reply.text)
+    checked, revises = judged_carry(
+        parsed, prior, sources, trees.head, resolved.quote_tolerance
+    )
+    result = apply_carry(
+        prior,
+        checked,
+        revises,
+        parsed.withdrawn,
+        resolution_paths,
+        range_removed,
+        gate_reason,
+        resolved.quote_tolerance,
+    )
+    if parsed.dropped:
+        # The parser's dropped entries are named where the draft reads
+        # them (round-5 review of #748): a restatement the parser
+        # refused -- an unknown severity, say -- leaves the prior
+        # finding standing (it falls to the unanchored carries), and the
+        # drop's reason travels with the rest of the carry-forward's
+        # notes instead of vanishing with the reply (D54's
+        # dropped-finding rule).
+        result = replace(result, notes=(*result.notes, *parsed.dropped))
+    return result
+
+
+class CarryCallRefused(Exception):
+    """A carry-forward call the review's own limits refused before it was
+    sent. The caller falls back to carrying every prior finding as
+    recorded, and the refusal's text is named in the draft."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+
+
+def _compose_carry(
+    review: AgenticReview,
+    prior: Sequence[tuple[str, Finding, str]],
+    result: CarryResult,
+    delta_from: str,
+    spend: Spend,
+    raw_lines: Sequence[str],
+    omitted: int,
+    log_note: str,
+) -> AgenticReview:
+    """The delta review with the carry-forward composed in: the carried
+    findings join the minted ones (deduplicated -- a carried copy kept
+    over a new duplicate, and one carried copy over a second record's
+    restatement of the same finding), the verdict is recomputed over the
+    combined set WITH the carried-but-unre-anchored priors counted as
+    verdict-setting -- a prior Blocker that fails to re-anchor can never
+    become an approval -- and the carry's buckets, raw lines and notes
+    land on the review for the draft and the round record."""
+    lens_labels = {identifier: lens for identifier, _finding, lens in prior}
+    # The duplicate pairs' representatives (round-5 review of #748): a
+    # verdict-setting finding beats one that does not set the verdict,
+    # then the stronger severity, ties keeping the incumbent. The
+    # first-match rule this replaces dropped a verified Blocker under a
+    # carried Major restating the same text -- and the same loss between
+    # two carried copies -- and flipped a BLOCK to an
+    # approve-with-changes.
+    representatives: dict[tuple[str, str], MintedFinding] = {}
+    for identifier, checked in result.carried:
+        _keep_stronger(
+            representatives,
+            MintedFinding(
+                identifier,
+                lens_labels.get(identifier, ""),
+                checked.finding,
+                True,
+                "" if checked.source is None else checked.source.value,
+                "",
+                checked.drift,
+                True,
+            ),
+        )
+    for minted in review.findings:
+        _keep_stronger(representatives, minted)
+    combined = rank(tuple(representatives.values()))
+    notes = list(result.notes)
+    if raw_lines:
+        notes.append(
+            f"{len(raw_lines)} finding line(s) at {delta_from[:12]} could not "
+            "be parsed and are carried as the record's raw text"
+        )
+    if omitted:
+        notes.append(
+            f"{omitted} verified finding(s) from the review at "
+            f"{delta_from[:12]} were not stored in that round's record (its "
+            f"{RECORD_CHARS}-character cap), so they cannot be carried; the "
+            "record names the omission"
+        )
+    if log_note:
+        notes.append(log_note)
+    note = "; ".join(notes)
+    return replace(
+        review,
+        findings=combined,
+        verdict=decide(
+            combined,
+            carried_setting=tuple(
+                finding.severity
+                for _identifier, finding in result.unanchored
+                if finding.sets_verdict
+            ),
+        ),
+        carried_unverified=result.unanchored,
+        carried_raw=tuple(raw_lines),
+        carried_omitted=omitted,
+        resolved=result.resolved,
+        delta_note=_merge_note(review.delta_note, note),
+        model_calls=spend.calls,
+        committed_usd=str(spend.committed_usd),
+    )
+
+
+def _merge_note(seeded: str, note: str) -> str:
+    """Two controller notes about the delta review in one line, seeded
+    first (the CLI's fallback note), the carry-forward's after."""
+    if not seeded:
+        return note
+    return f"{seeded}; {note}" if note else seeded
+
+
+def _scope_digest(scope: frozenset[str]) -> str:
+    """The scope's short digest, the suffix that makes a lens ledger
+    entry scope-specific (round-5 review of #748)."""
+    return hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
+
+
+def _keep_stronger(
+    representatives: dict[tuple[str, str], MintedFinding], candidate: MintedFinding
+) -> None:
+    """Keep the stronger of the candidate and the finding already keyed
+    by the same (location, text) pair, in place; the first incumbent
+    wins a tie. The composition's dedupe runs through this, so a
+    duplicate pair is one finding whose severity and verdict eligibility
+    are the pair's strongest (round-5 review of #748)."""
+    key = (str(candidate.finding.location), candidate.finding.finding)
+    kept = representatives.get(key)
+    if kept is None:
+        representatives[key] = candidate
+        return
+    if candidate.finding.sets_verdict != kept.finding.sets_verdict:
+        representatives[key] = candidate if candidate.finding.sets_verdict else kept
+        return
+    if candidate.finding.severity.rank < kept.finding.severity.rank:
+        representatives[key] = candidate
+
+
+def _capped(text: str, cap: int) -> str:
+    """The delta block as the carry-forward turn carries it: cut with the
+    truncation marker when it is over the cap, so the per-call token check
+    is never the reason a carry-forward loses its evidence. A truncated
+    delta still judges resolutions safely: the evidence pool is the
+    scope's own structured record, and an assessor that cannot see a
+    removed line cannot quote it, so its resolution is refused either way
+    (round-2 a4)."""
+    if len(text) <= cap:
+        return text
+    return text[: cap - TRUNCATION_MARKER_CHARS] + TRUNCATION_MARKER
+
+
 def _attempts(
     bridge: Bridge,
     job: LensJob,
@@ -1572,12 +2086,25 @@ def _round_record(
     lines = tuple(
         scrub(
             f"{item.id} {item.finding.severity.value} "
-            f"{item.finding.location} {item.finding.finding}"
+            f'"{item.finding.location}" {item.finding.finding}'
         )
         for item in review.verified
     )
+    # A delta review's carried-but-unre-anchored findings (#702) ride in
+    # the record too, in their original wording, and so do the lines that
+    # do not parse -- the raw text verbatim -- so the next review
+    # re-offers them: a finding the carry-forward could not re-anchor is
+    # never silently dropped from the chain (D73).
+    lines += tuple(
+        scrub(
+            f"{identifier} {finding.severity.value} "
+            f'"{finding.location}" {finding.finding}'
+        )
+        for identifier, finding in review.carried_unverified
+    )
+    lines += tuple(scrub(line) for line in review.carried_raw)
     stop = _first_limit_stop(review)
-    return fit_record(
+    record = fit_record(
         RoundRecord(
             event.repo,
             event.pr_number,
@@ -1589,6 +2116,16 @@ def _round_record(
             limit_stop="" if stop is None else scrub(stop.message()),
         )
     )
+    if review.carried_omitted:
+        # The earlier record's unstorable findings ride into this record's
+        # own omission count (round-2 review of #748, Major B): the text
+        # is unrecoverable, but the gap stays in the durable chain, so the
+        # next hop re-states it instead of the omission dying with the
+        # draft. `fit_record`'s own drops, if any, are on top.
+        record = replace(
+            record, findings_omitted=record.findings_omitted + review.carried_omitted
+        )
+    return record
 
 
 def first_turn(
@@ -1662,9 +2199,26 @@ def status_line(review: AgenticReview) -> str:
         "round_log_note": _status_log_note(review.round_log_note),
         "limit_stop": _limit_stop(review),
     }
+    if review.delta_from:
+        # The delta review's own counts (#702): a pipeline gating on the
+        # status line can tell a delta review from a full one and see
+        # what the carry-forward decided -- including the carries that
+        # did not re-anchor, so an all-clear on `carried` alone cannot
+        # hide them.
+        fields["carried"] = len(_carried(review))
+        fields["carried_unverified"] = len(review.carried_unverified) + len(
+            review.carried_raw
+        )
+        fields["resolved"] = len(review.resolved)
+        if review.delta_note:
+            fields["delta_note"] = _status_log_note(review.delta_note)
     if review.trace_id:
         fields["trace_id"] = review.trace_id
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
+
+
+def _carried(review: AgenticReview) -> tuple[MintedFinding, ...]:
+    return tuple(f for f in review.findings if f.carried)
 
 
 def _log_write_cause(exc: OSError) -> str:
@@ -1723,6 +2277,7 @@ def render_draft(
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub)]
+    lines += _delta_lines(review, scrub)
     if review.selection_note or review.not_picked:
         lines += ["", "## Lens selection"]
         if review.selection_note:
@@ -1734,6 +2289,7 @@ def render_draft(
                 for name, why in review.not_picked
             ]
     lines += _reassess_sections(review, scrub)
+    lines += _delta_sections(review, scrub)
     lines += ["", "## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
@@ -1974,6 +2530,17 @@ def _lens_gap(review: AgenticReview) -> str:
         return "a picked lens did not run"
     if _dropped_notes(review):
         return "a finding was dropped"
+    if review.carried_raw or review.carried_omitted:
+        # A prior finding the delta could not assess -- a line that
+        # parses only as raw text (a legacy unquoted whole-file location
+        # among them), or a finding the earlier record's cap never
+        # stored -- is not evidence the defect is gone, and its severity
+        # is unknown, so it cannot set the verdict the way an unanchored
+        # carry does (round-5 review of #748, M-2): the review's
+        # coverage stays incomplete instead, and no plain approval rides
+        # on it. A complete record with no standing findings still
+        # approves.
+        return "a prior finding the delta could not assess"
     if not review.lenses:
         return "no lens selected"
     if _unread_paths(review):
@@ -2031,6 +2598,62 @@ def _unread_clause(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     )
 
 
+def _delta_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The delta review's citation line and its controller note (#702):
+    which review this one builds on, and anything that fell back. Empty
+    on a full review."""
+    if not review.delta_from:
+        return []
+    lines = ["", f"Delta review: builds on the review of `{review.delta_from[:12]}`."]
+    if review.delta_note:
+        # Quoted like every other model-adjacent field (round-3 review
+        # of #748, a8): today's notes are controller text, but a future
+        # note composer must not become the one field that bypasses the
+        # discipline.
+        lines.append(quote_untrusted(review.delta_note, QUOTED_CHARS, scrub=scrub))
+    return lines
+
+
+def _delta_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The two sections a delta review's carry-forward (#702) can add, in
+    order: the prior findings the new commits fixed -- each with its
+    stated reason -- and the prior findings carried without a verified
+    re-anchored quote. Each is empty when nothing backs it, and the
+    carried findings that DID re-anchor are in the findings section
+    above, tagged `carried`."""
+    lines: list[str] = []
+    if review.resolved:
+        lines += [
+            "",
+            "## Resolved by the new commits",
+            "",
+            *(
+                f"- **{identifier}** "
+                f"{quote_untrusted(str(finding.location), QUOTED_CHARS, scrub=scrub)}: "
+                f"{quote_untrusted(finding.finding, QUOTED_CHARS, scrub=scrub)}. "
+                f"Reason, quoted: {quote_untrusted(reason, QUOTED_CHARS, scrub=scrub)}"
+                for identifier, reason, finding in review.resolved
+            ),
+        ]
+    if review.carried_unverified or review.carried_raw:
+        lines += [
+            "",
+            "## Carried, not re-verified",
+            "",
+            *(
+                f"- **{identifier}** "
+                f"{quote_untrusted(str(finding.location), QUOTED_CHARS, scrub=scrub)}: "
+                f"{quote_untrusted(finding.finding, QUOTED_CHARS, scrub=scrub)}"
+                for identifier, finding in review.carried_unverified
+            ),
+            *(
+                f"- {quote_untrusted(line, QUOTED_CHARS, scrub=scrub)}"
+                for line in review.carried_raw
+            ),
+        ]
+    return lines
+
+
 def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
     x = f.finding
     tags = [
@@ -2039,6 +2662,16 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         f"route: {x.route.value}",
         x.attribution.value,
     ]
+    if f.carried:
+        # A carried finding's route and attribution are the carry-forward's
+        # reconstruction, not this review's judgment; the tag says where
+        # the finding came from instead (issue #702).
+        return (
+            f"- **{f.id}** [carried, {x.severity.value}] "
+            f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "
+            f"({quote_untrusted(f.lens, QUOTED_CHARS, scrub=scrub)}): "
+            f"{quote_untrusted(x.finding, QUOTED_CHARS, scrub=scrub)}"
+        )
     if f.source == QuoteSource.REMOVED.value:
         tags.append(f.source)
     elif f.source == QuoteSource.HEAD_NEAR.value:
