@@ -215,6 +215,7 @@ def load_event(path: Path) -> PrEvent:
             repo=data.get("repo", ""),
             pr_number=data.get("pr_number", 0),
             head_sha=data.get("head_sha", ""),
+            delta_from=data.get("delta_from", "") or "",
         )
     except InvalidEventError as exc:
         raise UsageError(f"invalid event: {exc}") from exc

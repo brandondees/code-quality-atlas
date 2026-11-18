@@ -269,6 +269,20 @@ def _deadline_bounds_message(raw: str) -> str:
     )
 
 
+_COST_LINE = re.compile(r"Model calls: (\d+); committed: \$([0-9]+(?:\.[0-9]+)?)")
+
+
+def review_cost(report: ReviewReport) -> tuple[int, str] | None:
+    """The (calls, committed dollars) the draft's cost lines record, or
+    None when none parses -- the cost event then falls back to the
+    progress records, and to "unknown" past those."""
+    for line in report.cost_lines:
+        found = _COST_LINE.search(line)
+        if found is not None:
+            return int(found.group(1)), found.group(2)
+    return None
+
+
 @dataclass(frozen=True)
 class ReviewReport:
     """What the posted comment lists, taken from the draft the CLI wrote."""
@@ -795,12 +809,16 @@ def _read_token(env: Mapping[str, str], event: PrEvent) -> tuple[str, str]:
 
 
 def _write_event(path: Path, event: PrEvent) -> None:
-    payload = json.dumps(
-        {"repo": event.repo, "pr_number": event.pr_number, "head_sha": event.head_sha}
-    )
+    payload: dict[str, object] = {
+        "repo": event.repo,
+        "pr_number": event.pr_number,
+        "head_sha": event.head_sha,
+    }
+    if event.delta_from:
+        payload["delta_from"] = event.delta_from
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(payload)
+        handle.write(json.dumps(payload))
 
 
 def _tail(path: Path, limit: int = 500) -> str:

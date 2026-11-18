@@ -17,6 +17,7 @@ from enum import Enum
 from atlas_reviewer.redact import RedactedText
 
 _SHA = re.compile(r"[0-9a-f]{40}")
+_SHA_OR_EMPTY = re.compile(r"(?:[0-9a-f]{40})?")
 # `.` and `..` would be path traversal once the name is put into an API path.
 _REPO = re.compile(r"(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+")
 
@@ -32,6 +33,12 @@ class PrEvent:
     repo: str
     pr_number: int
     head_sha: str
+    delta_from: str = ""
+    """The head the delta review builds on (#702, D79): empty for a full
+    review, the previously reviewed head's SHA for a delta review of the
+    commits between that head and `head_sha`. The service queue records
+    it on a job whose push landed while an earlier review was kept
+    running; the review child reads it from the event file."""
 
     def __post_init__(self) -> None:
         if not isinstance(self.repo, str) or not _REPO.fullmatch(self.repo):
@@ -42,6 +49,12 @@ class PrEvent:
             raise InvalidEventError("pr_number must be positive")
         if not isinstance(self.head_sha, str) or not _SHA.fullmatch(self.head_sha):
             raise InvalidEventError("head_sha must be a full 40-hex commit SHA")
+        if not isinstance(self.delta_from, str) or not _SHA_OR_EMPTY.fullmatch(
+            self.delta_from
+        ):
+            raise InvalidEventError(
+                "delta_from must be empty or a full 40-hex commit SHA"
+            )
 
 
 class SourceKind(Enum):

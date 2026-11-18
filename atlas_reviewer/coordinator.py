@@ -100,6 +100,12 @@ from atlas_reviewer.domain import (
     RunnerReport,
     RunnerStatus,
 )
+from atlas_reviewer.head_change import (
+    LENS_SETTLED_STEP,
+    PROGRESS_PHASE,
+    PROGRESS_REVIEW_STEP,
+    READING_CHARS,
+)
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -738,6 +744,7 @@ def _review_lenses(
         ]
         for future in futures:
             runs.append(future.result())
+            _record_progress(telemetry, names, runs, spend, changed)
     for _ in range(MAX_CONTINUATIONS):
         if spend.halted:
             break
@@ -756,6 +763,7 @@ def _review_lenses(
         before = _pending_pairs(pending)
         for lens, paths in pending.items():
             runs.append(run(lens, paths, len(runs) + 1))
+            _record_progress(telemetry, names, runs, spend, changed)
         after = {
             lens: paths
             for lens, paths in _pending_by_lens(
@@ -765,6 +773,7 @@ def _review_lenses(
         }
         if not before - _pending_pairs(after):
             break
+    _record_progress(telemetry, names, runs, spend, changed, step=PROGRESS_REVIEW_STEP)
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
     reports = tuple(ran.report for ran in runs if ran.report is not None)
@@ -855,6 +864,72 @@ class _LensRun:
     report: RunnerReport | None
     spend: Spend
     flagged: tuple[str, ...]
+
+
+def _record_progress(
+    telemetry: Telemetry | None,
+    names: Sequence[str],
+    runs: Sequence[_LensRun],
+    spend: Spend,
+    changed: frozenset[str],
+    *,
+    step: str = LENS_SETTLED_STEP,
+) -> None:
+    """One progress record into the run's events file (#702, D79), after
+    a lens settles and once when the lens loop ends.
+
+    The service's keep-or-cancel decision reads these back from the run
+    directory while the review is still running: the fraction of planned
+    lenses with a settled attempt, the spend so far against the derived
+    reservation, and the paths the review is still reading. A record
+    made while lenses are in flight counts every planned lens without a
+    clean run as still reading -- its scope when it has one, the whole
+    changed set when it is still running or not yet started, because a
+    lens's first pass is submitted over every changed file. The closing
+    record reads the gate's own unread list instead: the lens loop has
+    ended, so what is still unread is exactly what no lens read. The
+    record is cumulative -- the newest one is the state -- and the
+    fields are the decision's own inputs, so a mutant that drops any of
+    them is visible to the decision's tests. The reading list is capped
+    (`head_change.READING_CHARS`): a truncated list reads as a shorter
+    one, which keeps a push rather than cancels, the safe direction."""
+    if telemetry is None:
+        return
+    if step is LENS_SETTLED_STEP:
+        clean = {ran.result.lens for ran in runs if ran.result.state is LensState.CLEAN}
+        latest: dict[str, LensResult] = {}
+        for ran in runs:
+            latest[ran.result.lens] = ran.result
+        reading: set[str] = set()
+        for name in names:
+            if name in clean:
+                continue
+            result = latest.get(name)
+            reading.update(
+                result.scope
+                if result is not None and result.scope is not None
+                else changed
+            )
+    else:
+        reading = set(_still_unread([ran.result for ran in runs], changed))
+    text = " ".join(sorted(reading))
+    if len(text) > READING_CHARS:
+        text = text[:READING_CHARS]
+    done = {ran.result.lens for ran in runs if ran.result.outcome is not None}
+    telemetry.record(
+        PROGRESS_PHASE,
+        step,
+        {
+            "lens": runs[-1].result.lens if runs else "",
+            "lenses_done": len(done),
+            "lenses_total": len(names),
+            "calls": spend.calls,
+            "committed_usd": str(spend.committed_usd),
+            "settled_usd": str(spend.settled_usd),
+            "reservation_usd": str(spend.limits.reservation_usd),
+            "reading": text,
+        },
+    )
 
 
 def _combined_runner(reports: Sequence[RunnerReport]) -> RunnerReport | None:

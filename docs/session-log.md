@@ -3318,3 +3318,50 @@ PR head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
 94%); `pytest atlas_reviewer/tests` 3,242 passed, 96.42%; ruff
 check/format, mypy (84 files), `tooling.cli drift` clean; actionlint 1.7.12
 clean on `ci.yml`. Offline only.
+
+## 2026-11-18 — #702: the keep-or-cancel decision for a push that lands mid-review (D79, PR 1 of the stack)
+
+The queue superseded any active job of a pull request on every newer
+head, so a review in flight was cancelled and its spend lost on exactly
+the pushes that carry the least review risk (the Nov 14 sample was
+mostly merges of main and docs or test-only fixes). This slice — the
+first of the two-PR stack the brief allowed, the delta review being the
+second — moves the decision into the service parent as a pure rule
+(`head_change.py`) over what the push changes (classified from GitHub's
+comparison of the two heads plus the base: every commit whose second
+parent is not `merge_base(base, new)` reads as code, so a
+feature-branch merge is never a base merge; the benign kinds are
+claimed on evidence only — an empty or cut commit list, a failed fetch,
+or no credentials at all read as code or keep with the gap recorded,
+never as benign by default), what the review is still reading (the
+review child now records a cumulative `progress` telemetry event into
+its run's events file after every settled lens and once when its lens
+loop ends — lenses settled of the planned count, spend against the
+derived reservation, the paths still being read), and how early the
+review is (`ATLAS_HEAD_CHANGE_CANCEL_FRACTION`, default 0.5, early on
+either the lens or the spend fraction). A kept head is recorded as the
+pull request's pending follow-up in the queue file — never holding an
+active slot — and materializes when the running review settles: a
+success queues it as a delta review (`PrEvent.delta_from`, the second
+PR's subject), a failure queues an ordinary review; a queued follow-up
+a newer push supersedes passes its `delta_from` on, so the chain stays
+anchored on the last head a review actually finished. `Board.enqueue`
+keeps its supersede contract untouched, and
+`ATLAS_HEAD_CHANGE_POLICY=cancel` restores the blanket supersede whole.
+Measure-first is wired: one `head change` event per decision (both
+heads, kind, fractions, reason, gap), a `review cost` event per settled
+review (draft cost lines when finished, the last progress record when
+cancelled or failed — read before the run directory is dropped —
+`measured: unknown` past both), and `follow-up queued` for the
+materialized head, all tagged with the heads in `service.jsonl`.
+Deliberately not done here: the delta review itself, and the session-log
+rotation the file's length owes (#467/#520 pre-existing debt, untouched
+per the D70 correction's precedent). Tests: 31 in
+`atlas_reviewer/tests/test_head_change.py`, 13 service flows in
+`test_service_receive.py`, the progress emission pinned end to end
+through a real `JsonlSink` and read back with the real reader in
+`test_coordinator.py`; named mutants in the D79 entry. Verification, all
+on the PR head: `pytest tests/` 880 passed / 14 skipped, coverage
+95.20% (floor 94%); `pytest atlas_reviewer/tests` 3,289 passed,
+96.06%; ruff check/format, mypy (85 files), `tooling.cli drift` clean.
+Offline only.
