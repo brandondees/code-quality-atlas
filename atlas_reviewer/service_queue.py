@@ -362,7 +362,7 @@ class Board:
         its terminal state.
 
         A kept head waits for its review's settle: a settled success
-        queues the pending
+        that covered the pull request queues the pending
         head as a delta review building on the head that just finished;
         a failure queues it as an ordinary review, because the failed
         review posted nothing for the delta to build on. The pending
@@ -435,10 +435,21 @@ class Board:
         self._jobs.append(Job(event, JobState.QUEUED))
         return _TakePlan(event, pending)
 
-    def settle(self, job: Job, state: JobState) -> tuple[JobState, PrEvent | None]:
+    def settle(
+        self, job: Job, state: JobState, *, covered: bool = True
+    ) -> tuple[JobState, PrEvent | None]:
         """The terminal state stored and the pull request's pending head
         taken, under one lock and one save (round-2 review of #747,
         R2-F4).
+
+        `covered` is the finished review's own coverage flag (the
+        worker passes its report's): a review that finished but did not
+        read every changed file cannot stand in for the files it never
+        read, so its follow-up is queued as an ordinary full review of
+        the pull request, not as a delta on top of it -- the delta's
+        narrowing would leave exactly those files to no review at all
+        (round-5 review of #748). The default is the caller's assertion;
+        the worker always passes the report's flag.
 
         As separate lock acquisitions -- ``finish``, then
         ``take_pending`` -- two windows opened: an idle recovery pass
@@ -457,7 +468,7 @@ class Board:
             job.state = state
             head_key = (job.event.repo, job.event.pr_number)
             plan = (
-                self._take_plan(head_key, job.event, state is JobState.DONE)
+                self._take_plan(head_key, job.event, state is JobState.DONE and covered)
                 if state in {JobState.DONE, JobState.FAILED}
                 else None
             )

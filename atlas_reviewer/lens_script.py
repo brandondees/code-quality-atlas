@@ -332,6 +332,17 @@ def _carryforward(path: Path, raw: object) -> CarryScript:
                 f"lens script {path}: carryforward entry {i} breaks the "
                 f"carry-forward reply's shape: {exc}"
             ) from exc
+    try:
+        # The complete reply too (round-5 review of #748): the caps are
+        # reply-level, so a scenario whose entries are each valid but
+        # number over the reply's cap loads per entry and then fails at
+        # parse time mid-run, silently carrying every prior finding.
+        parse_carry_reply(json.dumps({"findings": findings, "withdrawn": withdrawn}))
+    except ContractError as exc:
+        raise LensScriptError(
+            f"lens script {path}: carryforward breaks the carry-forward "
+            f"reply's shape: {exc}"
+        ) from exc
     return CarryScript(
         tuple(MappingProxyType(dict(entry)) for entry in findings),
         tuple(MappingProxyType(dict(entry)) for entry in withdrawn),

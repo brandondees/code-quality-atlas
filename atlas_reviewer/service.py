@@ -670,7 +670,9 @@ class Worker:
             # Keep the draft. This process publishes nothing, and the
             # draft is the record of the review. The child's stderr is
             # not: it can hold a secret the log scrubber would remove.
-            committed, follow_up = self._board.settle(job, JobState.DONE)
+            committed, follow_up = self._board.settle(
+                job, JobState.DONE, covered=report.coverage_complete is True
+            )
             if committed is JobState.SUPERSEDED:
                 self._drop_run_dir(job)
                 self._telemetry.record("service", "review superseded", fields)
@@ -733,7 +735,9 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 -- a post failure must not post again here
             self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
-        committed = self._settle(job, JobState.DONE)
+        committed = self._settle(
+            job, JobState.DONE, covered=report.coverage_complete is True
+        )
         if committed is JobState.SUPERSEDED:
             step = "review superseded"
         elif already:
@@ -841,13 +845,17 @@ class Worker:
         if stored in {JobState.QUEUED, JobState.POST_PENDING}:
             self._telemetry.record("service", "review stopped", fields)
 
-    def _settle(self, job: Job, state: JobState) -> JobState:
+    def _settle(self, job: Job, state: JobState, *, covered: bool = True) -> JobState:
         """The terminal state stored and the kept head's follow-up taken
         as one queue step (`Board.settle`, round-2 review of #747,
         R2-F4): the recovery pass can no longer interleave between the
         review's settle and its follow-up's install, and one save covers
-        both, so a crash cannot strand a head between them."""
-        committed, follow_up = self._board.settle(job, state)
+        both, so a crash cannot strand a head between them. `covered` is
+        the finished review's report flag on the DONE path: a review
+        that did not read every changed file queues its follow-up as an
+        ordinary full review, not as a delta on top of it (round-5
+        review of #748)."""
+        committed, follow_up = self._board.settle(job, state, covered=covered)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
             self._drop_run_dir(job)
         if follow_up is not None:

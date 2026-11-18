@@ -1128,8 +1128,18 @@ def _review_one(
         # A continuation is its own ledger entry. The lens's own attempt
         # stays settled when it left files unread (D42); this entry is the
         # coordinator assigning those files, not a retry of that attempt.
-        digest = hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
-        ledger_lens = f"{lens}#{digest}"
+        ledger_lens = f"{lens}#{_scope_digest(scope)}"
+    else:
+        # The run's scope is part of the entry's identity (round-5
+        # review of #748): the ledger is deployment-wide, and a delta
+        # run's settled lens at this head shares the key a later full
+        # run at the same head would compute -- the reused result's
+        # unread list is the delta's, and the full review would claim
+        # files no lens ever read. The `@` marker cannot collide with
+        # the continuation's `#`-hex suffix or `#reassess`; the same
+        # scope at the same head still reuses its settled attempt, so a
+        # crash-and-resume of one review bills nothing twice.
+        ledger_lens = f"{lens}@{_scope_digest(scope)}"
     key = LensKey(
         event.repo, event.pr_number, event.head_sha, ledger_lens, body_digest(body)
     )
@@ -1592,7 +1602,8 @@ def _with_carryforward(
             (),
             (
                 (
-                    f"the carry-forward call failed ({type(exc).__name__}: {exc}); "
+                    f"the carry-forward call failed ({type(exc).__name__}: "
+                    f"{scrubber(str(exc)).text}); "
                     "every prior finding is carried as the earlier review "
                     "recorded it"
                 ),
@@ -1692,10 +1703,31 @@ def _carry_call(
         (),
         None,
     )  # fmt: skip
+    if clock.monotonic() >= deadline:
+        # The wall check before the reservation (round-5 review of
+        # #748): a carry call that starts after the lens loop's deadline
+        # must not reserve -- let alone send -- a billable request; the
+        # carry fallback carries every prior finding as recorded.
+        raise CarryCallRefused(
+            "the review's deadline passed before the carry-forward could run"
+        )
     reserved = _reserve_call(traced_model, request, spend, clock, deadline, fit=False)
     if not isinstance(reserved, _Reserved):
         raise CarryCallRefused(reserved[1])
     worst = reserved.worst
+    if clock.monotonic() >= deadline:
+        # The reservation fits immediately and never consults the clock,
+        # so the wall check is ours (round-5 review of #748): the lens
+        # loop ended at the deadline, and a billable call sent after it
+        # spends past the wall the review respects. The reservation
+        # stays accounted at its worst case -- the dollars were held --
+        # and the call is not sent; the carry fallback carries every
+        # prior finding as recorded.
+        spend.settle(worst, None)
+        raise CarryCallRefused(
+            "the review's deadline passed while the carry-forward "
+            "reserved; the call was not sent"
+        )
     try:
         reply = traced_model.turn(request)
     except ByokRefusedError:
@@ -1717,7 +1749,7 @@ def _carry_call(
     checked, revises = judged_carry(
         parsed, prior, sources, trees.head, resolved.quote_tolerance
     )
-    return apply_carry(
+    result = apply_carry(
         prior,
         checked,
         revises,
@@ -1727,6 +1759,16 @@ def _carry_call(
         gate_reason,
         resolved.quote_tolerance,
     )
+    if parsed.dropped:
+        # The parser's dropped entries are named where the draft reads
+        # them (round-5 review of #748): a restatement the parser
+        # refused -- an unknown severity, say -- leaves the prior
+        # finding standing (it falls to the unanchored carries), and the
+        # drop's reason travels with the rest of the carry-forward's
+        # notes instead of vanishing with the reply (D54's
+        # dropped-finding rule).
+        result = replace(result, notes=(*result.notes, *parsed.dropped))
+    return result
 
 
 class CarryCallRefused(Exception):
@@ -1757,33 +1799,31 @@ def _compose_carry(
     become an approval -- and the carry's buckets, raw lines and notes
     land on the review for the draft and the round record."""
     lens_labels = {identifier: lens for identifier, _finding, lens in prior}
-    carried: list[tuple[str, CheckedFinding]] = []
-    carried_keys: set[tuple[str, str]] = set()
+    # The duplicate pairs' representatives (round-5 review of #748): a
+    # verdict-setting finding beats one that does not set the verdict,
+    # then the stronger severity, ties keeping the incumbent. The
+    # first-match rule this replaces dropped a verified Blocker under a
+    # carried Major restating the same text -- and the same loss between
+    # two carried copies -- and flipped a BLOCK to an
+    # approve-with-changes.
+    representatives: dict[tuple[str, str], MintedFinding] = {}
     for identifier, checked in result.carried:
-        key = (str(checked.finding.location), checked.finding.finding)
-        if key in carried_keys:
-            continue
-        carried_keys.add(key)
-        carried.append((identifier, checked))
-    carried_minted = tuple(
-        MintedFinding(
-            identifier,
-            lens_labels.get(identifier, ""),
-            checked.finding,
-            True,
-            "" if checked.source is None else checked.source.value,
-            "",
-            checked.drift,
-            True,
+        _keep_stronger(
+            representatives,
+            MintedFinding(
+                identifier,
+                lens_labels.get(identifier, ""),
+                checked.finding,
+                True,
+                "" if checked.source is None else checked.source.value,
+                "",
+                checked.drift,
+                True,
+            ),
         )
-        for identifier, checked in carried
-    )
-    kept_new = tuple(
-        minted
-        for minted in review.findings
-        if (str(minted.finding.location), minted.finding.finding) not in carried_keys
-    )
-    combined = rank((*kept_new, *carried_minted))
+    for minted in review.findings:
+        _keep_stronger(representatives, minted)
+    combined = rank(tuple(representatives.values()))
     notes = list(result.notes)
     if raw_lines:
         notes.append(
@@ -1827,6 +1867,32 @@ def _merge_note(seeded: str, note: str) -> str:
     if not seeded:
         return note
     return f"{seeded}; {note}" if note else seeded
+
+
+def _scope_digest(scope: frozenset[str]) -> str:
+    """The scope's short digest, the suffix that makes a lens ledger
+    entry scope-specific (round-5 review of #748)."""
+    return hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
+
+
+def _keep_stronger(
+    representatives: dict[tuple[str, str], MintedFinding], candidate: MintedFinding
+) -> None:
+    """Keep the stronger of the candidate and the finding already keyed
+    by the same (location, text) pair, in place; the first incumbent
+    wins a tie. The composition's dedupe runs through this, so a
+    duplicate pair is one finding whose severity and verdict eligibility
+    are the pair's strongest (round-5 review of #748)."""
+    key = (str(candidate.finding.location), candidate.finding.finding)
+    kept = representatives.get(key)
+    if kept is None:
+        representatives[key] = candidate
+        return
+    if candidate.finding.sets_verdict != kept.finding.sets_verdict:
+        representatives[key] = candidate if candidate.finding.sets_verdict else kept
+        return
+    if candidate.finding.severity.rank < kept.finding.severity.rank:
+        representatives[key] = candidate
 
 
 def _capped(text: str, cap: int) -> str:
@@ -2464,6 +2530,17 @@ def _lens_gap(review: AgenticReview) -> str:
         return "a picked lens did not run"
     if _dropped_notes(review):
         return "a finding was dropped"
+    if review.carried_raw or review.carried_omitted:
+        # A prior finding the delta could not assess -- a line that
+        # parses only as raw text (a legacy unquoted whole-file location
+        # among them), or a finding the earlier record's cap never
+        # stored -- is not evidence the defect is gone, and its severity
+        # is unknown, so it cannot set the verdict the way an unanchored
+        # carry does (round-5 review of #748, M-2): the review's
+        # coverage stays incomplete instead, and no plain approval rides
+        # on it. A complete record with no standing findings still
+        # approves.
+        return "a prior finding the delta could not assess"
     if not review.lenses:
         return "no lens selected"
     if _unread_paths(review):

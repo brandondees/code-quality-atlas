@@ -324,9 +324,16 @@ def _member[E: StrEnum](enum: type[E], key: str, value: str) -> E:
 
 def parse_location(text: str) -> Location:
     """A design reference, a line range (a location ending `:<n>` or
-    `:<n>-<m>`), or a whole file. Paths follow the bridge's path rules."""
+    `:<n>-<m>`), or a whole file. Paths follow the bridge's path rules.
+
+    A double quote is refused: the round record writes the location
+    quoted, and a quote inside the path would end the record's location
+    at the wrong place on the next read -- the finding would re-anchor
+    to a truncated path (round-5 review of #748)."""
     if len(text) > MAX_LOCATION_CHARS:
         raise ContractError(f"location is over {MAX_LOCATION_CHARS} characters")
+    if '"' in text:
+        raise ContractError("location path may not contain a double quote")
     if _DESIGN.fullmatch(text):
         return DesignRef(text)
     lines = _RANGE.fullmatch(text)

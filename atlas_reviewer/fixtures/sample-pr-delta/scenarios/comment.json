@@ -12,7 +12,7 @@
         "fix": "compute the discount in integer minor units and round once over the cart total"
       },
       {
-        "location": "calc.py:2",
+        "location": "calc.py:3",
         "evidence": "return price_cents * quantity * (100 - discount_pct) // 100",
         "severity": "minor",
         "valence": "defect",

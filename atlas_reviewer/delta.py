@@ -319,13 +319,17 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
 
     Three conditions refuse the delta as the resolution gate's evidence,
     each named on the scope's note and each leaving `resolution_paths`
-    empty: a range that cannot be fetched at all (the review then runs
-    on the full pull request diff rather than skipping the push); a
-    comparison whose merge base is not `delta_from` -- a rebase or a
-    force-push, after which the comparison's file list is measured from
-    the wrong base and is not the range's; and a file list that is
-    missing, malformed, or cut at GitHub's comparison cap, which cannot
-    prove what the range touched."""
+    empty: a range that cannot be fetched at all; a comparison whose
+    merge base is not `delta_from` -- a rebase or a force-push, after
+    which the comparison's file list is measured from the wrong base and
+    is not the range's; and a file list that is missing, malformed, or
+    cut at GitHub's comparison cap, which cannot prove what the range
+    touched. The last two also decline to BOUND the review: a list that
+    cannot prove what the range touched must not narrow the lens diff to
+    itself, or files the pull request changed that the list omits would
+    reach no lens while the coverage read complete -- so the review then
+    runs on the full pull request diff, as the unfetchable case always
+    has (round-5 review of #748)."""
     try:
         compare = github.get_compare(event.repo, event.delta_from, event.head_sha)
         names, complete = _range_paths(compare)
@@ -342,30 +346,45 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
     shown = set(diff_paths(pr_diff))
     paths = tuple(path for path in names if path in shown)
     if _diverged(compare, event.delta_from):
+        # A wrong-base list cannot prove what the range touched, so it
+        # must not bound the review either: a file the pull request
+        # changed that the list omits would reach no lens while the
+        # review claimed complete coverage (round-5 review of #748).
         return DeltaScope(
             event.delta_from,
-            scope_text(pr_diff, paths),
+            pr_diff,
             frozenset(),
             "the range comparison shows the histories diverged (a rebase or "
-            "a force-push); the review ran on the paths that differ, and no "
-            "resolution is accepted",
+            "a force-push); the review ran on the full pull request diff, "
+            "and no resolution is accepted",
             "the delta could not be established: the histories diverged",
         )
     if not complete:
+        # Same rule as the diverged case: a cut or malformed list cannot
+        # prove what the range touched, so the review does not narrow to
+        # it -- the files past the cap would reach no lens while the
+        # coverage read complete (round-5 review of #748).
         return DeltaScope(
             event.delta_from,
-            scope_text(pr_diff, paths),
+            pr_diff,
             frozenset(),
             "the range comparison's file list was cut or malformed, so the "
-            "delta's touched paths are not fully known; no resolution is "
-            "accepted",
+            "delta's touched paths are not fully known; the review ran on "
+            "the full pull request diff, and no resolution is accepted",
             "the delta's touched paths are not fully known",
         )
     removed, range_diff = _range_removals(compare)
     return DeltaScope(
         event.delta_from,
         scope_text(pr_diff, paths),
-        frozenset(paths),
+        # The gate is the range's own touched paths, not the lens diff's
+        # intersection with them: a follow-up that DELETES a file the
+        # earlier head added takes that file out of the pull request's
+        # net diff entirely, while the range's patch holds the cited
+        # removal -- the one case where the resolution is real (round-5
+        # review of #748). A path the range touched without a patch
+        # still refuses on evidence, the safe direction.
+        frozenset(names),
         removed=removed,
         range_diff=range_diff,
     )
@@ -405,7 +424,20 @@ def _range_removals(
             header = f"diff --git a/{name} b/{name}\n--- a/{name}\n+++ b/{name}\n"
             rendered.append(header + patch)
         if entries:
-            removed[name] = entries
+            # A rename's patch measures its old-side lines from the file
+            # the patch removes from -- `previous_filename` -- which is
+            # the path the earlier review's finding cites; keyed by the
+            # new name alone, a withdrawal of code the rename's commit
+            # deleted could never find its evidence (round-5 review of
+            # #748). The rendered turn keeps the new name, the lens
+            # scope's.
+            evidence_path = item.get("previous_filename")
+            key = (
+                evidence_path
+                if isinstance(evidence_path, str) and evidence_path
+                else name
+            )
+            removed[key] = entries
     return removed, "\n".join(rendered)
 
 
@@ -415,10 +447,14 @@ _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+")
 def _patch_removed(patch: str) -> tuple[tuple[int, str], ...]:
     """A unified-diff patch's removed lines with their old-side line
     numbers: each `@@ -a,b` hunk header sets the old side's counter, and
-    each `-` line (the `---` header is not a hunk line) consumes one."""
+    each `-` line (the `---` header is not a hunk line) consumes one.
+    The patch is split on LF only: a U+2028 or vertical tab inside a
+    patch line is content, not a record boundary, and splitting on it
+    would shift every later number in the hunk (round-5 review of
+    #748)."""
     removed: list[tuple[int, str]] = []
     old_side = 0
-    for line in patch.splitlines():
+    for line in patch.split("\n"):
         header = _HUNK.match(line)
         if header is not None:
             old_side = int(header.group(1))
@@ -465,6 +501,13 @@ def _range_paths(compare: Json) -> tuple[tuple[str, ...], bool]:
         name = item.get("filename") if isinstance(item, dict) else None
         if isinstance(name, str) and name:
             paths.append(name)
+            # A rename touches both its names: the prior findings cite
+            # the old path, the lens scope and the rendered diff use the
+            # new one, and the resolution gate must accept the path the
+            # finding actually cites (round-5 review of #748).
+            previous = item.get("previous_filename")
+            if isinstance(previous, str) and previous:
+                paths.append(previous)
         else:
             complete = False
     return tuple(paths), complete

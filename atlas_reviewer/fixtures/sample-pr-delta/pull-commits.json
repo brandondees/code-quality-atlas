@@ -26,5 +26,19 @@
         "date": "2026-11-05T10:00:00Z"
       }
     }
+  },
+  {
+    "sha": "4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5",
+    "parents": [
+      {
+        "sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
+      }
+    ],
+    "commit": {
+      "message": "Sum rounded line totals\n\nAddress the review's rounding finding.",
+      "committer": {
+        "date": "2026-11-05T11:00:00Z"
+      }
+    }
   }
 ]

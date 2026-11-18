@@ -3642,3 +3642,53 @@ entry's a9 clause above was corrected to say the fix was claimed and
 not applied. The round-4 verdict is APPROVE with nothing else at or
 above Nit; the round-3 mutants were re-applied by the reviewer and all
 13 died.
+
+## 2026-11-18 (same day) — #748 round 5: the unproven scope never bounds a review
+
+#747 merged (main `9b5f8841`); #748 retargeted to main and restacked
+(`83dbc6c7`, the round-4 tree). CodeRabbit finished after the round-4
+APPROVE, and Brandon's round-10 routine review verified three of its
+Majors and approved the round. The fixes, each pinned by a named test
+whose mutant dies: **Major 1** — a diverged history or a cut comparison
+file list cannot prove what the range touched, so `delta_scope` no
+longer narrows the lens diff to such a list (the review runs the full
+pull request diff, the unfetchable case's own fallback), and the
+service-side family case is fixed where the shape is decided:
+`ReviewReport` carries the status line's `coverage_complete` flag and
+`Board.settle` keys the follow-up's shape on it, so a finished review
+that did not read every changed file queues its kept head as an
+ordinary full review, never a delta on an unread base. **Major 2** — a
+prior finding the delta cannot assess (a raw-text line, a legacy
+unquoted whole-file location among them, or a record-cap omission)
+marks coverage incomplete through `_lens_gap`, the one coverage rule,
+so a clean delta over it posts COMMENT and never a plain approval; a
+complete record with no standing findings still approves. **Major 3** —
+the carry-forward's exception note is scrubbed where it is recorded, so
+the status line and the body carry the same redacted text
+(`_status_log_note` never scrubbed). **The check** — `LensKey` carried
+no scope, and the deployment-wide attestation ledger would let a later
+full run at the same head reuse a delta run's settled lens and its
+unread list; the run's scope digest now suffixes the key
+(`lens@<12-hex>`), same-scope reuse intact. The cheap CodeRabbit
+fixes: the resolution gate is the range's own touched paths (a deleted
+file's resolutions accepted; renames contribute `previous_filename` to
+the gate and the removed pool), the patch reader splits on LF only, a
+double quote is refused in a finding's location at the mint-side
+contract, the dedupe keeps the duplicate pair's stronger finding, the
+carry call checks the review wall before its reservation and again
+before sending (a reservation that crosses the wall is accounted, not
+sent), the parser's dropped restatements are named in the draft (D54),
+the post quotes the draft's delta note instead of asserting a carry,
+and the post's resolved and carried sections render the controller's
+bullets scrubbed and uncapped. The fixture tree's dry-run realism fixes
+landed with it (the head commit in `pull-commits.json`, the hunk
+counts, `changed_files`, the scenario's cited line, the SPDX header,
+the runner's ruff response matching reality). Skipped with one-line
+reasons in the PR body: the record's valence/attribution fields, the
+stale-anchor SHA check, the withdrawal quote's content match (the last
+two and the first fail closed or over-count conservatively today; the
+first and third need the record-format change), the base-merge path
+separation (documented deliberate over-inclusion), the quarantined-log
+note wording (the context omission already blocks approval), and the
+fixture withdrawal scenario (pinned at the delta and coordinator
+levels). Seventeen mutants applied by hand this round; all died.

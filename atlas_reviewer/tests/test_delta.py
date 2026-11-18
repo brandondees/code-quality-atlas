@@ -465,7 +465,13 @@ def test_the_delta_scope_is_the_range_paths_the_pr_diff_shows():
     # the whole pull request diff -- re-reviewing what the earlier
     # review already covered.
     assert scope.diff == PR_DIFF.split("diff --git a/settings.ini")[0]
-    assert scope.resolution_paths == frozenset({"calc.py"})
+    # The resolution gate is the range's own touched paths, not the
+    # lens diff's intersection with them (round-5 review of #748): a
+    # follow-up that deletes a file the earlier head added takes it out
+    # of the net diff, and the range's patch is then the only place its
+    # removal evidence lives. A gate path with no patch still refuses
+    # on evidence, so the wider set cannot accept more.
+    assert scope.resolution_paths == frozenset({"calc.py", "docs/from-main.md"})
     assert scope.note == ""
     assert github.calls == [
         ("get_compare", "example-org/example-app", f"{OLD}...{NEW}"),
@@ -481,7 +487,10 @@ def test_a_merge_only_push_yields_an_empty_trusted_scope():
     )
     scope = delta_scope(github, EVENT, PR_DIFF)
     assert scope.diff == ""
-    assert scope.resolution_paths == frozenset()
+    # The gate is the range's own touched paths (round-5 review of
+    # #748); this path has no patch in the comparison, so a resolution
+    # against it still refuses on evidence.
+    assert scope.resolution_paths == frozenset({"docs/from-main.md"})
     assert scope.note == ""
 
 
@@ -512,25 +521,40 @@ def test_an_unfetchable_range_falls_back_to_the_full_diff_and_refuses_resolution
 def test_a_diverged_history_refuses_resolutions_and_names_the_condition():
     """A rebase or force-push leaves `delta_from` a non-ancestor: the
     comparison's file list is then measured from the wrong base, so it is
-    not the range's, and the resolution gate refuses (round-1 M1)."""
+    not the range's, and the resolution gate refuses (round-1 M1). The
+    lens diff is not narrowed to that list either (round-5 review of
+    #748): a wrong-base list cannot prove what the range touched, and a
+    pull-request file it omits would reach no lens while the coverage
+    read complete. Mutant: the narrowing restored, which drops those
+    files from the review."""
     github = _FakeGitHub(
         {"merge_base_commit": {"sha": "e" * 40}, "files": [{"filename": "calc.py"}]}
     )
     scope = delta_scope(github, EVENT, PR_DIFF)
+    # Mutant: the lens diff narrowed to the wrong-base list's paths.
+    assert scope.diff == PR_DIFF
     assert scope.resolution_paths == frozenset()
     assert "diverged" in scope.note
+    assert "full pull request diff" in scope.note
     assert "diverged" in scope.gate_reason
 
 
 def test_a_cut_file_list_refuses_resolutions_and_names_the_cap():
     """A comparison at GitHub's files cap may be cut: what the range
     touched is then not fully known, so the gate refuses rather than
-    silently shrinking the delta (round-1 m3)."""
+    silently shrinking the delta (round-1 m3). The lens diff does not
+    narrow to the cut list either (round-5 review of #748, Major 1):
+    files past the cap would reach no lens while `coverage_complete`
+    stayed true, and `_lens_gap` does not read the delta note. Mutant:
+    the narrowing restored, which hides the cap-tail files."""
     capped = [{"filename": f"src/f{n}.py"} for n in range(300)]
     github = _FakeGitHub({"merge_base_commit": {"sha": OLD}, "files": capped})
     scope = delta_scope(github, EVENT, PR_DIFF)
+    # Mutant: the lens diff narrowed to the cut list's paths.
+    assert scope.diff == PR_DIFF
     assert scope.resolution_paths == frozenset()
     assert "not fully known" in scope.note
+    assert "full pull request diff" in scope.note
     assert scope.gate_reason
 
 
@@ -908,3 +932,122 @@ def test_a_header_shaped_line_before_the_first_hunk_is_still_skipped():
     the one place the exclusion still applies."""
     patch = "--- a/calc.py\n@@ -1,1 +1,1 @@\n-x\n"
     assert _patch_removed(patch) == ((1, "x"),)
+
+
+# ------------------------------------------------- round-5 fixes (#748)
+
+
+def test_a_resolution_for_a_file_the_followup_deletes_is_accepted():
+    """The gate is the range's own touched paths (round-5 review of
+    #748): a follow-up that deletes a file the earlier head added takes
+    it out of the pull request's net diff entirely -- the lens diff's
+    path intersection no longer contains it -- while the range's patch
+    holds the cited removal. Mutant: the gate rebuilt from the
+    intersection, which refuses the one resolution that is real."""
+    github = _FakeGitHub(
+        {
+            "merge_base_commit": {"sha": OLD},
+            "files": [
+                {
+                    "filename": "calc.py",
+                    "patch": (
+                        "@@ -1,3 +0,0 @@\n-def line_total():\n-    return sum(xs)\n"
+                    ),
+                }
+            ],
+        }
+    )
+    pr_diff = ""  # The net diff no longer shows the deleted file at all.
+    scope = delta_scope(github, EVENT, pr_diff)
+    # Mutant: the gate derived from the lens diff's paths (empty here).
+    assert scope.resolution_paths == frozenset({"calc.py"})
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "the follow-up deleted the file", "    return sum(xs)")],
+        scope.resolution_paths,
+        scope.removed,
+        tolerance=3,
+    )
+    assert result.resolved == (("P1", "the follow-up deleted the file", prior[0][1]),)
+
+
+def test_a_renamed_files_removed_lines_are_keyed_by_the_old_path():
+    """A rename's patch measures its old-side lines from the file the
+    patch removes from -- `previous_filename` -- which is the path the
+    earlier review's finding cites; keyed by the new name alone, a
+    withdrawal of code the rename's commit deleted could never find its
+    evidence (round-5 review of #748). Mutant: the pool keyed by the
+    new name, which refuses the resolution."""
+    github = _FakeGitHub(
+        {
+            "merge_base_commit": {"sha": OLD},
+            "files": [
+                {
+                    "filename": "renamed.py",
+                    "previous_filename": "calc.py",
+                    "patch": "@@ -2,1 +2,0 @@\n-    return sum(xs)\n",
+                }
+            ],
+        }
+    )
+    scope = delta_scope(github, EVENT, "diff --git a/renamed.py b/renamed.py\n")
+    assert "calc.py" in scope.removed
+    assert "renamed.py" not in scope.removed
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "the rename's commit removed the cited code", "    return sum(xs)")],
+        scope.resolution_paths,
+        scope.removed,
+        tolerance=3,
+    )
+    assert result.resolved == (
+        ("P1", "the rename's commit removed the cited code", prior[0][1]),
+    )
+
+
+def test_a_patch_line_with_a_unicode_line_separator_stays_one_line():
+    """The patch is split on LF only (round-5 review of #748): a U+2028
+    inside a context line is content, not a record boundary -- splitting
+    on it would count an extra old-side line and shift every later
+    number in the hunk, rejecting valid evidence at the span boundary.
+    Mutant: `splitlines()` restored, which shifts the removal."""
+    patch = (
+        "@@ -1,3 +1,3 @@\n"
+        " context\u2028 still one line\n"
+        "-    return sum(xs)\n"
+        "+    return total\n"
+    )
+    assert _patch_removed(patch) == ((2, "    return sum(xs)"),)
+
+
+def test_a_location_with_a_double_quote_is_refused_at_the_contract():
+    """The round record writes a finding's location quoted, so a quote
+    inside the path would end the record's location at the wrong place
+    on the next read (round-5 review of #748) -- the mint-side contract
+    refuses it instead, and the record can never hold one. Mutant: the
+    rejection dropped, which mints a location the next round misreads."""
+    from atlas_reviewer.lens_contract import parse_location
+
+    with pytest.raises(ContractError, match="double quote"):
+        parse_location('pkg/a" b.py:7')
+    with pytest.raises(ContractError, match="double quote"):
+        parse_location('pkg/a"b.py')
+    # Ordinary paths, spaces included, still parse.
+    assert parse_location("pkg/a b.py:7") == LineRange("pkg/a b.py", 7, 7)
+
+
+def test_a_quoted_location_with_a_space_round_trips_through_the_record():
+    """The round-trip the record contract rests on: a location with a
+    space parses back whole (the quotes exist for exactly this), and the
+    reader still refuses the ambiguous legacy forms."""
+    from atlas_reviewer.rounds import RoundRecord
+
+    line = 'P1 major "pkg/a b.py:7" the finding text'
+    record = RoundRecord("o/r", 7, NEW, "tracing", "COMMENT", (line,), False)
+    assert record.findings == (line,)

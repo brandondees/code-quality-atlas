@@ -12,7 +12,7 @@
   "base": {
     "ref": "main"
   },
-  "changed_files": 2,
+  "changed_files": 3,
   "labels": [
     {
       "name": "bug"

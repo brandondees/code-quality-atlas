@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from calc import line_total
 
 

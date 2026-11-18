@@ -1407,3 +1407,57 @@ def test_a_full_post_has_no_delta_citation_or_sections():
     assert "Follows the review of" not in body
     assert "## Resolved by the new commits" not in body
     assert "## Carried, not re-verified" not in body
+
+
+# ------------------------------------------------- round-5 fixes (#748)
+
+
+def test_the_post_quotes_the_carry_note_instead_of_claiming_a_carry(tmp_path):
+    """The follow-up line is honest about what the carry-forward did
+    (round-5 review of #748): the draft's delta note rides through
+    `ReviewReport`, and a note that says the round record could not be
+    read replaces the carried-forward claim -- an unreadable record is
+    not a review with no prior findings. Mutant: the note ignored, which
+    posts the false carried-forward sentence over a lost chain."""
+    from atlas_reviewer.verdict import STATUS_PREFIX
+
+    draft = (
+        f'{STATUS_PREFIX}{{"mode": "agentic", "review_event": "COMMENT", '
+        f'"coverage_complete": false, "delta_note": "the round log file '
+        f'could not be read, so no earlier findings could be carried"}}'
+        " -->\n\n"
+        "## Findings\n\nNone.\n"
+    )
+    report = summarize_draft(draft)
+    assert report.coverage_complete is False
+    assert "could not be read" in report.delta_note
+    old, new = "3" * 40, "4" * 40
+    body = render_comment(report, post_key(report_event(old, new)), str, delta_from=old)
+    assert "could not be read" in body
+    # Mutant target: the carried-forward claim over the unread record.
+    assert "carried forward below" not in body
+
+
+def test_a_resolution_reason_longer_than_the_quoting_default_survives():
+    """The resolved and carried sections post the controller's bullets
+    scrubbed and uncapped (round-5 review of #748): the bullets were
+    already quoted when the draft was written, and re-quoting them cut a
+    resolution's reason at 200 characters well below the post limit.
+    Mutant: the ordinary `_section` rendering restored, which cuts the
+    reason."""
+    reason = (
+        "P1: the follow-up replaced the per-line rounding with one single "
+        "round over the cart's aggregate total, so the quoted drift line "
+        "no longer exists at this head, and the release note documents "
+        "how the historical stored totals stay comparable across the change"
+    )
+    assert len(reason) > 200
+    report = ReviewReport((), (), "note", (), (), (), "COMMENT", resolved=(reason,))
+    body = render_comment(report, post_key(EVENT), str)
+    assert reason in body
+
+
+def report_event(old: str, new: str):
+    from atlas_reviewer.domain import PrEvent
+
+    return PrEvent("example-org/example-app", 42, new, delta_from=old)
