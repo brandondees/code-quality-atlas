@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import base64
 import codecs
+import hashlib
 import json
 import re
 import threading
@@ -59,9 +60,11 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     check_sizes,
     mutant_commit_steps,
+    parse_staged,
     quote,
     stage,
     stage_copy_steps,
+    stage_script,
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import KILL_AFTER_S
@@ -79,6 +82,7 @@ from atlas_reviewer.runner import (
     DEFAULT_CREATE_RETRIES,
     FIRST_FRAME_BUDGET_S,
     GUEST_TAIL_CHARS,
+    UNPACK_BUDGET_S,
     Session,
     guest_text,
     run_session,
@@ -102,6 +106,9 @@ EXEC_SLACK_S = 15.0
 MUTATE_EDIT_TIMEOUT_S = 30
 MUTATE_EDIT_SLACK_S = 30.0
 MUTATE_STAGE_SLACK_S = 60.0
+# A re-stage (round 2) rebuilds the repository and trees from freshly
+# uploaded, digest-checked tarballs, and re-applies a recorded mutation.
+RESTAGE_BUDGET_S = UNPACK_BUDGET_S + MUTATE_EDIT_TIMEOUT_S + EXEC_SLACK_S
 _TIMED_OUT = 124
 _KILLED = 137
 _FILE_TOO_LARGE = 153
@@ -763,6 +770,89 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     )
 
 
+def restage_script(
+    staged: Staged,
+    mutation: MutationRecord | None,
+    unpack: UnpackLimits,
+    digests: Mapping[Rev, str],
+) -> str:
+    """Rebuilds the staged repository, trees and scratch from the freshly
+    uploaded, digest-checked tarballs (D80 round 2). Executed PR code
+    cannot be prevented from writing into the runner -- it is the same
+    user -- and git does **not** re-verify a loose object on read, so an
+    in-place overwrite of a blob file is served verbatim by every later
+    read and by a copy staged from the object store. The one source of
+    truth executed code cannot touch is the controller's own copy of the
+    trees, so a re-stage removes everything it could have rewritten and
+    rebuilds it from those bytes; the staged commits are deterministic
+    (fixed identity and date), so the recorded BASE/HEAD ids come back
+    exactly. When a mutant is recorded, the same span splice re-applies
+    to a fresh copy and the mutant commit is re-created -- deterministic
+    for the same reason -- so the recorded mutant id comes back too and
+    `read_file`/`grep` at MUTANT keep serving the mutation the record
+    names. `stage_script`'s digest checks run first: a tarball rewritten
+    in the upload-to-verify window stops the staging."""
+    assert staged.pytest is not None  # the caller refuses the call before this
+    root = quote(staged.root)
+    steps = [
+        f"cd {root}",
+        (
+            f"rm -rf {quote(staged.root)}/repo.git {quote(staged.root)}/trees "
+            f"{quote(staged.root)}/{SCRATCH_DIR} "
+            f"{quote(staged.root)}/index-stage {quote(staged.root)}/index-mutant "
+            # The staging commits' own index files must go too: their
+            # cached stat entries (the tarballs' fixed mtimes and sizes
+            # extract identically) would let `git add` skip re-hashing,
+            # and the blobs they name exist only in the repository this
+            # rebuild just deleted.
+            f"{quote(staged.root)}/index-base {quote(staged.root)}/index-head "
+            f"{quote(staged.root)}/index-default"
+        ),
+        stage_script(
+            staged.root,
+            staged.git,
+            tuple(staged.commits),
+            unpack,
+            digests=digests,
+        ),
+        "staged=$?",
+    ]
+    if mutation is not None:
+        steps += [
+            'if [ "$staged" = 0 ]; then',
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            (
+                f"  ( cd {quote(staged.scratch)}; exec timeout -k {KILL_AFTER_S} "
+                f"{MUTATE_EDIT_TIMEOUT_S} "
+                f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
+                f"{quote(mutation.path)} {mutation.line} "
+                f"{quote(mutation.operator)} ) > mut 2> mut_err"
+            ),
+            "  m=$?",
+            "  payload=$(head -n 1 mut)",
+            "  c=-",
+            "  case $payload in",
+            '  "ok "*) cmt=$('
+            + "; ".join(
+                mutant_commit_steps(
+                    staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+                )
+            )
+            + ") 2>> mut_err ;;",
+            "  esac",
+            "  case $cmt in",
+            "    atlas-mutant:*) c=${cmt#atlas-mutant:} ;;",
+            "  esac",
+            f'  echo "{MUT_HEADER} $m $c"',
+            '  printf "%s" "$payload" | base64 -w0; echo',
+            f"  head -c {STDERR_BYTES} mut_err | base64 -w0; echo",
+            "fi",
+        ]
+    return "\n".join(steps)
+
+
 @dataclass(frozen=True)
 class _RunBlock:
     code: int
@@ -1241,10 +1331,26 @@ class Bridge:
     changed: frozenset[str] = frozenset()
     limits: Mapping[str, ToolLimits] = DEFAULT_LIMITS
     session_limits: SessionLimits = DEFAULT_SESSION
+    # The controller-held tarballs and their unpack caps (D80 round 2):
+    # the one source of truth executed code cannot touch, and what a
+    # re-stage rebuilds the runner's state from.
+    trees: SourceTrees = field(default=SourceTrees(b"", b"", "", ""))
+    unpack: UnpackLimits = DEFAULT_UNPACK
     calls: list[CallRecord] = field(default_factory=list)
     _flagged: list[str] = field(default_factory=list, repr=False)
     _renames: Mapping[str, tuple[str, str]] | None = field(default=None, repr=False)
     commits: Mapping[Rev, str] = field(default=MappingProxyType({}), repr=False)
+    # Set whenever executed PR code has run in this runner (D80 round 2):
+    # it may have rewritten anything it can reach -- loose objects in the
+    # repository (git does not re-verify a loose object on read), refs,
+    # `trees`, the scratch -- so the next call that reads or stages from
+    # the runner's state re-stages from the controller-held tarballs
+    # first. Cleared by a successful re-stage.
+    _suspect: bool = field(default=False, repr=False)
+    # The mutation a `mutate` call applied and committed, if one did: a
+    # re-stage re-applies it deterministically, so the recorded mutant id
+    # and the tree it names survive the rebuild.
+    _mutation: MutationRecord | None = field(default=None, repr=False)
     # The attempt now running, as `_spent`'s refusals name it, and the
     # counters its budget spends. Empty/unspent until `begin_attempt`.
     _attempt: str = field(default="", repr=False)
@@ -1360,17 +1466,23 @@ class Bridge:
                 "no pytest-capable interpreter was staged for the runner",
                 started,
             )
-        budget = (
-            2 * limits.timeout_s
-            + MUTATE_EDIT_TIMEOUT_S
-            + 2 * KILL_AFTER_S
-            + EXEC_SLACK_S
-            + MUTATE_EDIT_SLACK_S
-            + MUTATE_STAGE_SLACK_S
-            if call.tool == "mutate"
-            else limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
-        )
         try:
+            # Executed code may have rewritten anything it could reach
+            # since the last call (D80 round 2): the execution always
+            # starts from a re-staged, digest-checked repository and
+            # trees.
+            if self._suspect:
+                self._restage()
+            budget = (
+                2 * limits.timeout_s
+                + MUTATE_EDIT_TIMEOUT_S
+                + 2 * KILL_AFTER_S
+                + EXEC_SLACK_S
+                + MUTATE_EDIT_SLACK_S
+                + MUTATE_STAGE_SLACK_S
+                if call.tool == "mutate"
+                else limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
+            )
             code, text = self.session.exec(
                 f"bridge {call.tool}",
                 mutate_script(self.staged, call, limits)
@@ -1379,6 +1491,7 @@ class Bridge:
                 stage="bridge",
                 budget_s=budget,
             )
+            self._suspect = True
             blocks = parse_run_blocks(text) if code == 0 else None
             if blocks is None:
                 raise BoundaryError(
@@ -1389,11 +1502,59 @@ class Bridge:
                     raise _LostOutputError(problem)
             return self._run_result(call, blocks, started)
         except StreamTimeoutError as exc:
+            self._suspect = True
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
         except _LostOutputError as exc:
             return self._failed(call, Status.FAILED, str(exc), started)
         except BoundaryError as exc:
             return self._failed(call, Status.UNAVAILABLE, str(exc), started)
+
+    def _restage(self) -> None:
+        """Rebuilds the runner's repository, trees and scratch from the
+        controller-held tarballs (D80 round 2), because executed code can
+        rewrite anything it can reach and git does not re-verify a loose
+        object on read: the tarballs are the one source of truth it can
+        never touch. The staging is deterministic, so the recorded BASE
+        and HEAD ids must come back exactly -- anything else is a boundary
+        error, a gap. A recorded mutation re-applies on a fresh copy, and
+        the mutant commit is re-created with the same id, so the reads at
+        MUTANT keep serving the mutation the record names. Cleared, the
+        runner's state is exactly what the controller staged."""
+        digests = {
+            rev: hashlib.sha256(data).hexdigest() for rev, data in self.trees.staged()
+        }
+        for rev, data in self.trees.staged():
+            self.session.upload(
+                data,
+                f"{quote(self.staged.root)}/{rev.value.lower()}.tar.gz",
+                f"{rev.value} tree re-upload",
+            )
+        code, text = self.session.exec(
+            "bridge restage",
+            restage_script(self.staged, self._mutation, self.unpack, digests),
+            stage="bridge staging",
+            budget_s=RESTAGE_BUDGET_S,
+        )
+        commits = parse_staged(code, text, tuple(self.staged.commits), self.unpack)
+        if commits != dict(self.staged.commits):
+            raise BoundaryError(
+                f"the re-staged commits differ from the recorded ones "
+                f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+            )
+        if self._mutation is not None:
+            blocks = parse_run_blocks(text)
+            applied = next((b for b in blocks or () if isinstance(b, _MutBlock)), None)
+            ok, _before, _after, _reason = (
+                parse_mutation(applied.payload, applied.apply_exit)
+                if applied is not None
+                else (False, "", "", "no mutation step ran")
+            )
+            if not ok or applied is None or applied.commit != self._mutation.commit:
+                raise BoundaryError(
+                    "the re-applied mutant commit differs from the recorded one "
+                    f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+                )
+        self._suspect = False
 
     def _run_result(
         self,
@@ -1478,6 +1639,11 @@ class Bridge:
             after,
             "" if applied.commit in ("-", "") else applied.commit,
         )
+        if record.commit:
+            # A re-stage re-applies this mutation deterministically (D80
+            # round 2), so the mutant tree the record names survives the
+            # rebuild.
+            self._mutation = record
         runs: tuple[RunRecord, ...] = (RunRecord(baseline.code, _summary_of(baseline)),)
         if mutated is not None:
             runs += (RunRecord(mutated.code, _summary_of(mutated)),)
@@ -1535,6 +1701,11 @@ class Bridge:
     def _exec(
         self, call: Call, limits: ToolLimits, paths: tuple[str, ...] = ()
     ) -> _Reply:
+        if self._suspect:
+            # Executed code may have rewritten what the read tools serve
+            # (D80 round 2): re-stage from the controller-held tarballs
+            # before anything is served.
+            self._restage()
         code, text = self.session.exec(
             f"bridge {call.tool}",
             call_script(self.staged, call, limits, paths, self.commits),
@@ -1753,7 +1924,17 @@ def run_bridge(
             },
         )  # fmt: skip
         return body(
-            Bridge(session, staged, redactor, clock, changed, limits, session_limits)
+            Bridge(
+                session,
+                staged,
+                redactor,
+                clock,
+                changed,
+                limits,
+                session_limits,
+                trees,
+                unpack,
+            )
         )
 
     return run_session(

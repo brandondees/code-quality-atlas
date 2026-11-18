@@ -1431,7 +1431,10 @@ def test_the_built_argv_is_pytest_module_mode_isolated_and_fixed():
 
 
 TAMPER_TEST = """\
+import glob
+import os
 import subprocess
+import zlib
 from pathlib import Path
 
 BRIDGE = Path(__file__).resolve().parents[2]
@@ -1476,6 +1479,31 @@ def test_forges_the_mutant_ref_and_replaces_the_staged_trees():
         "from calc import total\\n\\n"
         "def test_always_passes():\\n    assert total([1]) == 111\\n"
     )
+
+
+def test_rewrites_a_loose_object_in_place():
+    # git does not re-verify a loose object on read, so overwriting the
+    # blob file under its original name is the attack that survives every
+    # read path that trusts the object store.
+    for path in glob.glob(
+        str(BRIDGE / "repo.git" / "objects" / "[0-9a-f][0-9a-f]" / "*")
+    ):
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        try:
+            data = zlib.decompress(raw)
+        except zlib.error:
+            continue
+        if (
+            data.endswith(b"    return sum(xs)\\n")
+            and b"if not xs:" in data
+            and b"def total(xs):" in data
+        ):
+            forged = data.replace(b"return sum(xs)", b"return 0  # FORGED OBJECT")
+            os.unlink(path)
+            with open(path, "wb") as handle:
+                handle.write(zlib.compress(forged))
+            return
 """
 
 DESTRUCTIVE_TEST = (
@@ -1524,6 +1552,10 @@ def test_executed_code_cannot_tamper_with_what_later_calls_trust(tmp_path):
         )  # fmt: skip
         out["mutant0"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
         out["run1"] = bridge.call("run_tests", {"path": "test_tamper.py"})
+        # A second execution with no read between: it too must stage the
+        # real tree, so the tamper cannot live in the object store across
+        # a run-to-run handoff.
+        out["run1b"] = bridge.call("run_tests", {"path": "test_calc.py"})
         out["head1"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
         out["mutant1"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
         out["m2"] = bridge.call(
@@ -1532,7 +1564,11 @@ def test_executed_code_cannot_tamper_with_what_later_calls_trust(tmp_path):
              "tests": "test_calc.py"},
         )  # fmt: skip
         out["mutant2"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
-        out["run2"] = bridge.call("run_tests", {"path": "test_calc.py"})
+        # The tamper again, then a read with no execution between: the
+        # served content is real even though the object was just
+        # rewritten under its recorded name.
+        out["run3"] = bridge.call("run_tests", {"path": "test_tamper.py"})
+        out["head3"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
         collected.update(out)
         return "done"
 
@@ -1544,6 +1580,10 @@ def test_executed_code_cannot_tamper_with_what_later_calls_trust(tmp_path):
     # The tamper run itself ran (the attack executed; it bought nothing).
     (tamper,) = collected["run1"].runs
     assert collected["run1"].status is Status.OK and tamper.exit == 0
+    # The very next execution still stages the real tree.
+    (run1b,) = collected["run1b"].runs
+    assert collected["run1b"].status is Status.OK and run1b.exit == 0
+    assert run1b.summary is not None and run1b.summary.count("passed") == 1
     # HEAD keeps its content, and MUTANT keeps serving the real mutant --
     # never the attacker's forged commit.
     assert collected["head1"].content.text == CALC
@@ -1556,20 +1596,19 @@ def test_executed_code_cannot_tamper_with_what_later_calls_trust(tmp_path):
     assert "REPLACED TREE" not in m2.mutation.before
     assert m2.outcome is MutantOutcome.KILLED
     assert "if not (not xs):" in collected["mutant2"].content.text
-    # And the next run runs the real tree: the replaced test_calc.py would
-    # fail against the real calc.py, and the real suite passes.
-    (run2,) = collected["run2"].runs
-    assert collected["run2"].status is Status.OK and run2.exit == 0
-    assert run2.summary is not None and run2.summary.count("passed") == 1
+    # And the tamper's second outing changes nothing a read serves.
+    assert collected["head3"].content.text == CALC
+    assert "FORGED OBJECT" not in collected["head3"].content.text
 
 
-def test_executed_code_deleting_the_repository_leaves_gaps_not_fake_runs(tmp_path):
-    """Round 1's F4, from the probe's DoS shape: executed code deletes the
-    staged repository, so the next call's staging fails -- a gap naming
-    the staging failure, never a fake test result built from a colliding
-    exit code. Deleting `trees` alone no longer matters at all: the copy
-    is staged from the repository's objects, which the tamper test above
-    pins."""
+def test_executed_code_deleting_the_repository_does_not_take_the_session_hostage(
+    tmp_path,
+):
+    """Round 1's F4 shape, re-run after the round-2 fix: executed code
+    deletes the staged repository -- and the next call rebuilds it from
+    the controller-held tarballs and runs the real tree, so the DoS buys
+    nothing; a staging failure stays a gap (`unavailable`, pinned by the
+    scripted staging-failure tests), never a fake test result."""
     collected = {}
 
     def body(bridge):
@@ -1577,7 +1616,13 @@ def test_executed_code_deleting_the_repository_leaves_gaps_not_fake_runs(tmp_pat
         out["run1"] = bridge.call("run_tests", {"path": "test_destructive.py"})
         out["run2"] = bridge.call("run_tests", {})
         out["mutate"] = bridge.call(
-            "mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}
+            "mutate",
+            {
+                "path": "calc.py",
+                "line": 2,
+                "operator": "remove-guard",
+                "tests": "test_calc.py",
+            },
         )
         collected.update(out)
         return "done"
@@ -1586,11 +1631,18 @@ def test_executed_code_deleting_the_repository_leaves_gaps_not_fake_runs(tmp_pat
     assert report.status is RunnerStatus.COMPLETED, report.note
     (destructive,) = collected["run1"].runs
     assert collected["run1"].status is Status.OK and destructive.exit == 0
-    assert collected["run2"].status is Status.UNAVAILABLE
-    assert "the staged copy could not be made" in collected["run2"].error.text
-    assert collected["run2"].runs == ()
-    assert collected["mutate"].status is Status.UNAVAILABLE
-    assert "the staged copy could not be made" in collected["mutate"].error.text
+    # The repository was rebuilt from the tarballs: the real tree runs.
+    (run2,) = collected["run2"].runs
+    assert collected["run2"].status is Status.OK and run2.exit == 0
+    assert run2.summary is not None and run2.summary.count("passed") == 2
+    # And a mutant runs and is judged against the real head statement.
+    # (The mutate's runs select the ordinary test file: a whole-suite run
+    # would execute the destructive test again mid-call, and its honest
+    # result is the inconclusive shape the staging-failure tests pin.)
+    assert collected["mutate"].status is Status.OK
+    assert collected["mutate"].outcome is MutantOutcome.SURVIVED
+    assert collected["mutate"].mutation.before == "return 0"
+    assert "REPLACED TREE" not in collected["mutate"].mutation.before
 
 
 def test_the_baseline_runs_writes_do_not_carry_into_the_mutant(tmp_path):
@@ -1679,3 +1731,114 @@ def test_a_rejected_call_does_not_spend_an_execution_slot(tmp_path):
     assert mutated.status is Status.OK
     assert refused.status is Status.OVER_SESSION_LIMIT
     assert "all 1 run_tests calls of this attempt made" in refused.error.text
+
+
+def test_a_tampered_upload_stops_the_restage(tmp_path):
+    """Round 2's upload-window shape: a daemon left behind by an executed
+    run can rewrite the freshly uploaded tarball before the staging exec
+    reads it. The staging verifies each tarball against the digest of the
+    bytes the controller holds, so a rewritten one stops the re-staging
+    (fail-closed), and the tool answers `unavailable`, never a result
+    built from attacker-chosen bytes. The rewrite here is a RECOMPRESSION
+    -- the same tree, unpacked identically -- so the digest check is the
+    only layer that sees it, and the mutant that drops the check dies on
+    this test."""
+    import glob as globmod
+
+    class UploadTamperer(LocalSprites):
+        armed = False
+
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            result = super().exec(name, argv, stdin, timeout_s, first_byte_s)
+            script = argv[-1]
+            if self.armed and "cat > " in script and ".tar.gz" in script:
+                after = script.split("cat > ", 1)[1]
+                path = after.split(" &&")[0].split()[0]
+                import gzip as gzipmod
+
+                for tarball in globmod.glob(path):
+                    # Recompressed, not corrupted: the archive unpacks
+                    # exactly as before and yields the same tree, so only
+                    # the digest check can see the rewrite.
+                    with open(tarball, "rb") as handle:
+                        original = handle.read()
+                    with open(tarball, "wb") as handle:
+                        handle.write(
+                            gzipmod.compress(
+                                gzipmod.decompress(original), compresslevel=1
+                            )
+                        )
+            return result
+
+    collected = {}
+    sprites = UploadTamperer()
+
+    def body(bridge):
+        bridge.call("run_tests", {"path": "test_calc.py"})
+        # The daemon the executed run left behind starts tampering with
+        # whatever is uploaded from here on.
+        sprites.armed = True
+        collected["read"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        return "done"
+
+    report = bridge_run(tmp_path, body, sprites=sprites, source=trees(SUITE))[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["read"].status is Status.UNAVAILABLE
+    assert "bridge staging failed" in collected["read"].error.text
+
+
+def test_a_daemon_racing_the_edit_cannot_forge_the_recorded_mutant(tmp_path):
+    """D80's owned residual, pinned: a test daemon that survives the
+    process-group kill could rewrite the scratch between the mutation
+    edit and the mutant commit, inside one exec. The re-stage checks the
+    re-created mutant commit against the id the record names, so a
+    winning daemon's tree is refused -- the tool answers `unavailable`, a
+    gap -- instead of serving a mutant the record did not make. The
+    daemon here is scripted: the runner writes into the copy between the
+    edit and the commit, deterministically, the way a winning race would."""
+    from atlas_reviewer.bridge import MUTATION_SCRIPT
+
+    class EditRacer(LocalSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            from atlas_reviewer.runner import exec_argv
+
+            script = argv[-1]
+            # The daemon rides only the mutate exec (the one that runs
+            # pytest and frames STAGE blocks); the re-stage's re-apply has
+            # no staged run in it.
+            if "> mut 2> mut_err" in script and "__ATLAS_STAGE__" in script:
+                scratch = script.split("( cd ", 1)[1].split(";", 1)[0].strip()
+                daemon = f"printf '\\n# daemon wrote here\\n' >> '{scratch}/calc.py'"
+                script = script.replace(
+                    "> mut 2> mut_err", f"> mut 2> mut_err; {daemon}", 1
+                )
+                wrapped = exec_argv(script, len(stdin) if stdin else 0)
+                return LocalSprites.exec(
+                    self, name, wrapped, stdin, timeout_s, first_byte_s
+                )
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    collected = {}
+    sprites = EditRacer()
+
+    def body(bridge):
+        collected["mutate"] = bridge.call(
+            "mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}
+        )
+        # The recorded mutant's id was minted from the tree the daemon's
+        # write landed in; the re-stage re-applies the recorded mutation
+        # to a clean copy and re-creates the id the splice alone produces,
+        # so the mismatch refuses the read.
+        collected["read"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        return "done"
+
+    report = bridge_run(
+        tmp_path, body, sprites=sprites,
+        source=trees({"calc.py": CALC.encode(), "test_calc.py": TEST_TOTAL.encode()}),
+    )[0]  # fmt: skip
+
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["mutate"].status is Status.OK
+    assert collected["read"].status is Status.UNAVAILABLE
+    assert "differs from the recorded one" in collected["read"].error.text
+    assert MUTATION_SCRIPT  # the marker the racer keys on is the fixed script

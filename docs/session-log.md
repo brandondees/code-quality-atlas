@@ -4291,3 +4291,40 @@ uid 0. The review's two probes became regression tests
 `test_the_baseline_runs_writes_do_not_carry_into_the_mutant`); seven new
 mutants, each dead on a named test. No live model, Sprite or GitHub
 call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 2: the object store is not a source of truth — the re-stage from the tarballs
+
+The round-2 routine review rejected the round-1 fix's premise with a
+re-run: **git does not re-verify a loose object on read** — `cat-file`
+inflates and serves it; only `fsck` and the transfer paths check ids —
+so the round-1 probe's in-place overwrite of the `calc.py` blob under
+its recorded name still served attacker content at `rev=HEAD`, and, once
+staging had been moved onto the object store, reached the next execution
+copy too. (`read_file HEAD` verified locally: overwrite the blob file
+`objects/e7/1172…` in place, and the commit-id-addressed read serves the
+forged bytes.) The one source of truth executed code cannot touch is the
+controller's own copy of the trees. So: every execution call — and every
+read that follows one (`_suspect`, set by any execution, cleared by a
+clean re-stage) — now **re-stages the runner's repository, trees, scratch
+and staging indexes from freshly re-uploaded, digest-checked tarballs**
+(`restage_script`): the staged commits are deterministic (fixed identity
+and date), so the recorded BASE/HEAD ids must come back exactly, and a
+mismatch is a gap; a recorded mutation re-applies deterministically on a
+fresh copy and the mutant commit is re-created with the same id, checked
+against the record, so MUTANT keeps serving the mutation the record
+names. The digest checks close the upload-to-verify window (a daemon
+rewriting the uploaded tarball stops the staging — pinned against a
+recompressed-equivalent tarball only the digest can see); the
+re-created-id check turns a daemon winning the edit→commit race into a
+refused read, not a forged record (pinned with a scripted daemon that
+writes into the copy between the edit and the commit). The stale-index
+trap this uncovered on the way: a re-stage that kept the staging index
+files let `git add`'s cached stat entries (the tarballs' fixed mtimes)
+skip re-hashing, and `write-tree` then failed on blobs the fresh
+repository had never received — the rebuild removes them. Executed code
+deleting the repository no longer takes the session hostage: the next
+call rebuilds and runs the real tree. Both review rounds' attacks live
+in one regression fixture (the forged ref, the replaced `trees`, the
+in-place object overwrite, twice); six more mutants die on named tests.
+No live model, Sprite or GitHub call; no secret read; no deployed
+setting changed.

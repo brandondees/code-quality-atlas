@@ -334,16 +334,34 @@ def _git_cmd(git: str, root: str) -> str:
 
 
 def stage_script(
-    root: str, git: str, revs: Sequence[Rev], unpack: UnpackLimits = DEFAULT_UNPACK
+    root: str,
+    git: str,
+    revs: Sequence[Rev],
+    unpack: UnpackLimits = DEFAULT_UNPACK,
+    digests: Mapping[Rev, str] | None = None,
 ) -> str:
     """One exec: extract each uploaded tarball within `unpack`
     (`guest_unpack`), commit its tree into a fresh bare repository, print
     each commit id. Runs in a `set -e` subshell so the exit marker is still
-    printed on failure, and the first refused tree stops the rest."""
+    printed on failure, and the first refused tree stops the rest. When
+    `digests` names each tree's sha256 (the re-stage path, where executed
+    code from an earlier call could have rewritten the uploaded file in
+    the upload-to-verify window), each tarball is verified against its
+    digest before anything is extracted, and a mismatch stops the
+    staging."""
     g = _git_cmd(git, root)
+    checks = [
+        (
+            f"printf '%s  {rev.value.lower()}.tar.gz\\n' {quote(digests[rev])} "
+            "| sha256sum -c -"
+        )
+        for rev in revs
+        if digests and rev in digests
+    ]
     steps = [
         f"cd {quote(root)}",
         f"export {' '.join(GIT_ENV)} {' '.join(_IDENTITY)}",
+        *checks,
         f"{g} init -q --bare {quote(root)}/repo.git",
         f"printf '%s\\n' {quote(ATTRIBUTES)} > repo.git/info/attributes",
         *(step for rev in revs for step in _commit_steps(root, g, rev, unpack)),
