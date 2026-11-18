@@ -13,12 +13,11 @@ supply their own api endpoints and keys" — carried below as §2's BYOK
 paragraph, §3's two BYOK rows, §4's two new bullets, slice **S10**, and
 §7's decisions, recorded when Brandon accepted all nine recommendations
 (4:15 PM CT). **Added in the later fix rounds:** the BYOK-bounds mechanism
-(§4's operator-side accounting) and the tier-coverage correction (§4's
-merge-base bullet) are folded in; **§8** carries the two questions they
-raised for Brandon, with nothing there decided. **Added 2026-11-18, 4:54 PM
-CT:** the S4 event-type invariant — `review_skip_events` stays a
-repo-owner opt-out that knowingly reduces coverage, with each skippable
-event's cost documented (D81's update; §2, §3 and §5 restated). Nothing
+(§4's operator-side accounting, now on operator-observed floors), the
+tier-coverage correction (§4's merge-base bullet), the S4 event-type
+decision (4:54 PM CT, recorded in §6), the tenant-supplied-keys naming
+note (§2), and **§8**'s three pending questions for Brandon, with nothing
+there decided. Nothing
 in this plan was run live: no model call, no
 GitHub write, no Fly or secret change, no deployed setting touched.
 
@@ -221,7 +220,12 @@ newest bullet. **This needs installation-level state, which D81's Q4 answer
 ("repo-level only for now") did not build; §7's decision 9 resolves the
 conflict by amending Q4 narrowly — installation-level state for
 credentials only, review configuration stays repo-level.** The decisions
-live in §7; the slice is S10.
+live in §7; the slice is S10. **A naming note:** this plan's "BYOK" — the
+installation supplies its own endpoint and key, the surface this record
+also calls **tenant-supplied keys** — is **not** OpenRouter's account-level
+BYOK, which already exists on main (`usage.is_byok`, `ByokRefusedError`,
+recorded in D41) and stays what it is for the operator's key; S10 leaves
+that existing handling untouched and the two never share a code path.
 
 ## 3. Candidate settings
 
@@ -351,26 +355,41 @@ live in §7; the slice is S10.
   `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the shared key's
   *total* credit limit, not a per-repo bound — which is exactly why the
   per-tenant bounds exist alongside it.
-- **BYOK bounds are computed on the operator side.** §7's decision 4 keeps
-  both spend bounds applying to a BYOK review, and the mechanism that makes
-  that hold: the BYOK spend a bound counts is **token counts × the
-  operator's price table** — §7's decision 6 already refuses models with no
-  price-table entry, so every allowed model has one. The provider's
-  self-reported `usage.cost` is **never trusted for a bound**: it is the
-  tenant's endpoint reporting its own bill, and a tenant-reported number
-  cannot bound operator-paid load. A reply whose token counts are missing
-  reserves the worst case and fails closed, the way D82's reservation
-  accounting does (#757). The **load the operator pays for regardless of
-  whose key pays the model** — compute, Sprites, the model-independent work
-  — is bounded per repo on the operator side, independent of the tenant's
-  key, by the existing controls counted in operator terms: the per-review
-  limits (D68's derived call caps and walls), the service's concurrency cap
-  (`ATLAS_REVIEW_CONCURRENCY`, 1–32), and S9's per-repo daily budget, whose
-  running total counts operator-priced spend even when the model bill goes
-  to the installation's key. What no existing control bounds is a
-  **per-installation total across its repos** — an installation holding
-  many repos multiplies the per-repo bound — and that limit is not S9's;
-  it is §8 Q1, an open question for Brandon, not decided here.
+- **BYOK bounds are computed on the operator side, from operator-observed
+  floors.** §7's decision 4 keeps both spend bounds applying to a BYOK
+  review, and the mechanism that makes that hold. The counted spend is
+  **token counts × the operator's price table** — §7's decision 6 already
+  refuses models with no price-table entry, so every allowed model has one
+  (zero- or nonpositive-priced models are §8 Q3, pending). The counts
+  themselves are **operator-observed and floored**, because the token
+  counts are as tenant-writable as the `usage.cost` field is: input tokens
+  are **at least** the prompt bytes the operator itself sent, metered by
+  D58's one-token-per-byte rule and converted to tokens; output tokens are
+  **at least** the completion bytes the operator itself received, metered
+  the same way and converted; the endpoint's reported usage counts may
+  refine the figure **upward only, never below the operator's floor** — a
+  misreporting endpoint must not deflate the per-day accounting the bounds
+  exist to be. The reservation half is D82's own rule (#757) — a call
+  reserves its worst case before it is sent — but the **settle is not**:
+  D82's settle prices a missing reasoning count at the conservative rate
+  for the operator's own trusted key, and the BYOK path **overrides that
+  settle**, refusing or reserving the worst case when the counts it needs
+  are missing. S9's per-repo daily budget and §8 Q1's recommended
+  per-installation cap count these operator-observed figures. The **load
+  the operator pays for regardless of whose key pays the model** —
+  compute, Sprites, the model-independent work — is bounded per repo on
+  the operator side, independent of the tenant's key, by the existing
+  controls counted in operator terms: the per-review limits (D68's derived
+  call caps and walls), the service's concurrency cap
+  (`ATLAS_REVIEW_CONCURRENCY`, 1–32), and S9's per-repo daily budget. What
+  no existing control bounds is a **per-installation total across its
+  repos** — an installation holding many repos multiplies the per-repo
+  bound — and that limit is not S9's; it is §8 Q1, an open question for
+  Brandon, not decided here. S10 leaves the existing OpenRouter-BYOK
+  handling untouched on the operator-key path — an unreadable upstream
+  account-level BYOK charge still keeps its reservation (D41) — and never
+  reads `usage.cost` or `cost_details.upstream_inference_cost` on the
+  tenant-supplied path; the operator-side floors above replace it there.
 - **BYOK keys are never repo content.** The intake surface is
   operator-hosted (the decided path: a settings page authenticated as the
   installation's admin via GitHub — §7's decision 1), never `REVIEW.md`, never a repo
@@ -412,13 +431,13 @@ live in §7; the slice is S10.
 | S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | both existing lines parse identically through the new module (no behavior change); unknown/out-of-range keys yield named fail-open notes that never echo the raw rejected value (§2's rule); the 64 KiB read bound preserved | **concurrent** — the #750 fix is open as **#757 (D82)** and its file list (`budget.py`, `openrouter.py`, `service_post.py`, `tool_model.py`) includes neither `review_wide.py` nor `coordinator.py`, so S1's refactor of the ceiling *read* (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`) is disjoint; this plan's earlier same-file prediction was wrong and is corrected here | first |
 | ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | — | dropped |
 | S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | floor keys honored and named in the post; floor-tier lenses' findings never silently suppressed (the tier rule carries over); lowering-only pinned by tests | **rebase-check against #757 (D82)** — its file list includes `service_post.py`, which S3 edits | after S1 |
-| S4 | When-to-review admission — narrowing in two kinds (D81's 4:54 PM CT update): **author-safe narrowing** on delivery properties where a skip cannot land unreviewed changes on a branch the repo reviews (the base branch; the config read from the repo's **default branch** per §4's rule, and no head-branch or label keys), and **repo-owner opt-outs that knowingly reduce coverage** (`review_skip_events`), with the owner-facing docs stating each skippable event's coverage cost; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; the README states plainly what each skippable event costs in coverage — skipping `synchronize` lets later pushes land unreviewed, and skipping `ready_for_review` means a PR opened as a draft is never reviewed when it turns ready; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
+| S4 | When-to-review admission — narrowing in two kinds (D81's 4:54 PM CT update): **author-safe narrowing** on delivery properties where a skip cannot land unreviewed changes on a branch the repo reviews (the base branch; the config read from the repo's **default branch** per §4's rule, and no head-branch or label keys), and **repo-owner opt-outs that knowingly reduce coverage** (`review_skip_events`), with the owner-facing docs stating each skippable event's coverage cost; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; the per-event coverage costs are stated in the carrier #756's README already provides (head fe9a3358: skipping `synchronize` means only the opening state is ever reviewed, skipping `ready_for_review` means a draft PR is never reviewed, skipping `opened` defers the first review to a later push, skipping all three means the repo is never reviewed) — S4's work keeps that text current rather than writing a second copy; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
 | S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | no path is ever dropped from review by user config; re-ranking is recorded in the draft; Q25 untouched | no open PR touches `diffs.py` — the merged D79 delta work touched `delta.py` and `head_change.py`, not `diffs.py`; rebase onto main before starting | after S1 |
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | the blocks reach every lens fenced and budgeted; omissions are named; injected content stays inside the fence | **concurrent** — corrected against the open #734 PRs' actual file lists: #752/#753 (D80) touch `bridge.py`, `bridge_args.py`, `bridge_staging.py`, `interpreter.py`, `lens_loop.py`, `attestation.py`, `coordinator.py`, `ports.py`, `tool_model.py` — **not** `cli.py` or `conversation.py`, so the earlier "hot files" premise (based on the pre-#752 prediction) was wrong; rebase-check only | after S1 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | — | **deferred by D81** (Q4: repo-level only — amended for credentials only by §7's decision 9, which is S10's store, not a general defaults store; Q7: quiet hours deferred) | deferred |
 | S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | a repo-raised ceiling cannot pass the operator max and the clamp is named; a repo over its daily budget is refused with the plain record and never a clean-looking post; **two distinct owner/repo pairs never share a spend file** (the percent-encoding of §4); the bounded overshoot is pinned by a test (concurrent admissions over-commit by at most the in-flight reviews × the operator max); the total survives a restart and resets at the UTC boundary | **rebase-check against #757 (D82)** — its file list includes `budget.py`, which S9's daily-total accounting edits; follows S1 (the operator max is a config-bounded value) and S4 (the refusal rides its admission surface, already in flight at #756) | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
-| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; no silent operator-key fallback; **the BYOK bounds are operator-side** — the counted spend is token counts × the operator's price table, never the provider's self-reported `usage.cost`, and a reply missing token counts reserves the worst case and fails closed (the D82 way, #757); the operator-paid load is bounded per repo by the per-review limits, the concurrency cap and the S9 daily budget counted in operator terms; tests pin each (a self-reported cost cannot satisfy a bound; a token-less reply fails closed) | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope; the per-installation operator-load bound is §8 Q1, pending |
+| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; no silent operator-key fallback; **the BYOK bounds are operator-side** — the counted spend is token counts × the operator's price table; the counts are operator-observed floors (D58-metered prompt bytes and received completion bytes), with the endpoint's reported counts refining upward only and the self-reported `usage.cost` never trusted; a reply missing its counts reserves the worst case for the reservation — D82's own rule (#757) — and refuses or reserves the worst case at settle, overriding D82's conservative-rate settle on the BYOK path; **a misreported count cannot lower the counted spend below the operator's observed floor**; the operator-paid load is bounded per repo by the per-review limits, the concurrency cap and the S9 daily budget counted in operator terms; tests pin each (a self-reported cost cannot satisfy a bound; a token-less reply fails closed; a deflated count settles at the floor, not below it) | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope; the per-installation operator-load bound is §8 Q1, pending |
 
 Recommended order: S4 is already in flight at #756 (its retarget
 follow-up is issue #758), then S1 (concurrent with the parity track), then S3 and S5, then S9
@@ -479,6 +498,20 @@ envelope (the one widening §2's invariant names), tracked as the
 follow-up **issue #758** to #756. Until #758 lands, the gap stands named,
 the way issue #756 documents it.
 
+**Update (2026-11-18, 4:54 PM CT — the S4 event-type invariant).**
+Resolving the round-5 Major the S4 event-type question raised: Brandon
+decided, **"Keep review_skip_events as a repo-owner opt-out and document
+that it reduces coverage."** The event type is not a property where a skip
+cannot land unreviewed changes — skipping `synchronize` lets later pushes
+land unreviewed, and skipping `ready_for_review` means a PR opened as a
+draft is never reviewed when it turns ready. The S4 invariant now
+separates two kinds of narrowing: what a **PR author cannot exploit** (the
+default-branch read, no head-branch or label keys), and **repo-owner
+opt-outs that knowingly reduce coverage**, of which `review_skip_events`
+is the first, with the owner-facing docs stating each skippable event's
+coverage cost (carried by #756's README, head fe9a3358). No other decision
+changes.
+
 ## 7. BYOK decisions (D81 — Brandon accepted all nine recommendations, 2026-11-18 4:15 PM CT)
 
 Brandon's BYOK requirement (2026-11-18, 3:41 PM CT) is recorded above and in
@@ -500,9 +533,13 @@ proposed, are recorded in D81:
    installation's own key — they protect the user's money and the service's
    load — with the installation able to lower them and the operator max as
    the outer bound; `ATLAS_KEY_CEILING_USD` stays operator-key only. The
-   mechanism that makes this hold is §4's operator-side accounting: bounds
-   count token × price-table figures, never the tenant endpoint's
-   self-reported `usage.cost`; the per-installation operator-load gap is
+   mechanism that makes this hold is §4's operator-side accounting, now
+   stated on **operator-observed floors**: the counted spend is token
+   counts × the operator's price table, with the counts floored at what
+   the operator itself metered (D58's one-token-per-byte on the prompt it
+   sent and on the completion bytes it received), reported counts refining
+   upward only, and the BYOK settle overriding D82's conservative-rate
+   settle; the per-installation operator-load gap is
    §8 Q1, pending.
 5. **Model choice.** A BYOK installation may choose the model its reviews
    run on, within what its own endpoint serves; D68's budget shape stays.
@@ -540,3 +577,15 @@ proposed, are recorded in D81:
    call. Recommended default: keep D69's behavior as recorded (the
    critical four protected) and treat the fifth lens's excludeability as a
    named limitation until he decides. **Not decided here.**
+3. **Zero- or nonpositive-priced models under BYOK.** Decision 6 refuses
+   models with *no* price-table entry; a model **with** a zero (or
+   nonpositive) price passes it, and tokens × $0 accumulates nothing —
+   every dollar-denominated operator bound (S9's daily budget, the
+   per-review ceiling's dollar meaning, §8 Q1's recommended cap) goes
+   vacuous for a tenant that picks a free model, while the per-review call
+   caps and walls still bound each review. Free models are a real BYOK use
+   case, so this is Brandon's call. Recommended default: extend decision
+   6's refusal to models with a **nonpositive** price entry (same
+   rationale — the reservation math is ungrounded for bounding); the
+   alternative is allowing them and counting a per-call non-dollar
+   operator-load unit alongside dollars. **Not decided here.**
