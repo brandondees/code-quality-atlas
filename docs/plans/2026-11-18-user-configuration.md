@@ -11,7 +11,8 @@ with #734's slice). **Added after D81, 2026-11-18 3:41 PM CT:** Brandon's
 BYOK requirement — "I need the github app to allow individuals or orgs to
 supply their own api endpoints and keys" — carried below as §2's BYOK
 paragraph, §3's two BYOK rows, §4's two new bullets, slice **S10**, and
-§7's pending open questions, whose answers are not recorded yet. Nothing
+§7's decisions, recorded when Brandon accepted all nine recommendations
+(4:15 PM CT). Nothing
 in this plan was run live: no model call, no
 GitHub write, no Fly or secret change, no deployed setting touched.
 
@@ -171,7 +172,7 @@ update) — plus `ATLAS_KEY_CEILING_USD`, which stays what it is: a cap on
 the *shared key's total* credit limit, not a per-repo bound; the model,
 provider, ZDR and safety-retention variables **for the operator's key** —
 BYOK (next paragraph) gives an installation its own endpoint and key
-instead, pending §7's answers; every operator secret; the Sprite
+instead, decided in §7; every operator secret; the Sprite
 policy (deny-all, credential-free, create retries/concurrency); service
 concurrency and deadline; the review-repo allowlist and admission envelope;
 `ATLAS_HEAD_CHANGE_*`. `ATLAS_REVIEW_CEILING_USD` stays the operator-set
@@ -187,15 +188,16 @@ conversation): the intake surface is operator-hosted, and the recommended
 path is a **settings page authenticated as the installation's admin via
 GitHub** (an org owner or the account owner, per GitHub's own
 installation-admin notion), with rotation, revocation, and deletion on the
-same page (§7 Q1; alternatives there). Storage: encrypted at rest under an
+same page (§7's decision 1). Storage: encrypted at rest under an
 operator-held key; never logged, never in a post, never passed to Sprites,
 cloud agents, or child environments beyond the one model-call client; on
-uninstall the stored secret is deleted (§4's bullet, §7 Q8). A
+uninstall the stored secret is deleted (§4's bullet, §7's decision 8). A
 user-supplied base URL is user-controlled egress — its trust rules are §4's
 newest bullet. **This needs installation-level state, which D81's Q4 answer
-("repo-level only for now") did not build; the conflict is flagged as §7's
-Q9, not overridden silently.** The open questions live in §7; the slice is
-S10.
+("repo-level only for now") did not build; §7's decision 9 resolves the
+conflict by amending Q4 narrowly — installation-level state for
+credentials only, review configuration stays repo-level.** The decisions
+live in §7; the slice is S10.
 
 ## 3. Candidate settings
 
@@ -212,8 +214,8 @@ S10.
 | #734 tool allow-lists | deny-all; structured `run_tests`/`mutate` with bridge-built argv | a repo's requested additions are **proposals** that become operator-approval requests (the #734 decision: approval may apply within the same run, bounded by the wall and dollar limits); never auto-granted | operator approves, user proposes | #734 not started |
 | Coding guidelines / AGENTS.md ingestion | none | delivered as fenced untrusted context blocks under the D67/D73 room budget, like the conversation and CI blocks; never instructions | user (content), engine (delivery) | not built |
 | Quiet hours / rate limits | none | an operator ceiling per repo per day; a user may only opt into quieter | user narrows, operator bounds | not built |
-| BYOK endpoint and key | none — the operator's key and endpoint serve every review | supplied by the installation's admin through the intake surface (§2, §7 Q1), never through `REVIEW.md`, any repo file, or a PR conversation; an HTTPS-only base URL that passes §4's egress checks; encrypted at rest, never logged or posted, never past the one model-call client | installation admin (supply), operator (intake, store, egress rules) | not built |
-| BYOK model choice | the operator's model | whether a BYOK installation may also choose models is §7 Q5; if allowed, the D68 budget shape (calls, turns, walls) stays and the dollar budgets resolve from the price table when the model is known — unknown pricing is §7 Q6 | user (choice), operator (bounds) | not built |
+| BYOK endpoint and key | none — the operator's key and endpoint serve every review | supplied by the installation's admin through the intake surface (§2, §7's decision 1), never through `REVIEW.md`, any repo file, or a PR conversation; an HTTPS-only base URL that passes §4's egress checks (§7's decision 2: any such host, not an operator allow-list); encrypted at rest, never logged or posted, never past the one model-call client | installation admin (supply), operator (intake, store, egress rules) | not built |
+| BYOK model choice | the operator's model | a BYOK installation may choose the model within its own endpoint (§7's decision 5); the D68 budget shape stays and the dollar budgets resolve from the price table, so models with no price-table entry are refused (§7's decision 6) | user (choice), operator (bounds) | not built |
 
 ## 4. Security and trust
 
@@ -287,7 +289,7 @@ S10.
   per-tenant bounds exist alongside it.
 - **BYOK keys are never repo content.** The intake surface is
   operator-hosted (recommended: a settings page authenticated as the
-  installation's admin via GitHub — §7 Q1), never `REVIEW.md`, never a repo
+  installation's admin via GitHub — §7's decision 1), never `REVIEW.md`, never a repo
   file, never a PR conversation. A stored key is encrypted at rest under an
   operator-held key; it is never logged, never quoted in a post or draft,
   and never passed to Sprites, cloud agents, or child environments beyond
@@ -296,7 +298,7 @@ S10.
   the Sprite receives neither. Rotation and revocation live on the same
   intake page; on uninstall (`installation.deleted`) the installation's
   stored secret is deleted, with a retention sweep catching a missed event
-  (§7 Q8).
+  (§7's decision 8).
 - **A user-supplied base URL is user-controlled egress.** The service makes
   outbound requests to it, which is an SSRF surface: HTTPS only; private,
   link-local, loopback and metadata addresses blocked at connect time with
@@ -307,10 +309,11 @@ S10.
   the operator's ZDR and safety-retention settings are operator policy for
   the operator key; on a BYOK review the PR diff goes to the installation's
   own endpoint by definition — that is the point of BYOK — so the intake
-  page states what is sent (§7 Q3 covers the consent form) and the draft
+  page states what is sent — the consent statement §7's decision 3 requires
+  before the first BYOK review — and the draft
   and post record which endpoint class served the review. The operator's
-  key is never used for a BYOK installation's review except under an
-  explicit fallback policy, default off (§7 Q7); a BYOK key failure — an
+  key is never used for a BYOK installation's review: §7's decision 7 keeps
+  the fallback policy off, and a BYOK key failure — an
   auth error, quota, or endpoint down — fails the review with the failure
   named plainly, never a clean-looking "Findings: None".
 
@@ -327,13 +330,14 @@ S10.
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | **depends on #734 (D80) landing** | after #734 |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | **deferred by D81** (Q4: repo-level only; Q7: quiet hours deferred) | deferred |
 | S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | **against the parity track:** touches `review_wide.py`, where #750's reservation accounting also lands — rebase-check against #750; and it rides S1's parse module (the operator max is a config-bounded value) and S4's admission surface, so it follows both | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
-| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | **against the parity track:** mostly disjoint from #734/#750/#713/#708's edit sets, but `tool_model.py` sits beside the #654/#655 drafts' edit set — rebase-check; gated on §7's answers and after S9 (the spend bounds define what a BYOK review clamps to) | last; **prereq: the installation-storage decision (§7 Q9)** |
+| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | **against the parity track:** mostly disjoint from #734/#750/#713/#708's edit sets, but `tool_model.py` sits beside the #654/#655 drafts' edit set — rebase-check; **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
 
 Recommended order: S4 immediately (touching nothing the parity track
 touches), then S1 (concurrent with the parity track, same-file caveat
 against #750 noted above), then S3 and S5, then S9 once S1 and S4 have
 landed (rebase-checked against #750), then S6 and S7 once issue #734 has
-landed, then S10 last once §7's answers are in. S2 is dropped and S8 is
+landed, then S10 last (its §7 decisions are recorded; it still follows
+S9). S2 is dropped and S8 is
 deferred by D81.
 
 ## 6. Decisions (D81)
@@ -375,53 +379,38 @@ App beyond the operator's allowlisted repos**. The plan's earlier claim
 that `ATLAS_KEY_CEILING_USD` was the spend backstop is corrected: it caps
 the shared key's total, not a per-repo bound.
 
-## 7. Open questions — BYOK (pending; answers not recorded yet)
+## 7. BYOK decisions (D81 — Brandon accepted all nine recommendations, 2026-11-18 4:15 PM CT)
 
-Brandon's BYOK requirement (2026-11-18, 3:41 PM CT) is recorded above and
-in D81's update note; these questions are his to answer, and the parent
-will relay the answers. Each with a recommended default.
+Brandon's BYOK requirement (2026-11-18, 3:41 PM CT) is recorded above and in
+D81's update notes; at 4:15 PM CT the same day he answered: **"Accept all 9
+BYOK recommendations."** The nine decisions, each the recommendation §7
+proposed, are recorded in D81:
 
-1. **Intake path.** Operator-hosted settings page authenticated as the
-   installation's admin via GitHub (recommended — the key never transits
-   repo content or a PR conversation, the admin identity is verifiable
-   through GitHub's own installation-admin notion, and rotation, revocation
-   and deletion get one natural home), an operator-run manual intake
-   (a ticket or form the operator enters into the store by hand), or
-   something else?
-2. **Endpoint scope.** Any HTTPS host that passes the private-range and
-   rebinding checks of §4 (recommended — BYOK's point is the user's own
-   provider), or an operator allow-list of endpoint providers only
-   (e.g. OpenRouter, a direct Anthropic-compatible host)?
+1. **Intake path.** An operator-hosted settings page authenticated as the
+   installation's admin via GitHub — the key never transits repo content or
+   a PR conversation, the admin identity is verifiable through GitHub's own
+   installation-admin notion, and rotation, revocation and deletion get one
+   natural home.
+2. **Endpoint scope.** Any HTTPS host that passes §4's private-range and
+   rebinding checks — BYOK's point is the user's own provider.
 3. **Data disclosure at intake.** An explicit consent statement the
-   installation admin must acknowledge before the first BYOK review —
-   naming that the PR diff is sent to the installation's own endpoint
-   (recommended; it is their key and their content, but the disclosure
-   belongs at intake) — or send-by-default with the statement posted for
-   information only?
-4. **Spend bounds on BYOK reviews.** Keep both bounds applying to the
-   installation's own key — they protect the user's money and the
-   service's load — with the installation able to lower them and the
-   operator max as the outer bound (recommended), or exempt BYOK reviews
-   from the per-repo daily budget? `ATLAS_KEY_CEILING_USD` is operator-key
-   only either way.
-5. **Model choice.** May a BYOK installation also choose the model its
-   reviews run on, within what its own endpoint serves (recommended — the
-   endpoint and key are theirs; D68's budget shape stays), or is the
-   model the operator's choice even on a BYOK key?
-6. **Unknown pricing.** If model choice is allowed, refuse models with no
-   price-table entry (recommended — the dollar budgets need a price source,
-   and the D68 reservation math would otherwise be ungrounded), or accept
-   them with the operator max as the only bound?
-7. **Fallback policy.** Never fall back to the operator key; a BYOK
-   failure fails the review with the failure named plainly (recommended,
-   default off — running someone's review on the operator's key without
-   their say-so is a cost and consent surprise), or an operator opt-in
-   fallback for outage resilience?
+   installation admin must acknowledge before the first BYOK review, naming
+   that the PR diff is sent to the installation's own endpoint.
+4. **Spend bounds on BYOK reviews.** Both per-tenant bounds apply to the
+   installation's own key — they protect the user's money and the service's
+   load — with the installation able to lower them and the operator max as
+   the outer bound; `ATLAS_KEY_CEILING_USD` stays operator-key only.
+5. **Model choice.** A BYOK installation may choose the model its reviews
+   run on, within what its own endpoint serves; D68's budget shape stays.
+6. **Unknown pricing.** Models with no price-table entry are refused — the
+   dollar budgets need a price source, and the D68 reservation math would
+   otherwise be ungrounded.
+7. **Fallback policy.** Never fall back to the operator key (default off);
+   a BYOK failure — an auth error, quota, or endpoint down — fails the
+   review with the failure named plainly, never a clean-looking review.
 8. **Key retention after uninstall.** Delete the installation's stored
    secret on the `installation.deleted` webhook, with a retention-window
-   sweep catching a missed event (recommended), or immediate deletion only?
-9. **Installation-level storage (the Q4 conflict).** BYOK needs
-   installation-level state that D81's Q4 ("repo-level only for now")
-   did not build. Recommended default: amend Q4 narrowly — installation
-   state for *credentials only*, review configuration stays repo-level —
-   or build a general installation-level store now?
+   sweep catching a missed event.
+9. **Installation-level storage (the Q4 conflict).** Q4 is **amended
+   narrowly**: installation-level state for *credentials only*; review
+   configuration stays repo-level.
