@@ -58,6 +58,15 @@ POST_WRITABLE = frozenset({"pull_requests"})
 Encoder = Callable[[Mapping[str, Any], str], str]
 
 
+def normalize_pem_key(raw: str) -> str:
+    """A private key as the PEM signer needs it: an env store that cannot
+    hold newlines delivers the key with literal ``\n`` sequences, which
+    are replaced when the raw value has none of the real ones. The one
+    home for this shape, used by the poster, the CLI and the head-change
+    classifier alike, so the three cannot drift."""
+    return raw.replace("\\n", "\n") if "\n" not in raw else raw
+
+
 def rs256(claims: Mapping[str, Any], key: str) -> str:
     return jwt.encode(dict(claims), key, algorithm="RS256")
 

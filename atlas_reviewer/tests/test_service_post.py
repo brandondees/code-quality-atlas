@@ -37,12 +37,12 @@ from atlas_reviewer.service_post import (
     RefusedReviewEvent,
     ReviewPoster,
     _marked,
-    _repository_names,
     comment_only,
     comment_payload,
     marker_for,
     post_key,
     render_comment,
+    repository_names,
 )
 from atlas_reviewer.service_queue import Board, JobState
 from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir, summarize_draft
@@ -1310,13 +1310,13 @@ def test_a_mint_401_is_not_retried(tmp_path):
 
 def test_an_allowlist_entry_without_an_owner_is_refused():
     with pytest.raises(ValueError, match="owner/name"):
-        _repository_names(frozenset({"noslash"}))
+        repository_names(frozenset({"noslash"}))
 
 
 def test_the_posting_token_covers_one_account():
     with pytest.raises(ValueError, match="one GitHub account"):
-        _repository_names(frozenset({"alice/shared", "bob/shared"}))
-    assert _repository_names(frozenset({"alice/shared", "alice/other"})) == (
+        repository_names(frozenset({"alice/shared", "bob/shared"}))
+    assert repository_names(frozenset({"alice/shared", "alice/other"})) == (
         "other",
         "shared",
     )

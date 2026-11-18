@@ -23,6 +23,7 @@ from atlas_reviewer.head_change import (
     PushClass,
     PushKind,
     cancel_fraction,
+    cap_reading,
     classify_delivery,
     classify_push,
     decide,
@@ -87,7 +88,13 @@ def test_a_merge_whose_base_side_cannot_be_identified_reads_as_code():
 
 
 def test_a_cut_commit_list_reads_as_code():
-    push = classify_push([_commit(NEW)], ["src/x.py"], base_tip=BASE, truncated=True)
+    # The commits the list shows are all base merges; the cut means the
+    # list is not the whole range, so the benign kind is unprovable.
+    # Mutant: the truncated guard dropped -- this input is all base
+    # merges, which the dropped guard would read as MERGE_ONLY.
+    push = classify_push(
+        [_merge(OLD, BASE)], ["src/x.py"], base_tip=BASE, truncated=True
+    )
     assert push.kind is PushKind.CODE
 
 
@@ -113,7 +120,7 @@ def _progress(
     reading: tuple[str, ...] = (),
 ) -> Progress:
     return Progress(
-        frozenset(f"lens{n}" for n in range(done)),
+        done,
         total,
         calls,
         settled_usd=Decimal(settled),
@@ -174,23 +181,72 @@ def test_missing_progress_reads_as_early():
     assert verdict.cancel is True
 
 
-def test_either_fraction_under_the_threshold_cancels():
-    # Every planned lens settled, but a tenth of the budget spent: the
-    # spend measure alone puts most of the remaining spend on stale code.
+def test_a_review_early_on_both_measures_cancels():
+    """The narrow cancel: a code push reaches a review that is under the
+    threshold on BOTH the lenses settled and the budget spent. Mutant:
+    the AND reverted to the issue's literal OR, which would cancel a
+    review whose every lens has settled because its spend sits under the
+    derived worst-case reservation (round-1 review of #747, F1)."""
     verdict = decide(
         _code(),
-        _progress(done=4, total=4, settled="1", reservation="10"),
+        _progress(done=1, total=4, settled="1", reservation="10"),
         0.5,
     )
     assert verdict.cancel is True
+    assert "both measures" in verdict.reason
+
+
+def test_a_review_with_every_lens_settled_is_kept_however_cheap():
+    """The F1 case: all four lenses settled, a third of the derived
+    reservation spent -- the spend measure measures budget headroom, not
+    work done, so it cannot alone make a finished review early. Mutant:
+    the OR reading, which cancels here."""
+    verdict = decide(
+        _code(),
+        _progress(done=4, total=4, settled="3", reservation="10"),
+        0.5,
+    )
+    assert verdict.cancel is False
+    assert "delta" in verdict.reason
+
+
+def test_a_review_past_the_threshold_on_either_measure_is_kept():
+    """A review whose lenses are mostly settled is kept even with almost
+    nothing spent, and one whose budget is mostly spent is kept even with
+    few lenses settled: early requires both measures under."""
+    assert (
+        decide(
+            _code(), _progress(done=3, total=4, settled="1", reservation="10"), 0.5
+        ).cancel
+        is False
+    )
+    assert (
+        decide(
+            _code(), _progress(done=1, total=4, settled="8", reservation="10"), 0.5
+        ).cancel
+        is False
+    )
 
 
 def test_the_threshold_is_configurable():
-    progress = _progress(done=3, total=4, settled="6", reservation="10")
+    progress = _progress(done=3, total=4, settled="3", reservation="10")
     # Mutant: the threshold hardcoded to one side, which would make the
     # setting a no-op in one direction.
-    assert decide(_code(), progress, 0.7).cancel is True
-    assert decide(_code(), progress, 0.5).cancel is False
+    assert decide(_code(), progress, 0.8).cancel is True
+    assert decide(_code(), progress, 0.7).cancel is False
+
+
+def test_a_fraction_exactly_at_the_threshold_is_not_early():
+    """ "Roughly under half" is an under: a fraction equal to the
+    threshold is past it, on either measure. Mutant: the comparison
+    loosened to ``<=``, which would cancel at the boundary a tuning
+    value could land on exactly (round-1 review of #747, F5)."""
+    assert (
+        decide(
+            _code(), _progress(done=2, total=4, settled="5", reservation="10"), 0.5
+        ).cancel
+        is False
+    )
 
 
 def test_an_unclassifiable_push_keeps_the_review():
@@ -254,7 +310,9 @@ def test_progress_is_read_from_the_events_file(tmp_path):
     )
     progress = read_progress(path)
     assert progress is not None
-    assert progress.lenses_done == frozenset({"tracing", "security"})
+    # The count is the record's own field, the one source of truth (the
+    # lens names are not recounted here) -- round-1 review of #747, F20.
+    assert progress.lenses_done == 2
     assert progress.lenses_total == 4
     assert progress.calls == 5
     assert progress.settled_usd == Decimal("0.80")
@@ -263,16 +321,19 @@ def test_progress_is_read_from_the_events_file(tmp_path):
 
 
 def test_the_rotated_file_is_read_before_the_current_one(tmp_path):
-    older = _write(tmp_path / "events.jsonl.1", _event(lens="tracing", lenses_total=4))
+    older = _write(
+        tmp_path / "events.jsonl.1",
+        _event(lens="tracing", lenses_done=1, lenses_total=4),
+    )
     newer = _write(
         tmp_path / "events.jsonl",
-        _event(lens="security", lenses_total=4, calls=9),
+        _event(lens="security", lenses_done=2, lenses_total=4, calls=9),
     )
     progress = read_progress(older, newer)
     assert progress is not None
     # Mutant: the current file read first, which would let a rotation
     # hide a lens settled before it.
-    assert progress.lenses_done == frozenset({"tracing", "security"})
+    assert progress.lenses_done == 2
     assert progress.calls == 9
 
 
@@ -296,15 +357,31 @@ def test_progress_fields_that_cannot_be_read_contribute_nothing(tmp_path):
     assert progress.lenses_total == 4
 
 
-def test_a_reading_list_over_its_cap_is_truncated_not_failed(tmp_path):
-    path = _write(
-        tmp_path / "events.jsonl",
-        _event(lens="tracing", lenses_total=1, reading="p " * 4_100),
-    )
+def test_a_reading_list_over_its_cap_is_truncated_not_failed():
+    """The cap is real: a reading list too long to carry is cut with the
+    truncation at the cap, never dropped wholesale. Mutant: the cap
+    removed -- the joined text runs past `READING_CHARS` (round-1
+    review of #747, F12; the old test's input parsed to one path and
+    pinned nothing)."""
+    reading = [f"src/file{n}.py" for n in range(500)]
+    text = cap_reading(reading)
+    assert len(text) <= READING_CHARS
+    assert len(text) > READING_CHARS - 20
+    assert text == " ".join(sorted(reading))[:READING_CHARS]
+
+
+def test_an_oversized_events_file_is_read_from_its_tail(tmp_path):
+    """The reader's byte cap seeks to the tail rather than failing or
+    reading unbounded: a progress record past the cap is still found
+    (round-1 review of #747, F12's second half)."""
+    path = tmp_path / "events.jsonl"
+    filler = json.dumps({"phase": "service", "step": "x"}) + "\n"
+    path.write_text(filler * 40_000, encoding="utf-8")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(_event(lens="tracing", lenses_done=1, lenses_total=4) + "\n")
     progress = read_progress(path)
     assert progress is not None
-    assert progress.reading
-    assert sum(len(path) + 1 for path in progress.reading) - 1 <= READING_CHARS
+    assert progress.lenses_done == 1
 
 
 # ------------------------------------------------------ the delivery reads
@@ -374,6 +451,35 @@ def test_a_pull_without_a_base_ref_is_a_boundary_error():
     github = _FakeGitHub({})
     with pytest.raises(BoundaryError):
         classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+
+
+def test_a_comparison_without_a_files_array_is_refused_not_vacuous():
+    """A comparison reply with no `files` array is not one this reader
+    can trust: an absent array read as empty would claim docs-or-tests
+    vacuously -- a benign kind with no path evidence (round-1 review of
+    #747, F17). Mutant: the missing array read as `()`, which would
+    classify a code push as docs-only here."""
+    github = _FakeGitHub(_pull(), {"merge_base_commit": {"sha": OLD}, "commits": []})
+    with pytest.raises(BoundaryError):
+        classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+
+
+def test_a_file_list_at_the_comparison_cap_reads_as_code():
+    """A list at GitHub's files cap may be cut, and a cut list cannot
+    prove the range is docs-or-tests-only: the classification reads it
+    as code (round-1 review of #747, F17)."""
+    capped = [{"filename": f"docs/f{n}.md"} for n in range(300)]
+    github = _FakeGitHub(
+        _pull(),
+        {
+            "merge_base_commit": {"sha": OLD},
+            "commits": [],
+            "files": capped,
+        },
+        {"merge_base_commit": {"sha": OLD}},
+    )
+    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    assert push.kind is PushKind.CODE
 
 
 def test_a_failed_read_propagates_to_the_caller():

@@ -44,7 +44,7 @@ from atlas_reviewer.head_change import (
     read_progress,
 )
 from atlas_reviewer.ledger import make_private_dirs
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, TransportTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
@@ -328,11 +328,25 @@ def _head_change_decision(
     posting = candidate.state is JobState.POSTING
     push: PushClass | None = None
     gap = ""
+    timed_out = False
+    started = telemetry.elapsed() if telemetry is not None else 0.0
     if not posting and classifier is not None:
         try:
             push = classifier(candidate.event, new_event)
         except Exception as exc:  # noqa: BLE001 -- a fetch failure keeps the review
             gap = f"{type(exc).__name__}: {exc}"
+            timed_out = isinstance(exc, TransportTimeoutError)
+    elif not posting:
+        # No classifier on this deployment -- the App credentials are
+        # absent or unusable -- so the push could not be classified and
+        # the cancel branch cannot fire. That is the owner's default
+        # direction, but it is a gap, not a normal decision: the event
+        # carries it with an error status, so a deployment that lost its
+        # credentials is visible in the telemetry instead of silently
+        # keep-everything (round-1 review of #747, F3).
+        gap = (
+            "no head-change classifier is configured; the push could not be classified"
+        )
     progress = (
         None
         if posting
@@ -343,7 +357,9 @@ def _head_change_decision(
         telemetry,
         "head change",
         _decision_fields(candidate, new_event, push, verdict),
+        start_s=started,
         error=gap,
+        timed_out=timed_out,
     )
     return verdict
 
@@ -377,13 +393,22 @@ def _record(
     step: str,
     fields: dict[str, str | int],
     *,
+    start_s: float | None = None,
     error: str = "",
+    timed_out: bool = False,
 ) -> None:
     if telemetry is None:
         return
     try:
+        if timed_out:
+            fields = {**fields, "timed_out": "1"}
         telemetry.record(
-            "service", step, fields, status=ERROR if error else OK, error=error
+            "service",
+            step,
+            fields,
+            status=ERROR if error else OK,
+            start_s=start_s,
+            error=error,
         )
     except Exception:  # noqa: BLE001, S110 -- the log itself failed; the decision stands
         pass
@@ -451,6 +476,7 @@ class Worker:
     def run_one(self) -> bool:
         if self._stop.is_set():
             return False
+        self._recover()
         job = self._board.claim()
         if job is None:
             return False
@@ -503,6 +529,27 @@ class Worker:
             self._publish_saved(job)
         except Exception as exc:  # noqa: BLE001 -- a post retry must not kill the worker
             self._fail_closed(job, exc)
+
+    def _recover(self) -> None:
+        """Queue a pending head whose pull request has no active job
+        (round-1 review of #747, F7): the crash window between a review's
+        ``finish`` persisting and ``take_pending`` running, the
+        materializing save's failure window, and a full queue at
+        materialize time can all strand one, and a redelivery of that
+        head is answered duplicate, so without the recovery it is never
+        reviewed. Runs on every worker pass; it installs only when there
+        is something to install."""
+        try:
+            for event in self._board.recover_pending():
+                self._telemetry.record("service", "follow-up queued", _fields(event))
+        except Exception as exc:  # noqa: BLE001 -- recovery must not kill the worker
+            self._telemetry.record(
+                "service",
+                "worker error",
+                {},
+                status=ERROR,
+                error=f"pending-head recovery failed: {type(exc).__name__}: {exc}",
+            )
 
     def _fail_closed(self, job: Job, exc: BaseException) -> None:
         """The job stays FAILED when the save works. When the save itself
@@ -1132,6 +1179,7 @@ def serve(
     runner: Runner | None = None,
     publisher: Publisher | None = None,
     classifier: PushClassifier | None = None,
+    classifier_reason: str = "",
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
@@ -1174,6 +1222,23 @@ def serve(
         server.worker = worker
         server.classifier = classifier
         server.telemetry = telemetry
+        # A pending head stranded by a crash or a failed save (round-1
+        # review of #747, F7) is queued here at boot, before any worker
+        # runs, and the same recovery runs on the worker's idle passes.
+        try:
+            for event in board.recover_pending():
+                telemetry.record("service", "follow-up queued", _fields(event))
+        except Exception as exc:  # noqa: BLE001 -- a failed boot recovery is the worker loop's problem
+            log(f"atlas-reviewer: pending-head recovery failed: {exc}")
+        if config.head_change_policy == POLICY_KEEP and classifier is None:
+            # The lost cancel branch is a visible condition, not a silent
+            # one (round-1 review of #747, F3): the boot log names it, and
+            # every unclassifiable decision records the gap on its event.
+            log(
+                "atlas-reviewer: head-change policy is keep with NO"
+                " classifier: every mid-review push will be kept and the"
+                f" gap recorded ({classifier_reason or 'no reason given'})"
+            )
         worker.start()
         log(
             "atlas-reviewer: service listening"
@@ -1182,6 +1247,11 @@ def serve(
             f" repos {', '.join(sorted(config.allowlist))};"
             f" head-change policy {config.head_change_policy}"
             f" (cancel fraction {config.cancel_fraction:.0%})"
+            + (
+                f"; pending follow-ups {len(board.pending_heads())}"
+                if board.pending_heads()
+                else ""
+            )
         )
         try:
             server.serve_forever()
@@ -1198,43 +1268,56 @@ _CLASSIFY_TIMEOUT_S = 5.0
 
 def _head_change_classifier(
     config: ServiceConfig, env: Mapping[str, str]
-) -> PushClassifier | None:
+) -> tuple[PushClassifier | None, str]:
     """The live classifier behind the keep side of the decision, built
     from the same App credentials the poster mints from, scoped to the
-    allowlist's repositories with read permissions only.
+    allowlist's repositories with read permissions only -- and the reason
+    there is none, for the boot log and the decision events to name.
 
-    None when the credentials are absent or will not build: a deployment
-    without them keeps every mid-review push and records the gap, the
-    owner's default, rather than failing a webhook over a missing
-    classification. The short timeout bounds the three reads the
-    classification takes; a delivery that outlives it is answered late,
-    which GitHub answers by redelivering, and the redelivery is a
-    duplicate the queue already refuses."""
+    The reason is empty when the classifier is built. A deployment
+    without usable credentials gets None plus the reason: it keeps every
+    mid-review push (the owner's default) rather than failing a webhook
+    over a missing classification, and every such decision is recorded
+    with the gap, so the lost cancel branch is visible, not silent
+    (round-1 review of #747, F3). The short timeout bounds the three
+    reads the classification takes; a delivery that outlives the
+    webhook's own response window is marked failed in GitHub's UI and is
+    NOT redelivered on its own (D53) -- the decision is nonetheless made
+    and recorded before the response, so the delivery's loss costs the
+    webhook acknowledgment, never the review's correctness."""
     from atlas_reviewer.github_api import GitHubClient
-    from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
+    from atlas_reviewer.github_auth import (
+        READ_PERMISSIONS,
+        AppInstallationTokens,
+        normalize_pem_key,
+    )
     from atlas_reviewer.http import UrllibTransport
-    from atlas_reviewer.service_post import _pem, _repository_names
+    from atlas_reviewer.service_post import repository_names
 
     app_id = env.get("ATLAS_GITHUB_APP_ID", "")
     private_key = env.get(APP_KEY_ENV, "")
     installation = env.get("ATLAS_GITHUB_INSTALLATION_ID", "")
     if not app_id or not private_key or not installation.isdigit():
-        return None
+        return None, (
+            "the App credentials (ATLAS_GITHUB_APP_ID, "
+            "ATLAS_GITHUB_APP_PRIVATE_KEY, ATLAS_GITHUB_INSTALLATION_ID) are "
+            "absent or malformed"
+        )
     try:
         tokens = AppInstallationTokens(
             UrllibTransport(),
             SystemClock(),
             app_id=app_id,
-            private_key=_pem(private_key),
+            private_key=normalize_pem_key(private_key),
             installation_id=int(installation),
             permissions=READ_PERMISSIONS,
-            repositories=_repository_names(config.allowlist),
+            repositories=repository_names(config.allowlist),
             timeout_s=_CLASSIFY_TIMEOUT_S,
         )
         client = GitHubClient(UrllibTransport(), tokens, timeout_s=_CLASSIFY_TIMEOUT_S)
-    except (ValueError, BoundaryError):
-        return None
-    return lambda running, new: classify_delivery(client, new, running)
+    except (ValueError, BoundaryError) as exc:
+        return None, f"the head-change classifier could not be built: {exc}"
+    return lambda running, new: classify_delivery(client, new, running), ""
 
 
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
@@ -1266,12 +1349,14 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
+    classifier, classifier_reason = _head_change_classifier(config, env)
     try:
         return serve(
             config,
             env,
             publisher=publisher.post,
-            classifier=_head_change_classifier(config, env),
+            classifier=classifier,
+            classifier_reason=classifier_reason,
             secret_sources=(
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,

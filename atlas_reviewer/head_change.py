@@ -60,7 +60,6 @@ from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 PROGRESS_PHASE = "progress"
 LENS_SETTLED_STEP = "lens settled"
 PROGRESS_REVIEW_STEP = "review progress"
-PROGRESS_SOURCE = "mid-review head change"
 
 # The reading set one progress event carries is capped so a pull request
 # with a very large diff cannot balloon the events file. Truncation reads
@@ -200,7 +199,7 @@ class Progress:
     yet", because a review whose events were lost -- or that has settled
     nothing -- is early."""
 
-    lenses_done: frozenset[str] = frozenset()
+    lenses_done: int = 0
     lenses_total: int = 0
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
@@ -218,8 +217,11 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
     than failing the decision: the progress is evidence for the cancel
     direction, and losing it degrades to the owner's default. Rotation
     puts the older events in `<file>.1`; the older file is read first so
-    a lens settled before a rotation is still counted."""
-    seen: set[str] = set()
+    a lens settled before a rotation is still counted. The count of
+    settled lenses is the record's own `lenses_done` field -- the one
+    source of truth for that number, already deduplicated against
+    continuations by the writer -- not a recount over lens names."""
+    done = 0
     total = 0
     calls = 0
     committed = Decimal(0)
@@ -236,9 +238,7 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
             if fields is None:
                 continue
             found = True
-            lens = fields.get("lens")
-            if isinstance(lens, str) and lens:
-                seen.add(lens)
+            done = _int(fields.get("lenses_done"), done)
             total = _int(fields.get("lenses_total"), total)
             calls = _int(fields.get("calls"), calls)
             committed = _decimal(fields.get("committed_usd"), committed)
@@ -247,15 +247,19 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
             reading = _reading(fields, reading)
     if not found:
         return None
-    return Progress(
-        frozenset(seen),
-        total,
-        calls,
-        committed,
-        settled,
-        reservation,
-        reading,
-    )
+    return Progress(done, total, calls, committed, settled, reservation, reading)
+
+
+def cap_reading(reading: Sequence[str]) -> str:
+    """The reading set as one progress record carries it: space-joined
+    and capped at `READING_CHARS`, so a pull request with a very large
+    diff cannot balloon the events file. Truncation reads as a shorter
+    reading set, which classifies a push as benign more readily -- the
+    owner's default direction -- never as a cancel."""
+    text = " ".join(sorted(reading))
+    if len(text) > READING_CHARS:
+        return text[:READING_CHARS]
+    return text
 
 
 def _tail(path: Path, max_bytes: int) -> str | None:
@@ -338,20 +342,25 @@ def decide(
     The order is the owner's: a benign push -- a merge of the base
     branch, docs and tests only, or no overlap with the files the review
     is still reading -- keeps the review however late it lands. A code
-    push cancels a review that is still early: under `threshold` on the
-    lens fraction *or* on the spend fraction, because either measure
-    under the threshold means most of the remaining spend would land on
-    stale code. Past the threshold on both, the review is kept and the
-    delta review follows it. A review that is already posting is never
-    cancelled: its spend is fully spent and its comment is about to go
-    out. A push that could not be classified (`push` None -- a fetch
-    that failed, no credentials to fetch with) keeps the review too:
-    the benign kinds are claimed on evidence, and so is the cancel
-    branch, and with no evidence either way the owner's default stands.
-    The fractions are still computed from whatever progress exists, so
-    the recorded decision shows what was known when it was made."""
+    push cancels a review that is still early, and early means under
+    `threshold` on BOTH measures -- the fraction of lenses settled and
+    the fraction of budget spent -- because finishing is the default and
+    cancelling the narrow exception: the spend measure alone cannot tell
+    an early review from a cheap one (a review whose every lens has
+    settled can sit far under its derived worst-case reservation), so
+    either measure alone would cancel completed work the issue exists to
+    protect (round-1 review of #747, F1). Past the threshold on either
+    measure, the review is kept and the delta review follows it. A
+    review that is already posting is never cancelled: its spend is
+    fully spent and its comment is about to go out. A push that could
+    not be classified (`push` None -- a fetch that failed, no
+    credentials to fetch with) keeps the review too: the benign kinds
+    are claimed on evidence, and so is the cancel branch, and with no
+    evidence either way the owner's default stands. The fractions are
+    still computed from whatever progress exists, so the recorded
+    decision shows what was known when it was made."""
     lens_fraction = _fraction(
-        len(progress.lenses_done) if progress else 0,
+        progress.lenses_done if progress else 0,
         progress.lenses_total if progress else 0,
     )
     spend_fraction = _spend_fraction(progress)
@@ -381,13 +390,14 @@ def decide(
             lens_fraction,
             spend_fraction,
         )
-    early = lens_fraction < threshold or spend_fraction < threshold
+    early = lens_fraction < threshold and spend_fraction < threshold
     if early:
         return Decision(
             True,
-            f"the review was early: {lens_fraction:.0%} of its lenses and "
-            f"{spend_fraction:.0%} of its budget spent, under the "
-            f"{threshold:.0%} threshold, and the push changed code under review",
+            f"the review was early on both measures: {lens_fraction:.0%} of "
+            f"its lenses and {spend_fraction:.0%} of its budget spent, each "
+            f"under the {threshold:.0%} threshold, and the push changed code "
+            "under review",
             lens_fraction,
             spend_fraction,
         )
@@ -438,14 +448,16 @@ def classify_delivery(
         raise BoundaryError("the pull request has no base ref")
     compare = github.get_compare(running.repo, running.head_sha, new_event.head_sha)
     commits, truncated = _commits(compare)
-    paths = _paths(compare)
+    paths, files_complete = _paths(compare)
     if _diverged(compare, running.head_sha):
         # No rule about commits "between" the heads holds once the
         # histories diverge, and the base-side read would classify
         # nothing useful; the code kind is the honest answer.
         return PushClass(PushKind.CODE, paths)
     base_tip = _merge_base(github.get_compare(running.repo, ref, new_event.head_sha))
-    return classify_push(commits, paths, base_tip=base_tip, truncated=truncated)
+    return classify_push(
+        commits, paths, base_tip=base_tip, truncated=truncated or not files_complete
+    )
 
 
 def _commits(compare: Json) -> tuple[tuple[Mapping[str, object], ...], bool]:
@@ -463,18 +475,34 @@ def _commits(compare: Json) -> tuple[tuple[Mapping[str, object], ...], bool]:
     return tuple(shaped), truncated
 
 
-def _paths(compare: Json) -> tuple[str, ...]:
+_COMPARE_FILES_CAP = 300
+"""GitHub's comparison response caps its `files` array; a list at the cap
+may be cut, and a cut list cannot prove what the range's commits
+changed -- a docs-or-tests kind claimed from a partial list is a benign
+kind claimed without full evidence."""
+
+
+def _paths(compare: Json) -> tuple[tuple[str, ...], bool]:
+    """The comparison's changed paths, and whether the list is complete.
+
+    A missing or non-array `files` raises: a comparison reply without a
+    files array is not a reply this reader can trust, and an absent array
+    read as empty would claim docs-or-tests vacuously -- a benign kind
+    with no path evidence, the shape the classification forbids (round-1
+    review of #747, F17). An entry that is not an object, or that names
+    no path, makes the list incomplete; so does a list at the cap."""
     files = compare.get("files")
-    if files is None:
-        return ()
     if not isinstance(files, list):
         raise BoundaryError("the comparison has no files array")
-    paths = []
+    paths: list[str] = []
+    complete = len(files) < _COMPARE_FILES_CAP
     for item in files:
         name = item.get("filename") if isinstance(item, dict) else None
         if isinstance(name, str) and name:
             paths.append(name)
-    return tuple(paths)
+        else:
+            complete = False
+    return tuple(paths), complete
 
 
 def _diverged(compare: Json, running_sha: str) -> bool:

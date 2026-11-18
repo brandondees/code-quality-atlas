@@ -3365,3 +3365,56 @@ on the PR head: `pytest tests/` 880 passed / 14 skipped, coverage
 95.20% (floor 94%); `pytest atlas_reviewer/tests` 3,289 passed,
 96.06%; ruff check/format, mypy (85 files), `tooling.cli drift` clean.
 Offline only.
+
+## 2026-11-18 (same day) — #747 round 1: finishing is the default, the race installs, the gap is recorded
+
+The protocol review's three Majors, fixed on the bottom layer (the
+correction appended to D79 carries the full list). The "early" test is
+now under the threshold on BOTH measures — the lens fraction and the
+spend fraction — because the spend measure reads against D68's derived
+worst-case reservation and so cannot tell an early review from a cheap
+one: the reproduced case (every lens settled, a third of the
+reservation spent) was cancellable in the window between the lens loop's
+end and the post, where a cancelled review's draft is never posted and
+the whole spend is re-spent. The issue's literal "or" supported the old
+reading; owned here as an ambiguity resolved the wrong way, with the
+reason string's self-contradiction fixed with it. `keep_head`'s race
+branch — the review settling between `head_change_candidate` and
+`keep_head`, up to three 5-second reads later — now installs the head
+under the same lock instead of answering `queued` over nothing (a 2xx is
+an acknowledgment GitHub will not redeliver, so the old branch dropped
+the pushed head while claiming it). A classifier-less deployment — the
+App credentials absent or unusable — now records the gap on every
+unclassifiable decision with an error status, and the boot log says once
+that the cancel branch is dead ("head-change policy is keep with NO
+classifier …"); the classifier's builder returns the reason there is
+none. The Minors: the cut-commit-list test's input is an all-base-merges
+cut list (the old input killed the guard only by accident of its paths);
+the at-threshold boundary pinned (`<=` mutant dies); D79 and the session
+log no longer say an empty commit list reads as code (the code and the
+README were right); stranded pending heads are recovered — at boot and
+on every worker pass, `Board.recover_pending` queues a pending head
+whose PR has no active job as an ordinary review, and `take_pending` no
+longer appends past the active-slot cap, leaving the head for the
+recovery; the `head change` event carries the decision's duration and a
+`timed_out` flag for a classification that ran past its transport
+timeout; the PEM normalization lives in one place
+(`github_auth.normalize_pem_key`) and `service_post.repository_names` is
+public; the `step is` string-identity comparison is `==`; D79 gained its
+Revisit clause (re-measure on live decision/cost telemetry; reopen when
+keeps would have been cheaper as cancels or the reverse) and D48, D53
+and D74 carry `Update (2026-11-18, D79)` notes, so no older entry states
+the reversed supersede as live; the vacuous truncation test replaced by
+real ones for the reading cap and the reader's tail-seek; the
+comparison-without-`files` shape refused instead of read as empty;
+`pending_head` replaced by `pending_heads`, which the boot log reads;
+the dead `PROGRESS_SOURCE` removed; the duplicated `_threading` alias
+import removed; the progress record's `lenses_done` field is the one
+source for the settled count (read back directly, not recounted); the
+classifier's docstring no longer claims GitHub redelivers a timed-out
+delivery (D53 records the opposite). The Nits noted: F18's trust-model
+boundary (the base-merge evidence comes from the party the review
+judges; every consequence lands on the keep side) is stated in D79 and
+the README. Counts corrected: 22 service flows in
+`test_service_receive.py` (15 from the first push, 7 from this round),
+37 in `test_head_change.py`.

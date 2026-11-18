@@ -225,6 +225,25 @@ class Board:
                 return job.event.delta_from
         return ""
 
+    def _known_head(self, event: PrEvent, at: datetime | None) -> Enqueue | None:
+        """The refusal for a head this queue already knows -- seen and
+        remembered, held by an existing job (a superseded or superseding
+        one is stale, the rest duplicates), or older than the accepted
+        head -- or None when the delivery is a new, current head."""
+        key = (event.repo, event.pr_number, event.head_sha)
+        if key in self._seen:
+            return Enqueue.DUPLICATE
+        for job in self._jobs:
+            if job.key() == key:
+                return (
+                    Enqueue.STALE
+                    if job.state is JobState.SUPERSEDED or job.superseded
+                    else Enqueue.DUPLICATE
+                )
+        if not self._newer_than_current(event, at):
+            return Enqueue.STALE
+        return None
+
     def keep_head(
         self,
         event: PrEvent,
@@ -248,35 +267,47 @@ class Board:
         A redelivery of the pending head is a duplicate, and an older
         delivery is stale, against the pending head as against an
         installed one. When no running or posting review remains by the
-        time this runs -- the decision raced a review that settled first
-        -- the head is installed as an ordinary review, without a delta
-        base: the follow-up then reviews the new head in full, which is
-        correct, only not delta-shaped."""
+        time this runs -- the decision raced a review that settled first,
+        or a stop/restart intervened -- the head is installed here, under
+        the same lock and save, as an ordinary review without a delta
+        base: answering ``queued`` without installing anything would
+        acknowledge a delivery GitHub will not redeliver, and the pushed
+        head would never be reviewed (round-1 review of #747, F2)."""
         with self._cv:
-            key = (event.repo, event.pr_number, event.head_sha)
-            if key in self._seen:
-                return Enqueue.DUPLICATE
-            for job in self._jobs:
-                if job.key() == key:
-                    return (
-                        Enqueue.STALE
-                        if job.state is JobState.SUPERSEDED or job.superseded
-                        else Enqueue.DUPLICATE
-                    )
-            if not self._newer_than_current(event, at):
-                return Enqueue.STALE
-            if not any(
+            refused = self._known_head(event, at)
+            if refused is not None:
+                return refused
+            running = any(
                 job.event.repo == event.repo
                 and job.event.pr_number == event.pr_number
                 and job.state in {JobState.RUNNING, JobState.POSTING}
                 and not job.superseded
                 for job in self._jobs
-            ):
+            )
+            active = sum(1 for job in self._jobs if job.state in _ACTIVE)
+            if not running:
+                # The race branch installs a job, which takes an active
+                # slot, so it is subject to the same cap as ``enqueue``.
+                # Recording a pending head is not: it holds no slot, so a
+                # full queue still records it rather than dropping the
+                # delivery to a 503 GitHub will not redeliver.
+                replaces = any(
+                    job.event.repo == event.repo
+                    and job.event.pr_number == event.pr_number
+                    and job.state in _ACTIVE
+                    for job in self._jobs
+                )
+                if active >= self._max_remembered and not replaces:
+                    return Enqueue.FULL
+                installed = self._install(event, at, None, "")
+                if superseded is not None:
+                    superseded.extend(installed)
+                self._cv.notify()
                 return Enqueue.QUEUED
             previous_head = self._heads.get((event.repo, event.pr_number))
             previous_pending = self._pending.get((event.repo, event.pr_number))
             touched: list[tuple[Job, JobState, bool, bool]] = []
-            settled: list[Job] = []
+            kept_back: list[Job] = []
             for job in self._jobs:
                 if (
                     job.event.repo != event.repo
@@ -288,7 +319,7 @@ class Board:
                 touched.append((job, job.state, job.superseded, job.cancel.is_set()))
                 job.superseded = True
                 job.cancel.set()
-                settled.append(job)
+                kept_back.append(job)
                 job.state = JobState.SUPERSEDED
             self._pending[(event.repo, event.pr_number)] = (event.head_sha, at)
             self._heads[(event.repo, event.pr_number)] = (event.head_sha, at)
@@ -312,7 +343,7 @@ class Board:
                         job.cancel.clear()
                 raise
             if superseded is not None:
-                superseded.extend(settled)
+                superseded.extend(kept_back)
             self._cv.notify()
             return Enqueue.KEPT
 
@@ -326,15 +357,21 @@ class Board:
         review posted nothing for the delta to build on. The pending
         head is installed only while it is still the pull request's
         current head -- a later push that was itself held back replaced
-        it in ``_pending`` and ``_heads``, and the newest one wins. None
-        of this supersedes anything: the finished job is terminal, so
-        the pending head takes its slot without a supersede."""
+        it in ``_pending`` and ``_heads``, and the newest one wins -- and
+        only while the queue has room for it: the finished job's slot
+        was freed by its own ``finish``, but another thread's ``enqueue``
+        can take it in between, and appending past the cap unconditionally
+        would breach it (round-1 review of #747, F13). When the queue is
+        full the pending head is left recorded for the idle recovery
+        (`recover_pending`) to retry. None of this supersedes anything:
+        the finished job is terminal, so the pending head takes its slot
+        without a supersede."""
         with self._cv:
             head_key = (finished.repo, finished.pr_number)
             pending = self._pending.get(head_key)
             if pending is None:
                 return None
-            sha, at = pending
+            sha = pending[0]
             current = self._heads.get(head_key)
             if current is None or current[0] != sha:
                 # A newer head replaced this one while the review ran.
@@ -344,13 +381,18 @@ class Board:
             if key in self._seen or any(job.key() == key for job in self._jobs):
                 self._pending.pop(head_key, None)
                 return None
+            if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
+                self._max_remembered
+            ):
+                # The slot this job freed is already taken. The pending
+                # head stays recorded; the idle recovery retries it.
+                return None
             event = PrEvent(
                 finished.repo,
                 finished.pr_number,
                 sha,
                 delta_from=finished.head_sha if succeeded else "",
             )
-            previous_head = self._heads.get(head_key)
             self._pending.pop(head_key, None)
             self._jobs.append(Job(event, JobState.QUEUED))
             try:
@@ -358,10 +400,57 @@ class Board:
             except Exception:
                 self._jobs.pop()
                 self._pending[head_key] = pending
-                self._heads[head_key] = previous_head or (sha, at)
                 raise
             self._cv.notify()
             return event
+
+    def recover_pending(self) -> tuple[PrEvent, ...]:
+        """Queue every pending head whose pull request has no active job
+        (round-1 review of #747, F7).
+
+        A kept head can be stranded: the process can die between the
+        review's ``finish`` persisting and ``take_pending`` running, the
+        materializing save can fail (the pending entry is put back and
+        the error surfaces as a generic worker error), and ``take_pending``
+        can leave it recorded on a full queue. A redelivery of a stranded
+        head is answered DUPLICATE by the pending check, so without this
+        recovery the head is never reviewed. Each stranded head is
+        installed as an ordinary review without a delta base -- what the
+        stranded head should have built on is not knowable here, and a
+        full review of the head is the safe shape -- and returned so the
+        caller can log what was recovered. Called when the service boots
+        and whenever a worker loop finds no queued work."""
+        with self._cv:
+            recovered: list[PrEvent] = []
+            for head_key, (sha, at) in list(self._pending.items()):
+                if any(
+                    job.event.repo == head_key[0]
+                    and job.event.pr_number == head_key[1]
+                    and job.state in _ACTIVE
+                    for job in self._jobs
+                ):
+                    continue
+                key = (head_key[0], head_key[1], sha)
+                if key in self._seen or any(job.key() == key for job in self._jobs):
+                    self._pending.pop(head_key, None)
+                    continue
+                if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
+                    self._max_remembered
+                ):
+                    break
+                event = PrEvent(head_key[0], head_key[1], sha)
+                self._pending.pop(head_key, None)
+                self._jobs.append(Job(event, JobState.QUEUED))
+                try:
+                    self._save()
+                except Exception:
+                    self._jobs.pop()
+                    self._pending[head_key] = (sha, at)
+                    raise
+                recovered.append(event)
+            if recovered:
+                self._cv.notify()
+            return tuple(recovered)
 
     def _install(
         self,
@@ -529,11 +618,16 @@ class Board:
                     return job
             return None
 
-    def pending_head(self, repo: str, pr_number: int) -> str:
-        """The head currently held back for this pull request, or ""."""
+    def pending_heads(self) -> tuple[tuple[str, int, str], ...]:
+        """Every head currently held back, as ``(repo, pr, sha)`` triples.
+
+        The diagnostic view of ``_pending``, read by the service's boot
+        log, so an operator can see a kept head that is waiting; the
+        queue's own paths use the internal record."""
         with self._cv:
-            pending = self._pending.get((repo, pr_number))
-            return pending[0] if pending else ""
+            return tuple(
+                (repo, pr, sha) for (repo, pr), (sha, _at) in self._pending.items()
+            )
 
     def begin_post(self, job: Job) -> bool:
         """True only when this job may be sent. A running job becomes

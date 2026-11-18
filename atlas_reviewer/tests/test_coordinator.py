@@ -2875,7 +2875,7 @@ def test_the_review_records_its_progress_for_the_service_to_read(tmp_path):
         assert "reservation_usd" in fields
     progress = read_progress(tmp_path / "events.jsonl")
     assert progress is not None
-    assert progress.lenses_done == {LENS, OTHER}
+    assert progress.lenses_done == 2
     assert progress.lenses_total == 2
     assert progress.reading == frozenset()
     assert progress.calls > 0

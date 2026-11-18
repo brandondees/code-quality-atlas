@@ -29,6 +29,7 @@ from atlas_reviewer.github_auth import (
     POST_PERMISSIONS,
     POST_WRITABLE,
     AppInstallationTokens,
+    normalize_pem_key,
 )
 from atlas_reviewer.http import HttpResponse, Transport
 from atlas_reviewer.ledger import make_private_dirs
@@ -476,7 +477,7 @@ def _marked(item: object, marker: str, sha: str, bot_login: str) -> int | None:
     return review_id
 
 
-def _repository_names(allowlist: frozenset[str]) -> tuple[str, ...]:
+def repository_names(allowlist: frozenset[str]) -> tuple[str, ...]:
     """GitHub scopes an installation token by repository name on the
     installation's account. Two owners would make a shared name grant
     both, so this refuses that list. An entry without an owner is a
@@ -508,7 +509,7 @@ def publisher_from_env(
     token stay in this process and are not given to the review child. The
     scrubber removes both from the comment."""
     app_id = _env(env, "ATLAS_GITHUB_APP_ID")
-    private_key = _pem(_env(env, "ATLAS_GITHUB_APP_PRIVATE_KEY"))
+    private_key = normalize_pem_key(_env(env, "ATLAS_GITHUB_APP_PRIVATE_KEY"))
     installation = _env(env, "ATLAS_GITHUB_INSTALLATION_ID")
     if (
         not installation.isascii()
@@ -533,7 +534,7 @@ def publisher_from_env(
         installation_id=int(installation),
         permissions=POST_PERMISSIONS,
         writable=POST_WRITABLE,
-        repositories=_repository_names(allowlist),
+        repositories=repository_names(allowlist),
     )
     redactor = Redactor(known_secrets=tuple(known), sources=(tokens.secrets,))
     return ReviewPoster(
@@ -551,7 +552,3 @@ def _env(env: Mapping[str, str], name: str) -> str:
     if not value:
         raise ValueError(f"posting a review needs the {name} environment variable")
     return value
-
-
-def _pem(raw: str) -> str:
-    return raw.replace("\\n", "\n") if "\n" not in raw else raw

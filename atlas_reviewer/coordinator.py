@@ -104,7 +104,7 @@ from atlas_reviewer.head_change import (
     LENS_SETTLED_STEP,
     PROGRESS_PHASE,
     PROGRESS_REVIEW_STEP,
-    READING_CHARS,
+    cap_reading,
 )
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
@@ -895,7 +895,7 @@ def _record_progress(
     one, which keeps a push rather than cancels, the safe direction."""
     if telemetry is None:
         return
-    if step is LENS_SETTLED_STEP:
+    if step == LENS_SETTLED_STEP:
         clean = {ran.result.lens for ran in runs if ran.result.state is LensState.CLEAN}
         latest: dict[str, LensResult] = {}
         for ran in runs:
@@ -912,9 +912,7 @@ def _record_progress(
             )
     else:
         reading = set(_still_unread([ran.result for ran in runs], changed))
-    text = " ".join(sorted(reading))
-    if len(text) > READING_CHARS:
-        text = text[:READING_CHARS]
+    text = cap_reading(sorted(reading))
     done = {ran.result.lens for ran in runs if ran.result.outcome is not None}
     telemetry.record(
         PROGRESS_PHASE,

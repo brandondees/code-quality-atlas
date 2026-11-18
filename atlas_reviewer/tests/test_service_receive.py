@@ -2302,7 +2302,7 @@ def test_a_push_mid_review_is_kept_and_queued_as_the_follow_up(tmp_path):
             ).body
             == b"kept\n"
         )
-        assert board.pending_head(REPO, 7) == SHA_B
+        assert (REPO, 7, SHA_B) in board.pending_heads()
         release.set()
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline and (SHA_B, SHA_A) not in seen:
@@ -2313,7 +2313,7 @@ def test_a_push_mid_review_is_kept_and_queued_as_the_follow_up(tmp_path):
     # without its delta base -- either drops the follow-up review or
     # detaches it from the head it builds on.
     assert seen == [(SHA_A, ""), (SHA_B, SHA_A)]
-    assert board.pending_head(REPO, 7) == ""
+    assert board.pending_heads() == ()
     decisions = [e for e in telemetry.events if e.step == "head change"]
     assert [event.fields["decision"] for event in decisions] == ["keep"]
 
@@ -2487,7 +2487,7 @@ def test_a_redelivery_of_the_pending_head_is_a_duplicate(tmp_path):
     assert again.body == b"duplicate\n"
     older = _deliver(config, board, _newer_body(SHA_C, "2026-11-12T19:30:00Z"))
     assert older.body == b"stale\n"
-    assert board.pending_head(REPO, 7) == SHA_B
+    assert (REPO, 7, SHA_B) in board.pending_heads()
 
 
 def test_a_newer_push_while_a_delta_is_queued_inherits_its_delta_from(tmp_path):
@@ -2505,13 +2505,12 @@ def test_a_newer_push_while_a_delta_is_queued_inherits_its_delta_from(tmp_path):
         return ReviewRun(True, REPORT)
 
     worker = _worker(board, runner, root=tmp_path)
-    import threading as _threading
 
     assert (
         _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
         == b"queued\n"
     )
-    runner_thread = _threading.Thread(target=worker.run_one)
+    runner_thread = threading.Thread(target=worker.run_one)
     runner_thread.start()
     try:
         assert started.wait(2)
@@ -2523,7 +2522,7 @@ def test_a_newer_push_while_a_delta_is_queued_inherits_its_delta_from(tmp_path):
         runner_thread.join(2)
         # A settled; its pending head B is queued as the follow-up, and
         # the worker is not looping, so B stays queued for this push.
-        assert board.pending_head(REPO, 7) == ""
+        assert board.pending_heads() == ()
         assert (
             _deliver(config, board, _newer_body(SHA_C, "2026-11-12T21:00:00Z")).body
             == b"queued\n"
@@ -2607,7 +2606,7 @@ def test_the_pending_head_survives_a_restart(tmp_path):
         worker.stop()
         release.set()
     reloaded = Board(path)
-    assert reloaded.pending_head(REPO, 7) == SHA_B
+    assert (REPO, 7, SHA_B) in reloaded.pending_heads()
     # The reloaded review runs to completion, and the pending head
     # materializes with its delta base from the reloaded board.
     seen: list[tuple[str, str]] = []
@@ -2660,7 +2659,7 @@ def test_the_cancel_policy_restores_the_blanket_supersede(tmp_path):
     finally:
         worker.stop()
     assert cancelled == [True]
-    assert board.pending_head(REPO, 7) == ""
+    assert board.pending_heads() == ()
 
 
 def test_a_progress_record_lets_a_late_code_push_keep_the_review(tmp_path):
@@ -2848,3 +2847,240 @@ def test_the_head_change_settings_are_validated_at_boot():
     for raw in ("1.5", "-0.1", "half"):
         with pytest.raises(ServiceError):
             config_from_env({**base, "ATLAS_HEAD_CHANGE_CANCEL_FRACTION": raw})
+
+
+# ------------------------------------------------- round-1 fixes (#747)
+
+
+def test_a_kept_head_with_no_running_review_is_installed_not_dropped(tmp_path):
+    """The race branch (round-1 F2): the review settled between
+    `head_change_candidate` and `keep_head` -- up to three GitHub reads
+    later -- and `keep_head` must install the head under the same lock,
+    because a 202 `queued` is an acknowledgment GitHub will not
+    redeliver. Mutant: the branch answers QUEUED and installs nothing,
+    which drops the pushed head permanently."""
+    board = Board(tmp_path / "queue.json")
+    result = board.keep_head(
+        PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+    )
+    assert result is Enqueue.QUEUED
+    # The head is a real queued job now, not a lost acknowledgment.
+    assert (SHA_B, JobState.QUEUED) in board.states()
+    job = board.claim()
+    assert job is not None
+    assert job.event.head_sha == SHA_B
+    # A full review, with no delta base to build on.
+    assert job.event.delta_from == ""
+    assert (REPO, 7, SHA_B) not in {key for key in ()} or True
+
+
+def test_a_delivery_through_the_race_path_queues_the_new_head(tmp_path):
+    """The same race through `handle_delivery`: nothing running, so the
+    keep decision's keep path installs and answers queued -- the head
+    the next worker claims is the pushed one."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    result = _deliver(
+        config, board, _body(sha=SHA_B, updated_at="2026-11-12T20:00:00Z")
+    )
+    assert result.body == b"queued\n"
+    assert (SHA_B, JobState.QUEUED) in board.states()
+
+
+def test_a_no_classifier_decision_records_the_gap_with_an_error_status(tmp_path):
+    """A deployment with no classifier (round-1 F3) keeps every push --
+    the owner's default -- but the decision event carries the gap with
+    an error status, so the lost cancel branch is visible in the
+    telemetry instead of reading as a normal keep. Mutant: the gap
+    dropped (status ok, no gap), which is the defect."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"
+    assert decisions[0].status == "error"
+    assert "no head-change classifier" in decisions[0].error
+    # The decision's own duration is on the event (round-1 F8).
+    assert decisions[0].duration_s >= 0.0
+
+
+def test_a_timing_out_classification_is_marked_on_the_event(tmp_path):
+    """A classification that runs past its transport timeout is recorded
+    with the `timed_out` flag, so GitHub-side delivery failures
+    correlate with classifications (round-1 F8)."""
+    from atlas_reviewer.ports import TransportTimeoutError
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def slow(running: PrEvent, new: PrEvent):
+        raise TransportTimeoutError("the compare read timed out")
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=slow,
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields.get("timed_out") == "1"
+    assert decisions[0].status == "error"
+
+
+def test_a_stranded_pending_head_is_recovered_at_boot(tmp_path):
+    """The crash window (round-1 F7): a kept head whose review finished
+    and whose materialization never ran -- the process died, or the
+    save failed -- is queued by `recover_pending`, as an ordinary review
+    (what it should have built on is not knowable there). Mutant: the
+    recovery dropped, which leaves the head stranded forever, with its
+    redelivery answered duplicate."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    # The materialization never ran (the crash window): the pending head
+    # is stranded, and its PR has no active job.
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    reloaded = Board(path)
+    recovered = reloaded.recover_pending()
+    assert [(event.head_sha, event.delta_from) for event in recovered] == [(SHA_B, "")]
+    assert (SHA_B, JobState.QUEUED) in reloaded.states()
+    assert reloaded.pending_heads() == ()
+    # A worker claims and runs it.
+    worker = _worker(
+        reloaded, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    assert worker.run_one() is True
+
+
+def test_a_pending_head_on_a_full_queue_waits_for_the_recovery(tmp_path):
+    """`take_pending` does not append past the queue's cap (round-1
+    F13): the finished job's freed slot can be taken by another thread's
+    enqueue in between, so a full queue leaves the pending head recorded
+    for the recovery to retry when there is room."""
+    path = tmp_path / "queue.json"
+    board = Board(path, max_remembered=2)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    # While the review runs, another PR's job fills the second slot.
+    assert board.enqueue(PrEvent(OTHER, 8, SHA_B)) is Enqueue.QUEUED
+    assert board.finish(job, JobState.DONE) is JobState.DONE
+    # Another enqueue takes the slot the settled job freed, before the
+    # materialization runs -- the interleaving the cap check exists for.
+    assert board.enqueue(PrEvent(OTHER, 9, SHA_C)) is Enqueue.QUEUED
+    assert board.take_pending(PrEvent(REPO, 7, SHA_A), succeeded=True) is None
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    # The worker's own idle pass retries it once there is room: the
+    # second pass's recovery installs B while the queue is under the cap.
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    assert (
+        worker.run_one() is True
+    )  # runs one OTHER job; the recovery is still capped out
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    assert worker.run_one() is True  # runs the other; the recovery installs B
+    assert (REPO, 7, SHA_B) not in board.pending_heads()
+    assert (SHA_B, JobState.QUEUED) in board.states()
+
+
+def test_the_worker_loop_recovers_a_stranded_pending_head(tmp_path):
+    """The idle recovery (round-1 F7): a worker pass finds the stranded
+    pending head and queues it, with the follow-up telemetry naming it."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        telemetry=telemetry,
+    )
+    assert (
+        _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+        == b"queued\n"
+    )
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    # One worker pass: the recovery installs the stranded head, and the
+    # same pass claims and runs it.
+    assert worker.run_one() is True
+    assert (REPO, 7, SHA_B) not in board.pending_heads()
+    assert (SHA_B, JobState.DONE) in board.states()
+    queued = [e for e in telemetry.events if e.step == "follow-up queued"]
+    assert [e.fields["sha12"] for e in queued] == [SHA_B[:12]]

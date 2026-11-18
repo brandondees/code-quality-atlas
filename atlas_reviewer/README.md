@@ -87,26 +87,48 @@ reservation, and the paths still being read):
   tests, or touches no file a lens without a clean run is still
   reading, keeps the review however late it lands;
 - a push that changes code under review cancels a review that is still
-  early — under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` (a fraction, default
-  `0.5`) on the lenses settled *or* on the budget spent — so most of the
-  remaining spend is not spent on stale code;
+  early — early meaning under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` (a
+  fraction, default `0.5`) on **both** the lenses settled and the budget
+  spent — so cancelling stays the narrow exception. The spend measure
+  alone cannot tell an early review from a cheap one (a review whose
+  every lens has settled can sit far under its derived worst-case
+  reservation), so either measure alone would cancel completed work
+  (round-1 review of #747, F1);
 - otherwise the review is kept and a follow-up review of the new head
   queues behind it.
 
 The classification reads GitHub's comparison of the two heads plus the
 pull request's base (`classify_delivery` in `head_change.py`), and the
 benign kinds are claimed only on evidence: a failed fetch, a cut commit
-list, or a merge whose base side cannot be identified reads as code,
-and a push no evidence classified at all keeps the review — the owner's
-default — with the gap recorded on the decision's telemetry. A review
-that is already posting is never cancelled.
+list (a comparison at GitHub's files cap may be cut, and a comparison
+with no `files` array is refused outright), or a merge whose base side
+cannot be identified reads as code; an empty, untruncated range changes
+nothing the review reads and is benign. A push no evidence classified
+at all keeps the review — the owner's default — and the gap is on the
+decision's telemetry with an error status: a deployment whose App
+credentials are absent or unusable has no classifier, and its boot log
+says so once while every such decision carries the gap (round-1 review
+of #747, F3). A review that is already posting is never cancelled. The
+classification's evidence comes from the same party the review judges —
+a crafted merge commit can present a code push as a merge of the base —
+and every consequence of that lands on the keep side, since the
+follow-up reviews the new head regardless (round-1 F18).
 
 A kept head does not hold a queue slot while it waits: the queue records
 it as the pull request's pending follow-up, and queues it when the
 running review settles — as a delta review building on the settled head
-when that review succeeded, as an ordinary review when it failed. The
-decision is the `head change` telemetry event (both heads, the kind,
-the fractions, the reason), the costs are `review cost` events (from the
+when that review succeeded, as an ordinary review when it failed. A
+pending head can be stranded — the process dying between the review's
+settle and the materialization, a failed materializing save, a full
+queue at materialize time — and a redelivery of a stranded head is
+answered duplicate, so the queue recovers one: at boot, and on every
+worker pass, a pending head whose pull request has no active job is
+queued as an ordinary review and named on the `follow-up queued` event
+(round-1 review of #747, F7). The decision is the `head change`
+telemetry event (both heads, the kind, the fractions, the reason, the
+decision's duration, and a `timed_out` flag when a classification read
+ran past its transport timeout — round-1 F8), the costs are `review
+cost` events (from the
 draft's cost lines when the review finished, from the last progress
 record when it was cancelled, `measured: unknown` when neither exists),
 and the queued follow-up is a `follow-up queued` event — all in
