@@ -3840,3 +3840,51 @@ if it were one lens (pinned through the carry-forward into the new
 record's `attributions`); `concern()`'s docstring now says the concern
 line travels bare (trusted bundle prose), not "quoted". Six mutants
 applied by hand; all died on their named tests.
+
+## 2026-11-18 — #750: the reservation's output term double-billed reasoning tokens, unpriced settles kept the ceiling full, and a stopped post read clean
+
+Issue #750's recorded v8 observations on the #702 stack (#747, #748 --
+several thousand lines each): every advisory review stopped early on
+`reservation_usd`, the $10.00 ceiling (D68) firing after about 4-5
+planned lenses and 4 model calls, with the posted reviews saying
+"Findings: None" while coverage was incomplete. Measured from the code
+and the issue's numbers only (the owner's standing no-live-runs decision
+holds until coverage parity): committed spend of $9.999988 across 4
+calls is 4 calls averaging about $2.50 of held worst case each, and the
+$11.16/$12.73 stop projections are the refused next call's worst case on
+top of that. Two stacked causes, both in the per-call accounting (D43's
+Update): the output term priced the whole output cap (the model's
+completion limit -- 64,000 tokens on the pinned Sonnet route) at the
+completion rate PLUS the reasoning rate, double-billing every reasoning
+token -- a reasoning token is one of the turn's output tokens, not an
+addition to them (OpenRouter's reasoning-tokens guide, OpenAI's reasoning
+guide and Anthropic's extended-thinking page, all fetched 2026-11-18) --
+and `_actual_cost` refused to price from tokens whenever the model had a
+reasoning rate and the response reported no reasoning-token count, so
+each such settle kept the full worst case as spent, `Spend`'s committed
+never came back down, and the in-flight backpressure never recovered
+room. Fixed by pricing the output cap at the higher of the two rates
+(`budget.worst_case_usd`, the fit's rate in `tool_model.output_tokens_within`
+matching it), pricing a reported reasoning count as the subset of the
+completion count it sits in with a missing rate standing for the
+completion rate, and pricing a missing count at the higher rate so the
+settle frees what the reservation held; a count claiming to sit outside
+the completion count keeps the reservation, as do a timeout's keep and a
+BYOK call with no reported upstream cost (D43's never-undercount rules,
+unchanged). Recorded as D82 (D80 and D81 are taken on open PRs #753 and
+#751), amending D43's Update; the ceiling, the per-lens knobs and
+`Spend`'s own rules are unchanged, and the reservation stays easy to
+clamp for the planned operator/daily-budget slice. Second behavior
+(issue #750's "can't be mistaken for a clean review"): a review whose
+coverage is not complete -- or that the draft's status line cannot show
+complete, the fail-closed reading `verdict.decide` gives -- now posts
+with a "REVIEW INCOMPLETE -- not a clean review" banner above the
+Findings section, and its empty Findings section names the
+incompleteness instead of the bare "None." (`service_post.render_comment`,
+`_findings_section`). The slicing and compaction design (Q26) stays
+open: compaction shrinks the per-call input bound and composes with
+this fix; neither is built here. Tests with fakes across
+`test_openrouter.py`, `test_tool_model.py`, `test_fit_output.py` and
+`test_service_post.py` pin both behaviors; the mutants applied by hand
+and killed by their named tests are listed in D82's Tests paragraph
+(R1-R6 on the reservation accounting, H1-H4 on the banner).
