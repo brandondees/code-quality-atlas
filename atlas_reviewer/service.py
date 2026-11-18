@@ -25,6 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
@@ -44,15 +45,24 @@ from atlas_reviewer.head_change import (
     read_progress,
 )
 from atlas_reviewer.ledger import make_private_dirs
-from atlas_reviewer.ports import BoundaryError, TransportTimeoutError
+from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
+    MAX_ADMISSION_BYTES,
+    NO_NARROWING,
+    REVIEW_MD,
     SIGNATURE_HEADER,
+    AdmissionReader,
     Admitted,
+    Ignored,
+    RepoAdmission,
     admit,
+    base_ref,
+    narrow,
     parse_delivery,
+    parse_repo_admission,
     signature_matches,
 )
 from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
@@ -76,6 +86,9 @@ from atlas_reviewer.service_run import (
 )
 from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, OK, Event, EventSink, JsonlSink, Telemetry
+
+if TYPE_CHECKING:
+    from atlas_reviewer.github_api import GitHubClient
 
 DEFAULT_REPO = "brandondees/code-quality-atlas"
 # A pool past this is a bad environment value, not a review budget. Each
@@ -230,6 +243,7 @@ def handle_delivery(
     worker: Worker | None = None,
     classifier: PushClassifier | None = None,
     telemetry: Telemetry | None = None,
+    admission_reader: AdmissionReader | None = None,
 ) -> HttpResult:
     """One HTTP request. A bad signature is refused. Everything else that
     is not a queued review is acknowledged so GitHub does not keep the
@@ -253,6 +267,22 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
+        if admission_reader is not None:
+            # The repo's own narrowing is read after the operator's
+            # envelope has passed, so a fetch happens only for a
+            # delivery that would otherwise be queued, and a repo can
+            # only ever narrow what the operator already admits.
+            admission = _repo_admission(
+                admission_reader, payload, decision.event, telemetry
+            )
+            skipped = narrow(payload, admission)
+            if isinstance(skipped, Ignored):
+                _record(
+                    telemetry,
+                    "review skipped",
+                    {**_fields(decision.event), "reason": skipped.reason},
+                )
+                return HttpResult(202, b"ignored\n", f"ignored:{skipped.reason}")
         return _admit_to_queue(
             decision,
             config,
@@ -262,6 +292,49 @@ def handle_delivery(
             telemetry=telemetry,
         )
     return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
+
+
+def _repo_admission(
+    reader: AdmissionReader,
+    payload: Mapping[str, Any],
+    event: PrEvent,
+    telemetry: Telemetry | None,
+) -> RepoAdmission:
+    """The reviewed repo's own narrowing, read from the base-ref
+    ``REVIEW.md`` the payload names -- the base branch, never the PR
+    head, so a PR cannot move its own admission.
+
+    The read runs under one overall budget, in a helper thread, the way
+    the head-change classification does. A read that fails, a file over
+    the read bound, or an unusable line falls back to the default --
+    which narrows nothing, so the operator's envelope stands and nothing
+    is widened -- and the gap is on the telemetry. No file at all is the
+    ordinary unconfigured repo: the default stands, silently."""
+    started = telemetry.elapsed() if telemetry is not None else 0.0
+    raw, gap, timed_out = _call_bounded(
+        reader, event.repo, base_ref(payload), budget_s=_CLASSIFY_BUDGET_S
+    )
+    if raw is None:
+        if gap:
+            _record(
+                telemetry,
+                "repo admission",
+                _fields(event),
+                start_s=started,
+                error=gap,
+                timed_out=timed_out,
+            )
+        return NO_NARROWING
+    admission = parse_repo_admission(raw.decode("utf-8", errors="replace"))
+    if admission.notes:
+        _record(
+            telemetry,
+            "repo admission",
+            _fields(event),
+            start_s=started,
+            error="; ".join(admission.notes),
+        )
+    return admission
 
 
 PushClassifier = Callable[[PrEvent, PrEvent], PushClass]
@@ -331,8 +404,11 @@ def _head_change_decision(
     timed_out = False
     started = telemetry.elapsed() if telemetry is not None else 0.0
     if not posting and classifier is not None:
-        push, gap, timed_out = _classify_bounded(
-            classifier, candidate.event, new_event, _CLASSIFY_BUDGET_S
+        push, gap, timed_out = _call_bounded(
+            classifier,
+            candidate.event,
+            new_event,
+            budget_s=_CLASSIFY_BUDGET_S,
         )
     elif not posting:
         # No classifier on this deployment -- the App credentials are
@@ -993,6 +1069,7 @@ class _Handler(BaseHTTPRequestHandler):
             worker=getattr(self.server, "worker", None),
             classifier=getattr(self.server, "classifier", None),
             telemetry=getattr(self.server, "telemetry", None),
+            admission_reader=getattr(self.server, "admission_reader", None),
         )
         self._send(result.status, result.body)
         route = self.path.split("?", 1)[0][:200]
@@ -1053,6 +1130,7 @@ class ReviewServer(ThreadingHTTPServer):
     worker: Worker | None = None
     classifier: PushClassifier | None = None
     telemetry: Telemetry | None = None
+    admission_reader: AdmissionReader | None = None
 
     def __init__(
         self,
@@ -1166,11 +1244,17 @@ class _LoggingSink:
         sha = event.fields.get("sha12", "")
         attempts = event.fields.get("attempts", "")
         retry = event.fields.get("retry_s", "")
+        reason = event.fields.get("reason", "")
         line = f"atlas-reviewer: {event.step} status={event.status} pr={pr} sha={sha}"
         if attempts != "":
             line += f" attempts={attempts}"
         if retry != "":
             line += f" retry_s={retry}"
+        if reason != "":
+            # A fixed reason label, never text from the payload or the
+            # config; it is what tells a rule-based skip apart from the
+            # service being down.
+            line += f" reason={reason}"
         if event.error:
             line += f" error={event.error}"
         self._log(line)
@@ -1184,6 +1268,8 @@ def serve(
     publisher: Publisher | None = None,
     classifier: PushClassifier | None = None,
     classifier_reason: str = "",
+    admission_reader: AdmissionReader | None = None,
+    admission_reason: str = "",
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
@@ -1226,6 +1312,7 @@ def serve(
         server.worker = worker
         server.classifier = classifier
         server.telemetry = telemetry
+        server.admission_reader = admission_reader
         # A pending head stranded by a crash or a failed save (round-1
         # review of #747, F7) is queued here at boot, before any worker
         # runs, and the same recovery runs on the worker's idle passes.
@@ -1242,6 +1329,14 @@ def serve(
                 "atlas-reviewer: head-change policy is keep with NO"
                 " classifier: every mid-review push will be kept and the"
                 f" gap recorded ({classifier_reason or 'no reason given'})"
+            )
+        if admission_reader is None and admission_reason:
+            # The repo's own narrowing cannot be read without the App
+            # credentials; that is a gap named at boot, and every
+            # delivery then runs on the operator's envelope alone.
+            log(
+                "atlas-reviewer: repo admission narrowing is off: the"
+                f" base-ref {REVIEW_MD} will not be read ({admission_reason})"
             )
         worker.start()
         log(
@@ -1279,24 +1374,27 @@ read still finishes in its background thread and is then simply not
 used."""
 
 
-def _classify_bounded(
-    classifier: PushClassifier,
-    running: PrEvent,
-    new_event: PrEvent,
+def _call_bounded(
+    call: Callable[..., Any],
+    *args: Any,
     budget_s: float,
-) -> tuple[PushClass | None, str, bool]:
-    """The classification under one overall deadline (round-2 review of
-    #747, R2-F8): the fetches run in a helper thread and the caller
-    waits at most `budget_s`; past it the push is unclassifiable (the
-    owner's keep default) with the gap set and the `timed_out` flag on,
-    so the handler's occupancy is bounded and the over-run is visible.
-    The helper thread outlives the wait only until its own per-read
-    timeouts end it."""
+) -> tuple[Any, str, bool]:
+    """One parent-side GitHub read under an overall deadline (round-2
+    review of #747, R2-F8): the call runs in a helper thread and the
+    caller waits at most ``budget_s``; past it the read has no result,
+    with the gap set and the ``timed_out`` flag on, so the handler's
+    occupancy is bounded and the over-run is visible. The helper thread
+    outlives the wait only until its own per-read timeouts end it.
+
+    Returns ``(result, gap, timed_out)``. ``result`` is None on a gap or
+    a timeout; a None with an empty gap is the call's own None -- the
+    shared budget cannot tell those apart, so a caller whose None is a
+    legitimate answer distinguishes them by the gap."""
     outcome: dict[str, object] = {}
 
     def run() -> None:
         try:
-            outcome["push"] = classifier(running, new_event)
+            outcome["result"] = call(*args)
         except Exception as exc:  # noqa: BLE001 -- the caller keeps the review on any failure
             outcome["error"] = exc
 
@@ -1306,7 +1404,7 @@ def _classify_bounded(
     if worker.is_alive():
         return (
             None,
-            f"the classification exceeded its {budget_s:.0f}-second budget",
+            f"the read exceeded its {budget_s:.0f}-second budget",
             True,
         )
     error = outcome.get("error")
@@ -1316,29 +1414,20 @@ def _classify_bounded(
             f"{type(error).__name__}: {error}",
             isinstance(error, TransportTimeoutError),
         )
-    push = outcome.get("push")
-    return push if isinstance(push, PushClass) else None, "", False
+    return outcome.get("result"), "", False
 
 
-def _head_change_classifier(
+def _read_client(
     config: ServiceConfig, env: Mapping[str, str]
-) -> tuple[PushClassifier | None, str]:
-    """The live classifier behind the keep side of the decision, built
-    from the same App credentials the poster mints from, scoped to the
-    allowlist's repositories with read permissions only -- and the reason
-    there is none, for the boot log and the decision events to name.
+) -> tuple[GitHubClient | None, str]:
+    """The read-only GitHub client the parent's own GitHub readers share
+    -- the head-change classifier and the repo admission reader -- built
+    from the App credentials, scoped to the allowlist's repositories with
+    read permissions only, and the reason there is none.
 
-    The reason is empty when the classifier is built. A deployment
-    without usable credentials gets None plus the reason: it keeps every
-    mid-review push (the owner's default) rather than failing a webhook
-    over a missing classification, and every such decision is recorded
-    with the gap, so the lost cancel branch is visible, not silent
-    (round-1 review of #747, F3). The short timeout bounds the three
-    reads the classification takes; a delivery that outlives the
-    webhook's own response window is marked failed in GitHub's UI and is
-    NOT redelivered on its own (D53) -- the decision is nonetheless made
-    and recorded before the response, so the delivery's loss costs the
-    webhook acknowledgment, never the review's correctness."""
+    The reason is empty when the client is built. A deployment without
+    usable credentials gets None plus the reason; each reader names its
+    own gap on it, so the lost read stays visible, not silent."""
     from atlas_reviewer.github_api import GitHubClient
     from atlas_reviewer.github_auth import (
         READ_PERMISSIONS,
@@ -1370,8 +1459,60 @@ def _head_change_classifier(
         )
         client = GitHubClient(UrllibTransport(), tokens, timeout_s=_CLASSIFY_TIMEOUT_S)
     except (ValueError, BoundaryError) as exc:
-        return None, f"the head-change classifier could not be built: {exc}"
+        return None, f"the read-only GitHub client could not be built: {exc}"
+    return client, ""
+
+
+def _head_change_classifier(
+    config: ServiceConfig, env: Mapping[str, str]
+) -> tuple[PushClassifier | None, str]:
+    """The live classifier behind the keep side of the decision, built
+    from the same App credentials the poster mints from, scoped to the
+    allowlist's repositories with read permissions only -- and the reason
+    there is none, for the boot log and the decision events to name.
+
+    The reason is empty when the classifier is built. A deployment
+    without usable credentials gets None plus the reason: it keeps every
+    mid-review push (the owner's default) rather than failing a webhook
+    over a missing classification, and every such decision is recorded
+    with the gap, so the lost cancel branch is visible, not silent
+    (round-1 review of #747, F3). The short timeout bounds the three
+    reads the classification takes; a delivery that outlives the
+    webhook's own response window is marked failed in GitHub's UI and is
+    NOT redelivered on its own (D53) -- the decision is nonetheless made
+    and recorded before the response, so the delivery's loss costs the
+    webhook acknowledgment, never the review's correctness."""
+    client, reason = _read_client(config, env)
+    if client is None:
+        return None, reason
     return lambda running, new: classify_delivery(client, running, new), ""
+
+
+def _repo_admission_reader(
+    config: ServiceConfig, env: Mapping[str, str]
+) -> tuple[AdmissionReader | None, str]:
+    """The base-ref ``REVIEW.md`` reader behind the repo's own admission
+    narrowing (config slice S4), built from the same read-only App
+    client the head-change classifier uses, and the reason there is
+    none.
+
+    A repo with no ``REVIEW.md`` on its base ref reads as None -- the
+    ordinary unconfigured repo, the default stands. Any other read
+    failure raises and the caller treats it as a gap: the operator's
+    envelope stands, and the gap is on the telemetry. The file is read
+    under the same 64 KiB bound the review's merge-base copy is, so an
+    over-grown file is a gap, not a truncated parse."""
+    client, reason = _read_client(config, env)
+    if client is None:
+        return None, reason
+
+    def read(repo: str, ref: str) -> bytes | None:
+        try:
+            return client.get_file(repo, ref, REVIEW_MD, MAX_ADMISSION_BYTES)
+        except NotFoundError:
+            return None
+
+    return read, ""
 
 
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
@@ -1404,6 +1545,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     classifier, classifier_reason = _head_change_classifier(config, env)
+    admission_reader, admission_reason = _repo_admission_reader(config, env)
     try:
         return serve(
             config,
@@ -1411,6 +1553,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
             publisher=publisher.post,
             classifier=classifier,
             classifier_reason=classifier_reason,
+            admission_reader=admission_reader,
+            admission_reason=admission_reason,
             secret_sources=(
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,

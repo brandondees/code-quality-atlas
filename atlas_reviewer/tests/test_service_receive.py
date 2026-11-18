@@ -116,6 +116,7 @@ def _deliver(
     worker=None,
     classifier=None,
     telemetry=None,
+    admission_reader=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
@@ -132,6 +133,7 @@ def _deliver(
         worker=worker,
         classifier=classifier,
         telemetry=telemetry,
+        admission_reader=admission_reader,
     )
 
 
@@ -3517,3 +3519,222 @@ def test_the_worker_keys_the_followup_on_the_reports_coverage(tmp_path):
     queued = [e for e in telemetry.events if e.step == "follow-up queued"]
     assert [e.fields["sha12"] for e in queued] == [SHA_B[:12]]
     assert all("delta_from" not in e.fields for e in queued)
+
+
+# ------------------------------------------------------------------
+# The repo's own narrowing (config slice S4): the base-ref REVIEW.md
+# narrows what the operator's envelope already admits, and can never
+# widen it. A skipped delivery is logged with its reason and never
+# queued or posted; a read that fails stands on the operator's envelope.
+
+
+def _labeled_body(*labels, base_ref="main", action="opened", sha=SHA_A):
+    pull = {
+        "number": 7,
+        "updated_at": "2026-11-12T20:00:00Z",
+        "draft": False,
+        "head": {"sha": sha},
+        "base": {"ref": base_ref, "repo": {"full_name": REPO}},
+        "labels": [{"name": label} for label in labels],
+    }
+    return json.dumps(
+        {"action": action, "repository": {"full_name": REPO}, "pull_request": pull}
+    ).encode()
+
+
+def _admission_reader(text, seen=None):
+    def read(repo: str, ref: str):
+        if seen is not None:
+            seen.append((repo, ref))
+        return None if text is None else text.encode()
+
+    return read
+
+
+def test_a_repo_skip_event_is_ignored_and_logged_not_queued(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    seen: list[tuple[str, str]] = []
+    reader = _admission_reader("review_skip_events: synchronize\n", seen)
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(action="synchronize"),
+        admission_reader=reader,
+        telemetry=telemetry,
+    )
+    assert result.status == 202
+    assert result.body == b"ignored\n"
+    assert result.detail == "ignored:repo-skip-event"
+    assert board.states() == ()
+    # The base ref the file was read from is the payload's base branch,
+    # never the PR head.
+    assert seen == [(REPO, "main")]
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert [e.fields["reason"] for e in skips] == ["repo-skip-event"]
+    assert [e.fields["pr"] for e in skips] == [7]
+    # The other accepted events still queue under the same config.
+    queued = _deliver(config, board, _labeled_body(), admission_reader=reader)
+    assert queued.body == b"queued\n"
+    assert len(board.states()) == 1
+
+
+def test_a_label_rule_cannot_narrow_and_the_envelope_stands(tmp_path):
+    """The label filters are deliberately absent (the plan-review scope
+    change): the PR author can set labels, so a skip rule on them would
+    let an author opt their own PR out of review. A label line is not an
+    admission key -- the delivery is queued either way."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    result = _deliver(
+        config,
+        board,
+        _labeled_body("wip"),
+        admission_reader=_admission_reader(
+            "review_required_labels: priority\nreview_skip_labels: wip\n"
+        ),
+    )
+    assert result.body == b"queued\n"
+    assert len(board.states()) == 1
+
+
+def test_a_base_branch_outside_the_include_list_is_skipped(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    reader = _admission_reader("review_base_include: main, release*\n")
+    outside = _deliver(
+        config, board, _labeled_body(base_ref="feature/x"), admission_reader=reader
+    )
+    assert outside.detail == "ignored:repo-base-branch"
+    assert board.states() == ()
+    prefix = _deliver(
+        config, board, _labeled_body(base_ref="release-1"), admission_reader=reader
+    )
+    assert prefix.body == b"queued\n"
+
+
+def test_no_review_md_on_the_base_ref_leaves_the_envelope_standing(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(),
+        admission_reader=_admission_reader(None),
+        telemetry=telemetry,
+    )
+    assert result.body == b"queued\n"
+    assert len(board.states()) == 1
+    assert [e for e in telemetry.events if e.step == "repo admission"] == []
+
+
+def test_a_failed_admission_read_is_a_recorded_gap_and_not_a_skip(tmp_path):
+    """Mutant: a read failure that skipped instead of standing on the
+    operator's envelope would empty the board here; the gap is recorded
+    so the lost read is visible, not silent."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+
+    def broken(repo: str, ref: str) -> bytes:
+        raise RuntimeError("the read failed")
+
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(),
+        admission_reader=broken,
+        telemetry=telemetry,
+    )
+    assert result.body == b"queued\n"
+    assert len(board.states()) == 1
+    gaps = [e for e in telemetry.events if e.step == "repo admission"]
+    assert len(gaps) == 1
+    assert gaps[0].status == "error"
+    assert "RuntimeError" in gaps[0].error
+
+
+def test_an_unusable_admission_line_is_named_and_narrows_nothing(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(),
+        admission_reader=_admission_reader("review_base_include:\n"),
+        telemetry=telemetry,
+    )
+    assert result.body == b"queued\n"
+    assert len(board.states()) == 1
+    notes = [e for e in telemetry.events if e.step == "repo admission"]
+    assert len(notes) == 1
+    assert notes[0].status == "error"
+    assert "review_base_include" in notes[0].error
+    assert "ignored" in notes[0].error
+
+
+def test_the_admission_reader_needs_the_app_credentials(tmp_path):
+    import atlas_reviewer.service as service_module
+
+    config = _config(tmp_path)
+    reader, reason = service_module._repo_admission_reader(config, {})
+    assert reader is None
+    assert "ATLAS_GITHUB_APP_ID" in reason
+
+
+def test_the_admission_reader_reads_one_bounded_file(tmp_path, monkeypatch):
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.ports import NotFoundError
+    from atlas_reviewer.service_admit import MAX_ADMISSION_BYTES, REVIEW_MD
+
+    calls: list[tuple[str, str, str, int]] = []
+
+    class _Client:
+        def __init__(self, result):
+            self.result = result
+
+        def get_file(self, repo, ref, path, max_bytes):
+            calls.append((repo, ref, path, max_bytes))
+            if self.result is None:
+                raise NotFoundError("GitHub 404")
+            return self.result
+
+    for missing, expected in ((b"config", b"config"), (None, None)):
+        client = _Client(missing)
+        monkeypatch.setattr(
+            service_module, "_read_client", lambda config, env, c=client: (c, "")
+        )
+        reader, reason = service_module._repo_admission_reader(_config(tmp_path), {})
+        assert reason == ""
+        # The file is the base-ref REVIEW.md under the shipped read bound.
+        assert reader("o/r", "main") is expected
+        assert calls[-1] == ("o/r", "main", REVIEW_MD, MAX_ADMISSION_BYTES)
+        assert calls[-1][3] == 64 * 1024
+
+
+def test_the_operator_log_line_carries_a_skip_reason():
+    """A skip's one-line reason reaches the operator log, not only the
+    JSONL sink, so a rule-based skip can be told apart from the service
+    being down. Mutant: the reason dropped from the line."""
+    from atlas_reviewer.service import _LoggingSink
+    from atlas_reviewer.telemetry import Event, NullSink
+
+    lines: list[str] = []
+    sink = _LoggingSink(NullSink(), lines.append)
+    sink.emit(
+        Event(
+            seq=1,
+            phase="service",
+            step="review skipped",
+            status="ok",
+            start_s=0.0,
+            duration_s=0.0,
+            fields={"pr": 7, "sha12": "aaaaaaaaaaaa", "reason": "repo-skip-event"},
+        )
+    )
+    assert len(lines) == 1
+    assert "review skipped" in lines[0]
+    assert "reason=repo-skip-event" in lines[0]

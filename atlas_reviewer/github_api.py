@@ -28,6 +28,7 @@ from atlas_reviewer.ports import (
 
 API_URL = "https://api.github.com"
 _JSON = "application/vnd.github+json"
+_RAW = "application/vnd.github.raw"
 _DIFF = "application/vnd.github.diff"
 _PER_PAGE = 100
 _MAX_REDIRECTS = 3
@@ -174,6 +175,17 @@ class GitHubClient:
 
     def get_tarball(self, repo: str, sha: str) -> bytes:
         return self._get(f"/repos/{repo}/tarball/{sha}")
+
+    def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
+        """One file's raw contents at a ref. ``ref`` may be a branch
+        name, so it is percent-encoded. A missing file is a
+        ``NotFoundError``; a file over ``max_bytes`` raises
+        ``ResponseTooLargeError`` rather than returning a cut parse."""
+        return self._get(
+            f"/repos/{repo}/contents/{quote(path, safe='')}?ref={quote(ref, safe='')}",
+            accept=_RAW,
+            max_bytes=max_bytes,
+        )
 
     def get_issue(self, repo: str, number: int) -> Json:
         return self._json(f"/repos/{repo}/issues/{number}")
