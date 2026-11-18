@@ -7,6 +7,7 @@ import inspect
 import json
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -60,6 +61,7 @@ REPORT = ReviewReport(
     limit_stops=("pull request diff | too large for one review pass | kept 1",),
     cost_lines=("reserved $1.00 actual $0.10",),
     recommended_event="APPROVE",
+    coverage_complete=False,
 )
 
 
@@ -533,7 +535,9 @@ def test_the_cut_drops_whole_findings_and_never_splits_a_span():
     findings = tuple(_span_finding(i) for i in (1, 2, 3))
 
     def base_part(stops: tuple) -> int:
-        report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+        report = ReviewReport(
+            (), (), "note", (), stops, (), "COMMENT", coverage_complete=True
+        )
         out = render_comment(report, key, identity)
         assert out.endswith("\n\n" + mark)
         return len(out) - 2 - len(mark) - len("## Findings\n\nNone.")
@@ -555,7 +559,10 @@ def test_the_cut_drops_whole_findings_and_never_splits_a_span():
     assert base_part(stops) + fs(3) + 2 + 2 + len(mark) > 65_000
     assert base_part(stops) + fs(2, 1 + len(drop_note)) + 2 + len(mark) <= 65_000
 
-    report = ReviewReport((), (), "note", (), stops, (), "COMMENT", findings=findings)
+    report = ReviewReport(
+        (), (), "note", (), stops, (), "COMMENT", findings=findings,
+        coverage_complete=True,
+    )  # fmt: skip
     cut = render_comment(report, key, identity)
     assert cut.endswith("\n\n" + mark)
     assert len(cut) <= 65_000
@@ -583,7 +590,9 @@ def test_the_hard_cut_fallback_lands_on_a_line_boundary():
     # A tail of span-carrying one-line items sized to overflow the limit:
     # every rendered line is whole, so the cut must land between lines.
     stops = tuple(_SPAN_ITEM.format(i=i) for i in range(1600))
-    report = ReviewReport((), (), "note", (), stops, (), "COMMENT")
+    report = ReviewReport(
+        (), (), "note", (), stops, (), "COMMENT", coverage_complete=True
+    )
     cut = render_comment(report, key, identity)
     assert cut.endswith("\n\n[comment cut to fit the post limit]\n\n" + mark)
     assert len(cut) <= 65_000
@@ -599,9 +608,41 @@ def test_the_hard_cut_fallback_lands_on_a_line_boundary():
     assert last in expected, last
 
 
-def test_a_report_without_findings_posts_none():
+def test_a_report_without_findings_posts_the_incomplete_none():
+    """Issue #750: an incomplete review's empty Findings section read as a
+    clean bill. The none names the incompleteness and the sections that
+    record the stop; a complete review's none stays plain."""
     body = render_comment(REPORT, post_key(EVENT), lambda item: item)
-    assert "## Findings\n\nNone." in body
+    assert (
+        "## Findings\n\nNone -- the review is incomplete, so this is not a "
+        "clean bill; see Lenses not run and Limit stops." in body
+    )
+    assert "## Findings\n\nNone." not in body
+    complete = replace(REPORT, coverage_complete=True)
+    assert "## Findings\n\nNone." in render_comment(
+        complete, post_key(EVENT), lambda item: item
+    )
+
+
+def test_an_incomplete_review_posts_the_stop_banner():
+    """Issue #750: a budget-stopped review's post said 'Findings: None'
+    under the advisory banner, and read as a clean review. A report whose
+    coverage is not complete -- or that the status line cannot show
+    complete -- carries the incompleteness banner above the findings; a
+    complete report does not."""
+    body = render_comment(REPORT, post_key(EVENT), lambda item: item)
+    assert "REVIEW INCOMPLETE -- not a clean review" in body
+    assert "An empty Findings section below means nothing was" in body
+    # The banner sits above the Findings section, so a reader cannot reach
+    # the empty findings without passing it.
+    assert body.index("REVIEW INCOMPLETE") < body.index("## Findings")
+    complete = replace(REPORT, coverage_complete=True)
+    clean = render_comment(complete, post_key(EVENT), lambda item: item)
+    assert "REVIEW INCOMPLETE" not in clean
+    unknown = replace(REPORT, coverage_complete=None)
+    assert "REVIEW INCOMPLETE -- not a clean review" in render_comment(
+        unknown, post_key(EVENT), lambda item: item
+    )
 
 
 def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):

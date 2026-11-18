@@ -57,6 +57,20 @@ _BANNER = (
     "full repository access, the full pull request diff, and per-lens "
     "subagent fan-out."
 )
+# What an incomplete review's post carries above the findings (issue #750):
+# the status line and the Limit stops section record the stop, but the
+# Findings section's plain "None." read as a clean bill on a review that
+# had stopped at its dollar ceiling after a few lenses. A review whose
+# coverage is not complete -- or that the draft's status line cannot show
+# complete, the same fail-closed reading `verdict.decide` gives
+# undeterminable coverage -- never posts without this banner.
+_INCOMPLETE = (
+    "> **REVIEW INCOMPLETE -- not a clean review.** This review's coverage "
+    "is not complete, so the lenses that ran do not stand for the whole "
+    "pull request. An empty Findings section below means nothing was "
+    "verified before the review stopped, not that the change is clean. "
+    "See Lenses not run and Limit stops for what did not finish."
+)
 _FILES = (
     "The controller's coverage note is the record of files a model call "
     "covered. A path named after it is a file the draft says was not "
@@ -114,10 +128,13 @@ def render_comment(
         report.files_note,
         *(f"not reviewed in full: {path}" for path in report.files_not_read),
     )
+    incomplete = report.coverage_complete is not True
     head: tuple[str, ...] = (
         _BANNER,
         f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
     )
+    if incomplete:
+        head += (_INCOMPLETE,)
     if delta_from:
         # A delta review cites the review it builds on (#702): the head
         # whose review carried these findings forward. The carry
@@ -167,7 +184,9 @@ def render_comment(
     ending = f"\n\n[comment cut to fit the post limit]\n\n{mark}"
 
     def assemble(items: tuple[str, ...], dropped: int) -> str:
-        return "\n\n".join((*head, _findings_section(items, scrub, dropped), *tail))
+        return "\n\n".join(
+            (*head, _findings_section(items, scrub, dropped, incomplete), *tail)
+        )
 
     def fits(b: str) -> bool:
         return len(b) + 2 + len(mark) <= MAX_COMMENT_CHARS
@@ -226,7 +245,10 @@ def _carried_section(
 
 
 def _findings_section(
-    items: tuple[str, ...], scrub: Callable[[str], str], dropped: int = 0
+    items: tuple[str, ...],
+    scrub: Callable[[str], str],
+    dropped: int = 0,
+    incomplete: bool = False,
 ) -> str:
     """The Findings section, rendered unlike every other section.
 
@@ -250,7 +272,12 @@ def _findings_section(
     removed from the end of the list (the draft lists findings most severe
     first): the cut never lands inside a finding's inner code span, so an
     overflowing post drops findings whole and the section names them
-    instead of leaving an unclosed span or a false none."""
+    instead of leaving an unclosed span or a false none.
+
+    `incomplete` is the review's coverage, read fail-closed by
+    `render_comment`: an empty section on an incomplete review cannot read
+    as a clean bill (issue #750), so its none names the incompleteness and
+    points at the sections that record the stop."""
     if items:
         listed = "\n".join(f"- {scrub(item)}" for item in items)
         if dropped:
@@ -260,6 +287,11 @@ def _findings_section(
             )
     elif dropped:
         listed = f"[all {dropped} findings cut to fit the post limit]"
+    elif incomplete:
+        listed = (
+            "None -- the review is incomplete, so this is not a clean bill; "
+            "see Lenses not run and Limit stops."
+        )
     else:
         listed = "None."
     return f"## Findings\n\n{listed}"
