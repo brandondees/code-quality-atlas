@@ -97,11 +97,13 @@ breadths.
 ## 2. Proposed user-facing surface
 
 **Precedence principle: user config tightens, operator config bounds — and
-the per-review ceiling is the one value a repo may raise (D81, Q2).** A user
-may lower a budget, raise a floor, or narrow what triggers a review; D81
-keeps D68's semantics, so a repo's `review_ceiling_usd:` may also raise its
-own per-review ceiling, backstopped outside repo control by the key-level
-spend guard (`ATLAS_KEY_CEILING_USD`) rather than by an operator clamp.
+the per-review ceiling is the one value a repo may raise, within the
+operator's max (D81, Q2 and its update).** A user may lower a budget, raise
+a floor, or narrow what triggers a review; D81 keeps D68's semantics, so a
+repo's `review_ceiling_usd:` may also raise its own per-review ceiling —
+but the effective value is clamped to the operator's **max per review**,
+one of the two per-tenant spend bounds the owner added on 2026-11-18
+(3:39 PM CT): an operator max per review and a per-repo daily budget.
 Nothing in user config can change the model, providers, or data policy,
 widen network, secret, or Sprite access, or enlarge the set of events the
 service acts on beyond the operator's envelope.
@@ -152,8 +154,10 @@ both depend on infrastructure that does not exist (an operator-side store;
 an attacker-bounded label grammar); D81 keeps both out of this track (Q4:
 repo-level only; Q5: none), so neither is designed in detail here.
 
-**Operator-only, never user-controlled:** `ATLAS_KEY_CEILING_USD`, which is
-the spend backstop that stays outside repo control under D81 Q2; the model,
+**Operator-only, never user-controlled:** the per-tenant spend bounds — the
+operator **max per review** and the **per-repo daily budget** (D81's
+update) — plus `ATLAS_KEY_CEILING_USD`, which stays what it is: a cap on
+the *shared key's total* credit limit, not a per-repo bound; the model,
 provider, ZDR and safety-retention variables; every secret; the Sprite
 policy (deny-all, credential-free, create retries/concurrency); service
 concurrency and deadline; the review-repo allowlist and admission envelope;
@@ -167,7 +171,8 @@ concurrency and deadline; the review-repo allowlist and admission envelope;
 | Lens include/exclude | none (guideline decides) | lens-shaped names only; never widens the depth mode; never touches the critical tier; exclude wins | user | exists (D69, `REVIEW.md`) |
 | Severity floor for posted findings | post everything (the service posts one COMMENT per head, not rounds) | a repo may raise its floor; floor-tier lenses' findings are never silently suppressed — the manifest tier split and the overlay's `acknowledge` rule carry over unchanged | user (floor level), engine (tier rule) | not read by the service; the protocol's `REVIEW.md` defines it |
 | Path include/exclude, generated-file handling | none | **ordering and depth only, never exclusion** — whether anything may be excluded from review at all is Q25's undecided question; a user path filter re-ranks and names what it deprioritized | user (ordering); any true exclusion waits on Q25 | not built (`diffs.risk_tier` ranks by path alone) |
-| Per-review budget | the repo's own `review_ceiling_usd:` line, or `ATLAS_REVIEW_CEILING_USD` ($10) when absent | the repo sets its own ceiling, up or down — D68's semantics, kept by D81 Q2; the operator's value is the default, and the backstop outside repo control is `ATLAS_KEY_CEILING_USD`; the ceiling actually used is named in the post (D68's ceiling note) | user (the repo's ceiling), operator (default + key guard) | exists (D68) |
+| Per-review budget | the repo's own `review_ceiling_usd:` line, or `ATLAS_REVIEW_CEILING_USD` ($10) when absent | the repo sets its own ceiling, up or down — D68's semantics, kept by D81 Q2 — but the **effective** value is clamped to the operator's max per review (D81's update; out-of-range → named fallback, D68's pattern); the ceiling actually used is named in the post (D68's ceiling note) | user (the repo's ceiling), operator (the max) | the read exists (D68); the operator max does not |
+| Per-repo daily budget | a working default of $100 per repo per UTC day, pending the owner's number | operator-set (`ATLAS_REPO_DAILY_BUDGET_USD`, proposed name); once a repo has spent its day's budget, further reviews are refused at admission and re-checked at preflight; the record says plainly "skipped: daily budget reached" and never reads as a clean review; the total resets at the UTC day boundary | operator | not built |
 | Head-change policy | `keep` (D79) | keep | operator | exists, env |
 | When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on **inputs a PR author cannot control** — the base branch, the event type, the draft state; never widen past the operator's envelope. Label- and head-branch-based rules are author-controlled (the head branch's name and the PR's labels are the author's or triage's to set, so a skip rule matching either is an author-controlled opt-out) and sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); filters not built |
 | Post format and verbosity | the current post body (D75) | verbosity may be lowered only; the Findings section, the coverage note and the REVIEW INCOMPLETE banner are never suppressible | user | not built |
@@ -195,12 +200,27 @@ concurrency and deadline; the review-repo allowlist and admission envelope;
   Sprite's deny-all credential-free policy, the child's env allowlist, and
   the model/data-policy variables sit outside the config schema by
   construction; the schema is a closed set, not a pass-through.
-- **The spend backstops sit outside repo control (D81 Q2).** D68's semantics
-  stay: a repo may raise or lower its own `review_ceiling_usd:`, and the
-  ceiling a review actually used is named in the draft and the post (D68's
-  ceiling note). The operator's backstop is not a ceiling clamp but the
-  key-level guard `ATLAS_KEY_CEILING_USD`, which refuses an OpenRouter key
-  whose own credit limit exceeds the operator's bound before any inference.
+- **The per-tenant spend bounds sit outside repo control (D81 Q2 and its
+  update).** D68's semantics stay: a repo may raise or lower its own
+  `review_ceiling_usd:`, and the ceiling a review actually used is named in
+  the draft and the post (D68's ceiling note) — but the effective value is
+  clamped to the operator's **max per review** (proposed name
+  `ATLAS_REPO_CEILING_MAX_USD`, a working default of $25 pending the
+  owner's number; out-of-range → named fallback, D68's pattern). The
+  second bound is the **per-repo daily budget**: once a repo has spent its
+  day's budget, its further reviews are refused at admission and re-checked
+  at preflight, the record says plainly "skipped: daily budget reached",
+  and nothing about the refusal can read as a clean review. The reset
+  boundary is the UTC day, and the running total lives where the service's
+  durable state already lives — the state root on the Fly volume
+  (`ATLAS_REVIEWER_STATE_DIR`), as one append-only
+  `<state root>/spend/<repo flattened>-<UTC date>.jsonl` file per repo per
+  day, the same pattern D74's per-PR round logs use; the date in the file
+  name makes the UTC reset structural, and a lost file loses only the
+  day's total, the way a lost round log loses only prior-round context.
+  `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the shared key's
+  *total* credit limit, not a per-repo bound — which is exactly why the
+  per-tenant bounds exist alongside it.
 
 ## 5. Sequencing (issue-sized slices)
 
@@ -214,11 +234,13 @@ concurrency and deadline; the review-repo allowlist and admission envelope;
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | **hot files** — `cli.py` is in #734's and the #654/#655 drafts' edit sets; wait for #734 | after #734 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | **depends on #734 (D80) landing** | after #734 |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | **deferred by D81** (Q4: repo-level only; Q7: quiet hours deferred) | deferred |
+| S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | **against the parity track:** touches `review_wide.py`, where #750's reservation accounting also lands — rebase-check against #750; and it rides S1's parse module (the operator max is a config-bounded value) and S4's admission surface, so it follows both | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
 
 Recommended order: S4 immediately (touching nothing the parity track
 touches), then S1 (concurrent with the parity track, same-file caveat
-against #750 noted above), then S3 and S5, then S6 and S7 once issue #734
-has landed. S2 is dropped and S8 is deferred by D81.
+against #750 noted above), then S3 and S5, then S9 once S1 and S4 have
+landed (rebase-checked against #750), then S6 and S7 once issue #734 has
+landed. S2 is dropped and S8 is deferred by D81.
 
 ## 6. Decisions (D81)
 
@@ -244,3 +266,17 @@ answer to Q2. Summary:
    be excluded from review at all (as recommended).
 7. **Quiet hours / rate limits.** Deferred; S8 is deferred whole.
 8. **AGENTS.md ingestion.** In scope as S6 (as recommended).
+
+**Update (2026-11-18, 3:39 PM CT — the per-tenant spend bound).** Resolving
+the round-2 Major that fix round 1 held, Brandon decided: **"Add both an
+operator max per review and a per-repo daily budget."** Q2's answer stands —
+repos set their own limits, within the operator's bound: the effective
+ceiling is clamped to the operator max (out-of-range → named fallback,
+D68's pattern), and the per-repo daily budget refuses further reviews at
+admission and re-checks at preflight, with the record saying plainly
+"skipped: daily budget reached" and never reading as a clean review; the
+reset boundary is the UTC day and the running total lives on the state
+volume (§4). This adds slice **S9** and is a **precondition for opening the
+App beyond the operator's allowlisted repos**. The plan's earlier claim
+that `ATLAS_KEY_CEILING_USD` was the spend backstop is corrected: it caps
+the shared key's total, not a per-repo bound.
