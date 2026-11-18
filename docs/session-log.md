@@ -3056,3 +3056,36 @@ notes, and D76 gained this correction. The module docstring's
 order-dependent wording ("whose own later run settled clean") is reworded to
 the presence-based rule. 3,229 reviewer tests, 882 tooling; ruff/format/
 mypy/drift clean. Offline only.
+
+## 2026-11-18 — #744 round-2 cleanups: the D76 residue superseded by name, the marker given one definition, the order-dependent wordings reworded
+
+The round-2 protocol review returned APPROVE and confirmed all five round-1
+fixes; its two Minors and two Nits are advisory, and all four are fixed
+here.
+
+Minor 1: D76's original body still described the retired `_blocks_coverage`
+carve-out as live and its Reversibility note still named the retired code —
+one record, two conflicting accounts. The entry is append-only
+(`test_decision_updates_are_appended`), so the body stays as written and a
+new note names both sentences verbatim and supersedes them, restating the
+current revert path (give either check back its per-entry form; drop
+`_uncovered_lens` and `_clean_runs` with them).
+
+Minor 2: the "recovered by L<n>'s clean run" marker was a free-text
+interface — an f-string in `coordinator._lens_line`, a hand-copied regex in
+`service_run`. One definition now: `notes.RECOVERED_NOTE` (the template),
+`notes.recovered_note(index)` (the builder the draft renders) and
+`notes.RECOVERED_NOTE_PATTERN` (the service-side pattern, built from the
+same template and anchored at the line's end), so the two sides cannot
+drift. Pinned by `test_the_recovered_note_and_its_pattern_are_one_definition`
+(the wording, the derived pattern's match, and the anchor property at the
+unit level) beside the existing end-to-end round-trip and forgery tests;
+the one-sided mutants — the draft appending its own literal instead of the
+builder, and the service matching its own regex — die on the existing
+recovered/forge tests.
+
+Nit 1: D44's D76 update note and `deploy-service.md` reworded from "a later
+run / the lens's own later runs" to the presence-based rule the code
+implements. Nit 2: the forgery test's "forgeable-free" typo is now "keeps
+the marker unforgeable by a quoted reason". 3,230 reviewer tests, 882
+tooling; ruff/format/mypy/drift clean. Offline only.

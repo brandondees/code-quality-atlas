@@ -254,8 +254,8 @@ directory.
 The comment says it is advisory and not a substitute for the full Claude
 Code protocol review, then lists the draft's verified findings, lenses
 run, lenses not run, the file-coverage note, limit stops, and cost. A lens
-an earlier entry left NOT RUN but one of the lens's own later runs
-recovered is listed as run, with the failure carried as a recovered note
+an earlier entry left NOT RUN but one of the lens's own runs recovered
+is listed as run, with the failure carried as a recovered note
 among the limit stops (#692, D76); a lens with no clean run is still not
 run.
 

@@ -52,6 +52,7 @@ from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.limit_stop import LimitHit
+from atlas_reviewer.notes import RECOVERED_NOTE_PATTERN
 from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
     ENV_KEY_CEILING_USD,
@@ -523,10 +524,6 @@ def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
 _AGENTIC_COVERAGE = re.compile(r"^- L\d+ (.+?): \*\*(.+?)\*\*(?:; (.*))?$")
 _AGENTIC_RUN_STATES = frozenset({"clean", "partial"})
 _NOT_RUN_BULLET = "- NOT RUN: "
-# A coverage line's recovered note (#692): the controller appends it last,
-# outside the quoted reason, so only a line the coordinator wrote ends this
-# way -- a quoted reason carrying the same words is never at the line's end.
-_AGENTIC_RECOVERED = re.compile(r"recovered by L\d+'s clean run$")
 # Coverage-section prose that is not a limit: the runner report and the
 # round-log note sit in that section whenever the draft has no prompt-cache
 # section between them, and a runner that did not complete adds its own
@@ -655,7 +652,7 @@ def _agentic_coverage(
             name, state, rest = match.group(1), match.group(2), match.group(3) or ""
             if state in _AGENTIC_RUN_STATES:
                 run.append(name)
-            elif _AGENTIC_RECOVERED.search(rest):
+            elif RECOVERED_NOTE_PATTERN.search(rest):
                 notes.append(line)
             elif "body sha256" not in rest:
                 quoted = _quoted_strings(rest)

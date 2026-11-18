@@ -120,7 +120,7 @@ from atlas_reviewer.lens_loop import (
     run_attempt,
 )
 from atlas_reviewer.lenses import LensLibrary
-from atlas_reviewer.notes import quote_untrusted
+from atlas_reviewer.notes import quote_untrusted, recovered_note
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -1978,7 +1978,7 @@ def _lens_line(
     else:
         line = f"{head}; " + "; ".join(_lens_line_parts(r, scrub))
     if recovered_by is not None:
-        line += f"; recovered by L{recovered_by}'s clean run"
+        line += f"; {recovered_note(recovered_by)}"
     return line
 
 

@@ -676,13 +676,14 @@ def test_a_not_run_without_a_clean_run_is_still_not_run_in_the_report():
 
 
 def test_a_quoted_reason_cannot_forge_the_recovered_marker():
-    """Round-1 Minor on #744: the `$` anchor on `_AGENTIC_RECOVERED` is
-    what keeps a recovery forgeable-free. A NOT RUN lens with no clean run
-    whose quoted reason carries the marker's words stays a not-run lens --
-    the words sit inside the reason's code span, whose closing backtick
-    always trails the line, so only a controller-appended note ends a line
-    with the marker. The unanchored mutant turns this lens into a
-    "recovered" note and empties Lenses not run."""
+    """Round-1 Minor on #744: the `$` anchor on `RECOVERED_NOTE_PATTERN`
+    is what keeps the marker unforgeable by a quoted reason. A NOT RUN
+    lens with no clean run whose quoted reason carries the marker's words
+    stays a not-run lens -- the words sit inside the reason's code span,
+    whose closing backtick always trails the line, so only a
+    controller-appended note ends a line with the marker. The unanchored
+    mutant turns this lens into a "recovered" note and empties Lenses not
+    run."""
     lens = "tracing-correctness-and-invariants"
     lost = LensResult(
         lens, 2, None, None,
