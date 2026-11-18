@@ -45,6 +45,7 @@ from atlas_reviewer.bridge_staging import (
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, FakeSprites, MemoryLedger
 from atlas_reviewer.local_runner import LocalSprites
+from atlas_reviewer.ports import StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.telemetry import Telemetry
 
@@ -955,6 +956,57 @@ def test_a_lost_output_is_a_failure_not_an_empty_result(tmp_path):
     assert "held 18 of 5 bytes" in result.error.text
 
 
+def test_a_run_stopped_by_its_exec_budget_is_a_timeout(tmp_path):
+    class StuckSprites(FakeSprites):
+        """Answers the lifecycle execs but never the run script: the exec
+        budget kills it, the same failure a live runner reports."""
+
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if "__ATLAS_RUN__" in argv[-1]:
+                raise StreamTimeoutError("the run stopped arriving")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    sprites = StuckSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    f"atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {}))
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-stuck-run",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    (result,) = results
+    assert result.status is Status.TIMED_OUT
+    assert "the run stopped arriving" in result.error.text
+
+
 def test_no_staged_pytest_is_refused_before_any_exec(tmp_path):
     sprites = FakeSprites(
         rules=(
@@ -1209,6 +1261,8 @@ class TestRunBlocks:
         assert parse_run_blocks("__ATLAS_RUN__ x 2 3 4\n\n\n") is None
         assert parse_run_blocks("__ATLAS_MUT__ 1 zz\n\n") is None
         assert parse_run_blocks("__ATLAS_MUT__ 1 -\nno!pe\n") is None
+        assert parse_run_blocks("__ATLAS_RUN__ 1 2 3 4\nno!pe\n\n") is None
+        assert parse_run_blocks("__ATLAS_RUN__ 1 2 3 4\n\nno!pe\n") is None
 
     def test_no_block_at_all_is_none(self):
         assert parse_run_blocks("nothing here\n") is None
