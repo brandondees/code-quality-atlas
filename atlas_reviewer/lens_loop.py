@@ -30,10 +30,10 @@ each after a short backoff), the runner's deadline, or the bridge's own
 per-attempt session budget: the coordinator starts that budget over for
 each attempt (#693), so a retry does not inherit what its predecessor
 spent, and once `SESSION_REFUSAL_LIMIT` `OVER_SESSION_LIMIT` results
-have accumulated, the turn's results go back and one tool-less turn asks
+have accumulated, the turn's results go back and one finalize turn asks
 the model to finalize with what it has -- the reply it then gives is
-judged like any final reply, with the stop attached, and re-issuing
-refused calls is no longer possible. A retried call
+judged like any final reply, with the stop attached, and the spent
+bridge refuses whatever the model still calls. A retried call
 reserves and settles like any other call, and the failed call's
 reservation stays committed. A call the reservation cannot cover at its
 full output cap is sent with the largest cap it can cover, when that is
@@ -194,18 +194,19 @@ DIFF_PREFIX_LABEL = "pull-request-diff"
 DEFAULT_QUOTE_REPAIRS = 1
 DEFAULT_QUOTE_TOLERANCE = 3
 
-# The repeated-refusal stop (issue #693, round 1): once this many
+# The repeated-refusal stop (issue #693): once this many
 # `OVER_SESSION_LIMIT` results have accumulated in the attempt, the
 # bridge budget is spent -- every further call would refuse, so the
 # count is cumulative by construction -- and the work left is not more
-# tool calls. The turn's results go back and one tool-less turn asks the
-# model to finalize with what it has: what it was about to deliver is
-# not thrown away with the budget, and a model that would re-issue
-# refused calls -- the Nov 14 trials measured a DeepSeek retry burning
-# 16 of them, each earning a duplicate-call nudge -- has no tools to
-# re-issue with. The stop names the lens, the attempt and the cap, and
-# rides on whatever the attempt then delivers. A constant, not a knob:
-# the budget itself is the setting.
+# tool calls. The turn's results go back and one finalize turn asks the
+# model to finalize with what it has, so what it was about to deliver is
+# not thrown away with the budget. The tool schemas stay on the request:
+# a request carrying tool history next to an empty tools array is a
+# shape the pinned Bedrock Converse route rejects, and the spent bridge
+# refuses whatever the model still calls, so a re-issue is a logged
+# refusal, not a runaway. The stop names the lens, the attempt and the
+# cap, and rides on whatever the attempt then delivers. A constant, not
+# a knob: the budget itself is the setting.
 SESSION_REFUSAL_LIMIT = 3
 
 # D68: the per-lens values a multi-lens review's review-wide limits
@@ -1434,13 +1435,16 @@ class _Progress:
     # results this attempt has taken -- cumulative, since once the budget
     # is spent every later call refuses -- and the last refusal's own
     # reason, so the stop can name the cap that was hit. When the
-    # threshold is reached the stop is built once, the conversation goes
-    # tool-less (`finalize_only`), and the stop rides on the outcome the
-    # attempt then delivers (`_with_session_stop`).
+    # threshold is reached the stop is built once and `finalizing` turns
+    # on: the model is asked to finalize with what it has (the tool
+    # schemas stay on the request; the spent bridge refuses whatever it
+    # still calls), the unread-list nudge is not earned -- the stop asked
+    # for a reply, not more reads -- and the stop rides on the outcome
+    # the attempt then delivers (`_with_session_stop`).
     session_refusals: int = 0
     last_refusal: str = ""
     session_stop: LimitHit | None = None
-    finalize_only: bool = False
+    finalizing: bool = False
 
     def unread(self) -> tuple[str, ...]:
         """The changed files this attempt has not read the whole diff of.
@@ -1737,7 +1741,7 @@ def run_attempt(
         if stopped is not None:
             return _with_session_stop(stopped, p)
         if retry_request is None:
-            request = _turn_request(system, messages, tools, prefix, p)
+            request = TurnRequest(system, tuple(messages), tools, prefix)
         else:
             # One retry of the request that just timed out (D58 item 5):
             # the timed-out request keeps its full reservation as spent, it
@@ -1803,21 +1807,6 @@ def run_attempt(
         _after_tool_turn(job, attempt, bridge, p, messages, limits)
 
 
-def _turn_request(
-    system: str,
-    messages: list[Message],
-    tools: tuple[ToolSchema, ...],
-    prefix: SharedPrefix | None,
-    p: _Progress,
-) -> TurnRequest:
-    """The next request. The repeated-refusal stop's finalize turn
-    carries no tool schemas (issue #693): the budget is spent, so the
-    only work tools could do is re-issue refused calls."""
-    return TurnRequest(
-        system, tuple(messages), () if p.finalize_only else tools, prefix
-    )
-
-
 def _run_turn_tools(
     job: LensJob,
     bridge: Bridge,
@@ -1829,9 +1818,9 @@ def _run_turn_tools(
 ) -> tuple[str, ...] | AttemptOutcome:
     """Run a tool turn's calls in order, every one of them answered, so
     the conversation the next request carries stays call-for-result whole
-    even when the batch straddles the attempt's bridge budget (round 1 of
-    #745: the refusals the model never saw are also the findings it never
-    got to deliver). A runner deadline inside a call ends the attempt."""
+    even when the batch straddles the attempt's bridge budget: the
+    refusals the model never saw are also the findings it never got to
+    deliver. A runner deadline inside a call ends the attempt."""
     results: list[str] = []
     try:
         for call in reply.calls:
@@ -1866,12 +1855,16 @@ def _session_limit_turn(
     spent -- every later call would refuse, so the count is cumulative by
     construction -- and the work left is not more tool calls. The stop is
     built once here, naming the lens, the attempt and the cap; the turn's
-    results have just gone back, and one tool-less turn asks the model to
+    results have just gone back, and one finalize turn asks the model to
     finalize with what it has, so what it was about to deliver is not
-    thrown away with the budget (round 1 of #745) and a model that would
-    re-issue refused calls has no tools to re-issue with. True when the
-    stop fired, so the stall detector's own finalize nudge -- which would
-    leave the tools on the table -- does not also fire on this turn."""
+    thrown away with the budget. The tool schemas stay on the request: a
+    request that carries tool history next to an empty tools array is a
+    shape the pinned Bedrock Converse route rejects, and the spent bridge
+    refuses whatever the model still calls, so a re-issue is a logged
+    refusal, bounded by the turn cap, the dollar reservation and the wall
+    clocks, and cannot restart the stop -- it fires once per attempt. True
+    when the stop fired, so the stall detector's own finalize nudge does
+    not also fire on this turn."""
     if p.session_stop is not None or p.session_refusals < SESSION_REFUSAL_LIMIT:
         return False
     limits = bridge.session_limits
@@ -1886,7 +1879,7 @@ def _session_limit_turn(
             f"{job.lens} attempt {attempt}; the last: {p.last_refusal}"
         ),
     )
-    p.finalize_only = True
+    p.finalizing = True
     p.nudges.append("session-limit")
     note_nudge("session-limit")
     messages.append(UserText(_session_limit_nudge(limits)))
@@ -1895,29 +1888,35 @@ def _session_limit_turn(
 
 def _session_limit_nudge(limits: SessionLimits) -> str:
     """The turn the repeated-refusal stop earns (issue #693): finalize now
-    with what you have, and no further tool calls -- the budget is spent,
-    so the only alternative work is re-issuing refused calls."""
+    with what you have -- the budget is spent, so any further tool call
+    will be refused, and the only alternative work is re-issuing refused
+    calls."""
     return (
         f"This attempt's tool budget is spent ({limits.max_calls} calls, "
         f"{limits.max_output_bytes} output bytes, per attempt). Finalize "
         "now with what you have: reply with exactly one JSON object, in "
-        "the shape the Finding contract defines, and nothing else. No "
-        "further tool calls will run."
+        "the shape the Finding contract defines, and nothing else. Any "
+        "further tool call will be refused."
     )
 
 
 def _with_session_stop(done: AttemptOutcome, p: _Progress) -> AttemptOutcome:
     """The repeated-refusal stop rides on whatever the attempt then
-    delivered (issue #693, round 1): the tool-less finalize turn let the
-    model reply, so the judgment stands -- its causes already carry the
-    refusals -- and the stop is attached when no later limit claims the
-    outcome, so the ledger, the status line, the round log and the
-    service report still name the lens, the attempt and the cap."""
+    delivered (issue #693): the finalize turn let the model reply, so the
+    judgment stands -- its causes already carry the refusals -- and the
+    stop is attached when no later limit claims the outcome, so the
+    ledger, the status line, the round log and the service report still
+    name the lens, the attempt and the cap. When a later stop does claim
+    it -- the turn cap landing on the finalize turn, say -- its message
+    is kept in the outcome's detail instead, so the stop never vanishes
+    without a trace."""
     stop = p.session_stop
-    if stop is None or done.limit_hit is not None:
+    if stop is None or stop.message() in done.detail:
         return done
     detail = f"{done.detail}; {stop.message()}" if done.detail else stop.message()
-    return replace(done, limit_hit=stop, detail=detail)
+    if done.limit_hit is None:
+        return replace(done, limit_hit=stop, detail=detail)
+    return replace(done, detail=detail)
 
 
 def _inject_stall_nudge(p: _Progress, limits: Limits, messages: list[Message]) -> None:
@@ -2218,20 +2217,16 @@ def _accept_or_repair(
         # The newest finding-bearing judgment is the evidence a later stop
         # returns, across any follow-up turns (review round 4, probe E).
         p.finding_hold = outcome
-    if (
-        not p.prefixed
-        and not p.unread_nudged
-        and not p.finalize_only
-        and outcome.unread
-    ):
+    if not p.prefixed and not p.unread_nudged and not p.finalizing and outcome.unread:
         # D58 reverses D42's no-nudge rule once: the unread list goes back
         # before a final reply is accepted, so a triaging model can finish
         # its coverage. The shared-prefix path never earns it: its
         # coverage is attested from what the prefix held, so there is no
         # unread list to send (D65). Nor does the repeated-refusal stop's
-        # finalize turn (issue #693): its request carries no tools, so the
-        # nudge would ask for reads it cannot make -- the unread list
-        # stays the outcome's `FILES_UNREAD` cause instead. The refused
+        # finalize turn (issue #693): the stop asked for a reply, not more
+        # reads, and the spent bridge refuses whatever the model still
+        # calls -- the unread list stays the outcome's `FILES_UNREAD`
+        # cause instead. The refused
         # reply's causes are not this attempt's unless the nudged reply
         # fails too.
         p.causes.clear()

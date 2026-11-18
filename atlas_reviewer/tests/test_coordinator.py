@@ -427,13 +427,16 @@ def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
 
 
 def test_a_retry_gets_a_full_bridge_budget_and_a_spent_one_finalizes(tmp_path):
-    """Issue #693, round 1. Attempt 1 makes 66 calls against the 64-call
-    budget: the first 64 run, the burst's last two are refused (below the
-    stop threshold), and the attempt fails its acknowledgement, which is
+    """Issue #693. Attempt 1 makes 66 calls against the 64-call budget:
+    the first 64 run, the burst's last two are refused (below the stop
+    threshold), and the attempt fails its acknowledgement, which is
     retried. The retry runs on the same runner session and still has its
     own full budget: its 64 calls run. Its next turn takes three
     refusals, which ends the reading: the turn's refusals go back and one
-    tool-less turn asks the model to finalize, and the finding it then
+    finalize turn asks the model to finalize -- the tools stay on the
+    request, because tool history next to an empty tools array is a shape
+    the pinned Bedrock Converse route rejects, and the spent bridge
+    refuses whatever the model still calls -- and the finding it then
     delivers is attested with the stop attached, naming the lens, the
     attempt and the cap -- in the ledger, the status line, the round log
     and so the service report. The shared-counter mutant, where attempt 2
@@ -471,9 +474,10 @@ def test_a_retry_gets_a_full_bridge_budget_and_a_spent_one_finalizes(tmp_path):
     assert "session_limits stopped the review" in recorded.limit_stop
     assert "attempt 2" in recorded.limit_stop
     # Six model calls: three turns in attempt 1, then the retry's burst,
-    # its refused batch, and the tool-less finalize turn.
+    # its refused batch, and the finalize turn -- which carries the tool
+    # schemas next to the tool history.
     assert len(model.requests) == 6
-    assert model.requests[5].tools == ()
+    assert len(model.requests[5].tools) == 5
 
 
 def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(

@@ -74,6 +74,7 @@ from atlas_reviewer.lens_loop import (
     ResolvedCall,
     ToolCalls,
     ToolRequest,
+    ToolResults,
     ToolSchema,
     TurnRequest,
     UserText,
@@ -381,6 +382,14 @@ def _payload(
     limits: ResolvedCall,
     selected: SelectedEndpoints,
 ) -> dict[str, Any]:
+    if not request.tools and _carries_tool_work(request.messages):
+        raise BoundaryError(
+            "a request carrying tool calls or results cannot go out with "
+            "an empty tools array: the pinned routes reject tool history "
+            "next to no toolConfig (Bedrock Converse's toolConfig rule), "
+            "so the adapter refuses the shape instead of failing the call "
+            "mid-review"
+        )
     caching = sends_cache_control(provider.model_id, selected.supported)
     payload: dict[str, Any] = {
         "model": provider.model_id,
@@ -413,6 +422,18 @@ def _tool(tool: ToolSchema) -> dict[str, Any]:
             "parameters": dict(tool.parameters),
         },
     }
+
+
+def _carries_tool_work(messages: tuple[Message, ...]) -> bool:
+    """Whether the history holds assistant tool calls or tool results.
+    The adapter's shape invariant: a request with them and an empty tools
+    array is one the pinned routes reject -- Bedrock Converse requires a
+    `toolConfig` when `toolUse` and `toolResult` blocks are present -- so
+    the only tool-less request that may go out is one whose history has
+    none, like the re-assessment call's single user turn."""
+    return any(
+        isinstance(message, AssistantCalls | ToolResults) for message in messages
+    )
 
 
 def _messages(request: TurnRequest, caching: bool) -> list[dict[str, Any]]:

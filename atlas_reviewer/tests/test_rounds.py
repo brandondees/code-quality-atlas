@@ -580,7 +580,7 @@ def test_an_unreadable_line_with_no_readable_head_is_set_aside():
 
 STOP = (
     "session_limits stopped the review: configured 64 call(s) and 1048576 "
-    "output bytes per attempt, observed 3 consecutive session-limit "
+    "output bytes per attempt, observed 3 session-limit "
     "refusals ended tracing-correctness-and-invariants attempt 2. Change "
     "it with the bridge's session limits (SessionLimits in bridge.py)."
 )

@@ -1750,15 +1750,17 @@ def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     assert outcome.state is LensState.PARTIAL
 
 
-def test_consecutive_session_limit_refusals_earn_a_tool_less_finalize_turn(tmp_path):
-    """Issue #693, round 1: once `SESSION_REFUSAL_LIMIT` results have been
+def test_the_refusal_stop_finalizes_with_the_tools_still_on_the_request(tmp_path):
+    """Issue #693: once `SESSION_REFUSAL_LIMIT` results have been
     `OVER_SESSION_LIMIT`, the budget is spent. The turn's results go back
     -- so a model whose batch straddled the budget still sees what ran --
-    and one tool-less turn asks the model to finalize with what it has:
+    and one finalize turn asks the model to finalize with what it has:
     the finding it then delivers is attested, with the stop attached,
-    instead of the round-1 cut's `UNACKNOWLEDGED` attempt that discarded
-    both the results and the reply. A model that would re-issue refused
-    calls has no tools to re-issue with."""
+    instead of the mid-turn cut's `UNACKNOWLEDGED` attempt that discarded
+    both the results and the reply. The tool schemas stay on the request:
+    tool history next to an empty tools array is a shape the pinned
+    Bedrock Converse route rejects, and the spent bridge refuses whatever
+    the model still calls."""
     spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
     outcome, model, _ = attempt(
         tmp_path,
@@ -1787,8 +1789,8 @@ def test_consecutive_session_limit_refusals_earn_a_tool_less_finalize_turn(tmp_p
     assert "session_limits stopped the review" in outcome.detail
     assert outcome.nudges == ("session-limit",)
     # Every call of the refused batch was answered, then exactly one
-    # tool-less turn was asked for: no third reading turn, and no tool
-    # schemas on it.
+    # finalize turn was asked for: no third reading turn was requested,
+    # and its request carries the tool schemas next to the tool history.
     assert [t.status for t in outcome.tools] == [
         "OK",
         "OVER_SESSION_LIMIT",
@@ -1797,8 +1799,59 @@ def test_consecutive_session_limit_refusals_earn_a_tool_less_finalize_turn(tmp_p
         "OVER_SESSION_LIMIT",
     ]
     assert len(model.requests) == 3
-    assert model.requests[2].tools == ()
+    assert model.requests[2].tools == tool_schemas()
     assert "tool budget is spent" in model.requests[2].messages[-1].text
+
+
+def test_a_finalize_turn_that_still_calls_tools_earns_no_second_stop(tmp_path):
+    """A re-issued call on the finalize turn is a logged refusal: the stop
+    fires once per attempt, so the repeated calls neither restart the
+    stop nor loop it -- the attempt ends when the model finally replies,
+    or at the turn cap."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    again = tools(*[("read_file", {"path": "calc.py"})] * 2)
+    outcome, model, _ = attempt(
+        tmp_path,
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            spent,
+            again,
+            final(finding()),
+        ],
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.attestation is Attestation.ATTESTED
+    assert [f.finding.finding for f in outcome.findings] == [
+        "rounds each item before summing, so totals drift"
+    ]
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.observed == (
+        "4 session-limit refusals ended "
+        "tracing-correctness-and-invariants attempt 1; the last: "
+        "session-limit: all 1 calls of this attempt made"
+    )
+    # One stop, one refusal-stop nudge; the finalize turn's own repeated
+    # refusals are named by the duplicate detector, not by a second stop.
+    assert outcome.nudges == ("session-limit", "duplicate-calls")
+    assert len(model.requests) == 4
+
+
+def test_a_later_stop_keeps_the_session_stop_in_its_detail(tmp_path):
+    """The turn cap landing exactly on the finalize boundary claims the
+    outcome's limit_hit; the session-limit stop stays in the record
+    through the detail, so the budget the attempt hit is still named in
+    the ledger, the draft and the round log."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    outcome, _, _ = attempt(
+        tmp_path,
+        [tools(("diff_file", {"path": "calc.py"})), spent],
+        limits=replace(LIMITS, max_turns=2),
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert "max_turns stopped the review" in outcome.detail
+    assert "session_limits stopped the review" in outcome.detail
 
 
 def test_a_retry_begins_with_a_full_bridge_budget(tmp_path):

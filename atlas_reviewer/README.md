@@ -1132,9 +1132,12 @@ a `Bridge` to the caller.
   output of its session (#693): the coordinator starts that budget over
   for each attempt, so a retry begins whole, and a refusal names the
   attempt that spent it. When three refusals have accumulated, the
-  turn's results go back and one tool-less turn asks the model to
-  finalize with what it has; the stop rides on what the attempt then
-  delivers, naming the lens, the attempt and the cap.
+  turn's results go back and one finalize turn asks the model to
+  finalize with what it has; the tools stay on the request, because
+  tool history next to an empty tools array is a shape the pinned
+  Bedrock route rejects, and the spent bridge refuses whatever the
+  model still calls; the stop rides on what the attempt then delivers,
+  naming the lens, the attempt and the cap.
 - **Exec.** Each call is a fixed git argv with every value shell-quoted,
   under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
   and repository attributes disable config, hooks, pagers, transports,
@@ -1344,8 +1347,11 @@ D41 records the 2026-11-12 probe that did.
   `OVER_SESSION_LIMIT`, its file stays unread, and the review fails
   closed. Raising the budget is the only remedy built; no path-exclusion
   option exists. When three refusals have accumulated in the attempt,
-  the turn's results go back and one tool-less turn asks the model to
-  finalize with what it has (#693): the finding it then delivers is
+  the turn's results go back and one finalize turn asks the model to
+  finalize with what it has (#693): the tools stay on the request,
+  because tool history next to an empty tools array is a shape the
+  pinned Bedrock route rejects, and the spent bridge refuses whatever
+  the model still calls; the finding the model then delivers is
   attested, with the stop attached, naming the lens, the attempt and the
   cap.
 - **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an

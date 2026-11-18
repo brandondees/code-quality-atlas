@@ -3057,3 +3057,39 @@ loop and coordinator tests lose the stop and the tool-less request), the
 tool-less request reverted to the full tool set, and the stop not
 attached to the delivered outcome. Full local checks green; offline
 only.
+
+## 2026-11-18 — #745 round-2 fixes: the finalize turn keeps its tools, and the stop never vanishes under a later one
+
+Round 2 caught the finalize turn's request shape: it sent an empty tools
+array next to a conversation already carrying assistant tool calls and
+tool results -- a shape the pinned Bedrock Converse route rejects
+(tool history requires a toolConfig), so the finalize call would have
+failed as a non-retryable model error and lost the findings the turn
+exists to deliver, on the route every live run takes.
+
+The tool schemas now stay on the finalize request: the model is asked to
+finalize, and the spent bridge refuses whatever it still calls -- a
+re-issue is a logged refusal, bounded by the turn cap, the dollar
+reservation and the wall clocks, and cannot restart the stop, which
+fires once per attempt. The adapter gained the shape invariant itself:
+`_payload` refuses any request that carries tool history next to an
+empty tools array before any request goes out (the one tool-less
+request that exists, the re-assessment call's single user turn, carries
+no history), so a future tool-less finalize turn cannot fail the call
+mid-review. When a later stop claims the outcome the session-limit stop
+once lost -- the turn cap landing on the finalize boundary -- its
+message is now kept in the outcome's detail. The unread-list nudge is
+still not earned on the finalize path: the stop asked for a reply, not
+more reads the bridge will refuse.
+
+D77 and the README now describe the tools-kept design and record the
+tool-less shape as a rejected alternative; the stale "consecutive"
+vocabulary left the loop test's name and the rounds fixture; the
+"round 1" journal citations left the new code comments; the PR title and
+body were rewritten to the current design. Mutants applied by hand and
+killed with `PYTHONDONTWRITEBYTECODE=1`: the tools dropped from the
+finalize request again (the loop and coordinator tests fail on the
+carried schemas), the shape guard removed (the adapter test fails), the
+detail-keeping dropped (the later-stop test fails), and the round-1
+suite (shared counter, threshold, wiring) re-killed. Full local checks
+green; offline only.
