@@ -110,16 +110,6 @@ _REPLY = re.compile(
     rf"{HEADER} (\d+) (\d+) (\d+) (\d+) (\d+)(?:\n({_B64}))?(?:\n({_B64}))?",
     re.ASCII,
 )
-# A run block: the process's exit status, the captured output's total
-# bytes and lines, the bytes shown, then the shown output and the capped
-# stderr, each base64-encoded on its own line.
-_RUN_FIELDS = rf"{RUN_HEADER} (\d+) (\d+) (\d+) (\d+)"
-# A mutation block: the edit step's exit status, the commit the mutated
-# tree is reachable at (`-` when none), and one payload line.
-_MUT_FIELDS = rf"{MUT_HEADER} (\d+) ([0-9a-f]{{40}}|-)"
-_BLOCKS = re.compile(
-    rf"^(?:{_RUN_FIELDS}|{_MUT_FIELDS})\n({_B64})$", re.ASCII | re.MULTILINE
-)
 # The final pytest summary line, `-q`'s last line of output: counts and
 # labels, or "no tests ran", then the elapsed seconds. Nothing else in the
 # output is parsed for anything.
