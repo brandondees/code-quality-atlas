@@ -5010,7 +5010,7 @@ def test_a_byok_refusal_records_the_executions_already_made(tmp_path):
     from atlas_reviewer.interpreter import PYENV_VERSIONS
     from atlas_reviewer.lens_loop import ToolCalls, ToolRequest
 
-    from .test_bridge_runs import ReplyRule, framed
+    from .test_bridge_runs import ReplyRule, framed, staged
 
     pyenv = f"{PYENV_VERSIONS}/3.13.7/bin/python3"
     out = b"1 passed in 0.01s\n"
@@ -5029,7 +5029,7 @@ def test_a_byok_refusal_records_the_executions_already_made(tmp_path):
                     f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
                 ),
             ),
-            ReplyRule("__ATLAS_RUN__", lambda _script: framed(0, out)),
+            ReplyRule("__ATLAS_RUN__", lambda _script: staged() + framed(0, out)),
         )
     )
     from .agentic import COST
