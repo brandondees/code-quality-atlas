@@ -125,9 +125,13 @@ D68's ceiling note.
 **The repo file: extend `REVIEW.md` rather than add `.atlas.yml`.** The read
 seam already exists (merge-base tarball, 64 KiB bound, fail-open notes), the
 protocol already documents `REVIEW.md` as the repo-facing policy file, and
-one file keeps the authoring surface — and the base-ref security rule — in
-one place. A second file would split that surface and duplicate the
-security rule the copied-parallel-way the standing authoring rules warn
+one file keeps the authoring surface — and the read-source security rule —
+in one place. The read source becomes per key (§4): admission-class keys
+read the repo's **default branch**, while D68's and D69's existing lines
+keep the merge-base read their semantics were decided against, their
+author-influence bounded and their migration to the default branch noted as
+the safer end-state. A second file would split that surface and duplicate
+the security rule the copied-parallel-way the standing authoring rules warn
 against. A `.atlas.yml`-style file remains the alternative if the key set
 grows past what one line-per-key grammar reads cleanly; the parse module of
 S1 should be written so the file name is one constant, not a design
@@ -203,7 +207,7 @@ S10.
 | Per-review budget | the repo's own `review_ceiling_usd:` line, or `ATLAS_REVIEW_CEILING_USD` ($10) when absent | the repo sets its own ceiling, up or down — D68's semantics, kept by D81 Q2 — but the **effective** value is clamped to the operator's max per review (D81's update; out-of-range → named fallback, D68's pattern); the ceiling actually used is named in the post (D68's ceiling note) | user (the repo's ceiling), operator (the max) | the read exists (D68); the operator max does not |
 | Per-repo daily budget | a working default of $100 per repo per UTC day, pending the owner's number | operator-set (`ATLAS_REPO_DAILY_BUDGET_USD`, proposed name); once a repo has spent its day's budget, further reviews are refused at admission and re-checked at preflight; the record says plainly "skipped: daily budget reached" and never reads as a clean review; the total resets at the UTC day boundary | operator | not built |
 | Head-change policy | `keep` (D79) | keep | operator | exists, env |
-| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on **inputs a PR author cannot control** — the base branch, the event type, the draft state; never widen past the operator's envelope. Label- and head-branch-based rules are author-controlled (the head branch's name and the PR's labels are the author's or triage's to set, so a skip rule matching either is an author-controlled opt-out) and sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); filters not built |
+| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on **inputs a PR author cannot control** — the base branch, the event type, the draft state; never widen past the operator's envelope. The config is read from the repo's **default branch** (§4), not the PR's base ref or merge-base, both of which an author can move in same-repo or stacked PRs; the base-retarget dodge (open against an excluded base, then retarget via `edited`) is S4's consideration to close. Label- and head-branch-based rules are author-controlled (the head branch's name and the PR's labels are the author's or triage's to set, so a skip rule matching either is an author-controlled opt-out) and sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); filters not built |
 | Post format and verbosity | the current post body (D75) | verbosity may be lowered only; the Findings section, the coverage note and the REVIEW INCOMPLETE banner are never suppressible | user | not built |
 | #734 tool allow-lists | deny-all; structured `run_tests`/`mutate` with bridge-built argv | a repo's requested additions are **proposals** that become operator-approval requests (the #734 decision: approval may apply within the same run, bounded by the wall and dollar limits); never auto-granted | operator approves, user proposes | #734 not started |
 | Coding guidelines / AGENTS.md ingestion | none | delivered as fenced untrusted context blocks under the D67/D73 room budget, like the conversation and CI blocks; never instructions | user (content), engine (delivery) | not built |
@@ -213,11 +217,40 @@ S10.
 
 ## 4. Security and trust
 
-- **Read from the merge-base / base ref only, never the PR head.** This is
-  D68's and D69's existing rule for `REVIEW.md` and the protocol's step-3
-  rule for both policy files ("a policy file changed by the PR under review
-  does not take effect for that review"). A PR author cannot move their own
-  review's budget, floor, or filters.
+- **Read from the repo's default branch for the settings a PR should not
+  influence; from the merge-base only where the existing semantics keep
+  it.** The plan's earlier blanket rule — merge-base/base ref, never the
+  PR head — had a hole #756's protocol review caught: the PR's `base.ref`
+  and its merge-base are **author-controllable** in same-repo and stacked
+  PRs, because the author can commit configuration to the branch they
+  target, and the merge-base then carries it. So:
+  - **Admission-class settings — S4's when-to-review rules, and any other
+    setting a PR must not influence — read from the repo's default
+    branch** (#756's approach). The default branch is the repo
+    maintainers' controlled surface: what governs a review cannot be
+    written by the PR being reviewed.
+  - **D68's ceiling line and D69's lens include/exclude keep their
+    existing merge-base read**, and they **do share the weakness**: in a
+    same-repo or stacked PR the author can put a `review_ceiling_usd:`
+    line or lens preference on the branch they target and have the
+    merge-base carry it. The exposure is bounded, not zero — the ceiling
+    raise is clamped by S9's operator max (and a lowered ceiling only
+    cheapens the author's own review), and the lens lists can never widen
+    the depth mode or touch the critical tier, so the strongest lenses
+    (the floor-tier set) cannot be excluded away. The migration of these
+    two reads to the default branch is the safer end-state and is a
+    candidate follow-up; until then their author-influence is stated here
+    rather than claimed away.
+  - **The base-retarget dodge is S4's consideration to close.** A PR
+    opened against an excluded base branch passes admission at `opened`,
+    then retargets — GitHub delivers `pull_request.edited` with a
+    `base` change and no new `opened` event — and a rule keyed on the
+    base branch would then be stale. Since S4's read source is the
+    default branch, a base-retarget cannot change the admission answer
+    through the config; the remaining surface is rules that compare the
+    PR's own base branch, which S4 must either re-evaluate on `edited`
+    events or define against the default branch so retargeting cannot
+    move the answer.
 - **Schema-validated, bounded, fail-open with named notes.** Every value
   carries a range the schema enforces; out-of-range or unparseable input
   falls back to the default and names itself, generalizing D68's
@@ -288,7 +321,7 @@ S10.
 | S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | **concurrent with the parity track** — verified against the code: #750's fix is reservation accounting (`budget.py`'s per-call pricing and `derive_review_wide`'s derived, ceiling-clamped reservation) plus the budget-stopped headline (`coordinator.py`'s `_headline` and the post path), all of which *consume* the resolved ceiling; none of it plausibly changes the `REVIEW.md` ceiling read S1 refactors (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`'s precedence). Same-file caveat: both edit `review_wide.py`, so a rebase may still be needed if hunks land adjacently | first |
 | ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | dropped |
 | S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | concurrent — disjoint from #734/#713/#708's files | after S1 |
-| S4 | When-to-review admission — narrowing on the inputs a PR author cannot control: the base branch, the event type, the draft state. Label- and head-branch-based rules are author-controlled opt-outs and sit behind Q5's deferred PR-level overrides, not here; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, README | **free** — can start now, concurrently with the whole parity track | first available |
+| S4 | When-to-review admission — narrowing on the inputs a PR author cannot control: the base branch, the event type, the draft state. Config read from the repo's **default branch** (#756's approach — §4's corrected rule), not the PR's base ref or merge-base; the base-retarget dodge (`pull_request.edited` retargeting after an excluded-base `opened`) is considered and closed here. Label- and head-branch-based rules are author-controlled opt-outs and sit behind Q5's deferred PR-level overrides, not here; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, README | **free** — can start now, concurrently with the whole parity track | first available |
 | S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | rebase-check against the D79 PRs' delta work before starting | after S1 |
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | **hot files** — `cli.py` is in #734's and the #654/#655 drafts' edit sets; wait for #734 | after #734 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | **depends on #734 (D80) landing** | after #734 |
