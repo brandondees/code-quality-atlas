@@ -3872,7 +3872,7 @@ settle frees what the reservation held; a count claiming to sit outside
 the completion count keeps the reservation, as do a timeout's keep and a
 BYOK call with no reported upstream cost (D43's never-undercount rules,
 unchanged). Recorded as D82 (D80 and D81 are taken on open PRs #753 and
-#751), amending D43's Update; the ceiling, the per-lens knobs and
+PR #751), amending D43's Update; the ceiling, the per-lens knobs and
 `Spend`'s own rules are unchanged, and the reservation stays easy to
 clamp for the planned operator/daily-budget slice. Second behavior
 (issue #750's "can't be mistaken for a clean review"): a review whose
