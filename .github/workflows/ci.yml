@@ -27,22 +27,34 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
-# Superseded pull_request runs are cancelled; a push to main (or a scheduled
-# run) never is. The original reason for that split was #378's single
-# self-hosted runner: obsolete pushes queued behind each other on one
-# machine, each holding it in turn. That contention is gone now that every
-# event runs on an ephemeral GitHub-hosted VM (D78) -- but the split stays,
-# for a different reason: a scheduled run shares this group with pushes to
-# main (both resolve to the default branch's ref), so cancelling in progress
-# on push would let any mid-week push cancel the weekly path-independent
-# pip-audit (#379) before it ran, leaving that CVE scan unexecuted until the
-# next week's cron; and letting each push to main finish keeps one complete,
-# recorded run per commit, which costs nothing extra on a public repo's free
-# hosted minutes. PR runs keep the cancel: they are far more frequent,
-# superseding one is unambiguous, and a superseded PR run's result is worth
-# nothing once the newer head has its own.
+# Superseded pull_request runs are cancelled; push and scheduled runs never
+# are. Two platform facts shape this block:
+#
+# 1. `cancel-in-progress` only governs *running* runs. A concurrency group
+#    holds at most one running and one pending run, and a newer run cancels
+#    an older *pending* one regardless of the setting -- observed live in
+#    this repo: main-push run 44087837195 was cancelled at
+#    2026-11-17T23:41:36Z, the same instant run 44181631062's gate job
+#    queued behind it. So no wording of this block can promise a recorded
+#    run for every commit; the newest head's run is the one that completes.
+# 2. `schedule` events resolve to the default branch's ref, so a ref-only
+#    group would put pushes and the weekly run in the same group -- and by
+#    fact 1, any push landing while the scheduled audit sat pending behind
+#    another run would silently replace it, losing that week's diff-
+#    independent pip-audit (#379).
+#
+# The group therefore carries the event name, separating the weekly audit
+# from main pushes entirely: a push can neither cancel (fact: cancel-in-
+# progress is false for non-PR events) nor supersede a pending audit, and
+# within the schedule group consecutive weekly runs can never overlap, so
+# pending-supersession there is harmless. Superseded *pending* main pushes
+# being replaced is accepted for the same reason: the newest head's result
+# is the one that matters, and any head that reaches the front of its group
+# still gets a complete, recorded run. PR runs keep the cancel: they are
+# far more frequent, superseding one is unambiguous, and a superseded PR
+# run's result is worth nothing once the newer head has its own.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -298,14 +310,20 @@ jobs:
       # site-packages across jobs, letting an already-installed pin report
       # "Requirement already satisfied" and skip its hash check entirely
       # (reproduced during that audit: ruff preinstalled, a forged hash of 64
-      # zeros, exit 0). Each hosted run now gets a fresh VM and setup-
-      # python's clean tool-cache interpreter, so nothing is ever already-
-      # satisfied and every pin's hash is verified on every run, with no venv
-      # and no $GITHUB_PATH export needed -- setup-python already puts this
-      # exact interpreter's pip/python on PATH for every later step
-      # (pip-tools, pip-audit, ruff, pytest, tooling.cli included).
+      # zeros, exit 0). A per-run hosted VM removes the cross-job
+      # accumulation -- but the interpreter this installs into is still the
+      # image-baked setup-python tool-cache Python, whose contents GitHub
+      # controls, so an image refresh could in principle ship a package
+      # matching one of this repo's pins at the pinned version and reopen
+      # the same skip. `--ignore-installed` closes that corner
+      # unconditionally: pip resolves and downloads every pin regardless of
+      # what the interpreter already holds, so every hash is verified on
+      # every run. No venv and no $GITHUB_PATH export are needed --
+      # setup-python already puts this exact interpreter's pip/python on
+      # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
+      # tooling.cli included).
       - if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: pip install --require-hashes -r requirements.txt
+        run: pip install --require-hashes --ignore-installed -r requirements.txt
       - name: dependency vulnerability audit
         # Also runs on the weekly `schedule` trigger above (#379), independent
         # of the path filter, so a CVE against an unchanged pin doesn't wait
@@ -681,13 +699,18 @@ jobs:
             "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.${arch}.tar.xz"
           echo "${sha}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
           tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
-          # $RUNNER_TEMP, not $HOME/.local/bin: the per-run scratch dir keeps
-          # the downloaded binary out of any PATH location a later step might
-          # assume is clean, and (the same hedge the require-hashes install
-          # above made for #366) this step doesn't depend on the dir's
-          # wiping anyway: it downloads, checksums, and overwrites the pinned
-          # binary unconditionally every run, so a leftover here would just
-          # be clobbered, never trusted-as-is.
+          # $RUNNER_TEMP, not $HOME/.local/bin: a per-run scratch dir. On the
+          # old persistent fleet (#378) a $HOME install survived onto every
+          # later job's PATH indefinitely; that concern is gone on a per-run
+          # VM, but the scratch dir stays because the export to $GITHUB_PATH
+          # below is deliberate (actionlint shells out to shellcheck via a
+          # bare PATH lookup) and a run-scoped dir keeps what it exports
+          # scoped to this run by construction. (The same hedge the
+          # require-hashes install above makes for #366 applies: this step
+          # doesn't depend on the dir's wiping anyway -- it downloads,
+          # checksums, and overwrites the pinned binary unconditionally every
+          # run, so a leftover here would just be clobbered, never
+          # trusted-as-is.)
           mkdir -p "$RUNNER_TEMP/bin"
           mv "$RUNNER_TEMP/shellcheck-${version}/shellcheck" "$RUNNER_TEMP/bin/shellcheck"
           chmod +x "$RUNNER_TEMP/bin/shellcheck"

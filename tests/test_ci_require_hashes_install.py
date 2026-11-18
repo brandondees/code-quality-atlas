@@ -12,11 +12,15 @@ checked (reproduced with a forged hash of 64 zeros, exit 0). The fix routed
 the install through a fresh `--clear`ed per-job venv, and
 `test_ci_require_hashes_targets_fresh_venv.py` (removed in the same change
 as D78) guarded that venv shape. D78 moved every event onto ephemeral
-GitHub-hosted runners, which dissolves #366's precondition -- each run gets
-a fresh VM and a clean setup-python interpreter, so nothing is ever
-already-satisfied -- and the venv went with it. What remains worth guarding
-mechanically is only that the `--require-hashes` install step still exists
-at all; a checkout cannot observe interpreter freshness on a hosted VM.
+GitHub-hosted runners, which removes the cross-job accumulation the venv
+existed for -- but the install now targets the image-baked setup-python
+tool-cache interpreter, whose contents GitHub controls, so an image refresh
+shipping a package matching one of this repo's pins at the pinned version
+could reopen the same skip (round-1 review of #746, Minor 2). The
+mechanical fix is `--ignore-installed`: pip resolves and downloads every
+pin regardless of what the interpreter already holds, so every hash is
+checked whatever the image ships -- and that flag is what this guard pins,
+because a checkout cannot observe interpreter freshness directly.
 """
 
 from pathlib import Path
@@ -36,10 +40,18 @@ def _find_require_hashes_step():
     return None
 
 
-def test_require_hashes_step_exists():
-    assert _find_require_hashes_step() is not None, (
+def test_require_hashes_install_exists_and_ignores_installed():
+    run = _find_require_hashes_step()
+    assert run is not None, (
         "no step in ci.yml's gate job runs `pip install --require-hashes` "
         "any more -- has the hash-pin gate been removed or renamed? Update "
         "this test (and re-check #366's hash-verification guarantee still "
         "holds however the install is now shaped) either way."
+    )
+    assert "--ignore-installed" in run, (
+        "the --require-hashes install no longer passes --ignore-installed. "
+        "Without it, a pin already satisfied by the hosted image's own "
+        "tool-cache interpreter reports \"Requirement already satisfied\" "
+        "and skips its hash check -- the #366 failure mode, triggered by an "
+        "image refresh rather than cross-job accumulation."
     )

@@ -1091,16 +1091,20 @@ labels — worth listing when the repo has more than one target class, since a
 job whose labels no runner carries sits `queued` with no error:
 
 ```sh
-grep -rn 'runs-on:' .github/workflows/ | sed 's/:  */: /'
+grep -rEn '^[[:space:]]*runs-on:' .github/workflows/ | sed 's/:  */: /'
 ```
+
+(The grep is anchored to line start so YAML comment text mentioning the
+phrase — e.g. a comment explaining a `runs-on:` decision — doesn't show up
+as a fake runner line.)
 
 **Every event now runs on GitHub-hosted runners (2026-11-17, D78).** This
 section's remaining paragraphs describe how the routing got here, not where
 it is. Today `ci.yml`'s single `gate` job is `runs-on: ubuntu-latest` for
 `pull_request`, `push`, and `schedule` alike, and this guide applies to this
-repo only as history (and to the other repos on the fleet). The `runs-on:`
-grep above still works as a self-check: on this repo it should now print one
-hosted line, per workflow.
+repo only as history (and to the other repos on the fleet). The anchored
+grep above still works as a self-check: on this repo it should print exactly
+one line, and it must read `runs-on: ubuntu-latest`.
 
 **Dependabot PRs no longer share this repo's self-hosted exposure (fixed by
 issue #471, completed by D78).** This section used to describe Dependabot
