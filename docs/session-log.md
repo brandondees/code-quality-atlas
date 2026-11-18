@@ -3450,6 +3450,7 @@ with no span), and the status line carrying `carried_unverified` beside
 `carried` and `resolved`. One test flake observed once
 (`test_instrumented.py::test_every_read_returns_what_the_inner_reader_returned`,
 a tarball read) and not on retry or in the full re-run; left alone.
+
 ## 2026-11-18 (same day) — #747 round 1: finishing is the default, the race installs, the gap is recorded
 
 The protocol review's three Majors, fixed on the bottom layer (the
