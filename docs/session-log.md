@@ -4264,14 +4264,40 @@ status line sums them over the lenses as `test_runs` and
 execution gap a review cannot approve over, the same rule a failed or
 timed-out run already rode; a failing suite is a result, not a gap, and
 still counts as a run. The plan's Status header now records Part B as
-<<<<<<< HEAD
-implemented with D80, phase 5's parity rerun still open (and out of
-=======
 implemented with D80, phase 5's parity rerun still open (and outside
->>>>>>> 07207c4d (docs: the part-2 session-log entry cannot open a line with a hash)
 the issue's scope). Four counting tests run real pytest through
 `LocalSprites`; the status-line test sums over three lenses; the
 round-trip pins the two new fields.
+
+## 2026-11-18 — #753 round 1 fixes: the counting layer's pins, and the folds carry the counts
+
+The protocol review's verdict was COMMENT with no Major: two Minors and
+five Nits, all in the layer this PR owns. The two Minors were pinning
+gaps, not behavior: the lens-loop side of "a failing suite is a result,
+not a gap, and still counts as a run" had no test of its own (the
+bridge side's pin is #752's), so a gate that counted only passing runs
+would have passed this layer's whole suite — the new
+`test_a_failing_suite_still_counts_as_a_run_and_not_a_gap` runs a
+failing suite through the loop and pins the count and the absent gap;
+and the `_EXECUTION` instructions paragraph was unpinned, so dropping
+it from either prompt layout left the suite green — the anti-drift
+test's shared-sentence list now carries the paragraph's four key
+sentences. The Nits: the stop fold that carries a held finding across a
+follow-up's tool work now refreshes `test_runs`/`mutants_survived`
+beside the tools and turns it already refreshed (the fold whose
+follow-up never ran keeps the held counts, with the reason stated); a
+Byok refusal's exception carries the counts beside the turns and tools,
+and the ledger line the coordinator finishes with them records the
+executions the attempt had already made; the duplicated assertion
+became the check it was meant to be (`outcome.test_runs == 0` — a
+mutate call is not a run_tests run) and the misleading test name now
+names what it tests; D80's Update names `_outcome_json` as the writer
+and `_outcome_from` as the reader; and the status line's sums are
+documented as the head's recorded executions, not what this review paid
+for — a reused lens's settled counts are real executions at this same
+head (D73's evidence stays at the head it belongs to). Five new
+hand-applied mutants over the fixes, each dead on a named test. The
+MD018 session-log fix had already landed at `07207c4d`.
 
 ## 2026-11-18 — #752 round 1: execution copies come from the object store, and MUTANT reads are hash-checked
 

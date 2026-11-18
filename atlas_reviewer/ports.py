@@ -37,6 +37,11 @@ class ByokRefusedError(BoundaryError):
         super().__init__(message)
         self.turns = 0
         self.tools: tuple[Any, ...] = ()
+        # D80's execution counts the loop fills alongside the turns and
+        # tools, so the ledger line a Byok refusal finishes records what
+        # the attempt executed before the refusal.
+        self.test_runs = 0
+        self.mutants_survived = 0
 
 
 class NotFoundError(BoundaryError):

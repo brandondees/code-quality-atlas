@@ -2008,7 +2008,9 @@ D41 records the 2026-11-12 probe that did.
     lenses' outcomes -- the `run_tests` calls that came back with a run,
     and the mutants whose verdict was survived; zero on an attempt that
     executed nothing, and an inconclusive mutant never counts as a
-    survivor),
+    survivor. The sums are the head's recorded executions, not what this
+    review paid for: a lens reused from the ledger contributes its
+    settled counts, which are real executions at this same head),
     `context_omissions`, `other_pull_requests`, `withdrawn`,
     `round_log_note`, `trace_id` when a span was recorded, the lens
     counts by state, and `limit_stop`. The two file fields are counts.

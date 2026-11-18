@@ -1518,7 +1518,9 @@ class _Progress:
         self.held_outcome = None
         if held is not None and not self.held_placed:
             # The follow-up turn never ran: the newest judgment stands,
-            # with the stop's cause and the limit named.
+            # with the stop's cause and the limit named. Its execution
+            # counts are the held judgment's own and stay as recorded --
+            # nothing executed between the hold and this stop.
             both = (
                 f"{held.detail}; {detail}" if held.detail and detail else
                 (detail or held.detail)
@@ -1534,7 +1536,8 @@ class _Progress:
         if best is not None and best.findings:
             # The last verified reply stays the attempt's evidence across
             # the tool work a follow-up asked for, with that work and the
-            # stop recorded on it.
+            # stop recorded on it -- the execution counts among it, so
+            # the follow-up's runs and survivors are not folded away.
             both = (
                 f"{best.detail}; {detail}" if best.detail and detail else
                 (detail or best.detail)
@@ -1544,6 +1547,8 @@ class _Progress:
                 causes=frozenset(best.causes) | frozenset(self.causes),
                 tools=tuple(self.tools),
                 turns=self.turns,
+                test_runs=self.runs_executed,
+                mutants_survived=self.mutants_survived,
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
@@ -1717,6 +1722,8 @@ def _place_call(
         spend.halt()
         exc.turns = p.turns
         exc.tools = tuple(p.tools)
+        exc.test_runs = p.runs_executed
+        exc.mutants_survived = p.mutants_survived
         raise
     except TransportTimeoutError as first:
         # The timed-out request keeps its full reservation as spent

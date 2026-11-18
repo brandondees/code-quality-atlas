@@ -14,6 +14,7 @@ from atlas_reviewer.attestation import (
     Cause,
     CheckedFinding,
     LensState,
+    ToolUse,
     body_digest,
 )
 from atlas_reviewer.bridge import BridgeResult, SessionLimits, Status, run_bridge
@@ -2161,6 +2162,10 @@ def test_the_prefix_instructions_and_the_paged_ones_agree_where_they_share():
             "Every quote is checked, and a finding whose quote is not found is "
             "not reported."
         ),
+        "Two tools execute, on a disposable copy of the head tree",
+        "run_tests runs the copy's pytest suite or the selector",
+        "a mutant that survived means the guard it stands for is not pinned",
+        "an inconclusive run is a gap, not evidence",
     ):
         assert shared in flat(INSTRUCTIONS)
         assert shared in flat(PREFIX_INSTRUCTIONS)
@@ -2689,7 +2694,7 @@ def test_a_run_tests_result_is_a_counted_run_and_a_cited_evidence_line(tmp_path)
     assert f"head {HEAD}" in run_turn
 
 
-def test_a_survived_mutant_counts_and_an_inconclusive_one_is_a_gap(tmp_path):
+def test_a_survived_mutant_counts_and_is_not_a_gap(tmp_path):
     source, the_job = exec_source(CALC_GUARDED)
     outcome, _model, _ = attempt(
         tmp_path,
@@ -2720,7 +2725,6 @@ def test_an_inconclusive_mutant_is_a_tool_gap_and_never_a_survivor(tmp_path):
     )  # fmt: skip
     assert outcome.mutants_survived == 0
     assert Cause.TOOL_GAP in outcome.causes
-    assert outcome.mutants_survived == 0
 
 
 def test_a_timed_out_run_is_a_gap_and_not_a_counted_run(tmp_path):
@@ -2749,3 +2753,112 @@ def test_a_timed_out_run_is_a_gap_and_not_a_counted_run(tmp_path):
     )  # fmt: skip
     assert outcome.test_runs == 0
     assert Cause.TOOL_GAP in outcome.causes
+
+
+def test_a_failing_suite_still_counts_as_a_run_and_not_a_gap(tmp_path):
+    """A suite whose tests fail is the run's result, not a tool failure:
+    the run counts, and no gap opens (D80; the lens-loop side of the
+    bridge's own pin, so a gate that counts only passing runs fails
+    here)."""
+    head = {
+        "calc.py": CALC_ROUND,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_calc.py": (
+            b"from calc import total\n\n"
+            b"def test_two_values():\n    assert total([1, 2]) == 4\n"
+        ),
+    }
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF,
+    )  # fmt: skip
+    outcome, _model, _ = attempt(
+        tmp_path, [tools(("run_tests", {})), final(finding())],
+        the_job=the_job,
+        source=SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD),
+        pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.test_runs == 1
+    assert Cause.TOOL_GAP not in outcome.causes
+
+
+def test_the_stop_fold_refreshes_the_execution_counts_with_the_tools():
+    """The fold that carries a held finding across the tool work a
+    follow-up asked for refreshes the execution counts beside the tools
+    and turns (round-1 Nit), so the follow-up's runs and survivors are
+    not folded away. The other fold's follow-up never ran, so its held
+    counts stand."""
+    from atlas_reviewer.attestation import QuoteSource
+    from atlas_reviewer.lens_contract import (
+        Attribution,
+        Finding,
+        LineRange,
+        Route,
+        Severity,
+        Valence,
+    )
+
+    f = Finding(
+        LineRange("calc.py", 2, 2), Severity.MAJOR, Valence.DEFECT, Route.ENG,
+        Attribution.INTRODUCED, "something", "fix it", "return sum(xs)",
+    )  # fmt: skip
+    held = AttemptOutcome(
+        Attestation.ATTESTED, findings=(CheckedFinding(f, QuoteSource.REMOVED),),
+        test_runs=1,
+    )  # fmt: skip
+    p = _Progress(changed=CHANGED)
+    p.finding_hold = held
+    p.tools.append(ToolUse("run_tests", "{}", "OK"))
+    p.turns = 3
+    p.runs_executed = 2
+    p.mutants_survived = 1
+    outcome = p.cut(Cause.TURN_CAP, "stopped")
+    assert (outcome.test_runs, outcome.mutants_survived) == (2, 1)
+    assert [(t.tool, t.status) for t in outcome.tools] == [("run_tests", "OK")]
+    # The fold whose follow-up never ran keeps the held counts: nothing
+    # executed between the hold and the stop.
+    q = _Progress(changed=CHANGED)
+    q.held_outcome = held
+    untouched = q.cut(Cause.TURN_CAP, "stopped")
+    assert (untouched.test_runs, untouched.mutants_survived) == (1, 0)
+
+
+def test_a_byok_refusal_carries_the_executions_already_made(tmp_path):
+    """The Byok refusal's exception carries the execution counts beside
+    the turns and tools, so the ledger line it finishes records what the
+    attempt executed before the refusal (round-1 Nit). The refusal fails
+    the runner by design; the record is what this pins, so the test
+    catches the exception inside the bridge session, the way the
+    coordinator's ledger finish does."""
+    source, the_job = exec_source(CALC_ROUND)
+    caught: list[ByokRefusedError] = []
+
+    def body(bridge):
+        model = ScriptedLensModel(
+            [tools(("run_tests", {})), ByokRefusedError("refusing the review: byok")]
+        )
+        clock = FakeClock()
+        try:
+            run_attempt(
+                the_job, bridge, model, Spend(LIMITS.resolve()), clock,
+                review_deadline=clock.monotonic() + 600,
+                review_started=clock.monotonic(), sleep=clock.advance,
+            )  # fmt: skip
+        except ByokRefusedError as exc:
+            caught.append(exc)
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(), MemoryLedger(), source, body, redactor=Redactor(),
+        changed=CHANGED, name="cqa-lens-byok", deadline_s=300, clock=FakeClock(),
+        root=str(tmp_path / "bridge"), pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (exc,) = caught
+    assert exc.test_runs == 1
+    assert exc.mutants_survived == 0
+    assert exc.turns == 1

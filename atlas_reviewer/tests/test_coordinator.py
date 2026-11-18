@@ -5001,3 +5001,47 @@ def test_a_carry_calls_overrun_reaches_the_drafts_tripwire_line(tmp_path):
     # $0.10), and the carried section still renders.
     assert "committed: $0.16." in line
     assert "## Carried, not re-verified" in draft
+
+def test_a_byok_refusal_records_the_executions_already_made(tmp_path):
+    """D80 (round-1 Nit): the ledger line a Byok refusal finishes carries
+    the counts the loop had reached, beside the turns and tools the
+    record already kept. The run here is scripted -- the fake runner
+    answers the run script, so the counted run needs no local pytest."""
+    from atlas_reviewer.interpreter import PYENV_VERSIONS
+    from atlas_reviewer.lens_loop import ToolCalls, ToolRequest
+
+    from .test_bridge_runs import ReplyRule, framed
+
+    pyenv = f"{PYENV_VERSIONS}/3.13.7/bin/python3"
+    out = b"1 passed in 0.01s\n"
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    f"atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{pyenv}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("__ATLAS_RUN__", lambda _script: framed(0, out)),
+        )
+    )
+    from .agentic import COST
+
+    run_turn = ToolCalls((ToolRequest("run_tests", {}),), COST)
+    result, _, _ = review(
+        tmp_path, [run_turn, ByokRefusedError("refusing the review: byok")],
+        sprites=sprites,
+    )  # fmt: skip
+    assert result.runner is not None
+    assert result.runner.status is RunnerStatus.FAILED
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.test_runs == 1
+    assert attempt.outcome.mutants_survived == 0
+    assert attempt.outcome.turns == 1
