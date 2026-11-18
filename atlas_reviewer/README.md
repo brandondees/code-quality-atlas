@@ -1546,12 +1546,23 @@ a `Bridge` to the caller.
   runner is destroyed). HEAD's
   parent is BASE; DEFAULT is its own root commit. Tools use only the
   synthetic ids staging reports. The merge base comes from GitHub's
-  compare endpoint (`fetch_sources`).
-- **Tools** (`bridge_args.py`). There are five, each with typed arguments:
+  compare endpoint (`fetch_sources`). Staging also probes, in the same
+  exec and still before any PR content is unpacked, for an interpreter
+  whose pytest runs isolated: each pyenv version and the system python,
+  each bounded on its own, accepted only on `interpreter.trusted_path`'s
+  shapes or a literal candidate the caller named. The newest pyenv hit
+  (else the system one) is `Staged.pytest`; none makes the execution
+  tools (D80) answer `unavailable` — a gap, not a crash.
+- **Tools** (`bridge_args.py`). There are seven, each with typed arguments:
   `diff_stat`, `diff_file` (path, byte offset), `list_files` (rev,
-  prefix), `read_file` (rev, path, at most 400 lines) and `grep` (pattern,
-  rev, prefix, fixed-string unless `regex`). `rev` is BASE, HEAD or a
-  staged DEFAULT. Anything else is rejected before an exec, with a fixed
+  prefix), `read_file` (rev, path, at most 400 lines), `grep` (pattern,
+  rev, prefix, fixed-string unless `regex`), and the two execution tools
+  (D80): `run_tests` (an optional `path` selector — a file, a directory
+  or a `file.py::node_id`, empty for the whole suite) and `mutate`
+  (`path`, `line`, `operator` — `negate-condition` or `remove-guard` —
+  and an optional `tests` selector its two runs share). `rev` is BASE,
+  HEAD, a staged DEFAULT, or MUTANT once a `mutate` call has committed
+  one. Anything else is rejected before an exec, with a fixed
   code and a controller-written reason that echoes neither the tool name
   nor any value sent. One attempt may spend at most 64 calls and 1 MiB of
   output of its session (#693): the coordinator starts that budget over
@@ -1562,8 +1573,12 @@ a `Bridge` to the caller.
   tool history next to an empty tools array is a shape the pinned
   Bedrock route is documented to reject, and the spent bridge refuses
   whatever the model still calls; the stop rides on what the attempt
-  then delivers, naming the lens, the attempt and the cap.
-- **Exec.** Each call is a fixed git argv with every value shell-quoted,
+  then delivers, naming the lens, the attempt and the cap. The two
+  execution tools (D80) have caps of their own, per attempt: 8
+  `run_tests` calls and 8 `mutate` calls (provisional, below the call
+  cap, so executions cannot be the whole of an attempt's budget), each
+  refused like any other spent budget.
+- **Exec.** Each read is a fixed git argv with every value shell-quoted,
   under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
   and repository attributes disable config, hooks, pagers, transports,
   diff drivers, filters, pathspec magic and in-tree `.gitattributes`.
@@ -1576,15 +1591,56 @@ a `Bridge` to the caller.
   name cannot move a match to another file, and every name `list_files`
   shows plainly reads back through `read_file` (the rest are marked).
   `diff_file` shows a renamed file as a rename from either path.
+- **Execution (D80).** `run_tests` and `mutate` never touch the review
+  trees: each call stages a fresh disposable copy of the HEAD tree
+  (`stage_copy_steps` — the previous call's scratch removed first,
+  removed again at the end), runs there, and dies with the copy. The
+  argv is built by the bridge and never by the model: `<trusted
+  interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
+  <selector>` — isolated (`-I`: no `PYTHON*` variables, no user site, cwd
+  off `sys.path`, so a PR `pytest.py` cannot shadow the runner
+  machinery; `-B` because isolated mode ignores
+  `PYTHONDONTWRITEBYTECODE`), module mode, and the model's selector as
+  one positional argument. One test process runs at a time. A run's wall
+  clock is the tool's `timeout_s` (default 60s, provisional) under the
+  guest's `timeout`; its captured output is capped at the tool's
+  `max_bytes` (default 16 KiB, provisional) and shown from the end,
+  where pytest's summary and failures sit. A `mutate` call runs the
+  baseline, applies the one-operator mutation with a fixed AST script
+  (the model named only a path, a line and an operator), commits the
+  mutated copy into the bare repository at the moving
+  `refs/tags/atlas-mutant` ref — the mutated tree is reachable at
+  exactly one new revision, and MUTANT resolves at the ref, so
+  `read_file` and `grep` can read it while BASE and HEAD stay untouched
+  — then runs the mutated copy. The verdict is the controller's, from
+  the runs' reported exits and its own parse of their final pytest
+  summary lines: `survived` only when the baseline ran at least one test
+  and passed and the mutated run also passed; an already-failing,
+  nothing-collected or nothing-ran baseline, a timed-out run, a mutated
+  run where no test ran, and a mutated run at a non-test exit are
+  `inconclusive` with the reason, never `survived`; a mutation that did
+  not apply or a tree that could not be committed ends after the
+  baseline and is inconclusive. The exits are in-band evidence, not
+  proof — the standing caveat `runner.parse_exit` records — and here PR
+  code runs, so a PR can shape its own test results; a forged verdict
+  changes only what a lens may claim, and the finding still needs a
+  verified quote. The interpreter is resolved before any PR content is
+  unpacked; none means the tools answer `unavailable`. The allow-list
+  seam for operator-approved commands is the bridge-owned argv table —
+  the approval flow itself is not built (D80).
 - **Results** are repository content and are not redacted. Each is
   scanned for committed secrets, and every hit is reported by path, line
   and pattern, pre-existing outside HEAD or in a file the PR did not
-  change. Values are kept only for scrubbing and never shown. git's stderr
-  is redacted. Every call is a ledger record, and telemetry names only the
-  tool.
+  change. Values are kept only for scrubbing and never shown. git's
+  stderr and a run's stderr are redacted. Every call is a ledger record,
+  and telemetry names only the tool. A run's output is PR-controlled
+  text, not tree content: a secret hit in it has no location and is
+  recorded as not introduced, and the output itself travels to the lens
+  nonce-fenced like every tool result — evidence a finding may cite,
+  never something that asserts one.
 
-Not built yet: `log`, `blame`, `run_check` and fetching the default-branch
-tarball.
+Not built yet: `log`, `blame`, `run_check`, fetching the default-branch
+tarball, and the operator-approved command allow-list (D80's seam).
 
 ## Agentic lens loop (offline, D40)
 
@@ -1964,11 +2020,11 @@ D41 records the 2026-11-12 probe that did.
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
 | `lenses.py` | load the chosen lenses' bodies whole under the budget -- no lens-count cap (D69) except triage's critical tier -- or mark them NOT RUN with a reason | reads the bundle |
-| `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
-| `bridge_args.py` | the closed tool set and its argument rules (`validate`, `arg_names`, `required_args`) | no |
+| `bridge.py` | the tool bridge: the read-only git tools' per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge`; and the two execution tools (D80): `run_tests` and `mutate`, whose staged-copy scripts, framing, verdicts and per-attempt caps the same ledger records | via `SpritesApi` |
+| `bridge_args.py` | the closed tool set and its argument rules (`validate`, `arg_names`, `required_args`), the mutant operator set and the MUTANT revision | no |
 | `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
 | `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
-| `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
+| `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources`; the pytest-capable interpreter probe and the execution tools' staged-copy and mutant-commit pieces (D80) | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |

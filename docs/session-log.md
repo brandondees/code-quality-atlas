@@ -4212,3 +4212,40 @@ token, bounded by the same 8-second read budget, spent after the poster's
 dedupe checks.
 
 Offline only, same rules as the entries above.
+
+## 2026-11-18 — #734 part 1: the bridge can execute — structured `run_tests` and `mutate` (D80)
+
+Part B of the 2026-11-13 plan's phase 2, the slice the parity gate's four
+execution-Minors (#661 m3/m4, #640 m1/m2) were waiting on. The model now
+names a test selector or a mutant spec — a path, a line and one of two
+closed-set operators — and the bridge builds the argv: `<trusted
+interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
+<selector>`. The interpreter is resolved before any PR content is
+unpacked by probing the pyenv versions and the system python for one
+whose pytest imports, accepted only on `interpreter.trusted_path`'s
+shapes or a literal candidate the caller named (the tests name this
+machine's venv as that candidate). Every call stages a fresh disposable
+copy of the HEAD tree, runs in it, and removes it, so the BASE/HEAD
+trees stay read-only whatever the tests write; a `mutate` call runs the
+baseline first, applies the mutation with one fixed AST script, commits
+the mutated copy at the moving `refs/tags/atlas-mutant` ref — the
+mutated tree is reachable at exactly one new revision, and MUTANT
+resolves *at the ref*, which is what made the `update-ref`-dropped
+mutant die — then runs the mutated copy. The verdict is the
+controller's, from the runs' exits and its own parse of the final
+pytest summary lines: survived only on a baseline that ran a test and
+passed plus a mutated run that passed; every other shape is
+inconclusive with its reason, and an inconclusive mutant is never a
+survived one. Caps: 8 run and 8 mutant calls per attempt (below the 64
+call cap), 60s per run, 16 KiB of tail-shown output per run — all
+provisional pending the owner. The operator-approval allow-list is
+designed as a seam (the bridge-owned argv table) and not built, per the
+owner's call. Tool schemas ship with the tools (`tool_schemas` builds
+from the bridge's table, so `rev`'s enum gained MUTANT); the
+instructions sentence, the attempt counters and the status line's runs
+and survivors counts are the next slice, then the parity rerun. Tests
+in `test_bridge_runs.py` run the tools for real through `LocalSprites`
+against a fixture suite executed by this machine's interpreter, plus
+scripted framing tests and pure verdict tests; thirteen hand-applied
+mutants each die on a named test (listed in D80). No live model, Sprite
+or GitHub call; no secret read; no deployed setting changed.

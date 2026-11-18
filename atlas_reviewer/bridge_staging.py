@@ -29,6 +29,14 @@ from atlas_reviewer.guest_unpack import (
     unpack_refusal,
     unpack_script,
 )
+from atlas_reviewer.interpreter import (
+    CANDIDATE_BOUND_S,
+    PYENV_VERSIONS,
+    SYSTEM_PYTHON,
+    TrustedPython,
+    bounded,
+    trusted_path,
+)
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 from atlas_reviewer.runner import (
     GUEST_TAIL_CHARS,
@@ -45,7 +53,23 @@ BRIDGE_ROOT = "/work/bridge"
 GIT_PATHS = ("/usr/bin/git", "/bin/git")
 GIT_TAG = "atlas-git"
 STAGED_TAG = "atlas-staged"
+MUTANT_REF = "refs/tags/atlas-mutant"
+MUTANT_TAG = "atlas-mutant"
+SCRATCH_DIR = "scratch"
+SCRATCH_WORK = "work"
 _SHA = re.compile(r"[0-9a-f]{40}")
+# The pythons the pytest probe asks about, in pick order: the pyenv
+# versions (the guest shell expands the glob), then the system one. The
+# same trusted shapes `interpreter` accepts; a caller may name further
+# literal candidates (the tests point it at this machine's venv).
+PYTEST_CANDIDATES = (f"{PYENV_VERSIONS}/*/bin/python3", SYSTEM_PYTHON)
+PYTEST_TAG = "atlas-pytest"
+_PYTEST_RE = re.compile(
+    re.escape(PYTEST_TAG)
+    + r":(/[A-Za-z0-9._/+-]{1,200}):"
+    + r"(\d+)\.(\d+)\.(\d+)\s*$",
+    re.MULTILINE,
+)
 
 # Fixed git options: no hooks, no fsmonitor, no pager, no transport, no
 # colour, unusual paths C-quoted, no line-ending or filter conversion.
@@ -111,10 +135,28 @@ class Staged:
     git: str
     commits: Mapping[Rev, str]
     git_version: str = ""
+    # The interpreter the execution tools (D80) run tests and mutants
+    # with: the newest pyenv python (or the system one) whose `-I -m
+    # pytest` the staging probe confirmed importable, resolved before any
+    # PR content is unpacked. None when no candidate has pytest, which
+    # makes `run_tests` and `mutate` unavailable, not broken.
+    pytest: TrustedPython | None = None
+    # The GitHub head SHA the head tree was fetched at (provenance, D80):
+    # a test or mutant result is tagged with it, so a lens can cite the
+    # evidence at the head it belongs to (D73).
+    head_sha: str = ""
 
     @property
     def revs(self) -> frozenset[Rev]:
         return frozenset(self.commits)
+
+    @property
+    def scratch(self) -> str:
+        """The scratch directory one execution tool call stages its
+        disposable copy of HEAD in, removed again by the call's own
+        script; the copy the tests write into and the mutant is committed
+        from never touches `trees` or the repository."""
+        return f"{self.root}/{SCRATCH_DIR}/{SCRATCH_WORK}"
 
 
 def fetch_sources(
@@ -169,15 +211,84 @@ def quote(value: str) -> str:
     return shlex.quote(value)
 
 
-def git_resolve_script(root: str) -> str:
+def git_resolve_script(
+    root: str, pytest_candidates: Sequence[str] = PYTEST_CANDIDATES
+) -> str:
     """Finds git at one of `GIT_PATHS` without consulting PATH, before any
-    PR content is in the runner, and creates the bridge root."""
+    PR content is in the runner, creates the bridge root, and probes each
+    candidate interpreter for a pytest it can run isolated (D80). Each
+    candidate is bounded on its own, so one hung interpreter cannot stop
+    the rest being found, and the script still exits nonzero when git is
+    missing."""
     candidates = " ".join(GIT_PATHS)
+    words = " ".join(pytest_candidates)
+    query = "import sys, pytest; print('%d.%d.%d' % sys.version_info[:3])"
+    probe = bounded(f'"$p" -I -c "{query}"', CANDIDATE_BOUND_S)
+    pytest_loop = (
+        f"for p in {words}; do "
+        f'if [ -x "$p" ] && v=$({probe} 2>/dev/null); then '
+        f'echo "{PYTEST_TAG}:$p:$v"; fi; done'
+    )
     return (
         f"mkdir -p {quote(root)}/trees && g=''; for p in {candidates}; do "
         'if [ -z "$g" ] && [ -f "$p" ] && [ -x "$p" ]; then g=$p; fi; done; '
         f'if [ -n "$g" ]; then echo "{GIT_TAG}:$g"; "$g" --version; '
-        f"else echo {GIT_TAG}:none; false; fi"
+        f"else echo {GIT_TAG}:none; fi; "
+        f'{pytest_loop}; test -n "$g"'
+    )
+
+
+def choose_pytest(
+    text: str, candidates: Sequence[str] = PYTEST_CANDIDATES
+) -> TrustedPython | None:
+    """The newest pyenv interpreter, else the system one, among those the
+    guest reported with an importable pytest. Only paths of the trusted
+    shapes, or exactly a literal candidate the controller itself named,
+    are accepted from the guest's answer; unreported candidates count as
+    unavailable."""
+    found = [
+        (path, (int(a), int(b), int(c)))
+        for path, a, b, c in _PYTEST_RE.findall(text)
+        if trusted_path(path) or path in candidates
+    ]
+    pyenv = sorted((c for c in found if c[0] != SYSTEM_PYTHON), key=_newest)
+    system = [c for c in found if c[0] == SYSTEM_PYTHON]
+    chosen = [*pyenv, *system][:1]
+    return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
+
+
+def _newest(candidate: tuple[str, tuple[int, int, int]]) -> tuple[int, ...]:
+    return tuple(-n for n in candidate[1])
+
+
+def stage_copy_steps(root: str, scratch: str) -> tuple[str, ...]:
+    """A fresh disposable copy of the staged HEAD tree (D80): the previous
+    call's scratch is removed first, so a copy an earlier call left behind
+    -- its exec was killed before its cleanup -- is never the copy this
+    call stages, and nothing a test wrote survives the call."""
+    return (
+        f"rm -rf {quote(f'{root}/{SCRATCH_DIR}')}",
+        f"mkdir -p {quote(f'{root}/{SCRATCH_DIR}')}",
+        f"cp -a {quote(f'{root}/trees/head')}/. {quote(scratch)}",
+    )
+
+
+def mutant_commit_steps(
+    root: str, git: str, scratch: str, head: str
+) -> tuple[str, ...]:
+    """Commits the mutated copy into the bare repository and moves
+    `MUTANT_REF` onto it (D80): the mutated tree becomes reachable at
+    exactly one new revision, so `read_file` and `grep` reach it at MUTANT
+    while BASE and HEAD stay untouched. Prints `MUTANT_TAG:<commit>` only
+    when the ref moved; carries the staging commit identity of its own."""
+    g = _git_cmd(git, root)
+    index = f"GIT_INDEX_FILE={quote(root)}/index-mutant"
+    return (
+        f"export {' '.join(_IDENTITY)}",
+        f"(cd {quote(scratch)} && {index} {g} --work-tree=. add -A -f .)",
+        f"t=$({index} {g} write-tree)",
+        f'c=$({g} commit-tree "$t" -p {quote(head)} -m atlas-mutant)',
+        f'{g} update-ref {quote(MUTANT_REF)} "$c" && echo "{MUTANT_TAG}:$c"',
     )
 
 
@@ -263,13 +374,18 @@ def stage(
     trees: SourceTrees,
     root: str = BRIDGE_ROOT,
     unpack: UnpackLimits = DEFAULT_UNPACK,
+    pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
 ) -> Staged:
     """Raises `BoundaryError` when git is missing or untrusted, an upload
     falls short, the runner refuses a tree past `unpack`, or staging does
     not report every commit."""
-    git, version = choose_git(
-        *session.exec("resolve git", git_resolve_script(root), stage="bridge staging")
+    code, text = session.exec(
+        "resolve git",
+        git_resolve_script(root, pytest_candidates),
+        stage="bridge staging",
     )
+    git, version = choose_git(code, text)
+    pytest = choose_pytest(text, pytest_candidates)
     revs = tuple(rev for rev, _ in trees.staged())
     for rev, data in trees.staged():
         session.upload(
@@ -284,4 +400,4 @@ def stage(
         budget_s=UNPACK_BUDGET_S,
     )
     commits = parse_staged(code, text, revs, unpack)
-    return Staged(root, git, MappingProxyType(commits), version)
+    return Staged(root, git, MappingProxyType(commits), version, pytest, trees.head_sha)

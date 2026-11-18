@@ -6,7 +6,8 @@ into a `Call` or raises `RejectedError` before anything runs. Paths and
 prefixes are repo-relative, NUL- and control-free, never start with `-`
 or `/`, have no empty, `.` or `..` segment and are at most 512 bytes;
 patterns are at most 256 bytes on one line; integers are range-checked;
-the revision is one of the staged BASE, HEAD and DEFAULT. A rejection
+the revision is one of the staged BASE, HEAD and DEFAULT, plus MUTANT
+once a `mutate` call has produced a mutant tree (D80). A rejection
 carries a fixed code and never echoes the tool name or a value the model
 sent.
 """
@@ -32,6 +33,7 @@ class Rev(StrEnum):
     BASE = "BASE"
     HEAD = "HEAD"
     DEFAULT = "DEFAULT"
+    MUTANT = "MUTANT"
 
 
 class RejectedError(ValueError):
@@ -141,6 +143,24 @@ def _rev(value: Any, revs: frozenset[Rev]) -> Rev:
 
 
 _LINE = _int_in(1, 10_000_000)
+
+# The closed set of single-operator mutants `mutate` applies (D80): one
+# named statement, one operator. `negate-condition` wraps the condition of
+# the `if`, `while` or conditional expression at the named line in `not
+# (...)`; `remove-guard` replaces the body of the `if` at the named line
+# with `pass`, so the guarded action no longer happens. Anything else is a
+# rejected call, and an operator that does not apply to the named line is
+# an inconclusive mutant at run time, never a survived one.
+MUTANT_OPERATORS = ("negate-condition", "remove-guard")
+
+
+def _operator(value: Any, _revs: frozenset[Rev]) -> str:
+    if not isinstance(value, str) or value not in MUTANT_OPERATORS:
+        names = ", ".join(MUTANT_OPERATORS)
+        raise RejectedError(INVALID, f"must be one of the mutant operators: {names}")
+    return value
+
+
 TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
     {
         "diff_stat": (),
@@ -157,6 +177,18 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
             _Arg("rev", _rev, "HEAD"),
             _Arg("prefix", _prefix, ""),
             _Arg("regex", _flag, False),
+        ),
+        # D80: the model names a test file or selector and a mutant spec;
+        # the bridge builds the argv. `path` is a selector passed to
+        # pytest as one positional argument (a file, a directory or a
+        # `file.py::node_id`), empty for the whole suite; `mutate`'s
+        # `tests` selects what its baseline and mutated runs execute.
+        "run_tests": (_Arg("path", _prefix, ""),),
+        "mutate": (
+            _Arg("path", _path),
+            _Arg("line", _LINE),
+            _Arg("operator", _operator),
+            _Arg("tests", _prefix, ""),
         ),
     }
 )  # fmt: skip
