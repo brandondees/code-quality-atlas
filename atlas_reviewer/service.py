@@ -29,9 +29,9 @@ from pathlib import Path
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.head_change import (
-    CANCEL,
+    DECISION_CANCEL,
+    DECISION_KEEP,
     DEFAULT_CANCEL_FRACTION,
-    KEEP,
     POLICIES,
     POLICY_CANCEL,
     POLICY_KEEP,
@@ -331,11 +331,9 @@ def _head_change_decision(
     timed_out = False
     started = telemetry.elapsed() if telemetry is not None else 0.0
     if not posting and classifier is not None:
-        try:
-            push = classifier(candidate.event, new_event)
-        except Exception as exc:  # noqa: BLE001 -- a fetch failure keeps the review
-            gap = f"{type(exc).__name__}: {exc}"
-            timed_out = isinstance(exc, TransportTimeoutError)
+        push, gap, timed_out = _classify_bounded(
+            classifier, candidate.event, new_event, _CLASSIFY_BUDGET_S
+        )
     elif not posting:
         # No classifier on this deployment -- the App credentials are
         # absent or unusable -- so the push could not be classified and
@@ -368,7 +366,7 @@ def _decision_fields(
     candidate: Job,
     new_event: PrEvent,
     push: PushClass | None,
-    verdict: Decision | None,
+    verdict: Decision,
 ) -> dict[str, str | int]:
     fields: dict[str, str | int] = {
         **_fields(new_event),
@@ -376,15 +374,14 @@ def _decision_fields(
     }
     if push is not None:
         fields["kind"] = push.kind.value
-    if verdict is not None:
-        fields.update(
-            {
-                "decision": CANCEL if verdict.cancel else KEEP,
-                "reason": verdict.reason,
-                "lens_fraction": f"{verdict.lens_fraction:.2f}",
-                "spend_fraction": f"{verdict.spend_fraction:.2f}",
-            }
-        )
+    fields.update(
+        {
+            "decision": DECISION_CANCEL if verdict.cancel else DECISION_KEEP,
+            "reason": verdict.reason,
+            "lens_fraction": f"{verdict.lens_fraction:.2f}",
+            "spend_fraction": f"{verdict.spend_fraction:.2f}",
+        }
+    )
     return fields
 
 
@@ -666,13 +663,15 @@ class Worker:
             # Keep the draft. This process publishes nothing, and the
             # draft is the record of the review. The child's stderr is
             # not: it can hold a secret the log scrubber would remove.
-            committed = self._board.finish(job, JobState.DONE)
+            committed, follow_up = self._board.settle(job, JobState.DONE)
             if committed is JobState.SUPERSEDED:
                 self._drop_run_dir(job)
                 self._telemetry.record("service", "review superseded", fields)
                 return
-            if committed is JobState.DONE:
-                self._materialize(job, True)
+            if follow_up is not None:
+                self._telemetry.record(
+                    "service", "follow-up queued", _fields(follow_up)
+                )
             stderr = run_dir(self._state_root, job.event) / "stderr.txt"
             if stderr.is_file():
                 try:
@@ -836,11 +835,16 @@ class Worker:
             self._telemetry.record("service", "review stopped", fields)
 
     def _settle(self, job: Job, state: JobState) -> JobState:
-        committed = self._board.finish(job, state)
+        """The terminal state stored and the kept head's follow-up taken
+        as one queue step (`Board.settle`, round-2 review of #747,
+        R2-F4): the recovery pass can no longer interleave between the
+        review's settle and its follow-up's install, and one save covers
+        both, so a crash cannot strand a head between them."""
+        committed, follow_up = self._board.settle(job, state)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
             self._drop_run_dir(job)
-        if committed in {JobState.DONE, JobState.FAILED}:
-            self._materialize(job, committed is JobState.DONE)
+        if follow_up is not None:
+            self._telemetry.record("service", "follow-up queued", _fields(follow_up))
         return committed
 
     def _materialize(self, job: Job, succeeded: bool) -> None:
@@ -1264,6 +1268,56 @@ def serve(
 
 
 _CLASSIFY_TIMEOUT_S = 5.0
+_CLASSIFY_BUDGET_S = 8.0
+"""The classification's overall budget, inside the webhook handler
+thread (round-2 review of #747, R2-F8): a token mint plus three reads at
+their own 5-second timeouts could hold the handler past GitHub's ~10
+second response window with no bound; past this budget the push is
+unclassifiable -- the owner's keep default, with the gap and the
+`timed_out` flag on the decision's event -- and the handler answers. The
+read still finishes in its background thread and is then simply not
+used."""
+
+
+def _classify_bounded(
+    classifier: PushClassifier,
+    running: PrEvent,
+    new_event: PrEvent,
+    budget_s: float,
+) -> tuple[PushClass | None, str, bool]:
+    """The classification under one overall deadline (round-2 review of
+    #747, R2-F8): the fetches run in a helper thread and the caller
+    waits at most `budget_s`; past it the push is unclassifiable (the
+    owner's keep default) with the gap set and the `timed_out` flag on,
+    so the handler's occupancy is bounded and the over-run is visible.
+    The helper thread outlives the wait only until its own per-read
+    timeouts end it."""
+    outcome: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            outcome["push"] = classifier(running, new_event)
+        except Exception as exc:  # noqa: BLE001 -- the caller keeps the review on any failure
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(budget_s)
+    if worker.is_alive():
+        return (
+            None,
+            f"the classification exceeded its {budget_s:.0f}-second budget",
+            True,
+        )
+    error = outcome.get("error")
+    if error is not None:
+        return (
+            None,
+            f"{type(error).__name__}: {error}",
+            isinstance(error, TransportTimeoutError),
+        )
+    push = outcome.get("push")
+    return push if isinstance(push, PushClass) else None, "", False
 
 
 def _head_change_classifier(

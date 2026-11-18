@@ -66,7 +66,7 @@ import json
 import secrets
 import threading
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import StrEnum
@@ -101,6 +101,14 @@ from atlas_reviewer.domain import (
     RunnerStatus,
 )
 from atlas_reviewer.head_change import (
+    FIELD_CALLS,
+    FIELD_COMMITTED_USD,
+    FIELD_LENS,
+    FIELD_LENSES_DONE,
+    FIELD_LENSES_TOTAL,
+    FIELD_READING,
+    FIELD_RESERVATION_USD,
+    FIELD_SETTLED_USD,
     LENS_SETTLED_STEP,
     PROGRESS_PHASE,
     PROGRESS_REVIEW_STEP,
@@ -742,8 +750,18 @@ def _review_lenses(
             submit_with_review_context(pool, run, lens, changed, index)
             for index, lens in enumerate(names, start=1)
         ]
-        for future in futures:
-            runs.append(future.result())
+        # Emitted as lenses COMPLETE, not in submission order (round-2
+        # review of #747, R2-F7): with a pool past one, blocking on the
+        # first-submitted future left no record until the slowest lens
+        # settled, and a push in that window read as no progress -- the
+        # cancel direction. `runs` itself stays in submission order, so
+        # the draft's ordering, mint ids and clean-run supersession are
+        # exactly what they were.
+        completed: dict[int, _LensRun] = {}
+        for future in as_completed(futures):
+            ran = future.result()
+            completed[ran.result.index] = ran
+            runs = [completed[index] for index in sorted(completed)]
             _record_progress(telemetry, names, runs, spend, changed)
     for _ in range(MAX_CONTINUATIONS):
         if spend.halted:
@@ -918,14 +936,14 @@ def _record_progress(
         PROGRESS_PHASE,
         step,
         {
-            "lens": runs[-1].result.lens if runs else "",
-            "lenses_done": len(done),
-            "lenses_total": len(names),
-            "calls": spend.calls,
-            "committed_usd": str(spend.committed_usd),
-            "settled_usd": str(spend.settled_usd),
-            "reservation_usd": str(spend.limits.reservation_usd),
-            "reading": text,
+            FIELD_LENS: runs[-1].result.lens if runs else "",
+            FIELD_LENSES_DONE: len(done),
+            FIELD_LENSES_TOTAL: len(names),
+            FIELD_CALLS: spend.calls,
+            FIELD_COMMITTED_USD: str(spend.committed_usd),
+            FIELD_SETTLED_USD: str(spend.settled_usd),
+            FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
+            FIELD_READING: text,
         },
     )
 

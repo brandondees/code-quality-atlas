@@ -983,13 +983,13 @@ def test_a_supersede_during_a_deferred_post_is_not_logged_as_a_retry(tmp_path):
     board.enqueue(PrEvent(REPO, 7, SHA_A))
     job = board.claim()
     assert job is not None
-    real = board.finish
+    real = board.settle
 
-    def finish(current, state):
+    def settle(current, state):
         current.superseded = True
         return real(current, state)
 
-    board.finish = finish
+    board.settle = settle
     worker._defer_post(job, "github down")
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
     steps = [event.step for event in worker._telemetry.events]
@@ -1067,13 +1067,14 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
 
         board = Board(root / "queue.json")
         finishes: list[JobState] = []
-        real = board.finish
+        real = board.settle
 
-        def finish(job, state):
-            finishes.append(state)
-            return real(job, state)
+        def settle(job, state):
+            committed, _follow_up = real(job, state)
+            finishes.append(committed)
+            return committed, _follow_up
 
-        board.finish = finish
+        board.settle = settle
         worker = Worker(
             board,
             runner,
@@ -1108,13 +1109,14 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
     board = Board(tmp_path / "superseded" / "queue.json")
     board_box["board"] = board
     finishes: list[JobState] = []
-    real = board.finish
+    real = board.settle
 
-    def finish(job, state):
-        finishes.append(state)
-        return real(job, state)
+    def settle(job, state):
+        committed, _follow_up = real(job, state)
+        finishes.append(committed)
+        return committed, _follow_up
 
-    board.finish = finish
+    board.settle = settle
     worker = Worker(
         board,
         mark_runner,
@@ -1653,13 +1655,13 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
         return ReviewRun(True, REPORT)
 
     worker = _worker(board, runner, root=tmp_path)
-    real = board.finish
+    real = board.settle
 
-    def finish(job, state):
+    def settle(job, state):
         job.superseded = True
         return real(job, state)
 
-    monkeypatch.setattr(board, "finish", finish)
+    monkeypatch.setattr(board, "settle", settle)
     assert worker.run_one() is True
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
     assert not directory.exists()
@@ -2869,9 +2871,10 @@ def test_a_kept_head_with_no_running_review_is_installed_not_dropped(tmp_path):
     job = board.claim()
     assert job is not None
     assert job.event.head_sha == SHA_B
-    # A full review, with no delta base to build on.
+    # A full review, with no delta base to build on, and no pending
+    # record left behind.
     assert job.event.delta_from == ""
-    assert (REPO, 7, SHA_B) not in {key for key in ()} or True
+    assert board.pending_heads() == ()
 
 
 def test_a_delivery_through_the_race_path_queues_the_new_head(tmp_path):
@@ -3084,3 +3087,155 @@ def test_the_worker_loop_recovers_a_stranded_pending_head(tmp_path):
     assert (SHA_B, JobState.DONE) in board.states()
     queued = [e for e in telemetry.events if e.step == "follow-up queued"]
     assert [e.fields["sha12"] for e in queued] == [SHA_B[:12]]
+
+
+def test_a_stale_pending_head_is_dropped_not_installed_by_the_recovery(tmp_path):
+    """The recovery's stale window (round-2 R2-F4): a pending head the
+    pull request has moved past must not be installed -- it would
+    review, and post for, a head that is no longer the PR's head
+    (`still_current` compares nothing against the accepted heads). The
+    recovery drops the stale record, the way `take_pending` drops one.
+    The state is built directly -- a pending entry outliving its head is
+    the crash/recovery shape the check exists for. Mutant: the check
+    dropped, which installs the stale head."""
+    path = tmp_path / "queue.json"
+    stamp = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+    path.write_text(
+        json.dumps(
+            {
+                "jobs": [],
+                "seen": [],
+                "heads": [
+                    {"repo": REPO, "pr": 7, "sha": SHA_C, "at": stamp.isoformat()}
+                ],
+                "pending": [
+                    {"repo": REPO, "pr": 7, "sha": SHA_B, "at": stamp.isoformat()}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    board = Board(path)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    # Mutant target: B installed (and eventually posted) though C is the
+    # pull request's head.
+    assert board.recover_pending() == ()
+    assert board.pending_heads() == ()
+    assert board.states() == ()
+
+
+def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
+    tmp_path, monkeypatch
+):
+    """The classification's overall budget (round-2 R2-F8): a fetch that
+    runs past `_CLASSIFY_BUDGET_S` is given up on inside the webhook
+    handler -- the push is unclassifiable (the owner's keep default),
+    the gap names the budget, and the `timed_out` flag is on -- so the
+    handler's occupancy is bounded. Mutant: the budget wait removed
+    (the handler blocks on the classifier), which hangs this test's
+    slow classifier past the budget."""
+    import atlas_reviewer.service as service_module
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def slow(running: PrEvent, new: PrEvent):
+        release.wait(30)
+        return _code_push(running, new)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    monkeypatch.setattr(service_module, "_CLASSIFY_BUDGET_S", 0.2)
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+            classifier=slow,
+            telemetry=telemetry,
+        )
+        # The past-budget classification is the keep default, flagged.
+        assert result.body == b"kept\n"
+        decisions = [e for e in telemetry.events if e.step == "head change"]
+        assert decisions[0].fields["decision"] == "keep"
+        assert decisions[0].fields.get("timed_out") == "1"
+        assert "budget" in decisions[0].error
+    finally:
+        release.set()
+        worker.stop()
+    # The bounded budget is the module's own constant, small enough to
+    # sit inside GitHub's response window.
+    assert service_module._CLASSIFY_BUDGET_S <= 10.0
+
+
+def test_the_decision_duration_pin_uses_a_clock_that_advances(tmp_path):
+    """The duration pin made real (round-2 R2-F11): the classification
+    consumes clock time, so a recorded `start_s` yields the decision's
+    own duration, while a dropped `start_s` (the mutant) measures from
+    the record's own moment and reads about zero. The decision here is
+    the classifier's code push with no progress recorded, so it cancels
+    -- and the event's duration is what is pinned."""
+    from atlas_reviewer.tests.helpers import FakeClock
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    clock = FakeClock()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(clock, scrub=lambda text: text)
+    clock.advance(100.0)
+
+    def slow_clock(running: PrEvent, new: PrEvent):
+        # The classification consumes clock time: the recorded duration
+        # is the decision's own only when `start_s` names when it began.
+        clock.advance(50.0)
+        return _code_push(running, new)
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=slow_clock,
+                telemetry=telemetry,
+            ).body
+            == b"queued\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "cancel"
+    # Mutant: `start_s` dropped -- the duration then reads from the
+    # record's own moment (about zero), not the decision's 50 advanced
+    # seconds.
+    assert decisions[0].duration_s >= 40.0

@@ -3331,7 +3331,7 @@ second — moves the decision into the service parent as a pure rule
 comparison of the two heads plus the base: every commit whose second
 parent is not `merge_base(base, new)` reads as code, so a
 feature-branch merge is never a base merge; the benign kinds are
-claimed on evidence only — an empty or cut commit list, a failed fetch,
+claimed on evidence only — a cut commit list (an empty, untruncated range is benign; corrected by round-1 F6, the first wording here was wrong), a failed fetch,
 or no credentials at all read as code or keep with the gap recorded,
 never as benign by default), what the review is still reading (the
 review child now records a cumulative `progress` telemetry event into
@@ -3339,7 +3339,7 @@ its run's events file after every settled lens and once when its lens
 loop ends — lenses settled of the planned count, spend against the
 derived reservation, the paths still being read), and how early the
 review is (`ATLAS_HEAD_CHANGE_CANCEL_FRACTION`, default 0.5, early on
-either the lens or the spend fraction). A kept head is recorded as the
+early on both the lens and the spend fractions (round-1 F1 corrected the first wording's either-measure reading)). A kept head is recorded as the
 pull request's pending follow-up in the queue file — never holding an
 active slot — and materializes when the running review settles: a
 success queues it as a delta review (`PrEvent.delta_from`, the second
@@ -3356,7 +3356,9 @@ cancelled or failed — read before the run directory is dropped —
 materialized head, all tagged with the heads in `service.jsonl`.
 Deliberately not done here: the delta review itself, and the session-log
 rotation the file's length owes (#467/#520 pre-existing debt, untouched
-per the D70 correction's precedent). Tests: 31 in
+per the D70 correction's precedent). Tests (the counts as of this
+entry; the later rounds grew them — 37 and 22 at the round-1 fix head,
+per that entry): 31 in
 `atlas_reviewer/tests/test_head_change.py`, 13 service flows in
 `test_service_receive.py`, the progress emission pinned end to end
 through a real `JsonlSink` and read back with the real reader in
@@ -3418,3 +3420,54 @@ judges; every consequence lands on the keep side) is stated in D79 and
 the README. Counts corrected: 22 service flows in
 `test_service_receive.py` (15 from the first push, 7 from this round),
 37 in `test_head_change.py`.
+
+## 2026-11-18 (same day) — #747 round 2: the recovery cannot interleave or post stale, and the docs catch up to the code
+
+The round-2 protocol review (APPROVE) asked for the Minors and cheap
+Nits. The behavioral one is the recovery's two windows (R2-F4):
+`recover_pending` now checks that the pending head is still the
+pull request's accepted head, dropping a stale record the way
+`take_pending` drops one — the consequence of the old shape was a
+stale COMMENT posting for a head the PR had moved past, since
+`still_current` compares nothing against `_heads` — and the review's
+settle and its follow-up's install are one queue step now
+(`Board.settle`: the supersede coercion, the pending checks, the
+install and the save under one lock, one save, one rollback), which
+closes the interleave window where an idle recovery pass between a
+review's `finish` and its `take_pending` installed the head as a plain
+review and cost the follow-up its delta base. The classification runs
+under one overall budget (`_CLASSIFY_BUDGET_S`, 8 seconds, in a helper
+thread the caller waits on) — past it the push is unclassifiable-keep
+with the gap and `timed_out` on the event, and the handler's occupancy
+is bounded (R2-F8). `_diverged` reads a missing or malformed merge base
+as diverged — fail closed, like every other unusable shape (R2-F5).
+The first progress wave is emitted as lenses complete (`as_completed`),
+not in submission order, so a pool past one no longer leaves no record
+until the slowest first-submitted lens settles; `runs` stays in
+submission order, so the draft's ordering, mint ids and clean-run
+supersession are unchanged (R2-F7, done in this layer — it is the
+shared coordinator surface). The reading set round-trips as a JSON
+array (paths with spaces mangled by the space-join; a cap-truncated
+value falls back to the legacy space split, whose fragments match
+nothing — keep direction) (R2-F12). The progress record's field names
+are one home's constants on both the writer and reader side (R2-F13).
+The decision constants are named apart from the policy constants
+(`DECISION_KEEP`/`DECISION_CANCEL`) and the dead Optional guard on
+`_decision_fields` is gone (R2-F14). The docs: the README's env-var row
+now says both measures (R2-F1); D79's tests paragraph no longer
+inventories the superseded OR rule (R2-F2), and D79 records the spend
+gauge's reading explicitly — `settled_usd / reservation_usd`, the
+directive's "actual spend" read as the settled-vs-committed distinction
+in the numerator, the denominator left as the derived reservation
+(directionally safe: clamped under the ceiling, so the implemented
+measure cancels less than a ceiling gauge would), with the Revisit
+clause covering Brandon weighing in (R2-F6); the first session-log
+entry's superseded wording and counts now carry their corrections inline
+(R2-F3). The one-sided `<=` boundary corner is pinned (R2-F15); the
+race test's tautological assertion is a real pending-empty assertion
+(R2-F10); the duration pin uses a clock that advances, so a dropped
+`start_s` fails it (R2-F11). deploy-service.md documents the downgrade
+rollback: a release without the queue file's `pending` key and
+`delta_from` strands kept heads (their redelivery is refused), so drain
+before downgrading, with the boot log's `pending follow-ups N` as the
+observable (R2-F9).

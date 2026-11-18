@@ -53,6 +53,16 @@ _RELOAD = {
 }
 
 
+@dataclass
+class _TakePlan:
+    """A pending head's in-memory installation, awaiting the caller's
+    save: the queued follow-up and the rollback record (the pending
+    entry as it was)."""
+
+    event: PrEvent
+    backup: tuple[str, datetime | None]
+
+
 class QueueError(ValueError):
     """The queue file cannot be used. Starting would forget a dedupe key."""
 
@@ -365,44 +375,98 @@ class Board:
         full the pending head is left recorded for the idle recovery
         (`recover_pending`) to retry. None of this supersedes anything:
         the finished job is terminal, so the pending head takes its slot
-        without a supersede."""
+        without a supersede. The whole step is one lock and one save; a
+        review that settles takes both steps together (`settle`), so the
+        recovery cannot interleave (round-2 review of #747, R2-F4)."""
         with self._cv:
             head_key = (finished.repo, finished.pr_number)
-            pending = self._pending.get(head_key)
-            if pending is None:
+            plan = self._take_plan(head_key, finished, succeeded)
+            if plan is None:
                 return None
-            sha = pending[0]
-            current = self._heads.get(head_key)
-            if current is None or current[0] != sha:
-                # A newer head replaced this one while the review ran.
-                self._pending.pop(head_key, None)
-                return None
-            key = (finished.repo, finished.pr_number, sha)
-            if key in self._seen or any(job.key() == key for job in self._jobs):
-                self._pending.pop(head_key, None)
-                return None
-            if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
-                self._max_remembered
-            ):
-                # The slot this job freed is already taken. The pending
-                # head stays recorded; the idle recovery retries it.
-                return None
-            event = PrEvent(
-                finished.repo,
-                finished.pr_number,
-                sha,
-                delta_from=finished.head_sha if succeeded else "",
-            )
-            self._pending.pop(head_key, None)
-            self._jobs.append(Job(event, JobState.QUEUED))
             try:
                 self._save()
             except Exception:
                 self._jobs.pop()
-                self._pending[head_key] = pending
+                self._pending[head_key] = plan.backup
                 raise
             self._cv.notify()
-            return event
+            return plan.event
+
+    def _take_plan(
+        self,
+        head_key: tuple[str, int],
+        finished: PrEvent,
+        succeeded: bool,
+    ) -> _TakePlan | None:
+        """The pending head to install, installed in memory, with the
+        rollback record -- the lock is held; the caller saves. None when
+        there is nothing to install, in which case a stale pending entry
+        was dropped here."""
+        pending = self._pending.get(head_key)
+        if pending is None:
+            return None
+        sha = pending[0]
+        current = self._heads.get(head_key)
+        if current is None or current[0] != sha:
+            # A newer head replaced this one while the review ran.
+            self._pending.pop(head_key, None)
+            return None
+        key = (head_key[0], head_key[1], sha)
+        if key in self._seen or any(job.key() == key for job in self._jobs):
+            self._pending.pop(head_key, None)
+            return None
+        if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
+            self._max_remembered
+        ):
+            # The slot this job freed is already taken. The pending
+            # head stays recorded; the idle recovery retries it.
+            return None
+        event = PrEvent(
+            head_key[0],
+            head_key[1],
+            sha,
+            delta_from=finished.head_sha if succeeded else "",
+        )
+        self._pending.pop(head_key, None)
+        self._jobs.append(Job(event, JobState.QUEUED))
+        return _TakePlan(event, pending)
+
+    def settle(self, job: Job, state: JobState) -> tuple[JobState, PrEvent | None]:
+        """The terminal state stored and the pull request's pending head
+        taken, under one lock and one save (round-2 review of #747,
+        R2-F4).
+
+        As separate lock acquisitions -- ``finish``, then
+        ``take_pending`` -- two windows opened: an idle recovery pass
+        between them saw no active job and installed the pending head as
+        a plain review before the delta base was set, costing the
+        follow-up its delta; and a process death between the two saves
+        stranded a head whose redelivery is refused. Here the supersede
+        coercion, the pending checks, the follow-up install and the
+        queue-file save are one step, and the rollback puts both sides
+        back when the save fails. The follow-up event, when one was
+        queued, comes back for the caller's telemetry."""
+        with self._cv:
+            if job.superseded and state is not JobState.SUPERSEDED:
+                state = JobState.SUPERSEDED
+            previous = job.state
+            job.state = state
+            head_key = (job.event.repo, job.event.pr_number)
+            plan = (
+                self._take_plan(head_key, job.event, state is JobState.DONE)
+                if state in {JobState.DONE, JobState.FAILED}
+                else None
+            )
+            try:
+                self._save()
+            except Exception:
+                job.state = previous
+                if plan is not None:
+                    self._jobs.pop()
+                    self._pending[head_key] = plan.backup
+                raise
+            self._cv.notify_all()
+            return state, plan.event if plan is not None else None
 
     def recover_pending(self) -> tuple[PrEvent, ...]:
         """Queue every pending head whose pull request has no active job
@@ -429,6 +493,17 @@ class Board:
                     and job.state in _ACTIVE
                     for job in self._jobs
                 ):
+                    continue
+                current = self._heads.get(head_key)
+                if current is None or current[0] != sha:
+                    # A newer head took over while this one was held back
+                    # (a cancel-decision push installed it): the pending
+                    # record is stale, and installing it would review --
+                    # and post for -- a head the pull request has moved
+                    # past. Dropped, the way `take_pending` drops one
+                    # (round-2 review of #747, R2-F4). Mutant: the check
+                    # dropped, which posts a stale head's review.
+                    self._pending.pop(head_key, None)
                     continue
                 key = (head_key[0], head_key[1], sha)
                 if key in self._seen or any(job.key() == key for job in self._jobs):

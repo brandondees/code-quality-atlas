@@ -272,6 +272,18 @@ is listed as run, with the failure carried as a recovered note
 among the limit stops (#692, D76); a lens with no clean run is still not
 run.
 
+## Downgrading
+
+The queue file carries a `pending` key (a kept head waiting for its
+review to settle) and a per-job `delta_from` (the delta review's base),
+which a release from before #702 ignores: a downgrade strands a kept
+head — its record is unread by the older release, and a redelivery of
+that head is answered duplicate, so it is never reviewed. Before
+downgrading, stop the service and let it drain (the boot log's
+`pending follow-ups N` count, and `service.jsonl`'s `follow-up queued`
+events, are the observables); a pending head recovered by the running
+release is an ordinary queued job the older release understands.
+
 ## Tear down
 
 Disable the GitHub App webhook before stopping the Machine. A delivery

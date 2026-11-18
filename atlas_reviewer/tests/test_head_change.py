@@ -261,6 +261,15 @@ def test_a_posting_review_is_never_cancelled():
     assert verdict.lens_fraction == 1.0
 
 
+def test_a_lens_fraction_exactly_at_the_threshold_is_not_early():
+    """The boundary semantics are one threshold for both measures: a
+    lens fraction exactly AT it is past, even with the spend strictly
+    under. Mutant: the lens side loosened to ``<=`` alone (round-2
+    review of #747, R2-F15)."""
+    progress = _progress(done=2, total=4, settled="3", reservation="10")
+    assert decide(_code(), progress, 0.5).cancel is False
+
+
 def test_the_decision_carries_the_fractions_it_was_made_from():
     verdict = decide(
         _code(), _progress(done=1, total=4, settled="2", reservation="10"), 0.5
@@ -358,16 +367,47 @@ def test_progress_fields_that_cannot_be_read_contribute_nothing(tmp_path):
 
 
 def test_a_reading_list_over_its_cap_is_truncated_not_failed():
-    """The cap is real: a reading list too long to carry is cut with the
-    truncation at the cap, never dropped wholesale. Mutant: the cap
-    removed -- the joined text runs past `READING_CHARS` (round-1
-    review of #747, F12; the old test's input parsed to one path and
-    pinned nothing)."""
+    """The cap is real: a reading list too long to carry is cut at the
+    cap, never dropped wholesale. Mutant: the cap removed -- the JSON
+    text runs past `READING_CHARS` (round-1 review of #747, F12; the
+    old test's input parsed to one path and pinned nothing)."""
     reading = [f"src/file{n}.py" for n in range(500)]
     text = cap_reading(reading)
     assert len(text) <= READING_CHARS
     assert len(text) > READING_CHARS - 20
-    assert text == " ".join(sorted(reading))[:READING_CHARS]
+    assert text == json.dumps(sorted(reading))[:READING_CHARS]
+
+
+def test_a_reading_set_with_spaces_round_trips(tmp_path):
+    """The reading set is a JSON array (round-2 review of #747, R2-F12):
+    a changed path containing a space survives the round trip, where the
+    space-join split it into fragments and the overlap check matched
+    nothing. Mutant: the encoding reverted to the space join, which
+    mangles the path."""
+    reading = ["my file.py", "src/x.py"]
+    text = cap_reading(reading)
+    assert text == '["my file.py", "src/x.py"]'
+    path = _write(
+        tmp_path / "events.jsonl", _event(lens="l", lenses_total=1, reading=text)
+    )
+    progress = read_progress(path)
+    assert progress is not None
+    assert progress.reading == frozenset({"my file.py", "src/x.py"})
+
+
+def test_a_truncated_reading_value_falls_back_and_fails_safe(tmp_path):
+    """A cap-truncated JSON value is not valid JSON: the reader falls
+    back to the legacy space split, whose fragments match no pushed path
+    -- the keep direction -- instead of failing the read (round-2
+    R2-F12's truncation half)."""
+    reading = [f"src/file{n}.py" for n in range(500)]
+    text = cap_reading(reading)
+    path = _write(
+        tmp_path / "events.jsonl", _event(lens="l", lenses_total=1, reading=text)
+    )
+    progress = read_progress(path)
+    assert progress is not None
+    assert progress.reading  # fragments survive as tokens; nothing crashes
 
 
 def test_an_oversized_events_file_is_read_from_its_tail(tmp_path):
@@ -441,6 +481,22 @@ def test_a_diverged_history_reads_as_code_without_the_base_read():
     github = _FakeGitHub(
         _pull(),
         _compare([_commit(NEW)], ["src/x.py"], BASE),
+    )
+    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    assert push.kind is PushKind.CODE
+    assert len(github.calls) == 2
+
+
+def test_a_comparison_without_a_merge_base_reads_as_diverged():
+    """A comparison that offers no readable merge base is not evidence
+    that the two heads share history: it reads as diverged, the same
+    fail-closed rule every other unusable shape follows (round-2 review
+    of #747, R2-F5). Mutant: the missing sha read as not-diverged,
+    which would classify a garbled reply's commits as the range's."""
+    github = _FakeGitHub(
+        _pull(),
+        {"commits": [], "files": []},
+        {"merge_base_commit": {"sha": BASE}},
     )
     push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
     assert push.kind is PushKind.CODE

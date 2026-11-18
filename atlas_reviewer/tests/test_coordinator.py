@@ -2867,7 +2867,7 @@ def test_the_review_records_its_progress_for_the_service_to_read(tmp_path):
     assert first["lenses_total"] == 2
     assert first["reading"]  # the second lens's scope is still unread
     assert second["lenses_done"] == 2
-    assert final["reading"] == ""
+    assert final["reading"] == "[]"
     for fields in (first, second, final):
         assert fields["calls"] >= 1
         assert "committed_usd" in fields
@@ -2880,3 +2880,90 @@ def test_the_review_records_its_progress_for_the_service_to_read(tmp_path):
     assert progress.reading == frozenset()
     assert progress.calls > 0
     assert progress.reservation_usd > 0
+
+
+def test_progress_is_emitted_as_lenses_complete_not_in_submission_order(tmp_path):
+    """The first wave's records are emitted as lenses COMPLETE (round-2
+    review of #747, R2-F7): with a pool past one, blocking on the
+    first-submitted future left no record in the events file until the
+    slowest lens settled, and a push landing in that window read as no
+    progress -- the cancel direction. Here the first-submitted lens is
+    the slow one: the fast lens's record must appear in the events file
+    while the slow one is still on its first turn. Mutant: the emission
+    reverted to submission order, which produces no record at all while
+    the slow lens blocks."""
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.head_change import read_progress
+    from atlas_reviewer.telemetry import JsonlSink, Telemetry
+
+    release = threading.Event()
+    slow_started = threading.Event()
+
+    def slow_first_turn(_request):
+        slow_started.set()
+        release.wait(10)
+        return READ_ALL
+
+    fast_model = ScriptedLensModel(
+        [READ_ALL, final(lens=OTHER, digest=body_digest(OTHER_BODY))]
+    )
+    slow_model = ScriptedLensModel([slow_first_turn, final()])
+
+    sink = JsonlSink(tmp_path / "events.jsonl")
+    outcome: dict[str, object] = {}
+
+    def run_review():
+        with sink:
+            telemetry = Telemetry(SystemClock(), sink=sink, scrub=lambda text: text)
+            try:
+                result, _sprites = _lenses(
+                    tmp_path,
+                    [LENS, OTHER],
+                    slow_model,
+                    pool=2,
+                    models=[slow_model, fast_model],
+                    telemetry=telemetry,
+                )
+                outcome["result"] = result
+            except BaseException as exc:  # noqa: BLE001 -- surfaced below
+                outcome["error"] = exc
+
+    review_thread = threading.Thread(target=run_review)
+    review_thread.start()
+    try:
+        assert slow_started.wait(5), "the slow lens never started"
+        # The fast lens settles while the slow one is blocked: its record
+        # is in the file before any release.
+        deadline = time.monotonic() + 5
+        progress = []
+        while time.monotonic() < deadline:
+            progress = read_progress(tmp_path / "events.jsonl")
+            if progress is not None and progress.lenses_done >= 1:
+                break
+            time.sleep(0.02)
+        assert progress is not None, "no progress record while the slow lens ran"
+        # Mutant target: submission-order emission has no record here at
+        # all; and the record that exists names the fast lens.
+        named = _last_progress_lens(tmp_path / "events.jsonl")
+        assert named == OTHER
+    finally:
+        release.set()
+        review_thread.join(15)
+    assert "error" not in outcome, outcome.get("error")
+    result = outcome["result"]
+    assert result.coverage_complete
+
+
+def _last_progress_lens(path):
+    import json as json_module
+
+    from atlas_reviewer.head_change import PROGRESS_PHASE
+
+    last = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        data = json_module.loads(line)
+        if data.get("phase") == PROGRESS_PHASE:
+            last = data.get("lens")
+    return last

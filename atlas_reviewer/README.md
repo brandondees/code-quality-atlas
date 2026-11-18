@@ -571,7 +571,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_MIN_OUTPUT_TOKENS` | agentic lens entry | Smallest output cap a call is fitted to when the reservation cannot cover its full cap. Unset is 16,000 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 | `ATLAS_HEAD_CHANGE_POLICY` | webhook service | The keep-or-cancel policy for a push that lands mid-review (#702, D79): `keep` (the default) decides per push and queues a kept head as the settled review's follow-up; `cancel` restores the blanket supersede. An unknown value refuses to start |
-| `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` | webhook service | The "early" threshold the cancel branch compares the lenses-settled and budget-spent fractions against, 0.0 to 1.0 (default 0.5). A code push under it on either measure cancels the running review |
+| `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` | webhook service | The "early" threshold the cancel branch compares the lenses-settled and budget-spent fractions against, 0.0 to 1.0 (default 0.5). A code push under it on both measures cancels the running review |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that

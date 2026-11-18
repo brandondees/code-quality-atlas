@@ -58,6 +58,18 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 
 PROGRESS_PHASE = "progress"
+# The progress record's field names, the wire contract between the
+# review child's writer and the service's reader -- one home, so a
+# renamed field cannot drift between the sides (round-2 review of
+# #747, R2-F13).
+FIELD_LENS = "lens"
+FIELD_LENSES_DONE = "lenses_done"
+FIELD_LENSES_TOTAL = "lenses_total"
+FIELD_CALLS = "calls"
+FIELD_COMMITTED_USD = "committed_usd"
+FIELD_SETTLED_USD = "settled_usd"
+FIELD_RESERVATION_USD = "reservation_usd"
+FIELD_READING = "reading"
 LENS_SETTLED_STEP = "lens settled"
 PROGRESS_REVIEW_STEP = "review progress"
 
@@ -79,8 +91,12 @@ POLICIES = (POLICY_KEEP, POLICY_CANCEL)
 POLICY_ENV = "ATLAS_HEAD_CHANGE_POLICY"
 CANCEL_FRACTION_ENV = "ATLAS_HEAD_CHANGE_CANCEL_FRACTION"
 
-KEEP = "keep"
-CANCEL = "cancel"
+DECISION_KEEP = "keep"
+DECISION_CANCEL = "cancel"
+"""The decision event's recorded outcomes. Named apart from
+`POLICY_KEEP`/`POLICY_CANCEL` -- same values, different meanings -- so a
+caller cannot pass one where the other is meant (round-2 review of
+#747, R2-F14)."""
 
 
 def head_change_policy(env: Mapping[str, str]) -> str:
@@ -238,12 +254,12 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
             if fields is None:
                 continue
             found = True
-            done = _int(fields.get("lenses_done"), done)
-            total = _int(fields.get("lenses_total"), total)
-            calls = _int(fields.get("calls"), calls)
-            committed = _decimal(fields.get("committed_usd"), committed)
-            settled = _decimal(fields.get("settled_usd"), settled)
-            reservation = _decimal(fields.get("reservation_usd"), reservation)
+            done = _int(fields.get(FIELD_LENSES_DONE), done)
+            total = _int(fields.get(FIELD_LENSES_TOTAL), total)
+            calls = _int(fields.get(FIELD_CALLS), calls)
+            committed = _decimal(fields.get(FIELD_COMMITTED_USD), committed)
+            settled = _decimal(fields.get(FIELD_SETTLED_USD), settled)
+            reservation = _decimal(fields.get(FIELD_RESERVATION_USD), reservation)
             reading = _reading(fields, reading)
     if not found:
         return None
@@ -251,12 +267,16 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
 
 
 def cap_reading(reading: Sequence[str]) -> str:
-    """The reading set as one progress record carries it: space-joined
-    and capped at `READING_CHARS`, so a pull request with a very large
-    diff cannot balloon the events file. Truncation reads as a shorter
-    reading set, which classifies a push as benign more readily -- the
-    owner's default direction -- never as a cancel."""
-    text = " ".join(sorted(reading))
+    """The reading set as one progress record carries it: a JSON array
+    (paths can contain spaces, which a space-join mangled into
+    fragments -- round-2 review of #747, R2-F12), capped at
+    `READING_CHARS`, so a pull request with a very large diff cannot
+    balloon the events file. A truncation can cut the JSON mid-escape;
+    the reader then falls back to the legacy space split, whose
+    fragments match no pushed path -- the same shorter-reading-set
+    direction, which keeps a push rather than cancels, never the
+    reverse."""
+    text = json.dumps(sorted(reading))
     if len(text) > READING_CHARS:
         return text[:READING_CHARS]
     return text
@@ -309,12 +329,21 @@ def _decimal(raw: object, current: Decimal) -> Decimal:
 
 
 def _reading(fields: Mapping[str, object], current: frozenset[str]) -> frozenset[str]:
-    """The newest record's reading set. An absent field leaves the
-    previous one; an empty one is a real value -- the review reported
-    nothing left reading -- and resets."""
-    raw = fields.get("reading")
+    """The newest record's reading set: a JSON array (the writer's own
+    form), or the legacy space-joined form of a record written before
+    the encoding -- and of a cap-truncated value, whose fragments match
+    no pushed path and so keep a push, never cancel one. An absent
+    field leaves the previous set; an empty one is a real value -- the
+    review reported nothing left reading -- and resets."""
+    raw = fields.get(FIELD_READING)
     if not isinstance(raw, str):
         return current
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        decoded = None
+    if isinstance(decoded, list) and all(isinstance(item, str) for item in decoded):
+        return frozenset(item for item in decoded if item)
     return frozenset(part for part in raw.split(" ") if part)
 
 
@@ -506,9 +535,16 @@ def _paths(compare: Json) -> tuple[tuple[str, ...], bool]:
 
 
 def _diverged(compare: Json, running_sha: str) -> bool:
+    """True unless the comparison proves its own base: a merge base that
+    is missing, malformed, or not the reviewed head all read as diverged
+    -- a force-push or a garbled reply must not have its commit list
+    trusted as the range's, the same fail-closed rule every other
+    unusable shape in this module follows (round-2 review of #747,
+    R2-F5). Mutant: the missing-sha case read as not-diverged, which
+    would classify a garbled reply's commits as the range's."""
     base = compare.get("merge_base_commit")
     sha = base.get("sha") if isinstance(base, dict) else None
-    return isinstance(sha, str) and sha != running_sha
+    return not (isinstance(sha, str) and sha == running_sha)
 
 
 def _merge_base(compare: Json) -> str | None:
