@@ -13,11 +13,14 @@ supply their own api endpoints and keys" — carried below as §2's BYOK
 paragraph, §3's two BYOK rows, §4's two new bullets, slice **S10**, and
 §7's decisions, recorded when Brandon accepted all nine recommendations
 (4:15 PM CT). **Added in the later fix rounds:** the BYOK-bounds mechanism
-(§4's operator-side accounting, now on operator-observed floors), the
-tier-coverage correction (§4's merge-base bullet), the S4 event-type
-decision (4:54 PM CT, recorded in §6), the tenant-supplied-keys naming
-note (§2), and **§8**'s three pending questions for Brandon, with nothing
-there decided. Nothing
+(§4's operator-side accounting — the operator-observed-floor variant
+withdrawn once the 5:13 answers made tenant keys required), the
+tier-coverage correction and its 5:13 answer (§4's merge-base bullet; all
+five floor-tier lenses protected), the S4 event-type decision (4:54 PM CT,
+recorded in §6), the tenant-supplied-keys naming note (§2), the
+invite-only gate (§2), and **§8** — Q1–Q3 decided 5:13 PM CT, **Q4 open**
+(how to keep operator compute for tenants at or near zero) and **Q5 open**
+(who configures the per-installation daily cap). Nothing
 in this plan was run live: no model call, no
 GitHub write, no Fly or secret change, no deployed setting touched.
 
@@ -225,7 +228,10 @@ the operator's allowlisted repos a tenant-supplied key is required — there
 is no operator-key path for tenant installations** — so the tenant path's
 dollar bounds are the tenant's own spend protection (§4), a
 **per-installation daily cap, configurable per installation**, joins S9's
-bounds (S9/S10), and the operator-compute question is §8 Q4, open. The
+bounds (S9/S10) — who configures it (the operator per invited installation,
+or the installation admin on the intake page, which would need a further
+amendment to §7 decision 9's "credentials only") is **§8 Q5, pending
+Brandon** — and the operator-compute question is §8 Q4, open. The
 decisions
 live in §7; the slice is S10. **A naming note:** this plan's "BYOK" — the
 installation supplies its own endpoint and key, the surface this record
@@ -239,8 +245,9 @@ intending to set up a cost based billing system and roll out access on an
 invite only basis initially."* The App is public and anyone can install
 it; what decides today is the existing repo allowlist —
 `ATLAS_REVIEW_REPOS`, checked in `service_admit.admit` — and a
-non-allowlisted delivery is acknowledged (HTTP 200, `service.py`'s
-receiver) and ignored **before any review, Sprite, or model call**, so an
+non-allowlisted delivery is acknowledged (HTTP **202**, the receiver's
+ignored path — `service.py:264`; 200 is the queued path) and ignored
+**before any review, Sprite, or model call**, so an
 uninvited installation costs the operator nothing but a webhook
 acknowledgement. Opening the App beyond the allowlist means **adding
 invited installations** to `ATLAS_REVIEW_REPOS` — never removing the
@@ -450,10 +457,10 @@ key.
 
 | Slice | What | Files | Done when | Parity-track pointers | Order |
 |---|---|---|---|---|---|
-| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes; the merge-base lens preference protects **all five** manifest floor-tier lenses (the 5:13 PM CT answer, recorded as D69's update) | new module, `review_wide.py` call sites, `picker.py`'s protection set, tests | both existing lines parse identically through the new module (no behavior change); unknown/out-of-range keys yield named fail-open notes that never echo the raw rejected value (§2's rule); the 64 KiB read bound preserved; **an exclude naming `hunting-silent-failures` is refused the way the critical four are** (D69's 5:13 PM CT update), pinned by a test | **concurrent** — the #750 fix is open as **#757 (D82)** and its file list (`budget.py`, `openrouter.py`, `service_post.py`, `tool_model.py`) includes neither `review_wide.py` nor `coordinator.py`, so S1's refactor of the ceiling *read* (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`) is disjoint; this plan's earlier same-file prediction was wrong and is corrected here | first |
+| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes; the merge-base lens preference protects **all five** manifest floor-tier lenses (the 5:13 PM CT answer, recorded as D69's update) | new module, `review_wide.py` call sites, `picker.py`'s protection set, tests | both existing lines parse identically through the new module (no behavior change); unknown/out-of-range keys yield named fail-open notes that never echo the raw rejected value (§2's rule); the 64 KiB read bound preserved; **an exclude naming `hunting-silent-failures` is refused the way the critical four are** (D69's 5:13 PM CT update), pinned by a test | **concurrent** — the #750 fix is open as **#757 (D82)** and its file list (`budget.py`, `openrouter.py`, `service_post.py`, `tool_model.py`) includes neither `review_wide.py` nor `coordinator.py`, so S1's refactor of the ceiling *read* (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`) is disjoint; this plan's earlier same-file prediction was wrong and is corrected here — and no open PR (#752/#753/#756/#757) touches `picker.py`, so S1's protection-set change is disjoint too | first |
 | ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | — | dropped |
 | S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | floor keys honored and named in the post; floor-tier lenses' findings never silently suppressed (the tier rule carries over); lowering-only pinned by tests | **rebase-check against #757 (D82)** — its file list includes `service_post.py`, which S3 edits | after S1 |
-| S4 | When-to-review admission — narrowing in two kinds (D81's 4:54 PM CT update): **author-safe narrowing** on delivery properties where a skip cannot land unreviewed changes on a branch the repo reviews (the base branch — and the patterns matched against come from the repo's **default branch** per §4's rule, with no head-branch or label keys, so a PR cannot write its own admission), and **repo-owner opt-outs that knowingly reduce coverage** (`review_skip_events`), with the owner-facing docs stating each skippable event's coverage cost; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; the per-event coverage costs are stated in the carrier #756's README provides (head fe9a3358) — stated precisely, per #756's r3 correction of the draft path: skipping `synchronize` means only the opening state is ever reviewed for a non-draft PR (a draft-opened PR's state is still reviewed at its ready transition, which reviews the whole diff), and skipping `ready_for_review` loses the review only when a draft-opened PR becomes ready and merges with no further push (a later push is admitted as `synchronize` and reviews the whole diff); skipping `opened` defers the first review to a later push; skipping all three means the repo is never reviewed — S4's work keeps that text current and precise rather than writing a second copy; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
+| S4 | When-to-review admission — narrowing in two kinds (D81's 4:54 PM CT update): **author-safe narrowing** on delivery properties where a skip cannot land unreviewed changes on a branch the repo reviews (the base branch — and the patterns matched against come from the repo's **default branch** per §4's rule, with no head-branch or label keys, so a PR cannot write its own admission), and **repo-owner opt-outs that knowingly reduce coverage** (`review_skip_events`), with the owner-facing docs stating each skippable event's coverage cost; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; the per-event coverage costs are stated in the carrier #756's README provides (head ced3c412) — stated precisely, per #756's r3 correction of the draft path: skipping `synchronize` means only the opening state is ever reviewed for a non-draft PR (a draft-opened PR's state is still reviewed at its ready transition, which reviews the whole diff), and skipping `ready_for_review` loses the review only when a draft-opened PR becomes ready and merges with no further push (a later push is admitted as `synchronize` and reviews the whole diff); skipping `opened` defers the first review to a later push; skipping all three means the repo is never reviewed — S4's work keeps that text current and precise rather than writing a second copy; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
 | S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | no path is ever dropped from review by user config; re-ranking is recorded in the draft; Q25 untouched | no open PR touches `diffs.py` — the merged D79 delta work touched `delta.py` and `head_change.py`, not `diffs.py`; rebase onto main before starting | after S1 |
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | the blocks reach every lens fenced and budgeted; omissions are named; injected content stays inside the fence | **concurrent** — corrected against the open #734 PRs' actual file lists: #752/#753 (D80) touch `bridge.py`, `bridge_args.py`, `bridge_staging.py`, `interpreter.py`, `lens_loop.py`, `attestation.py`, `coordinator.py`, `ports.py`, `tool_model.py` — **not** `cli.py` or `conversation.py`, so the earlier "hot files" premise (based on the pre-#752 prediction) was wrong; rebase-check only | after S1 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
@@ -535,7 +542,7 @@ separates two kinds of narrowing: what a **PR author cannot exploit** (the
 default-branch read, no head-branch or label keys), and **repo-owner
 opt-outs that knowingly reduce coverage**, of which `review_skip_events`
 is the first, with the owner-facing docs stating each skippable event's
-coverage cost (carried by #756's README, head fe9a3358). No other decision
+coverage cost (carried by #756's README, head ced3c412). No other decision
 changes.
 
 **Update (2026-11-18, 5:13 PM CT — the §8 answers, the tenant-key
@@ -593,7 +600,8 @@ proposed, are recorded in D81:
    repos (no operator-key path), so on that path these bounds are the
    **tenant's own spend protection** — §4 states what that does and does
    not make tenant-reported figures able to touch; a per-installation
-   daily cap, configurable per installation, is added (S9/S10).
+   daily cap, configurable per installation, is added (S9/S10) — who
+   configures it is **§8 Q5, pending**.
 5. **Model choice.** A BYOK installation may choose the model its reviews
    run on, within what its own endpoint serves; D68's budget shape stays.
 6. **Unknown pricing.** Models with no price-table entry are refused — the
@@ -612,7 +620,7 @@ proposed, are recorded in D81:
    narrowly**: installation-level state for *credentials only*; review
    configuration stays repo-level.
 
-## 8. Open questions — Q1 and Q2 decided 5:13 PM CT; Q4 pending
+## 8. Open questions — Q1–Q3 decided 5:13 PM CT; Q4 and Q5 open
 
 1. **The per-installation operator-load bound — DECIDED (5:13 PM CT).**
    Brandon: *"A cap should be configurable per installation, but it
@@ -651,3 +659,15 @@ proposed, are recorded in D81:
    invite-only rollout; **designing that billing system is out of scope
    for this plan** — this question stays open for the mechanism that lands
    before billing does.
+5. **Who configures the per-installation daily cap — OPEN.** The cap is
+   decided (Q1); its **configurer** is not, and the two options diverge on
+   a recorded boundary: **the operator sets the cap per invited
+   installation** — which conflicts with nothing (it is operator
+   configuration, stored wherever the operator's configuration lives) — or
+   **the installation admin sets it on S10's settings page** — which makes
+   it installation-level *non-credential* configuration, needing a further
+   amendment to §7 decision 9's "installation-level state for credentials
+   only" before it can exist. The cap's default value likewise awaits this
+   answer and §8 Q4's mechanism. Recommended default: the operator-set
+   option (it conflicts with nothing, and the cap can move to the settings
+   page later if Brandon amends decision 9). **Not decided here.**
