@@ -22,7 +22,8 @@ and slices the work so some of it runs concurrently with the parity track
 ## 1. What is configurable today
 
 **A. Operator env, service level** (`atlas_reviewer/service.py`,
-`service_admit.py`, `service_queue.py`, `service_post.py`;
+`service_admit.py`, `service_run.py`, `service_queue.py`,
+`service_post.py`, `head_change.py`;
 `atlas_reviewer/deploy-service.md`, `fly.service.toml`):
 
 - Which repositories are reviewed at all: `ATLAS_REVIEW_REPOS`
@@ -135,6 +136,17 @@ protocol reports in its coverage line, and the service can do the same.
 Every posted error names the key, the rejected value, and the default that
 stands.
 
+**Skipped reviews are recorded, not silent.** A rule-based skip (S4's
+narrowing) records a one-line reason — which rule matched, on which input —
+in the service's telemetry and the run's state, so a skipped review can be
+told apart from the service being down. Whether a skip also posts a visible
+note on the pull request: recommend **not by default** — the visible note
+would land on exactly the PRs the repo asked the service to be quiet on,
+recreating the noise the narrowing exists to remove, while the reason stays
+durable and auditable in telemetry where an operator debug mode can surface
+it; revisit toward a visible note only if operators report misreading a
+skip as the reviewer being broken.
+
 **Installation-level defaults and PR-level overrides** are real surfaces but
 both depend on infrastructure that does not exist (an operator-side store;
 an attacker-bounded label grammar); D81 keeps both out of this track (Q4:
@@ -157,7 +169,7 @@ concurrency and deadline; the review-repo allowlist and admission envelope;
 | Path include/exclude, generated-file handling | none | **ordering and depth only, never exclusion** — whether anything may be excluded from review at all is Q25's undecided question; a user path filter re-ranks and names what it deprioritized | user (ordering); any true exclusion waits on Q25 | not built (`diffs.risk_tier` ranks by path alone) |
 | Per-review budget | the repo's own `review_ceiling_usd:` line, or `ATLAS_REVIEW_CEILING_USD` ($10) when absent | the repo sets its own ceiling, up or down — D68's semantics, kept by D81 Q2; the operator's value is the default, and the backstop outside repo control is `ATLAS_KEY_CEILING_USD`; the ceiling actually used is named in the post (D68's ceiling note) | user (the repo's ceiling), operator (default + key guard) | exists (D68) |
 | Head-change policy | `keep` (D79) | keep | operator | exists, env |
-| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow (labels, branches, skip events); never widen past the operator's envelope | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); labels/branches not built |
+| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on **inputs a PR author cannot control** — the base branch, the event type, the draft state; never widen past the operator's envelope. Label- and head-branch-based rules are author-controlled (the head branch's name and the PR's labels are the author's or triage's to set, so a skip rule matching either is an author-controlled opt-out) and sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); filters not built |
 | Post format and verbosity | the current post body (D75) | verbosity may be lowered only; the Findings section, the coverage note and the REVIEW INCOMPLETE banner are never suppressible | user | not built |
 | #734 tool allow-lists | deny-all; structured `run_tests`/`mutate` with bridge-built argv | a repo's requested additions are **proposals** that become operator-approval requests (the #734 decision: approval may apply within the same run, bounded by the wall and dollar limits); never auto-granted | operator approves, user proposes | #734 not started |
 | Coding guidelines / AGENTS.md ingestion | none | delivered as fenced untrusted context blocks under the D67/D73 room budget, like the conversation and CI blocks; never instructions | user (content), engine (delivery) | not built |
@@ -194,19 +206,19 @@ concurrency and deadline; the review-repo allowlist and admission envelope;
 
 | Slice | What | Files | Against the parity track | Order |
 |---|---|---|---|---|
-| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | **coordinate with #750** — both touch the ceiling read in `review_wide.py` | first, after #750 lands (or rebase) |
+| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | **concurrent with the parity track** — verified against the code: #750's fix is reservation accounting (`budget.py`'s per-call pricing and `derive_review_wide`'s derived, ceiling-clamped reservation) plus the budget-stopped headline (`coordinator.py`'s `_headline` and the post path), all of which *consume* the resolved ceiling; none of it plausibly changes the `REVIEW.md` ceiling read S1 refactors (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`'s precedence). Same-file caveat: both edit `review_wide.py`, so a rebase may still be needed if hunks land adjacently | first |
 | ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | dropped |
 | S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | concurrent — disjoint from #734/#713/#708's files | after S1 |
-| S4 | When-to-review admission (labels, branches, narrowing) | `service_admit.py`, `service.py`, README | **free** — can start now, concurrently with the whole parity track | first available |
+| S4 | When-to-review admission — narrowing on the inputs a PR author cannot control: the base branch, the event type, the draft state. Label- and head-branch-based rules are author-controlled opt-outs and sit behind Q5's deferred PR-level overrides, not here; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, README | **free** — can start now, concurrently with the whole parity track | first available |
 | S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | rebase-check against the D79 PRs' delta work before starting | after S1 |
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | **hot files** — `cli.py` is in #734's and the #654/#655 drafts' edit sets; wait for #734 | after #734 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | **depends on #734 (D80) landing** | after #734 |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | **deferred by D81** (Q4: repo-level only; Q7: quiet hours deferred) | deferred |
 
 Recommended order: S4 immediately (touching nothing the parity track
-touches), then S1 once #750 has landed (or rebased onto it), then S3 and
-S5, then S6 and S7 once issue #734 has landed. S2 is dropped and S8 is
-deferred by D81.
+touches), then S1 (concurrent with the parity track, same-file caveat
+against #750 noted above), then S3 and S5, then S6 and S7 once issue #734
+has landed. S2 is dropped and S8 is deferred by D81.
 
 ## 6. Decisions (D81)
 
