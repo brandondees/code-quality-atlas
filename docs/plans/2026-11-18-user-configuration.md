@@ -283,8 +283,9 @@ live in §7; the slice is S10.
 - **Config values are untrusted data everywhere they reach a model.** Lens
   names are validated lens-shaped at parse (D69); guideline and
   AGENTS.md-derived content travels nonce-fenced like every other block
-  (D65's per-review nonce, D52/D67/D73's assembly rules); config never
-  enters trusted controller text.
+  (D65's per-review nonce, D52/D67/D73's assembly rules); raw config
+  **text** never enters trusted controller text — schema-validated values
+  may be named, per §2's rule and D68's own ceiling note.
 - **No config key can widen network, secret, or Sprite access.** The
   Sprite's deny-all credential-free policy, the child's env allowlist, and
   the model/data-policy variables sit outside the config schema by
@@ -317,7 +318,11 @@ live in §7; the slice is S10.
   pull request, not per repo, and the append-only total is read, not
   locked. The plan accepts the bounded overshoot explicitly rather than
   adding a per-repo lock: the worst case is the repo's in-flight reviews
-  each spending up to the operator max past the day's budget, the
+  each spending up to the operator max past the day's budget — at the
+  proposed defaults that number is 32 in-flight reviews × the $25 operator
+  max = **$800 past a $100 daily budget**, bounded by the operator's own
+  concurrency setting (`ATLAS_REVIEW_CONCURRENCY`, 1–32); both dollar
+  figures remain working defaults pending the owner's numbers — the
   refusal applies to the *next* admission after the total is committed,
   and the overshoot is visible in the same telemetry the total comes
   from. A per-repo lock is the alternative if the operator wants the
@@ -368,7 +373,7 @@ live in §7; the slice is S10.
 | ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | — | dropped |
 | S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | floor keys honored and named in the post; floor-tier lenses' findings never silently suppressed (the tier rule carries over); lowering-only pinned by tests | **rebase-check against #757 (D82)** — its file list includes `service_post.py`, which S3 edits | after S1 |
 | S4 | When-to-review admission — narrowing on delivery properties where **a skip cannot land unreviewed changes on a branch the repo reviews**: the base branch (the skip and the landing coincide) and the event type; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts). Config read from the repo's **default branch** (#756's approach — §4's rule); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
-| S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | no path is ever dropped from review by user config; re-ranking is recorded in the draft; Q25 untouched | rebase-check against the merged D79 delta work before starting | after S1 |
+| S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | no path is ever dropped from review by user config; re-ranking is recorded in the draft; Q25 untouched | no open PR touches `diffs.py` — the merged D79 delta work touched `delta.py` and `head_change.py`, not `diffs.py`; rebase onto main before starting | after S1 |
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | the blocks reach every lens fenced and budgeted; omissions are named; injected content stays inside the fence | **concurrent** — corrected against the open #734 PRs' actual file lists: #752/#753 (D80) touch `bridge.py`, `bridge_args.py`, `bridge_staging.py`, `interpreter.py`, `lens_loop.py`, `attestation.py`, `coordinator.py`, `ports.py`, `tool_model.py` — **not** `cli.py` or `conversation.py`, so the earlier "hot files" premise (based on the pre-#752 prediction) was wrong; rebase-check only | after S1 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | — | **deferred by D81** (Q4: repo-level only — amended for credentials only by §7's decision 9, which is S10's store, not a general defaults store; Q7: quiet hours deferred) | deferred |
