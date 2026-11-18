@@ -4249,3 +4249,45 @@ against a fixture suite executed by this machine's interpreter, plus
 scripted framing tests and pure verdict tests; thirteen hand-applied
 mutants each die on a named test (listed in D80). No live model, Sprite
 or GitHub call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 1: execution copies come from the object store, and MUTANT reads are hash-checked
+
+The round's Major (the routine's Blocker) was real and the review's
+probes proved it end to end: executed PR code — the same user that owns
+the review state — re-pointed `refs/tags/atlas-mutant` at a forged
+commit (the next `read_file` at MUTANT served the attacker's file),
+replaced `trees/head` wholesale (the next `mutate` staged, mutated,
+committed and quoted the attacker's content as the head file's), and
+deleted `trees` (the next call mislabeled the shell's exit as a test
+result). The probes also established what survives: forging a loose
+object **at its SHA** is rejected by git's read-path hash check, so
+commit-id-addressed reads keep their integrity. The fix takes the
+strongest option that fits the fakes and the `LocalSprites` seam — no
+new users, mounts or binaries, only git plumbing the staging already
+trusts. Every execution copy is now staged **from the bare repository's
+objects** (`read-tree <recorded HEAD commit>` + `checkout-index
+--prefix`; the invocation names the bridge root as its work tree only to
+satisfy the bare-repository check, and writes nothing there), so `trees`
+is never read after staging and nothing executed code replaced can
+change what a later call stages; each staging step's exit is its own
+`__ATLAS_STAGE__` block, and a copy that could not be built is an
+`unavailable` gap, never a test result. MUTANT resolves at the
+**recorded commit id** — the ref stays as bookkeeping and is honestly
+demoted: the `update-ref`-dropped mutant is no longer observable and
+left the mutant list. A `mutate` call stages a fresh copy between the
+baseline and the mutation (the baseline's writes carry into neither the
+mutated run nor the mutant commit), and the mutation edit is a span
+splice (the rest of the file stays byte-identical; the record quotes the
+mutated span). Owned rather than hidden: executed code can still take
+the session's availability hostage (recorded as gaps), and a
+process-group-escaping daemon could race the edit→commit pair inside one
+exec — the same in-band trust boundary the exits already carry. The
+round's other findings: exit 0 with no summary line is inconclusive on
+both verdict sides; shape errors are gaps, not a latent `ValueError`;
+the mutation step's stderr is surfaced redacted; rejected calls spend no
+execution slot; exit 4's reason is honest; the chmod test skips under
+uid 0. The review's two probes became regression tests
+(`test_executed_code_cannot_tamper_with_what_later_calls_trust`,
+`test_the_baseline_runs_writes_do_not_carry_into_the_mutant`); seven new
+mutants, each dead on a named test. No live model, Sprite or GitHub
+call; no secret read; no deployed setting changed.

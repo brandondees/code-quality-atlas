@@ -154,8 +154,11 @@ class Staged:
     def scratch(self) -> str:
         """The scratch directory one execution tool call stages its
         disposable copy of HEAD in, removed again by the call's own
-        script; the copy the tests write into and the mutant is committed
-        from never touches `trees` or the repository."""
+        script. The copy is built from the bare repository's objects
+        (`stage_copy_steps`), so what the tests write into it -- and what
+        a hostile test replaces elsewhere -- never reaches the next
+        call's copy, the mutant commit, or anything else a later call
+        trusts."""
         return f"{self.root}/{SCRATCH_DIR}/{SCRATCH_WORK}"
 
 
@@ -261,15 +264,33 @@ def _newest(candidate: tuple[str, tuple[int, int, int]]) -> tuple[int, ...]:
     return tuple(-n for n in candidate[1])
 
 
-def stage_copy_steps(root: str, scratch: str) -> tuple[str, ...]:
-    """A fresh disposable copy of the staged HEAD tree (D80): the previous
-    call's scratch is removed first, so a copy an earlier call left behind
-    -- its exec was killed before its cleanup -- is never the copy this
-    call stages, and nothing a test wrote survives the call."""
+def stage_copy_steps(root: str, git: str, scratch: str, head: str) -> tuple[str, ...]:
+    """Builds one fresh disposable copy of the HEAD tree from the bare
+    repository's own objects (D80 round 1): `read-tree <head-commit>`
+    rebuilds a scratch index from the recorded HEAD commit and
+    `checkout-index` writes that tree out, so the copy comes from git's
+    hash-checked object store and never from `trees` or a previous
+    scratch. Nothing PR-controlled code wrote or replaced between calls
+    -- in `trees`, the scratch, or the index file -- can change what a
+    later execution call stages; the only thing executed code can take
+    from the session is its own remaining availability (deleting the
+    repository makes later calls fail, recorded as gaps). The step
+    removes any index file a previous call left behind, so `read-tree`
+    always builds the index anew; the commit is named by its recorded id,
+    not by the `HEAD` symref the staging repository leaves at its unborn
+    default branch."""
+    g = _git_cmd(git, root)
+    index = f"GIT_INDEX_FILE={quote(root)}/index-stage"
+    # The bare repository refuses index operations; naming the bridge root
+    # as the invocation's work tree satisfies the check, and nothing is
+    # written there -- `read-tree` touches only the index, and
+    # `checkout-index` writes to the `--prefix` directory.
+    work_tree = f"--work-tree={quote(root)}"
     return (
-        f"rm -rf {quote(f'{root}/{SCRATCH_DIR}')}",
+        f"rm -rf {quote(f'{root}/{SCRATCH_DIR}')} {quote(root)}/index-stage",
         f"mkdir -p {quote(f'{root}/{SCRATCH_DIR}')}",
-        f"cp -a {quote(f'{root}/trees/head')}/. {quote(scratch)}",
+        f"{index} {g} {work_tree} read-tree {quote(head)}",
+        f"{index} {g} {work_tree} checkout-index -a -f --prefix={quote(scratch)}/",
     )
 
 
@@ -277,14 +298,17 @@ def mutant_commit_steps(
     root: str, git: str, scratch: str, head: str
 ) -> tuple[str, ...]:
     """Commits the mutated copy into the bare repository and moves
-    `MUTANT_REF` onto it (D80): the mutated tree becomes reachable at
-    exactly one new revision, so `read_file` and `grep` reach it at MUTANT
-    while BASE and HEAD stay untouched. Prints `MUTANT_TAG:<commit>` only
-    when the ref moved; carries the staging commit identity of its own."""
+    `MUTANT_REF` onto it (D80). The bridge reads MUTANT at the commit id
+    its own commit step recorded -- the ref is bookkeeping, not a read
+    path, so executed code moving or forging it changes nothing the tools
+    serve; a commit id is content-addressed and git's read path verifies
+    it. Prints `MUTANT_TAG:<commit>` only when the ref moved; carries the
+    staging commit identity of its own."""
     g = _git_cmd(git, root)
     index = f"GIT_INDEX_FILE={quote(root)}/index-mutant"
     return (
         f"export {' '.join(_IDENTITY)}",
+        f"rm -f {quote(root)}/index-mutant",
         f"(cd {quote(scratch)} && {index} {g} --work-tree=. add -A -f .)",
         f"t=$({index} {g} write-tree)",
         f'c=$({g} commit-tree "$t" -p {quote(head)} -m atlas-mutant)',

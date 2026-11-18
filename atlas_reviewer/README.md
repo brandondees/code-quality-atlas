@@ -1591,43 +1591,58 @@ a `Bridge` to the caller.
   name cannot move a match to another file, and every name `list_files`
   shows plainly reads back through `read_file` (the rest are marked).
   `diff_file` shows a renamed file as a rename from either path.
-- **Execution (D80).** `run_tests` and `mutate` never touch the review
-  trees: each call stages a fresh disposable copy of the HEAD tree
-  (`stage_copy_steps` — the previous call's scratch removed first,
-  removed again at the end), runs there, and dies with the copy. The
-  argv is built by the bridge and never by the model: `<trusted
-  interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
-  <selector>` — isolated (`-I`: no `PYTHON*` variables, no user site, cwd
-  off `sys.path`, so a PR `pytest.py` cannot shadow the runner
-  machinery; `-B` because isolated mode ignores
-  `PYTHONDONTWRITEBYTECODE`), module mode, and the model's selector as
-  one positional argument. One test process runs at a time. A run's wall
-  clock is the tool's `timeout_s` (default 60s, provisional) under the
-  guest's `timeout`; its captured output is capped at the tool's
-  `max_bytes` (default 16 KiB, provisional) and shown from the end,
-  where pytest's summary and failures sit. A `mutate` call runs the
-  baseline, applies the one-operator mutation with a fixed AST script
-  (the model named only a path, a line and an operator), commits the
-  mutated copy into the bare repository at the moving
-  `refs/tags/atlas-mutant` ref — the mutated tree is reachable at
-  exactly one new revision, and MUTANT resolves at the ref, so
-  `read_file` and `grep` can read it while BASE and HEAD stay untouched
-  — then runs the mutated copy. The verdict is the controller's, from
-  the runs' reported exits and its own parse of their final pytest
-  summary lines: `survived` only when the baseline ran at least one test
-  and passed and the mutated run also passed; an already-failing,
-  nothing-collected or nothing-ran baseline, a timed-out run, a mutated
-  run where no test ran, and a mutated run at a non-test exit are
-  `inconclusive` with the reason, never `survived`; a mutation that did
-  not apply or a tree that could not be committed ends after the
-  baseline and is inconclusive. The exits are in-band evidence, not
-  proof — the standing caveat `runner.parse_exit` records — and here PR
-  code runs, so a PR can shape its own test results; a forged verdict
-  changes only what a lens may claim, and the finding still needs a
-  verified quote. The interpreter is resolved before any PR content is
-  unpacked; none means the tools answer `unavailable`. The allow-list
-  seam for operator-approved commands is the bridge-owned argv table —
-  the approval flow itself is not built (D80).
+- **Execution (D80, corrected 2026-11-18 round 1).** `run_tests` and `mutate`
+  never touch the review trees: each call stages a fresh disposable copy of
+  the head tree **from the bare repository's objects** (`stage_copy_steps` —
+  `read-tree <recorded HEAD commit>` plus `checkout-index --prefix`, so the
+  copy comes from git's hash-checked object store and never from `trees`, the
+  previous scratch, or an index file a call or a tampering test left behind),
+  runs there, and removes it. Each staging step's exit is its own
+  `__ATLAS_STAGE__` block: a copy that could not be built is a staging
+  failure (`unavailable`, a gap), never a test result — the failing step's
+  exit code can no longer masquerade as pytest's. The argv is built by the
+  bridge and never by the model: `<trusted interpreter> -I -B -m pytest -q
+  --color=no -p no:cacheprovider <selector>` — isolated (`-I`: no `PYTHON*`
+  variables, no user site, cwd off `sys.path`, so a PR `pytest.py` cannot
+  shadow the runner machinery; `-B` because isolated mode ignores
+  `PYTHONDONTWRITEBYTECODE`), module mode, and the model's selector as one
+  positional argument. One test process runs at a time. A run's wall clock
+  is the tool's `timeout_s` (default 60s, provisional) under the guest's
+  `timeout`; its captured output is capped at the tool's `max_bytes`
+  (default 16 KiB, provisional) and shown from the end, where pytest's
+  summary and failures sit. A `mutate` call runs the baseline, stages a
+  **fresh** copy (the baseline's writes carry into neither the mutated run
+  nor the mutant commit), applies the one-operator mutation with a fixed
+  AST script as a **span splice** (the model named only a path, a line and
+  an operator; the rest of the file stays byte-identical), commits the
+  mutated copy into the bare repository and records its id — the mutated
+  tree is reachable at exactly one new revision, and MUTANT resolves at
+  that **recorded commit id**, which git's read path hash-checks, so
+  executed code moving or forging the `refs/tags/atlas-mutant` ref (kept as
+  bookkeeping) changes nothing `read_file` or `grep` serves — then runs the
+  mutated copy. The verdict is the controller's, from the runs' reported
+  exits and its own parse of their final pytest summary lines: `survived`
+  only when the baseline ran at least one test and passed and the mutated
+  run also passed with a summary showing one — an exit 0 whose output
+  carries no summary line proves nothing and is inconclusive; an
+  already-failing, nothing-collected or nothing-ran baseline, a timed-out
+  run, a mutated run where no test ran, and a mutated run at a non-test
+  exit are `inconclusive` with the reason, never `survived`; a mutation
+  that did not apply or a tree that could not be committed ends after the
+  baseline and is inconclusive. The exits are in-band evidence, not proof —
+  the standing caveat `runner.parse_exit` records — and here PR code runs,
+  so a PR can shape its own test results; a forged verdict changes only
+  what a lens may claim, and the finding still needs a verified quote. The
+  residual a same-user runner cannot close is owned, not hidden: executed
+  code can make later calls *fail* (deleting the repository makes their
+  staging fail — recorded as `unavailable` gaps, bounded by the runner's
+  destruction), and a daemon that escaped the process-group kill could race
+  the edit→commit pair inside one exec. The interpreter is resolved before
+  any PR content is unpacked; none means the tools answer `unavailable`.
+  The caps count what ran: a refused call — rejected arguments, an
+  already-spent budget — takes no execution slot; a run that timed out
+  keeps its. The allow-list seam for operator-approved commands is the
+  bridge-owned argv table — the approval flow itself is not built (D80).
 - **Results** are repository content and are not redacted. Each is
   scanned for committed secrets, and every hit is reported by path, line
   and pattern, pre-existing outside HEAD or in a file the PR did not

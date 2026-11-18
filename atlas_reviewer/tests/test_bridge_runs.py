@@ -10,6 +10,7 @@ GitHub call is made; the fixture suite is built here and executed from a
 staged copy."""
 
 import base64
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -204,10 +205,11 @@ def test_negate_condition_wraps_the_condition_in_not(tmp_path):
     status, rest = payload_of(result)
     assert status == "ok"
     before, after = rest.split(" ")
-    whole = base64.b64decode(before).decode()
-    assert whole == "if not xs:\n        return 0"
-    assert base64.b64decode(after).decode() == "if not not xs:\n    return 0"
-    assert "if not not xs:" in path.read_text()
+    assert base64.b64decode(before).decode() == "not xs"
+    assert base64.b64decode(after).decode() == "not (not xs)"
+    assert "if not (not xs):" in path.read_text()
+    # The rest of the file is byte-identical: no whole-module rewrite.
+    assert "return sum(xs)" in path.read_text()
 
 
 def test_remove_guard_replaces_the_body_with_pass(tmp_path):
@@ -215,11 +217,11 @@ def test_remove_guard_replaces_the_body_with_pass(tmp_path):
     assert result.returncode == 0
     status, rest = payload_of(result)
     assert status == "ok"
-    before, _ = rest.split(" ")
-    assert base64.b64decode(before).decode() == (
-        'if xs is None:\n        raise ValueError("xs is required")'
-    )
+    before, after = rest.split(" ")
+    assert base64.b64decode(before).decode() == 'raise ValueError("xs is required")'
+    assert base64.b64decode(after).decode() == "pass"
     assert "if xs is None:\n        pass" in path.read_text()
+    assert "return sum(xs)" in path.read_text()
 
 
 def test_negate_condition_applies_to_while_and_the_conditional_expression(tmp_path):
@@ -228,12 +230,12 @@ def test_negate_condition_applies_to_while_and_the_conditional_expression(tmp_pa
         2, "negate-condition",
     )  # fmt: skip
     assert result.returncode == 0
-    assert "while not n > 0:" in path.read_text()
+    assert "while not (n > 0):" in path.read_text()
     result, path = edit(
         tmp_path, "def pick(n):\n    return 1 if n else 2\n", 2, "negate-condition"
     )
     assert result.returncode == 0
-    assert "1 if not n else 2" in path.read_text()
+    assert "1 if not (n) else 2" in path.read_text()
 
 
 def test_a_statement_the_operator_does_not_apply_to_is_refused(tmp_path):
@@ -278,6 +280,10 @@ def test_a_file_that_is_not_utf_8_is_refused(tmp_path):
     )
 
 
+@pytest.mark.skipif(
+    hasattr(os, "getuid") and os.getuid() == 0,
+    reason="a chmod-based refusal is a no-op for uid 0",
+)
 def test_an_unwritable_copy_is_refused_without_a_partial_write(tmp_path):
     path = tmp_path / "m.py"
     path.write_text(CALC, encoding="utf-8")
@@ -314,9 +320,7 @@ def test_a_multi_line_statement_is_cited_whole(tmp_path):
     status, rest = payload_of(result)
     assert status == "ok"
     before, _ = rest.split(" ")
-    assert base64.b64decode(before).decode() == (
-        "if (\n        n\n    ):\n        return 1"
-    )
+    assert base64.b64decode(before).decode() == "n"
 
 
 # ----------------------------------------------------------------- run_tests
@@ -481,9 +485,8 @@ def test_a_mutant_the_tests_catch_is_killed_and_the_tag_names_the_tree(tmp_path)
     assert result.outcome_reason == "the mutated run failed (exit 1)"
     assert result.mutation is not None
     assert result.mutation.commit
-    assert result.mutation.before.startswith("if xs is None:")
-    assert "raise ValueError" in result.mutation.before
-    assert result.mutation.after.startswith("if not xs is None:")
+    assert result.mutation.before == "xs is None"
+    assert result.mutation.after == "not (xs is None)"
     baseline, mutated = result.runs
     assert (baseline.exit, mutated.exit) == (0, 1)
     assert "baseline run: exit 0, 2 passed" in render(result)
@@ -495,7 +498,7 @@ def test_a_mutant_the_tests_catch_is_killed_and_the_tag_names_the_tree(tmp_path)
     # HEAD stays what it was.
     assert result.content.text != ""
     assert "FAILED" in result.content.text
-    assert "if not xs is None:" in read.content.text
+    assert "if not (xs is None):" in read.content.text
     assert head.content.text == REQUIRE
     assert tagged is True
 
@@ -574,9 +577,7 @@ def test_a_baseline_with_nothing_collected_is_inconclusive(tmp_path):
         },
     )
     assert result.outcome is MutantOutcome.INCONCLUSIVE
-    assert result.outcome_reason == (
-        "no test was collected for the baseline run (exit 4)"
-    )
+    assert result.outcome_reason == "the test run stopped before collecting (exit 4)"
 
 
 def test_a_baseline_past_its_wall_clock_is_inconclusive(tmp_path):
@@ -633,7 +634,7 @@ def test_a_second_mutate_moves_the_one_tag(tmp_path):
     assert first.outcome is MutantOutcome.SURVIVED
     assert second.outcome is MutantOutcome.KILLED
     assert second.mutation.commit != first.mutation.commit
-    assert "if not xs is None:" in read.content.text
+    assert "if not (xs is None):" in read.content.text
 
 
 def test_the_review_trees_stay_read_only_across_a_mutate(tmp_path):
@@ -739,18 +740,24 @@ class ReplyRule:
         return self.answer(script), 0
 
 
-def framed(code, out, shown=None):
+def framed(code, out, shown=None, err=b""):
     shown = out if shown is None else shown
     return (
         f"__ATLAS_RUN__ {code} {len(out)} {len(out.splitlines())} {len(shown)}\n"
         f"{base64.b64encode(shown).decode()}\n"
-        f"{base64.b64encode(b'').decode()}\n"
+        f"{base64.b64encode(err).decode()}\n"
     )
 
 
-def mutation_block(apply_exit, commit, payload=b""):
+def staged():
+    return "__ATLAS_STAGE__ 0\n"
+
+
+def mutation_block(apply_exit, commit, payload=b"", err=b""):
     return (
-        f"__ATLAS_MUT__ {apply_exit} {commit}\n{base64.b64encode(payload).decode()}\n"
+        f"__ATLAS_MUT__ {apply_exit} {commit}\n"
+        f"{base64.b64encode(payload).decode()}\n"
+        f"{base64.b64encode(err).decode()}\n"
     )
 
 
@@ -818,25 +825,51 @@ def test_a_scripted_reply_frames_the_runs_and_the_mutant(tmp_path):
     def answer(script):
         if "__ATLAS_MUT__" in script:
             return (
-                framed(0, out)
-                + mutation_block(
-                    0, commit, ok_payload(b"if not xs:", b"if not (not xs):")
-                )
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(0, commit, ok_payload(b"not xs", b"not (not xs):"))
                 + framed(0, out)
             )
-        return framed(0, out)
+        return staged() + framed(0, out)
 
     (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,), source=trees(SUITE))
     assert result.status is Status.OK
     assert result.outcome is MutantOutcome.SURVIVED
     assert result.mutation.commit == commit
-    assert result.mutation.before == "if not xs:"
+    assert result.mutation.before == "not xs"
     rendered = render(result)
     assert "baseline run: exit 0, 1 passed" in rendered
     assert "mutated run: exit 0, 1 passed" in rendered
     assert f"head {HEAD}" in rendered
     assert "mutation at calc.py:2 (negate-condition)" in rendered
-    assert 'if not xs:"` -> `"if not (not xs):"' in rendered
+    assert 'not xs"` -> `"not (not xs):"' in rendered
+
+
+def test_a_staging_failure_is_not_a_test_result(tmp_path):
+    (result,), _ = fake_bridge(
+        tmp_path, lambda _script: "__ATLAS_STAGE__ 128\n", (("run_tests", {}),)
+    )
+    assert result.status is Status.UNAVAILABLE
+    assert "the staged copy could not be made (exit 128)" in result.error.text
+    assert result.runs == ()
+
+
+def test_a_mutate_staging_failure_after_the_baseline_is_inconclusive(tmp_path):
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        if script.count("__ATLAS_STAGE__") == 2:
+            return staged() + framed(0, out) + "__ATLAS_STAGE__ 1\n"
+        return staged() + framed(0, out)
+
+    (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,))
+    assert result.status is Status.OK
+    assert result.outcome is MutantOutcome.INCONCLUSIVE
+    assert result.outcome_reason == "the mutated copy could not be staged (exit 1)"
+    (baseline,) = result.runs
+    assert baseline.exit == 0
+    assert "mutated run: not run" in render(result)
 
 
 def test_a_mutation_step_that_failed_is_inconclusive(tmp_path):
@@ -844,8 +877,13 @@ def test_a_mutation_step_that_failed_is_inconclusive(tmp_path):
 
     def answer(script):
         if "__ATLAS_MUT__" in script:
-            return framed(0, out) + mutation_block(1, "-")
-        return framed(0, out)
+            return (
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(1, "-", err=b"Traceback: boom\n")
+            )
+        return staged() + framed(0, out)
 
     (result,), _ = fake_bridge(
         tmp_path, answer,
@@ -855,6 +893,8 @@ def test_a_mutation_step_that_failed_is_inconclusive(tmp_path):
     assert result.outcome_reason == (
         "the mutation did not apply: the mutation step failed (exit 1)"
     )
+    # The mutation step's own stderr is surfaced as the runtime error (F6).
+    assert "Traceback: boom" in result.error.text
     assert "mutated run: not run" in render(result)
 
 
@@ -864,8 +904,11 @@ def test_a_refusal_reason_from_the_mutation_script_is_carried(tmp_path):
 
     def answer(script):
         if "__ATLAS_MUT__" in script:
-            return framed(0, out) + mutation_block(0, "-", payload)
-        return framed(0, out)
+            return (
+                staged() + framed(0, out) + staged()
+                + mutation_block(0, "-", payload)
+            )  # fmt: skip
+        return staged() + framed(0, out)
 
     (result,), _ = fake_bridge(
         tmp_path, answer,
@@ -882,8 +925,11 @@ def test_a_mutation_that_applies_but_commits_nothing_is_inconclusive(tmp_path):
 
     def answer(script):
         if "__ATLAS_MUT__" in script:
-            return framed(0, out) + mutation_block(0, "-", ok_payload(b"a", b"b"))
-        return framed(0, out)
+            return (
+                staged() + framed(0, out) + staged()
+                + mutation_block(0, "-", ok_payload(b"a", b"b"))
+            )  # fmt: skip
+        return staged() + framed(0, out)
 
     (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,))
     assert result.outcome is MutantOutcome.INCONCLUSIVE
@@ -896,11 +942,13 @@ def test_a_killed_verdict_from_a_scripted_pair_of_runs(tmp_path):
     def answer(script):
         if "__ATLAS_MUT__" in script:
             return (
-                framed(0, b"1 passed\n")
+                staged()
+                + framed(0, b"1 passed in 0.01s\n")
+                + staged()
                 + mutation_block(0, "a" * 40, ok_payload(b"a", b"b"))
                 + framed(1, out)
             )
-        return framed(0, b"1 passed\n")
+        return staged() + framed(0, b"1 passed in 0.01s\n")
 
     (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,))
     assert result.outcome is MutantOutcome.KILLED
@@ -918,31 +966,81 @@ def test_a_malformed_reply_is_unavailable(tmp_path):
 def test_a_run_tests_reply_that_is_a_mutation_block_is_unavailable(tmp_path):
     (result,), _ = fake_bridge(
         tmp_path,
-        lambda _script: mutation_block(0, "-", b"no x"),
+        lambda _script: staged() + mutation_block(0, "-", b"no x"),
         (("run_tests", {}),),
     )
     assert result.status is Status.UNAVAILABLE
-    assert "not one test run" in result.error.text
+    assert "not a staging step and one test run" in result.error.text
 
 
-def test_a_mutate_reply_without_a_mutation_block_is_unavailable(tmp_path):
+def test_a_mutate_reply_with_the_wrong_shape_is_unavailable(tmp_path):
+    out = b"1 passed in 0.01s\n"
     (result,), _ = fake_bridge(
         tmp_path,
-        lambda _script: framed(0, b"1 passed in 0.01s\n") + framed(0, b"1 passed\n"),
+        lambda _script: staged() + framed(0, out) + mutation_block(0, "a" * 40, b"ok"),
         (MUTATE_REQUEST,),
     )
     assert result.status is Status.UNAVAILABLE
-    assert "not a baseline run, a mutation and a mutated run" in result.error.text
+    assert "second staging step is missing" in result.error.text
+
+
+def test_a_reply_starting_with_a_run_block_is_unavailable(tmp_path):
+    out = b"1 passed in 0.01s\n"
+    (result,), _ = fake_bridge(
+        tmp_path, lambda _script: framed(0, out), (("run_tests", {}),)
+    )
+    assert result.status is Status.UNAVAILABLE
+    assert "not a staging step" in result.error.text
 
 
 def test_a_run_without_a_summary_line_renders_its_exit_alone(tmp_path):
     (result,), _ = fake_bridge(
-        tmp_path, lambda _script: framed(0, b"no summary here\n"), (("run_tests", {}),)
+        tmp_path,
+        lambda _script: staged() + framed(0, b"no summary here\n"),
+        (("run_tests", {}),),
     )
     (run,) = result.runs
     assert run.summary is None
     assert "test run: exit 0" in render(result)
     assert "test run: exit 0," not in render(result)
+
+
+def test_an_exit_zero_run_without_a_summary_is_never_a_verdict(tmp_path):
+    """F7: an exit 0 with no summary line does not prove a test ran, so
+    the mutated side of the verdict may not rest on it. The baseline here
+    has a summary; the mutated run's suppressed reporter is what makes
+    this inconclusive."""
+    out = b"the terminal reporter was suppressed\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            return (
+                staged() + framed(0, b"1 passed in 0.01s\n") + staged()
+                + mutation_block(0, "a" * 40, ok_payload(b"a", b"b"))
+                + framed(0, out)
+            )  # fmt: skip
+        return staged() + framed(0, out)
+
+    (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,))
+    assert result.outcome is MutantOutcome.INCONCLUSIVE
+    assert result.outcome_reason == "the mutated run's output carries no summary"
+
+
+def test_an_exit_zero_baseline_without_a_summary_is_inconclusive(tmp_path):
+    out = b"the terminal reporter was suppressed\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            return (
+                staged() + framed(0, out) + staged()
+                + mutation_block(0, "a" * 40, ok_payload(b"a", b"b"))
+                + framed(0, b"1 passed in 0.01s\n")
+            )  # fmt: skip
+        return staged() + framed(0, out)
+
+    (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,))
+    assert result.outcome is MutantOutcome.INCONCLUSIVE
+    assert result.outcome_reason == "the baseline run's output carries no summary"
 
 
 def test_a_lost_output_is_a_failure_not_an_empty_result(tmp_path):
@@ -1327,3 +1425,257 @@ def test_the_built_argv_is_pytest_module_mode_isolated_and_fixed():
     assert _pytest_argv(staged, "").endswith("-p no:cacheprovider")
     assert _pytest_argv(staged, "my tests.py").endswith("'my tests.py'")
     validate("run_tests", {"path": "test_calc.py"}, frozenset(Rev))
+
+
+# ------------------------------------------------- tamper resistance (round 1)
+
+
+TAMPER_TEST = """\
+import subprocess
+from pathlib import Path
+
+BRIDGE = Path(__file__).resolve().parents[2]
+REPO = str(BRIDGE / "repo.git")
+
+
+def git(*args, **kwargs):
+    return subprocess.run(
+        ["git", f"--git-dir={REPO}", *args], capture_output=True, text=True, **kwargs
+    )
+
+
+def test_forges_the_mutant_ref_and_replaces_the_staged_trees():
+    work = BRIDGE / "scratch" / "forge"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "calc.py").write_text(
+        "def total(xs):\\n    return 999  # ATTACKER CONTENT\\n"
+    )
+    blob = git("hash-object", "-w", str(work / "calc.py")).stdout.strip()
+    assert blob, "hash-object failed"
+    tree = subprocess.run(
+        ["git", f"--git-dir={REPO}", "hash-object", "-w", "-t", "tree", "--stdin"],
+        input=b"100644 calc.py\\x00" + bytes.fromhex(blob),
+        capture_output=True,
+    ).stdout.decode().strip()
+    assert tree, "tree hash failed"
+    commit = git(
+        "-c", "user.name=attacker", "-c", "user.email=attacker@invalid",
+        "commit-tree", tree, "-m", "forged",
+    ).stdout.strip()
+    assert commit, "commit-tree failed"
+    moved = git("update-ref", "refs/tags/atlas-mutant", commit)
+    assert moved.returncode == 0, moved.stderr
+    head = BRIDGE / "trees" / "head"
+    subprocess.run(["chmod", "-R", "u+w", str(BRIDGE / "trees")], check=False)
+    subprocess.run(["rm", "-rf", str(head)], check=False)
+    head.mkdir(parents=True)
+    (head / "calc.py").write_text(
+        "def total(xs):\\n    if xs:\\n        return 111  # REPLACED TREE\\n    return 0\\n"
+    )
+    (head / "test_calc.py").write_text(
+        "from calc import total\\n\\n"
+        "def test_always_passes():\\n    assert total([1]) == 111\\n"
+    )
+"""
+
+DESTRUCTIVE_TEST = (
+    "import shutil\n"
+    "from pathlib import Path\n\n"
+    "BRIDGE = Path(__file__).resolve().parents[2]\n\n\n"
+    "def test_deletes_the_staged_repository():\n"
+    '    shutil.rmtree(BRIDGE / "repo.git", ignore_errors=True)\n'
+)
+
+CARRIER_TEST = (
+    "from calc import total\n\n"
+    "open('baseline_marker.txt', 'w').write('the baseline ran here')\n\n\n"
+    "def test_two_values():\n    assert total([1, 2]) == 3\n"
+)
+
+TAMPER_TREES = {
+    "calc.py": CALC.encode(),
+    "test_calc.py": TEST_TOTAL.encode(),
+    "test_tamper.py": TAMPER_TEST.encode(),
+}
+DESTRUCTIVE_TREES = {
+    "calc.py": CALC.encode(),
+    "test_calc.py": TEST_TOTAL.encode(),
+    "test_destructive.py": DESTRUCTIVE_TEST.encode(),
+}
+
+
+def test_executed_code_cannot_tamper_with_what_later_calls_trust(tmp_path):
+    """Round 1's F1, from the review's own probe: a test in the executed
+    suite forges the `atlas-mutant` ref onto an attacker commit and
+    replaces `trees/head` wholesale. What a later call stages and serves
+    comes from the bare repository's objects at recorded commit ids, so
+    HEAD reads keep their content, MUTANT keeps serving the real mutant,
+    the next mutate's record quotes the real head statement, and the next
+    run runs the real tree."""
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["head0"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["m1"] = bridge.call(
+            "mutate",
+            {"path": "calc.py", "line": 2, "operator": "negate-condition",
+             "tests": "test_calc.py"},
+        )  # fmt: skip
+        out["mutant0"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
+        out["run1"] = bridge.call("run_tests", {"path": "test_tamper.py"})
+        out["head1"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["mutant1"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
+        out["m2"] = bridge.call(
+            "mutate",
+            {"path": "calc.py", "line": 2, "operator": "negate-condition",
+             "tests": "test_calc.py"},
+        )  # fmt: skip
+        out["mutant2"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
+        out["run2"] = bridge.call("run_tests", {"path": "test_calc.py"})
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(tmp_path, body, source=trees(TAMPER_TREES))[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    m1, m2 = collected["m1"], collected["m2"]
+    assert m1.outcome is MutantOutcome.KILLED and m1.mutation.commit
+    assert m1.mutation.before == "not xs"
+    # The tamper run itself ran (the attack executed; it bought nothing).
+    (tamper,) = collected["run1"].runs
+    assert collected["run1"].status is Status.OK and tamper.exit == 0
+    # HEAD keeps its content, and MUTANT keeps serving the real mutant --
+    # never the attacker's forged commit.
+    assert collected["head1"].content.text == CALC
+    assert "ATTACKER CONTENT" not in collected["mutant1"].content.text
+    assert "if not (not xs):" in collected["mutant1"].content.text
+    # The next mutate ran against the real head tree: its record quotes
+    # the real condition, not the replaced tree's, and its verdict is
+    # again a real one.
+    assert m2.mutation.before == "not xs"
+    assert "REPLACED TREE" not in m2.mutation.before
+    assert m2.outcome is MutantOutcome.KILLED
+    assert "if not (not xs):" in collected["mutant2"].content.text
+    # And the next run runs the real tree: the replaced test_calc.py would
+    # fail against the real calc.py, and the real suite passes.
+    (run2,) = collected["run2"].runs
+    assert collected["run2"].status is Status.OK and run2.exit == 0
+    assert run2.summary is not None and run2.summary.count("passed") == 1
+
+
+def test_executed_code_deleting_the_repository_leaves_gaps_not_fake_runs(tmp_path):
+    """Round 1's F4, from the probe's DoS shape: executed code deletes the
+    staged repository, so the next call's staging fails -- a gap naming
+    the staging failure, never a fake test result built from a colliding
+    exit code. Deleting `trees` alone no longer matters at all: the copy
+    is staged from the repository's objects, which the tamper test above
+    pins."""
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["run1"] = bridge.call("run_tests", {"path": "test_destructive.py"})
+        out["run2"] = bridge.call("run_tests", {})
+        out["mutate"] = bridge.call(
+            "mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}
+        )
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(tmp_path, body, source=trees(DESTRUCTIVE_TREES))[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (destructive,) = collected["run1"].runs
+    assert collected["run1"].status is Status.OK and destructive.exit == 0
+    assert collected["run2"].status is Status.UNAVAILABLE
+    assert "the staged copy could not be made" in collected["run2"].error.text
+    assert collected["run2"].runs == ()
+    assert collected["mutate"].status is Status.UNAVAILABLE
+    assert "the staged copy could not be made" in collected["mutate"].error.text
+
+
+def test_the_baseline_runs_writes_do_not_carry_into_the_mutant(tmp_path):
+    """Round 1's F2, from the carry-over probe: a baseline test's writes
+    stay out of the mutant's tree and out of the mutated run -- the copy
+    is staged fresh between the baseline and the mutation, so MUTANT is
+    the head tree plus one mutation and nothing else."""
+    source = trees(
+        {
+            "calc.py": CALC.encode(),
+            "test_calc.py": CARRIER_TEST.encode(),
+        }
+    )
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["mutate"] = bridge.call(
+            "mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}
+        )
+        out["marker"] = bridge.call(
+            "read_file", {"rev": "MUTANT", "path": "baseline_marker.txt"}
+        )
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(tmp_path, body, source=source)[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["mutate"].outcome is MutantOutcome.SURVIVED
+    assert collected["marker"].status is not Status.OK
+    assert "the baseline ran here" not in collected["marker"].content.text
+
+
+def test_the_mutation_leaves_the_rest_of_the_file_byte_identical(tmp_path):
+    """Round 1's F3: the mutation is a span splice, not a whole-module
+    rewrite -- the mutated run's source is the head source plus one edit,
+    so comments, quoting and formatting outside the mutated span survive,
+    and a source-sensitive suite cannot be handed a false `killed` by
+    rewritten formatting."""
+    formatted = (
+        b"# the rounding policy lives here\n"
+        b"def total(xs):\n"
+        b"    if not xs:      # keep the spacing\n"
+        b"        return 0\n"
+        b"    return sum(xs)  # trailing comment\n"
+    )
+    source = trees({"calc.py": formatted, "test_calc.py": TEST_TOTAL.encode()})
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["mutate"] = bridge.call(
+            "mutate", {"path": "calc.py", "line": 3, "operator": "negate-condition"}
+        )
+        out["mutant"] = bridge.call("read_file", {"rev": "MUTANT", "path": "calc.py"})
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(tmp_path, body, source=source)[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["mutate"].mutation.before == "not xs"
+    assert collected["mutate"].mutation.after == "not (not xs)"
+    mutated = collected["mutant"].content.text
+    assert "# the rounding policy lives here" in mutated
+    assert "if not (not xs):      # keep the spacing" in mutated
+    assert "return sum(xs)  # trailing comment" in mutated
+
+
+def test_a_rejected_call_does_not_spend_an_execution_slot(tmp_path):
+    """Round 1's F8: refused calls -- rejected arguments, an already-spent
+    budget -- spent no execution resource and take no execution slot; a
+    run that timed out did run, and keeps its slot."""
+    results, _ = calls(
+        tmp_path,
+        ("run_tests", {"path": "-k"}),
+        ("mutate", {"path": "calc.py", "operator": "remove-guard"}),
+        ("run_tests", {}),
+        ("mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}),
+        ("run_tests", {}),
+        session_limits=SessionLimits(max_test_runs=1, max_mutants=1),
+    )
+    rejected_run, rejected_mutate, ran, mutated, refused = results
+    assert rejected_run.status is Status.REJECTED
+    assert rejected_mutate.status is Status.REJECTED
+    assert ran.status is Status.OK
+    assert mutated.status is Status.OK
+    assert refused.status is Status.OVER_SESSION_LIMIT
+    assert "all 1 run_tests calls of this attempt made" in refused.error.text

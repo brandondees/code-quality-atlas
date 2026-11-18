@@ -53,7 +53,6 @@ from atlas_reviewer.bridge_staging import (
     BRIDGE_ROOT,
     GIT_ENV,
     GIT_OPTIONS,
-    MUTANT_REF,
     PYTEST_CANDIDATES,
     SCRATCH_DIR,
     SourceTrees,
@@ -91,16 +90,18 @@ HEADER = "__ATLAS_BRIDGE__"
 UNKNOWN_TOOL = "(unknown tool)"
 RUN_HEADER = "__ATLAS_RUN__"
 MUT_HEADER = "__ATLAS_MUT__"
+STAGE_HEADER = "__ATLAS_STAGE__"
 STDERR_BYTES = 2_000
 STDERR_CHARS = 1_000
 # 512-byte blocks under dash (8 MiB); a shell counting 1 KiB blocks allows 16.
 RAW_OUTPUT_BLOCKS = 16_384
 EXEC_SLACK_S = 15.0
 # The mutation edit runs under its own `timeout`, and a `mutate` call runs
-# two test processes (baseline, mutated) plus that edit plus the mutant
-# commit inside one exec budget.
+# two test processes (baseline, mutated), that edit, and two staging
+# checkouts of the head tree, inside one exec budget.
 MUTATE_EDIT_TIMEOUT_S = 30
 MUTATE_EDIT_SLACK_S = 30.0
+MUTATE_STAGE_SLACK_S = 60.0
 _TIMED_OUT = 124
 _KILLED = 137
 _FILE_TOO_LARGE = 153
@@ -568,16 +569,33 @@ if target is None:
     if at_line:
         refuse("the operator does not apply to the statement at that line")
     refuse("no statement starts at that line")
-before = ast.get_source_segment(source, target)
-if before is None:
-    lines = source.splitlines()
-    before = lines[line - 1] if line <= len(lines) else ""
+
+# The edit is a span splice, not a whole-module rewrite: only the mutated
+# span changes, so the rest of the file stays byte-identical -- comments,
+# string quoting and formatting included -- and the mutated run's source
+# is the head source plus one edit. Line offsets are computed over "\\n"
+# only, matching how the parser numbers lines.
+offsets = [0]
+for part in source.split("\\n"):
+    offsets.append(offsets[-1] + len(part) + 1)
+
+def span(lineno, col, end_lineno, end_col):
+    return offsets[lineno - 1] + col, offsets[end_lineno - 1] + end_col
+
 if operator == "negate-condition":
-    target.test = ast.UnaryOp(op=ast.Not(), operand=target.test)
+    start, end = span(
+        target.test.lineno, target.test.col_offset,
+        target.test.end_lineno, target.test.end_col_offset,
+    )
+    replacement = "not (" + source[start:end] + ")"
 else:
-    target.body = [ast.Pass()]
-ast.fix_missing_locations(tree)
-mutated = ast.unparse(tree)
+    start, end = span(
+        target.body[0].lineno, target.body[0].col_offset,
+        target.body[-1].end_lineno, target.body[-1].end_col_offset,
+    )
+    replacement = "pass"
+before = source[start:end]
+mutated = source[:start] + replacement + source[end:]
 compile(mutated, path, "exec")
 temporary = path + ".atlas-mutant"
 try:
@@ -586,10 +604,9 @@ try:
     os.replace(temporary, path)
 except OSError:
     refuse("the copy could not be written")
-after = ast.unparse(target)
 print(
     "ok " + base64.b64encode(before.encode()).decode()
-    + " " + base64.b64encode(after.encode()).decode()
+    + " " + base64.b64encode(replacement.encode()).decode()
 )
 """
 
@@ -614,92 +631,133 @@ def _selector(selector: str) -> str:
 
 def run_test_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     """One exec for `run_tests` (D80): a fresh disposable copy of the
-    staged HEAD tree, one bounded pytest process in it, its output
-    captured and shown from the end (the summary and the failures sit
-    there), framed like every bridge reply, and the copy removed again --
-    whatever the tests wrote dies with it, never reaching `trees` or the
-    repository."""
-    scratch = staged.scratch
+    head tree staged from the repository's objects (`stage_copy_steps` --
+    its exit is framed as its own STAGE block, so a copy that could not
+    be built is a staging failure, never a test result), one bounded
+    pytest process in it, its output captured and shown from the end (the
+    summary and the failures sit there), framed like every bridge reply,
+    and the copy removed again -- whatever the tests wrote dies with it,
+    and nothing it wrote or replaced reaches a later call."""
+    scratch = quote(staged.scratch)
     root = quote(staged.root)
-    return "; ".join(
+    return "\n".join(
         (
             f"cd {root}",
-            *stage_copy_steps(staged.root, scratch),
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            "stage=$?",
+            f'echo "{STAGE_HEADER} $stage"',
+            'if [ "$stage" = 0 ]; then',
+            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            "  export PYTHONDONTWRITEBYTECODE=1;",
             (
-                f"( cd {quote(scratch)}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
-                "export PYTHONDONTWRITEBYTECODE=1; "
-                f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
+                f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
                 f"{_pytest_argv(staged, call.get('path'))} ) > out 2> err"
             ),
-            "s=$?",
-            f"tail -c {limits.max_bytes} out > shown",
-            f'echo "{RUN_HEADER} $s $(wc -c < out) $(wc -l < out) $(wc -c < shown)"',
-            "base64 -w0 < shown; echo",
-            f"head -c {STDERR_BYTES} err | base64 -w0; echo",
+            "  s=$?",
+            f"  tail -c {limits.max_bytes} out > shown",
+            f'  echo "{RUN_HEADER} $s $(wc -c < out) $(wc -l < out) $(wc -c < shown)"',
+            "  base64 -w0 < shown; echo",
+            f"  head -c {STDERR_BYTES} err | base64 -w0; echo",
+            "fi",
             f"rm -rf {root}/{SCRATCH_DIR} out err shown",
         )
     )
 
 
 def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
-    """One exec for `mutate` (D80): the same disposable copy, the baseline
-    run first, then the single-operator mutation applied by the fixed
-    script (the model named only a path, a line and an operator), the
-    mutated tree committed at the moving `atlas-mutant` ref, then the
-    mutated run. A mutation that did not apply, or a tree that could not
-    be committed, ends the exec after the baseline block -- the controller
-    reports it inconclusive, never a survived mutant."""
-    scratch = staged.scratch
+    """One exec for `mutate` (D80): the baseline run on a copy staged
+    from the repository's objects, a **fresh** copy staged again for the
+    mutation (F2: the baseline run's writes must not carry into the
+    mutated tree or the mutant commit), then the single-operator mutation
+    applied by the fixed script (the model named only a path, a line and
+    an operator), the mutated tree committed and its id recorded, then
+    the mutated run. Each staging step's exit is its own STAGE block: a
+    copy that could not be built ends the exec after the last block it
+    could make, and the controller reports it as a staging failure, never
+    a test result. A mutation that did not apply, or a tree that could
+    not be committed, ends after the baseline -- inconclusive, never a
+    survived mutant."""
+    scratch = quote(staged.scratch)
     root = quote(staged.root)
     run = (
-        f"( cd {quote(scratch)}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+        f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{_pytest_argv(staged, call.get('tests'))} )"
     )
     assert staged.pytest is not None  # the caller refuses the call before this
     edit = (
-        f"( cd {quote(scratch)}; exec timeout -k {KILL_AFTER_S} "
+        f"( cd {scratch}; exec timeout -k {KILL_AFTER_S} "
         f"{MUTATE_EDIT_TIMEOUT_S} "
         f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
         f"{quote(call.get('path'))} {call.get('line')} "
         f"{quote(call.get('operator'))} ) > mut 2> mut_err"
     )
     commit = "; ".join(
-        mutant_commit_steps(staged.root, staged.git, scratch, staged.commits[Rev.HEAD])
+        mutant_commit_steps(
+            staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+        )
     )
 
     def framed_run(name: str) -> str:
-        return (
-            f"{run} > {name}_out 2> {name}_err; {name}=$?; "
-            f"tail -c {limits.max_bytes} {name}_out > {name}_shown; "
-            f'echo "{RUN_HEADER} ${name} $(wc -c < {name}_out) '
-            f'$(wc -l < {name}_out) $(wc -c < {name}_shown)"; '
-            f"base64 -w0 < {name}_shown; echo; "
-            f"head -c {STDERR_BYTES} {name}_err | base64 -w0; echo"
+        return "\n".join(
+            (
+                f"  {run} > {name}_out 2> {name}_err",
+                f"  {name}=$?",
+                f"  tail -c {limits.max_bytes} {name}_out > {name}_shown",
+                (
+                    f'  echo "{RUN_HEADER} ${name} $(wc -c < {name}_out) '
+                    f'$(wc -l < {name}_out) $(wc -c < {name}_shown)"'
+                ),
+                "  base64 -w0 < " + name + "_shown; echo",
+                f"  head -c {STDERR_BYTES} {name}_err | base64 -w0; echo",
+            )
         )
 
-    return "; ".join(
+    return "\n".join(
         (
             f"cd {root}",
             f"export {' '.join(GIT_ENV)} PYTHONDONTWRITEBYTECODE=1",
-            *stage_copy_steps(staged.root, scratch),
-            framed_run("b"),
-            f"{edit} > mut 2> mut_err",
-            "m=$?",
-            "payload=$(head -n 1 mut)",
-            (
-                "c=-; case $payload in "
-                f'"ok "*) cmt=$({commit}) 2>> mut_err; '
-                "case $cmt in atlas-mutant:*) c=${cmt#atlas-mutant:} ;; esac ;; "
-                "esac"
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
             ),
-            f'echo "{MUT_HEADER} $m $c"',
-            'printf "%s" "$payload" | base64 -w0; echo',
-            f'if [ "$c" != "-" ]; then {framed_run("s")}; fi',
+            "stage=$?",
+            f'echo "{STAGE_HEADER} $stage"',
+            'if [ "$stage" = 0 ]; then',
+            framed_run("b"),
+            # The second staging and everything past it run only when the
+            # first copy was built: a staging failure skips the run it
+            # would serve (F4), and a failed re-stage skips the mutation
+            # it would serve.
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            "  stage=$?",
+            f'  echo "{STAGE_HEADER} $stage"',
+            '  if [ "$stage" = 0 ]; then',
+            f"    {edit}",
+            "    m=$?",
+            "    payload=$(head -n 1 mut)",
+            "    c=-",
+            "    case $payload in",
+            f'    "ok "*) cmt=$({commit}) 2>> mut_err ;;',
+            "    esac",
+            "    case $cmt in",
+            "    atlas-mutant:*) c=${cmt#atlas-mutant:} ;;",
+            "    esac",
+            f'    echo "{MUT_HEADER} $m $c"',
+            '    printf "%s" "$payload" | base64 -w0; echo',
+            f"    head -c {STDERR_BYTES} mut_err | base64 -w0; echo",
+            '    if [ "$c" != "-" ]; then',
+            framed_run("s"),
+            "    fi",
+            "  fi",
+            "fi",
             (
                 f"rm -rf {root}/{SCRATCH_DIR} b_out b_err b_shown mut mut_err "
-                "s_out s_err s_shown"
+                "s_out s_err s_shown index-stage index-mutant"
             ),
         )
     )
@@ -729,20 +787,39 @@ class _MutBlock:
     apply_exit: int
     commit: str
     payload: bytes
+    stderr: bytes
 
 
-def parse_run_blocks(text: str) -> tuple[_RunBlock | _MutBlock, ...] | None:
-    """The run and mutation blocks an execution tool's exec printed, in
-    order; None when there is no block at all or a header-shaped line does
-    not parse. The test processes' own output reaches this stream only
-    base64-encoded, so every header line here is the script's own, and a
-    line that merely looks like one is a refusal of the whole reply."""
-    blocks: list[_RunBlock | _MutBlock] = []
+@dataclass(frozen=True)
+class _StageBlock:
+    """One staging step's exit status. A nonzero one means the disposable
+    copy of HEAD could not be built, and everything after it that needed
+    the copy was skipped -- never a test result (D80 round 1)."""
+
+    code: int
+
+
+def parse_run_blocks(
+    text: str,
+) -> tuple[_RunBlock | _MutBlock | _StageBlock, ...] | None:
+    """The staging, run and mutation blocks an execution tool's exec
+    printed, in order; None when there is no block at all or a
+    header-shaped line does not parse. The test processes' own output
+    reaches this stream only base64-encoded, so every header line here is
+    the script's own, and a line that merely looks like one is a refusal
+    of the whole reply."""
+    blocks: list[_RunBlock | _MutBlock | _StageBlock] = []
     lines = text.split("\n")
     index = 0
     while index < len(lines):
         line = lines[index]
         index += 1
+        if line.startswith(f"{STAGE_HEADER} "):
+            fields = line.split(" ")
+            if len(fields) == 2 and _DIGIT.fullmatch(fields[1]):
+                blocks.append(_StageBlock(int(fields[1])))
+                continue
+            return None
         if not line.startswith((f"{RUN_HEADER} ", f"{MUT_HEADER} ")):
             continue
         payload = lines[index] if index < len(lines) else ""
@@ -776,11 +853,16 @@ def parse_run_blocks(text: str) -> tuple[_RunBlock | _MutBlock, ...] | None:
             and _DIGIT.fullmatch(fields[1])
             and (fields[2] == "-" or _MUT_COMMIT.fullmatch(fields[2]))
         ):
+            # The mutation step's own stderr follows the payload, and is
+            # empty exactly when `parse_exit` stripped the empty line.
+            stderr_line = lines[index] if index < len(lines) else ""
             try:
                 decoded = base64.b64decode(payload, validate=True)
+                stderr = base64.b64decode(stderr_line, validate=True)
             except ValueError:
                 return None
-            blocks.append(_MutBlock(int(fields[1]), fields[2], decoded))
+            index += 1
+            blocks.append(_MutBlock(int(fields[1]), fields[2], decoded, stderr))
         else:
             return None
     return tuple(blocks) or None
@@ -789,7 +871,12 @@ def parse_run_blocks(text: str) -> tuple[_RunBlock | _MutBlock, ...] | None:
 def parse_summary(text: str) -> TestSummary | None:
     """The counts on the last pytest summary line of one run's captured
     output, and nothing else in it; None when the output carries no line
-    of that shape (then the run's exit status decides alone)."""
+    of that shape (then `mutant_outcome` treats a passing exit as
+    unproven -- F7: a verdict may not rest on an exit alone). The LAST
+    summary-shaped line wins, so PR output printed after pytest's own
+    summary replaces the parsed counts; that is inside the owned in-band
+    threat model (D80), and the summary is parsed only for counts, never
+    for instructions."""
     for line in reversed(text.splitlines()):
         match = _SUMMARY.match(line.strip())
         if match is None:
@@ -849,32 +936,48 @@ def mutant_outcome(
     summary_mutated: TestSummary | None,
 ) -> tuple[MutantOutcome, str]:
     """The verdict on one mutant (D80), and its controller-written reason.
-    Only a mutant whose baseline run passed -- ran at least one test --
-    and whose mutated run also passed is `survived`; an already-failing,
-    empty or all-skipping baseline, a timed-out run, and a mutated run
-    that is not a test result are all inconclusive. A summary the output
-    did not carry leaves the exit status to decide alone."""
+    Only a mutant whose baseline run passed -- and whose summary shows at
+    least one test run -- and whose mutated run also passed with a
+    summary that shows one is `survived`. An already-failing, empty or
+    all-skipping baseline, a timed-out run, a run whose output carries no
+    summary line (F7: the exit alone never proves a test ran), a mutated
+    run where no test ran, and a mutated run that is not a test result
+    are all inconclusive. The summary is the controller's own parse of
+    the captured output; what PR code can shape -- its exits and what it
+    prints -- is D80's owned in-band caveat."""
     if not applied:
         return MutantOutcome.INCONCLUSIVE, f"the mutation did not apply: {apply_reason}"
     if baseline.code in (_TIMED_OUT, _KILLED):
         return MutantOutcome.INCONCLUSIVE, "the baseline run hit its wall clock"
-    if baseline.code in (4, 5):
+    if baseline.code == 5:
         return (
             MutantOutcome.INCONCLUSIVE,
-            f"no test was collected for the baseline run (exit {baseline.code})",
+            "no test was collected for the baseline run (exit 5)",
+        )
+    if baseline.code == 4:
+        return (
+            MutantOutcome.INCONCLUSIVE,
+            "the test run stopped before collecting (exit 4)",
         )
     if baseline.code != 0:
         return (
             MutantOutcome.INCONCLUSIVE,
             f"the baseline run already fails (exit {baseline.code})",
         )
-    if summary_baseline is not None and not summary_baseline.ran_any:
+    if summary_baseline is None:
+        return (
+            MutantOutcome.INCONCLUSIVE,
+            "the baseline run's output carries no summary",
+        )
+    if not summary_baseline.ran_any:
         return MutantOutcome.INCONCLUSIVE, "no test ran in the baseline run"
     if mutated is None:
         return MutantOutcome.INCONCLUSIVE, "the mutated run did not run"
     if mutated.code in (_TIMED_OUT, _KILLED):
         return MutantOutcome.INCONCLUSIVE, "the mutated run hit its wall clock"
-    if summary_mutated is not None and not summary_mutated.ran_any:
+    if summary_mutated is None:
+        return MutantOutcome.INCONCLUSIVE, "the mutated run's output carries no summary"
+    if not summary_mutated.ran_any:
         return MutantOutcome.INCONCLUSIVE, "no test ran in the mutated run"
     if mutated.code == 0:
         return (
@@ -904,35 +1007,67 @@ def _summary_of(block: _RunBlock) -> TestSummary | None:
     return parse_summary(block.content.decode("utf-8", errors="replace"))
 
 
-def _single_run(blocks: tuple[_RunBlock | _MutBlock, ...]) -> _RunBlock:
-    """`run_tests`'s reply is exactly one run block."""
-    (block,) = blocks
-    if not isinstance(block, _RunBlock):
-        raise BoundaryError("the run_tests reply is not one test run")
-    return block
-
-
-def _mutant_blocks(
-    blocks: tuple[_RunBlock | _MutBlock, ...],
-) -> tuple[_RunBlock, _MutBlock, _RunBlock | None]:
-    """`mutate`'s reply is a baseline run and a mutation block, then a
-    mutated run when the mutation applied and the tree committed."""
-    if (
-        len(blocks) == 3
-        and isinstance(blocks[0], _RunBlock)
-        and isinstance(blocks[1], _MutBlock)
-        and isinstance(blocks[2], _RunBlock)
-    ):
-        return blocks[0], blocks[1], blocks[2]
+def _single_run(
+    blocks: tuple[_RunBlock | _MutBlock | _StageBlock, ...],
+) -> tuple[_StageBlock, _RunBlock | None]:
+    """`run_tests`'s reply is a staging block and -- when the copy was
+    built -- one run block; the script skips the run when staging failed,
+    so a lone staging block is that failure's shape. Any other shape is a
+    boundary error -- a gap -- never a `ValueError` escaping the exec's
+    failure handling (F5)."""
     if (
         len(blocks) == 2
-        and isinstance(blocks[0], _RunBlock)
-        and isinstance(blocks[1], _MutBlock)
+        and isinstance(blocks[0], _StageBlock)
+        and isinstance(blocks[1], _RunBlock)
     ):
-        return blocks[0], blocks[1], None
-    raise BoundaryError(
-        "the mutate reply is not a baseline run, a mutation and a mutated run"
-    )
+        return blocks[0], blocks[1]
+    if len(blocks) == 1 and isinstance(blocks[0], _StageBlock):
+        return blocks[0], None
+    raise BoundaryError("the run_tests reply is not a staging step and one test run")
+
+
+def _mutant_shape(
+    blocks: tuple[_RunBlock | _MutBlock | _StageBlock, ...],
+) -> tuple[
+    _StageBlock,
+    _RunBlock | None,
+    _StageBlock | None,
+    _MutBlock | None,
+    _RunBlock | None,
+]:
+    """`mutate`'s reply is a staging block, then -- when the copy was
+    built -- the baseline run, then the second staging block, then, when
+    that copy was built too, the mutation block and, when the mutation
+    applied and the tree committed, the mutated run. Each shorter shape
+    is the script stopping after the step that failed, and every other
+    shape is a boundary error -- a gap -- never a crash."""
+    if not blocks or not isinstance(blocks[0], _StageBlock):
+        raise BoundaryError("the mutate reply does not start with a staging step")
+    stage1 = blocks[0]
+    rest = blocks[1:]
+    if not rest:
+        return stage1, None, None, None, None
+    if not isinstance(rest[0], _RunBlock):
+        raise BoundaryError("the mutate reply's baseline run is missing")
+    baseline = rest[0]
+    rest = rest[1:]
+    if not rest:
+        raise BoundaryError("the mutate reply ends without its second staging step")
+    if not isinstance(rest[0], _StageBlock):
+        raise BoundaryError("the mutate reply's second staging step is missing")
+    stage2 = rest[0]
+    rest = rest[1:]
+    if not rest:
+        return stage1, baseline, stage2, None, None
+    if not isinstance(rest[0], _MutBlock):
+        raise BoundaryError("the mutate reply's mutation step is missing")
+    applied = rest[0]
+    rest = rest[1:]
+    if not rest:
+        return stage1, baseline, stage2, applied, None
+    if not isinstance(rest[0], _RunBlock):
+        raise BoundaryError("the mutate reply's mutated run is missing")
+    return stage1, baseline, stage2, applied, rest[0]
 
 
 @dataclass(frozen=True)
@@ -1231,8 +1366,9 @@ class Bridge:
             + 2 * KILL_AFTER_S
             + EXEC_SLACK_S
             + MUTATE_EDIT_SLACK_S
+            + MUTATE_STAGE_SLACK_S
             if call.tool == "mutate"
-            else limits.timeout_s + EXEC_SLACK_S
+            else limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
         )
         try:
             code, text = self.session.exec(
@@ -1251,7 +1387,7 @@ class Bridge:
             for block in blocks:
                 if isinstance(block, _RunBlock) and (problem := block.problem()):
                     raise _LostOutputError(problem)
-            return self._run_result(call, blocks, self.clock.monotonic() - started)
+            return self._run_result(call, blocks, started)
         except StreamTimeoutError as exc:
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
         except _LostOutputError as exc:
@@ -1260,21 +1396,62 @@ class Bridge:
             return self._failed(call, Status.UNAVAILABLE, str(exc), started)
 
     def _run_result(
-        self, call: Call, blocks: tuple[_RunBlock | _MutBlock, ...], seconds: float
+        self,
+        call: Call,
+        blocks: tuple[_RunBlock | _MutBlock | _StageBlock, ...],
+        started: float,
     ) -> BridgeResult:
+        seconds = self.clock.monotonic() - started
         if call.tool == "run_tests":
-            baseline = _single_run(blocks)
+            stage, run = _single_run(blocks)
+            if stage.code != 0:
+                # F4: a copy that could not be staged is a staging
+                # failure, never a test result -- the exit the failing
+                # `cd` or `cp` left behind must not be read as pytest's.
+                return self._failed(
+                    call,
+                    Status.UNAVAILABLE,
+                    f"the staged copy could not be made (exit {stage.code})",
+                    started,
+                )
+            assert (
+                run is not None
+            )  # the script runs the copy only when staging succeeded
             return self._exec_result(
                 call,
-                _run_status(baseline.code),
-                (RunRecord(baseline.code, _summary_of(baseline)),),
+                _run_status(run.code),
+                (RunRecord(run.code, _summary_of(run)),),
                 None,
                 None,
                 "",
+                run,
+                self.clock.monotonic() - started,
+            )
+        stage1, baseline, stage2, applied, mutated = _mutant_shape(blocks)
+        if stage1.code != 0:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                f"the staged copy could not be made (exit {stage1.code})",
+                started,
+            )
+        assert (
+            baseline is not None
+        )  # the script runs the copy only when staging succeeded
+        if stage2 is not None and stage2.code != 0:
+            # The second staging (F2's fresh copy for the mutation) failed:
+            # the mutant never applied, and nothing after it ran.
+            return self._exec_result(
+                call,
+                Status.OK,
+                (RunRecord(baseline.code, _summary_of(baseline)),),
+                None,
+                MutantOutcome.INCONCLUSIVE,
+                f"the mutated copy could not be staged (exit {stage2.code})",
                 baseline,
                 seconds,
             )
-        baseline, applied, mutated = _mutant_blocks(blocks)
+        assert stage2 is not None and applied is not None
         ok, before, after, apply_reason = parse_mutation(
             applied.payload, applied.apply_exit
         )
@@ -1284,12 +1461,14 @@ class Bridge:
             _summary_of(mutated) if mutated is not None else None,
         )  # fmt: skip
         if ok and applied.commit not in ("-", ""):
-            # MUTANT resolves at the moving ref, not at the recorded id:
-            # the ref is what makes the latest mutant the one reachable
-            # revision, so a read at MUTANT is the tree that commit steps
-            # actually moved (D80).
+            # MUTANT resolves at the commit id this bridge's own commit
+            # step recorded (D80 round 1): a commit id is
+            # content-addressed and git's read path verifies it, so
+            # executed code moving or forging the `atlas-mutant` ref
+            # changes nothing the read tools serve. The ref stays as
+            # bookkeeping only.
             self.commits = MappingProxyType(
-                {**self.staged.commits, Rev.MUTANT: MUTANT_REF}
+                {**self.staged.commits, Rev.MUTANT: applied.commit}
             )
         record = MutationRecord(
             call.get("operator"),
@@ -1305,6 +1484,7 @@ class Bridge:
         return self._exec_result(
             call, Status.OK, runs, record, outcome, outcome_reason,
             mutated or baseline, seconds,
+            edit_stderr=applied.stderr,
         )  # fmt: skip
 
     def _exec_result(
@@ -1317,10 +1497,15 @@ class Bridge:
         outcome_reason: str,
         block: _RunBlock,
         seconds: float,
+        edit_stderr: bytes = b"",
     ) -> BridgeResult:
         text = block.content.decode("utf-8", errors="replace")
         scan = detect_secrets(text)
         stderr = block.stderr.decode("utf-8", errors="replace")
+        if edit_stderr and not stderr:
+            # F6: the mutation step's own stderr is runtime text like the
+            # runs', redacted and shown the same way.
+            stderr = edit_stderr.decode("utf-8", errors="replace")
         self._flagged.extend(scan.values)
         # Test output is not tree content: a hit has no location, and it is
         # not the PR's committed secret, so it is recorded as not
@@ -1446,9 +1631,14 @@ class Bridge:
         )
         self._attempt_calls += 1
         self._attempt_shown += result.shown_bytes
-        if result.tool == "run_tests":
+        # The execution caps count what ran (D80 round 1): a refused call
+        # -- rejected arguments or an already-spent budget -- spent no
+        # execution resource, so it takes no slot; a run that timed out
+        # did run, and keeps its slot.
+        spent_nothing = result.status in (Status.REJECTED, Status.OVER_SESSION_LIMIT)
+        if result.tool == "run_tests" and not spent_nothing:
             self._attempt_runs += 1
-        elif result.tool == "mutate":
+        elif result.tool == "mutate" and not spent_nothing:
             self._attempt_mutants += 1
         return result
 
