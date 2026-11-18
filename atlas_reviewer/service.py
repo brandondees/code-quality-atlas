@@ -59,7 +59,7 @@ from atlas_reviewer.service_admit import (
     Ignored,
     RepoAdmission,
     admit,
-    base_ref,
+    default_branch,
     narrow,
     parse_delivery,
     parse_repo_admission,
@@ -267,6 +267,12 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
+        # The handler's GitHub reads -- the admission read and, when a
+        # review is running, the head-change classification -- share one
+        # overall budget, so the two together cannot hold the handler
+        # past GitHub's response window (round-1 review of #756, Minor
+        # 2: two full budgets stacked to ~16 s).
+        read_started = _monotonic()
         if admission_reader is not None:
             # The repo's own narrowing is read after the operator's
             # envelope has passed, so a fetch happens only for a
@@ -290,6 +296,7 @@ def handle_delivery(
             worker=worker,
             classifier=classifier,
             telemetry=telemetry,
+            read_started=read_started,
         )
     return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
 
@@ -300,19 +307,27 @@ def _repo_admission(
     event: PrEvent,
     telemetry: Telemetry | None,
 ) -> RepoAdmission:
-    """The reviewed repo's own narrowing, read from the base-ref
-    ``REVIEW.md`` the payload names -- the base branch, never the PR
-    head, so a PR cannot move its own admission.
+    """The reviewed repo's own narrowing, read from the ``REVIEW.md`` on
+    the repository's **default branch** -- the branch that changes only
+    through reviewed merges, never the PR head and never the PR's own
+    base branch, both of which a same-repo PR's author controls
+    (round-1 review of #756, Major 1). An empty default branch in the
+    payload is recovered by the reader's own read-only lookup.
 
-    The read runs under one overall budget, in a helper thread, the way
-    the head-change classification does. A read that fails, a file over
-    the read bound, or an unusable line falls back to the default --
-    which narrows nothing, so the operator's envelope stands and nothing
-    is widened -- and the gap is on the telemetry. No file at all is the
-    ordinary unconfigured repo: the default stands, silently."""
+    The read runs under the handler's shared read budget, in a helper
+    thread, the way the head-change classification does. A read that
+    fails, a file over the read bound, or an unusable line falls back
+    to the default -- which narrows nothing, so the operator's envelope
+    stands and nothing is widened -- and the gap is on the telemetry.
+    No file at all is the ordinary unconfigured repo: the default
+    stands, silently."""
     started = telemetry.elapsed() if telemetry is not None else 0.0
     raw, gap, timed_out = _call_bounded(
-        reader, event.repo, base_ref(payload), budget_s=_CLASSIFY_BUDGET_S
+        reader,
+        event.repo,
+        default_branch(payload),
+        budget_s=_READ_BUDGET_S,
+        what="admission read",
     )
     if raw is None:
         if gap:
@@ -348,6 +363,7 @@ def _admit_to_queue(
     worker: Worker | None,
     classifier: PushClassifier | None,
     telemetry: Telemetry | None,
+    read_started: float | None = None,
 ) -> HttpResult:
     """Queue an admitted delivery, deciding keep-or-cancel first (#702).
 
@@ -357,7 +373,9 @@ def _admit_to_queue(
     from its events file, and `decide` keeps or cancels. The decision is
     recorded as telemetry either way. Under the `cancel` policy the
     supersede is decided by the queue alone, exactly as before this
-    policy existed."""
+    policy existed. `read_started` is when the handler began its GitHub
+    reads; the classification gets what is left of the one shared read
+    budget after the admission read (round-1 review of #756, Minor 2)."""
     settled: list[Job] = []
     candidate = (
         board.head_change_candidate(decision.event, at=decision.updated_at)
@@ -369,8 +387,13 @@ def _admit_to_queue(
             decision.event, at=decision.updated_at, superseded=settled
         )
     else:
+        budget = (
+            _READ_BUDGET_S - (_monotonic() - read_started)
+            if read_started is not None
+            else _READ_BUDGET_S
+        )
         verdict = _head_change_decision(
-            candidate, decision.event, config, classifier, telemetry
+            candidate, decision.event, config, classifier, telemetry, budget
         )
         if verdict.cancel:
             result = board.enqueue(
@@ -394,22 +417,40 @@ def _head_change_decision(
     config: ServiceConfig,
     classifier: PushClassifier | None,
     telemetry: Telemetry | None,
+    budget_s: float | None = None,
 ) -> Decision:
     """The keep-or-cancel decision for one mid-review push, and its
     telemetry record. A classification failure keeps the review and
-    records the gap; the progress read can only contribute nothing."""
+    records the gap; the progress read can only contribute nothing.
+    ``budget_s`` is what is left of the handler's shared read budget;
+    None means the caller did not bound it and the full budget stands."""
+    budget = _READ_BUDGET_S if budget_s is None else budget_s
     posting = candidate.state is JobState.POSTING
     push: PushClass | None = None
     gap = ""
     timed_out = False
     started = telemetry.elapsed() if telemetry is not None else 0.0
     if not posting and classifier is not None:
-        push, gap, timed_out = _call_bounded(
-            classifier,
-            candidate.event,
-            new_event,
-            budget_s=_CLASSIFY_BUDGET_S,
-        )
+        if budget <= 0:
+            # The admission read spent the handler's shared read budget;
+            # the classification gets none. The keep verdict is the
+            # owner's default, and the spent budget is the named gap, so
+            # a deployment whose reads are slow is visible rather than
+            # silently keep-everything.
+            gap = "the handler's read budget was spent on the admission read"
+        else:
+            push, gap, timed_out = _call_bounded(
+                classifier,
+                candidate.event,
+                new_event,
+                budget_s=budget,
+                what="classification",
+            )
+            if not isinstance(push, PushClass):
+                # The guard the pre-generalization helper carried
+                # (round-1 review of #756, Nit 5): a misbehaving
+                # classifier's answer is unclassifiable, not a verdict.
+                push = None
     elif not posting:
         # No classifier on this deployment -- the App credentials are
         # absent or unusable -- so the push could not be classified and
@@ -1336,7 +1377,7 @@ def serve(
             # delivery then runs on the operator's envelope alone.
             log(
                 "atlas-reviewer: repo admission narrowing is off: the"
-                f" base-ref {REVIEW_MD} will not be read ({admission_reason})"
+                f" default-branch {REVIEW_MD} will not be read ({admission_reason})"
             )
         worker.start()
         log(
@@ -1363,21 +1404,25 @@ def serve(
 
 
 _CLASSIFY_TIMEOUT_S = 5.0
-_CLASSIFY_BUDGET_S = 8.0
-"""The classification's overall budget, inside the webhook handler
-thread (round-2 review of #747, R2-F8): a token mint plus three reads at
-their own 5-second timeouts could hold the handler past GitHub's ~10
-second response window with no bound; past this budget the push is
-unclassifiable -- the owner's keep default, with the gap and the
-`timed_out` flag on the decision's event -- and the handler answers. The
-read still finishes in its background thread and is then simply not
-used."""
+_READ_BUDGET_S = 8.0
+"""The handler's overall read budget, inside the webhook handler thread
+(round-2 review of #747, R2-F8; round-1 review of #756, Minor 2): the
+parent's GitHub reads on one delivery -- the repo admission read and,
+when a review is running, the head-change classification's token mint
+plus three reads at their own 5-second timeouts -- share it, so however
+many reads run they cannot together hold the handler past GitHub's ~10
+second response window. Past the budget a read has no result -- the
+owner's keep default for the classification, the operator envelope for
+the admission read -- with the gap and the `timed_out` flag on the
+decision's event, and the handler answers. The read still finishes in
+its background thread and is then simply not used."""
 
 
 def _call_bounded(
     call: Callable[..., Any],
     *args: Any,
     budget_s: float,
+    what: str = "read",
 ) -> tuple[Any, str, bool]:
     """One parent-side GitHub read under an overall deadline (round-2
     review of #747, R2-F8): the call runs in a helper thread and the
@@ -1385,6 +1430,9 @@ def _call_bounded(
     with the gap set and the ``timed_out`` flag on, so the handler's
     occupancy is bounded and the over-run is visible. The helper thread
     outlives the wait only until its own per-read timeouts end it.
+    ``what`` names the read in the gap, so the classification's gap
+    text stays what it was before the helper was generalized (round-1
+    review of #756, Nit 6).
 
     Returns ``(result, gap, timed_out)``. ``result`` is None on a gap or
     a timeout; a None with an empty gap is the call's own None -- the
@@ -1404,7 +1452,7 @@ def _call_bounded(
     if worker.is_alive():
         return (
             None,
-            f"the read exceeded its {budget_s:.0f}-second budget",
+            f"the {what} exceeded its {budget_s:.0f}-second budget",
             True,
         )
     error = outcome.get("error")
@@ -1420,10 +1468,11 @@ def _call_bounded(
 def _read_client(
     config: ServiceConfig, env: Mapping[str, str]
 ) -> tuple[GitHubClient | None, str]:
-    """The read-only GitHub client the parent's own GitHub readers share
-    -- the head-change classifier and the repo admission reader -- built
-    from the App credentials, scoped to the allowlist's repositories with
-    read permissions only, and the reason there is none.
+    """The read-only GitHub client each of the parent's own GitHub
+    readers builds for itself -- the head-change classifier and the repo
+    admission reader -- from the App credentials, scoped to the
+    allowlist's repositories with read permissions only, and the reason
+    there is none.
 
     The reason is empty when the client is built. A deployment without
     usable credentials gets None plus the reason; each reader names its
@@ -1491,12 +1540,18 @@ def _head_change_classifier(
 def _repo_admission_reader(
     config: ServiceConfig, env: Mapping[str, str]
 ) -> tuple[AdmissionReader | None, str]:
-    """The base-ref ``REVIEW.md`` reader behind the repo's own admission
-    narrowing (config slice S4), built from the same read-only App
-    client the head-change classifier uses, and the reason there is
-    none.
+    """The default-branch ``REVIEW.md`` reader behind the repo's own
+    admission narrowing (config slice S4), a read-only App client built
+    from the same credentials and the same read-only scope the
+    head-change classifier's is, and the reason there is none.
 
-    A repo with no ``REVIEW.md`` on its base ref reads as None -- the
+    The config comes from the **default branch** (round-1 review of
+    #756, Major 1): a same-repo PR's author controls the PR's base
+    branch, and a config read from it would let the author opt their own
+    PR out of review; the default branch changes only through reviewed
+    merges. When the payload does not carry the default branch, one
+    read-only lookup recovers it; a lookup that fails is a gap. A repo
+    with no ``REVIEW.md`` on its default branch reads as None -- the
     ordinary unconfigured repo, the default stands. Any other read
     failure raises and the caller treats it as a gap: the operator's
     envelope stands, and the gap is on the telemetry. The file is read
@@ -1506,13 +1561,25 @@ def _repo_admission_reader(
     if client is None:
         return None, reason
 
-    def read(repo: str, ref: str) -> bytes | None:
+    def read(repo: str, default_branch: str) -> bytes | None:
         try:
+            ref = default_branch or _default_branch_via_api(client, repo)
             return client.get_file(repo, ref, REVIEW_MD, MAX_ADMISSION_BYTES)
         except NotFoundError:
             return None
 
     return read, ""
+
+
+def _default_branch_via_api(client: GitHubClient, repo: str) -> str:
+    """The repository's default branch, recovered with one read-only
+    lookup when the payload's shape did not carry it. A reply without a
+    usable name is a boundary failure -- the gap, not a guess."""
+    repository = client.get_repository(repo)
+    branch = repository.get("default_branch") if isinstance(repository, dict) else None
+    if not isinstance(branch, str) or not branch:
+        raise BoundaryError(f"the repository {repo} has no default branch to read")
+    return branch
 
 
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:

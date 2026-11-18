@@ -3137,7 +3137,7 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
     tmp_path, monkeypatch
 ):
     """The classification's overall budget (round-2 R2-F8): a fetch that
-    runs past `_CLASSIFY_BUDGET_S` is given up on inside the webhook
+    runs past `_READ_BUDGET_S` is given up on inside the webhook
     handler -- the push is unclassifiable (the owner's keep default),
     the gap names the budget, and the `timed_out` flag is on -- so the
     handler's occupancy is bounded. Mutant: the budget wait removed
@@ -3148,7 +3148,7 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
     # Read the shipped budget before the monkeypatch is active (round-3
     # R3-F4): the final assertion must judge the constant that ships,
     # not the patched 0.2 s this test installs.
-    shipped_budget = service_module._CLASSIFY_BUDGET_S
+    shipped_budget = service_module._READ_BUDGET_S
     board = Board(tmp_path / "queue.json")
     config = _config(tmp_path)
     started = threading.Event()
@@ -3167,7 +3167,7 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
     telemetry = Telemetry(SystemClock())
     worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
     worker.start()
-    monkeypatch.setattr(service_module, "_CLASSIFY_BUDGET_S", 0.2)
+    monkeypatch.setattr(service_module, "_READ_BUDGET_S", 0.2)
     try:
         assert (
             _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
@@ -3187,6 +3187,9 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
         assert decisions[0].fields["decision"] == "keep"
         assert decisions[0].fields.get("timed_out") == "1"
         assert "budget" in decisions[0].error
+        # The gap names the classification, the text the pre-generalization
+        # helper carried (round-1 review of #756, Nit 6).
+        assert decisions[0].error.startswith("the classification exceeded")
     finally:
         release.set()
         worker.stop()
@@ -3538,7 +3541,14 @@ def _labeled_body(*labels, base_ref="main", action="opened", sha=SHA_A):
         "labels": [{"name": label} for label in labels],
     }
     return json.dumps(
-        {"action": action, "repository": {"full_name": REPO}, "pull_request": pull}
+        {
+            "action": action,
+            # The default branch differs from the base ref the fixtures
+            # deliver, so a read of the base ref cannot pass for a read
+            # of the default branch (round-1 review of #756, Major 1).
+            "repository": {"full_name": REPO, "default_branch": "trunk"},
+            "pull_request": pull,
+        }
     ).encode()
 
 
@@ -3568,9 +3578,9 @@ def test_a_repo_skip_event_is_ignored_and_logged_not_queued(tmp_path):
     assert result.body == b"ignored\n"
     assert result.detail == "ignored:repo-skip-event"
     assert board.states() == ()
-    # The base ref the file was read from is the payload's base branch,
-    # never the PR head.
-    assert seen == [(REPO, "main")]
+    # The config is read from the repository's default branch, never the
+    # PR head and never the PR's own base branch.
+    assert seen == [(REPO, "trunk")]
     skips = [e for e in telemetry.events if e.step == "review skipped"]
     assert [e.fields["reason"] for e in skips] == ["repo-skip-event"]
     assert [e.fields["pr"] for e in skips] == [7]
@@ -3578,6 +3588,27 @@ def test_a_repo_skip_event_is_ignored_and_logged_not_queued(tmp_path):
     queued = _deliver(config, board, _labeled_body(), admission_reader=reader)
     assert queued.body == b"queued\n"
     assert len(board.states()) == 1
+
+
+def test_the_config_is_read_from_the_default_branch_not_the_base_ref(tmp_path):
+    """Major 1 (round-1 review of #756): a same-repo PR's author controls
+    its base branch, so reading the config from it would let the author
+    opt their own PR out of review. The delivery's base ref here differs
+    from the repository's default branch, so a mutant that reads the
+    base ref dies on the pin."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    seen: list[tuple[str, str]] = []
+    reader = _admission_reader("review_base_include: main\n", seen)
+    result = _deliver(
+        config,
+        board,
+        _labeled_body(base_ref="feature/x"),
+        admission_reader=reader,
+    )
+    assert seen == [(REPO, "trunk")]
+    assert result.detail == "ignored:repo-base-branch"
+    assert board.states() == ()
 
 
 def test_a_label_rule_cannot_narrow_and_the_envelope_stands(tmp_path):
@@ -3709,10 +3740,65 @@ def test_the_admission_reader_reads_one_bounded_file(tmp_path, monkeypatch):
         )
         reader, reason = service_module._repo_admission_reader(_config(tmp_path), {})
         assert reason == ""
-        # The file is the base-ref REVIEW.md under the shipped read bound.
+        # The file is the default-branch REVIEW.md under the shipped read bound.
         assert reader("o/r", "main") is expected
         assert calls[-1] == ("o/r", "main", REVIEW_MD, MAX_ADMISSION_BYTES)
         assert calls[-1][3] == 64 * 1024
+
+
+def test_the_admission_reader_recovers_an_unnamed_default_branch(tmp_path, monkeypatch):
+    """Major 1's fallback (round-1 review of #756): a payload shape that
+    does not carry the default branch is recovered with one read-only
+    lookup; a lookup that fails is the ordinary no-config repo, and a
+    reply without a usable name is the gap, not a guess."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.ports import BoundaryError, NotFoundError
+    from atlas_reviewer.service_admit import MAX_ADMISSION_BYTES, REVIEW_MD
+
+    calls: list[tuple[object, ...]] = []
+
+    class _Client:
+        def __init__(self, repo_json, file_result=b"config"):
+            self.repo_json = repo_json
+            self.file_result = file_result
+
+        def get_repository(self, repo):
+            calls.append(("repo", repo))
+            if self.repo_json is None:
+                raise NotFoundError("GitHub 404")
+            return self.repo_json
+
+        def get_file(self, repo, ref, path, max_bytes):
+            calls.append(("file", repo, ref, path, max_bytes))
+            return self.file_result
+
+    found = _Client({"default_branch": "trunk"})
+    monkeypatch.setattr(service_module, "_read_client", lambda config, env: (found, ""))
+    reader, _ = service_module._repo_admission_reader(_config(tmp_path), {})
+    assert reader("o/r", "") == b"config"
+    assert calls[-2:] == [
+        ("repo", "o/r"),
+        ("file", "o/r", "trunk", REVIEW_MD, MAX_ADMISSION_BYTES),
+    ]
+    # A payload that names the branch reads no lookup at all.
+    calls.clear()
+    assert reader("o/r", "main") == b"config"
+    assert calls == [("file", "o/r", "main", REVIEW_MD, MAX_ADMISSION_BYTES)]
+    # A lookup that 404s is the ordinary unconfigured repo, silently.
+    missing = _Client(None)
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (missing, "")
+    )
+    reader, _ = service_module._repo_admission_reader(_config(tmp_path), {})
+    assert reader("o/r", "") is None
+    # A reply without a usable default branch is the gap, not a guess.
+    nameless = _Client({})
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (nameless, "")
+    )
+    reader, _ = service_module._repo_admission_reader(_config(tmp_path), {})
+    with pytest.raises(BoundaryError):
+        reader("o/r", "")
 
 
 def test_the_operator_log_line_carries_a_skip_reason():
@@ -3738,3 +3824,96 @@ def test_the_operator_log_line_carries_a_skip_reason():
     assert len(lines) == 1
     assert "review skipped" in lines[0]
     assert "reason=repo-skip-event" in lines[0]
+
+
+def test_the_admission_read_shares_the_handlers_read_budget(tmp_path, monkeypatch):
+    """Minor 2 (round-1 review of #756): the admission read and the
+    head-change classification share one handler read budget, so the two
+    together cannot hold the handler for two full budgets. An admission
+    read that spends the budget leaves the classification none: the keep
+    verdict is the owner's default and the spent budget is the named
+    gap. Mutant: a second full budget for the classification would run
+    it and record the classification's own timeout text instead."""
+    import atlas_reviewer.service as service_module
+
+    shipped_budget = service_module._READ_BUDGET_S
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def slow_read(repo: str, ref: str):
+        time.sleep(0.5)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    monkeypatch.setattr(service_module, "_READ_BUDGET_S", 0.2)
+    try:
+        assert _deliver(config, board, _labeled_body()).body == b"queued\n"
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+            admission_reader=slow_read,
+            classifier=lambda running, new: _code_push(running, new),
+            telemetry=telemetry,
+        )
+        # The spent budget is the keep default, flagged as the gap.
+        assert result.body == b"kept\n"
+        decisions = [e for e in telemetry.events if e.step == "head change"]
+        assert decisions[0].fields["decision"] == "keep"
+        assert "spent on the admission read" in decisions[0].error
+    finally:
+        release.set()
+        worker.stop()
+    # The shared budget is the shipped constant, read before this test's
+    # monkeypatch was active, small enough to sit inside GitHub's
+    # response window even with both reads stacked.
+    assert shipped_budget <= 10.0
+
+
+def test_a_misbehaving_classifier_is_unclassifiable_not_a_crash(tmp_path):
+    """Nit 5 (round-1 review of #756): the generalized read helper no
+    longer type-checks its result, so the classification call site
+    carries the guard the pre-generalization helper had -- a classifier
+    whose answer is not a PushClass is unclassifiable (the keep
+    default), never a verdict and never a handler crash."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert _deliver(config, board, _body()).body == b"queued\n"
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+            classifier=lambda running, new: "not a push class",
+            telemetry=telemetry,
+        )
+        assert result.body == b"kept\n"
+        decisions = [e for e in telemetry.events if e.step == "head change"]
+        assert decisions[0].fields["decision"] == "keep"
+        assert "kind" not in decisions[0].fields
+    finally:
+        release.set()
+        worker.stop()

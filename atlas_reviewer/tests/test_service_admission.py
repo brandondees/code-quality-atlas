@@ -192,3 +192,31 @@ def test_narrowing_json_payload_round_trips_through_a_real_delivery_shape():
     )
     admission = parse_repo_admission("review_base_exclude: main\n")
     assert narrow(json.loads(body), admission).reason == BASE_BRANCH_REASON
+
+
+def test_a_leading_byte_order_mark_is_not_prose():
+    """A UTF-8 BOM before the first key line must not silence it: the
+    line still parses, or a still-unusable one is still named, the
+    distinguishability the unusable-line pattern promises."""
+    bom = "﻿"
+    parsed = parse_repo_admission(f"{bom}review_base_include: main\n")
+    assert parsed.base_include == ("main",)
+    assert parsed.notes == ()
+    unusable = parse_repo_admission(f"{bom}review_base_include:\n")
+    assert unusable.base_include == ()
+    assert len(unusable.notes) == 1
+    assert "review_base_include" in unusable.notes[0]
+
+
+def test_the_default_branch_comes_from_the_repository_object():
+    """The config's source branch is the repository's default branch,
+    from the payload's repository object; a shape without one is empty
+    and the reader recovers it with a lookup."""
+    from atlas_reviewer.service_admit import default_branch
+
+    payload = _payload()
+    payload["repository"] = {"full_name": "o/r", "default_branch": "trunk"}
+    assert default_branch(payload) == "trunk"
+    del payload["repository"]["default_branch"]
+    assert default_branch(payload) == ""
+    assert default_branch({}) == ""

@@ -26,15 +26,21 @@ ACCEPTED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
 # The repo-narrowed admission surface (config slice S4 of the
 # user-configuration plan): a repo may narrow when the service reviews
 # it -- base-branch include/exclude, and which of the three accepted
-# events to skip -- via lines in its base-ref
-# ``REVIEW.md``, read from the base ref the payload names, never the PR
-# head, so a PR cannot move its own admission. A repo may only narrow
-# the operator's admission envelope (non-draft, those three events, the
-# allowlisted repos), never widen it: every check below can only remove
-# a review, and a value that is unusable falls back to the default --
-# no narrowing of that kind -- with a named note. The parse and the
-# narrowing are local and minimal here so the shared config parser
-# (slice S1) can absorb them later.
+# events to skip -- via lines in the ``REVIEW.md`` on its **default
+# branch**, read from the default branch the payload names (one
+# read-only lookup recovers it when the payload omits it), never the PR
+# head or the PR's own base branch: in a same-repo or stacked PR the
+# author controls both of those, and the default branch changes only
+# through reviewed merges, so a PR cannot move its own admission. The
+# include/exclude match still runs against the delivery's base branch --
+# which the author chose -- but the patterns it matches come from the
+# default branch. A repo may only narrow the operator's admission
+# envelope (non-draft, those three events, the allowlisted repos), never
+# widen it: every check below can only remove a review, and a value
+# that is unusable falls back to the default -- no narrowing of that
+# kind -- with a named note. The parse and the narrowing are local and
+# minimal here so the shared config parser (slice S1) can absorb them
+# later.
 SIGNATURE_HEADER = "X-Hub-Signature-256"
 EVENT_HEADER = "X-GitHub-Event"
 _SHA256_PREFIX = "sha256="
@@ -138,7 +144,7 @@ REVIEW_MD = "REVIEW.md"
 # this slice stands alone; slice S1 absorbs both.
 MAX_ADMISSION_BYTES = 64 * 1024
 
-# The base-ref ``REVIEW.md`` lines a repo narrows admission with. Each
+# The default-branch ``REVIEW.md`` lines a repo narrows admission with. Each
 # value is a comma-separated list, one line per key, running to a ``#``
 # comment or the end of the line -- the same value grammar the file's
 # review-side settings use.
@@ -174,17 +180,19 @@ _BRANCH_PATTERN = re.compile(r"[A-Za-z0-9._/-]+\*?")
 SKIP_EVENT_REASON = "repo-skip-event"
 BASE_BRANCH_REASON = "repo-base-branch"
 
-# The base-ref ``REVIEW.md`` reader behind the narrowing: given the
-# reviewed repo and the base ref the payload names, the file's bytes, or
-# None when there is no file there. Any other failure raises; the
-# caller treats a raise as a gap and stands on the operator's envelope.
+# The default-branch ``REVIEW.md`` reader behind the narrowing: given
+# the reviewed repo and the default branch to read (empty when the
+# payload did not name one, in which case the reader recovers it with
+# one read-only lookup), the file's bytes, or None when there is no
+# file there. Any other failure raises; the caller treats a raise as a
+# gap and stands on the operator's envelope.
 AdmissionReader = Callable[[str, str], bytes | None]
 
 
 @dataclass(frozen=True)
 class RepoAdmission:
-    """A repo's own narrowing of when it is reviewed, parsed from its
-    base-ref ``REVIEW.md``.
+    """A repo's own narrowing of when it is reviewed, parsed from the
+    ``REVIEW.md`` on its default branch.
 
     ``base_include`` is the base branches review is for, ``base_exclude``
     the ones it is not -- exclude wins; ``skip_events`` the accepted
@@ -213,13 +221,15 @@ def parse_repo_admission(text: str | None) -> RepoAdmission:
     appears twice -- falls back to that key's default, which narrows
     nothing, and is named in ``notes``. A key's default can only narrow
     less than what was written, so fail-open here cannot widen the
-    operator's envelope."""
+    operator's envelope. A leading byte-order mark is not prose: it is
+    stripped before the first line is read, so a BOM'd first key line
+    still parses or is still named, not silently swallowed."""
     if text is None:
         return NO_NARROWING
     values: dict[str, tuple[str, ...]] = {}
     unusable: set[str] = set()
     notes: list[str] = []
-    for line in text.splitlines():
+    for line in text.removeprefix("\ufeff").splitlines():
         found = _matching_key(line)
         if found is None:
             continue
@@ -258,7 +268,7 @@ def _matching_key(line: str) -> tuple[str, str | None] | None:
 
 def _unusable_note(key: str) -> str:
     return (
-        f"the reviewed repo's base-ref {REVIEW_MD} carries a {key}: line "
+        f"the reviewed repo's default-branch {REVIEW_MD} carries a {key}: line "
         "that is present but not usable; it is ignored and the default "
         f"(no {key.removeprefix('review_').replace('_', ' ')}) stands"
     )
@@ -292,9 +302,12 @@ def narrow(payload: Mapping[str, Any], admission: RepoAdmission) -> Ignored | No
     None when the delivery stays admitted.
 
     The checks run in a fixed order -- skip event, base branch -- and
-    the first hit wins. Every check can only remove a review, and every
-    input is one the PR author cannot control: a base ref the shape does
-    not carry matches nothing."""
+    the first hit wins. Every check can only remove a review. The
+    patterns come from the default branch, which changes only through
+    reviewed merges; what they match is the delivery's base branch,
+    which the author chose but cannot rewrite -- the config source, not
+    the match target, is what keeps the author from opting out. A base
+    ref the shape does not carry matches nothing."""
     action = payload.get("action")
     if isinstance(action, str) and action in admission.skip_events:
         return Ignored(SKIP_EVENT_REASON)
@@ -308,11 +321,22 @@ def narrow(payload: Mapping[str, Any], admission: RepoAdmission) -> Ignored | No
 
 def base_ref(payload: Mapping[str, Any]) -> str:
     """The pull request's base branch name from the payload, the empty
-    string when the shape does not carry one."""
+    string when the shape does not carry one. The match target for the
+    include/exclude patterns, never the config's source ref."""
     pull = payload.get("pull_request")
     base = pull.get("base") if isinstance(pull, dict) else None
     ref = base.get("ref") if isinstance(base, dict) else None
     return ref if isinstance(ref, str) else ""
+
+
+def default_branch(payload: Mapping[str, Any]) -> str:
+    """The repository's default branch name from the payload, the empty
+    string when the shape does not carry one -- the caller recovers an
+    empty one with a read-only lookup, because the config is read from
+    this branch, never from one the PR author controls."""
+    repository = payload.get("repository")
+    branch = repository.get("default_branch") if isinstance(repository, dict) else None
+    return branch if isinstance(branch, str) and branch else ""
 
 
 def _matches(name: str, patterns: tuple[str, ...]) -> bool:

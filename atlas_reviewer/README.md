@@ -74,9 +74,12 @@ posted — unless the head-change policy below decides to keep it.
 ### A repo's own narrowing of when it is reviewed
 
 A repository may narrow — never widen — when the service reviews it, with
-lines in its `REVIEW.md` read from the **base ref** the delivery names
-(the pull request's base branch, never the PR head, so a PR cannot move
-its own admission). The keys:
+lines in its `REVIEW.md` read from the **default branch** — the branch
+that changes only through reviewed merges, so a PR cannot move its own
+admission. The PR's own base branch and the PR head are never read for
+this: in a same-repo or stacked pull request the author controls both,
+and a config read from either would let the author opt their own PR out
+of review (round-1 review of #756, Major 1). The keys:
 
 ```text
 review_base_include: <branch>[, <branch>...]    # only PRs targeting these base branches are reviewed
@@ -88,7 +91,13 @@ Every key is one line whose value is a comma-separated list, running to a
 `#` comment or the end of the line, the same value grammar the file's
 review-side settings use. A branch entry may end with one `*`, which
 matches any branch with the prefix before it (`release*` matches
-`release-1`); no other glob character is read. These are this schema's
+`release-1`); no other glob character is read. Two consequences of that
+grammar: a branch name containing `#` or `,` — both legal in git ref
+names — cannot be expressed (the text from there on reads as a comment
+or the next entry, which can only match differently, never wider than
+the operator envelope), and a leading byte-order mark is not prose — it
+is stripped, so a BOM'd first key line still parses or is still named.
+These are this schema's
 own bounds, not GitHub's: an entry is at most 64 characters, a line
 carries at most 32 entries, and a `review_skip_events:` entry must be one
 of the three accepted event names.
@@ -96,14 +105,26 @@ of the three accepted event names.
 Narrowing runs after the operator's envelope has passed — the delivery is
 a non-draft `pull_request` event of the three accepted kinds on an
 allowlisted repo — and the checks run in a fixed order: skip event, then
-the base branch (an include list the base ref does not match, or an
-exclude match, skips it; exclude wins). A skipped delivery is recorded on
+the base branch (an include list the delivery's base branch does not
+match, or an exclude match, skips it; exclude wins). The patterns come
+from the default branch; what they match is the delivery's base branch,
+which the author chose but cannot rewrite — the config's source, not the
+match target, is what keeps an author from opting out. A skipped delivery is recorded on
 the `review skipped` telemetry event with its fixed reason — carried on
 the operator log line too — and nothing is queued or posted for it: a
 skip acts on the delivery only, and neither cancels a review already
 running nor supersedes a queued one, which finish under the envelope they
 were admitted under. The skip is a log record, not a comment; the service
 posts nothing for a PR it did not review.
+
+**A base retarget is a gap, not a covered case.** A PR opened against an
+excluded (or unlisted) base branch and then retargeted to an included one
+is not re-evaluated: the retarget arrives as an `edited` event with
+`changes.base`, which is outside the operator's three-event envelope, and
+admitting it would widen the operator's event set — an operator decision,
+not a repo-config one. Until the operator widens the envelope, such a PR
+can reach a mergeable state without a review; the gap is recorded here
+rather than silently assumed away.
 
 There are deliberately no label-based or head-branch-based filters: the
 PR author controls both, so a skip rule matching either would let an
@@ -117,18 +138,25 @@ but not usable — no value, an entry outside its key's grammar, more
 entries than the cap, or a key that appears twice — falls back to that
 key's default, which narrows nothing, and is named on a `repo admission`
 telemetry event. The file is read under the same 64 KiB bound the
-review's merge-base copy is. A repository with no `REVIEW.md` on its base
-ref is the ordinary unconfigured case: the operator's envelope stands,
-silently. A read that fails — credentials unusable, a fetch past its
-budget, a file over the read bound — also stands on the operator's
+review's merge-base copy is. A repository with no `REVIEW.md` on its
+default branch is the ordinary unconfigured case: the operator's envelope
+stands, silently. A read that fails — credentials unusable, a fetch past
+its budget, a file over the read bound — also stands on the operator's
 envelope, with the gap on a `repo admission` event, because narrowing
-only ever removes reviews and a missing read widens nothing. A deployment
+only ever removes reviews and a missing read widens nothing. When the
+payload does not carry the default branch's name, one read-only lookup
+(`github_api.get_repository`) recovers it, and a lookup that fails is
+that gap. A deployment
 whose App credentials are absent or unusable has no admission reader at
 all; its boot log says so once, and every delivery runs on the envelope
-alone. The narrowing needs the same read-only App client the head-change
-classifier uses (`github_api.get_file`); like the classification, the
-read runs in a helper thread under one overall budget so the handler's
-occupancy stays inside GitHub's response window.
+alone. The narrowing uses a read-only App client
+built from the same credentials and the same read-only scope as the
+head-change classifier's (`github_api.get_file`); like the
+classification, the
+read runs in a helper thread, and **all** of the handler's GitHub reads
+on one delivery — the admission read and, when a review is running, the
+classification — share one overall read budget, so however many run they
+cannot together hold the handler past GitHub's response window.
 
 Only these three keys are read at admission. The file's review-side
 settings (`review_ceiling_usd:`, `review_lens_include:`,
@@ -1747,13 +1775,13 @@ D41 records the 2026-11-12 probe that did.
 | `local_runner.py` | the dry-run runner: `LocalSprites` runs each exec's wrapper locally (the same class the bridge and lens-loop tests use) and `LocalTasks` answers the keepalive hold on a unix socket | subprocesses, a local socket |
 | `lens_script.py` | the dry-run lens script: the scripted reviewer's fixed reading behavior and the JSON scenarios the fixture ships | reads the script file |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
-| `service_admit.py` | webhook signature, event and allowlist admission; the repo-narrowed admission config (config slice S4): the base-ref `REVIEW.md` narrowing lines parsed bounded and fail-open with named notes, and the pure narrowing of an admitted delivery — skip events and base-branch include/exclude, the inputs a PR author cannot control — that can only remove a review, never widen the operator's envelope | no |
+| `service_admit.py` | webhook signature, event and allowlist admission; the repo-narrowed admission config (config slice S4): the default-branch `REVIEW.md` narrowing lines parsed bounded and fail-open with named notes, and the pure narrowing of an admitted delivery — skip events and base-branch include/exclude — that can only remove a review, never widen the operator's envelope | no |
 | `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
 | `delta.py` | the delta review a kept head's follow-up runs (#702): the delta scope, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |
 | `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74) | the review child |
 | `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
-| `service.py` | webhook HTTP server and the review worker; after the operator's envelope passes, reads the repo's base-ref `REVIEW.md` (the payload's base branch, never the PR head) through the shared read-only App client and applies the repo's own narrowing, logging every skip with its reason and every failed or unusable read as a recorded gap | network |
+| `service.py` | webhook HTTP server and the review worker; after the operator's envelope passes, reads the repo's default-branch `REVIEW.md` (the branch that changes only through reviewed merges, never the PR head or the PR's own base branch) through a read-only App client built from the same credentials as the head-change classifier's, and applies the repo's own narrowing, logging every skip with its reason and every failed or unusable read as a recorded gap; the handler's GitHub reads share one overall budget | network |
 
 ## Trust boundaries
 

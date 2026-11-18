@@ -176,6 +176,9 @@ class GitHubClient:
     def get_tarball(self, repo: str, sha: str) -> bytes:
         return self._get(f"/repos/{repo}/tarball/{sha}")
 
+    def get_repository(self, repo: str) -> Json:
+        return self._json(f"/repos/{repo}")
+
     def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
         """One file's raw contents at a ref. ``ref`` may be a branch
         name, so it is percent-encoded. A missing file is a
