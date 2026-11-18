@@ -12,7 +12,10 @@ BYOK requirement — "I need the github app to allow individuals or orgs to
 supply their own api endpoints and keys" — carried below as §2's BYOK
 paragraph, §3's two BYOK rows, §4's two new bullets, slice **S10**, and
 §7's decisions, recorded when Brandon accepted all nine recommendations
-(4:15 PM CT). Nothing
+(4:15 PM CT). **Added in the later fix rounds:** the BYOK-bounds mechanism
+(§4's operator-side accounting) and the tier-coverage correction (§4's
+merge-base bullet) are folded in; **§8** carries the two questions they
+raised for Brandon, with nothing there decided. Nothing
 in this plan was run live: no model call, no
 GitHub write, no Fly or secret change, no deployed setting touched.
 
@@ -252,8 +255,18 @@ live in §7; the slice is S10.
     merge-base carry it. The exposure is bounded, not zero — the ceiling
     raise is clamped by S9's operator max (and a lowered ceiling only
     cheapens the author's own review), and the lens lists can never widen
-    the depth mode or touch the critical tier, so the strongest lenses
-    (the floor-tier set) cannot be excluded away. The migration of these
+    the depth mode or touch the **critical tier** — the four lenses
+    `picker.py`'s `CRITICAL_TIER` protects from `review_lens_exclude:`
+    (tracing-correctness-and-invariants, sweeping-for-security,
+    reviewing-migration-and-data-safety, reviewing-concurrency-and-async)
+    — so those four cannot be excluded away. The manifest's **floor tier is
+    one larger**: it adds `hunting-silent-failures`, and the merge-base
+    lens preference **can** exclude it today, because the preference
+    application protects only the critical tier. Which set the
+    configuration surface protects — the picker's critical four, or the
+    manifest's five-lens floor tier — would change D69's recorded
+    behavior, so it is an open question for Brandon (§8 Q2), not decided
+    here. The migration of these
     two reads to the default branch is the safer end-state and is a
     candidate follow-up; until then their author-influence is stated here
     rather than claimed away.
@@ -331,6 +344,26 @@ live in §7; the slice is S10.
   `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the shared key's
   *total* credit limit, not a per-repo bound — which is exactly why the
   per-tenant bounds exist alongside it.
+- **BYOK bounds are computed on the operator side.** §7's decision 4 keeps
+  both spend bounds applying to a BYOK review, and the mechanism that makes
+  that hold: the BYOK spend a bound counts is **token counts × the
+  operator's price table** — §7's decision 6 already refuses models with no
+  price-table entry, so every allowed model has one. The provider's
+  self-reported `usage.cost` is **never trusted for a bound**: it is the
+  tenant's endpoint reporting its own bill, and a tenant-reported number
+  cannot bound operator-paid load. A reply whose token counts are missing
+  reserves the worst case and fails closed, the way D82's reservation
+  accounting does (#757). The **load the operator pays for regardless of
+  whose key pays the model** — compute, Sprites, the model-independent work
+  — is bounded per repo on the operator side, independent of the tenant's
+  key, by the existing controls counted in operator terms: the per-review
+  limits (D68's derived call caps and walls), the service's concurrency cap
+  (`ATLAS_REVIEW_CONCURRENCY`, 1–32), and S9's per-repo daily budget, whose
+  running total counts operator-priced spend even when the model bill goes
+  to the installation's key. What no existing control bounds is a
+  **per-installation total across its repos** — an installation holding
+  many repos multiplies the per-repo bound — and that limit is not S9's;
+  it is §8 Q1, an open question for Brandon, not decided here.
 - **BYOK keys are never repo content.** The intake surface is
   operator-hosted (the decided path: a settings page authenticated as the
   installation's admin via GitHub — §7's decision 1), never `REVIEW.md`, never a repo
@@ -378,7 +411,7 @@ live in §7; the slice is S10.
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | — | **deferred by D81** (Q4: repo-level only — amended for credentials only by §7's decision 9, which is S10's store, not a general defaults store; Q7: quiet hours deferred) | deferred |
 | S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | a repo-raised ceiling cannot pass the operator max and the clamp is named; a repo over its daily budget is refused with the plain record and never a clean-looking post; **two distinct owner/repo pairs never share a spend file** (the percent-encoding of §4); the bounded overshoot is pinned by a test (concurrent admissions over-commit by at most the in-flight reviews × the operator max); the total survives a restart and resets at the UTC boundary | **rebase-check against #757 (D82)** — its file list includes `budget.py`, which S9's daily-total accounting edits; follows S1 (the operator max is a config-bounded value) and S4 (the refusal rides its admission surface, already in flight at #756) | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
-| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; no silent operator-key fallback | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
+| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; no silent operator-key fallback; **the BYOK bounds are operator-side** — the counted spend is token counts × the operator's price table, never the provider's self-reported `usage.cost`, and a reply missing token counts reserves the worst case and fails closed (the D82 way, #757); the operator-paid load is bounded per repo by the per-review limits, the concurrency cap and the S9 daily budget counted in operator terms; tests pin each (a self-reported cost cannot satisfy a bound; a token-less reply fails closed) | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope; the per-installation operator-load bound is §8 Q1, pending |
 
 Recommended order: S4 is already in flight at #756 (its retarget
 follow-up is issue #758), then S1 (concurrent with the parity track), then S3 and S5, then S9
@@ -459,7 +492,11 @@ proposed, are recorded in D81:
 4. **Spend bounds on BYOK reviews.** Both per-tenant bounds apply to the
    installation's own key — they protect the user's money and the service's
    load — with the installation able to lower them and the operator max as
-   the outer bound; `ATLAS_KEY_CEILING_USD` stays operator-key only.
+   the outer bound; `ATLAS_KEY_CEILING_USD` stays operator-key only. The
+   mechanism that makes this hold is §4's operator-side accounting: bounds
+   count token × price-table figures, never the tenant endpoint's
+   self-reported `usage.cost`; the per-installation operator-load gap is
+   §8 Q1, pending.
 5. **Model choice.** A BYOK installation may choose the model its reviews
    run on, within what its own endpoint serves; D68's budget shape stays.
 6. **Unknown pricing.** Models with no price-table entry are refused — the
@@ -474,3 +511,25 @@ proposed, are recorded in D81:
 9. **Installation-level storage (the Q4 conflict).** Q4 is **amended
    narrowly**: installation-level state for *credentials only*; review
    configuration stays repo-level.
+
+## 8. Open questions (pending — for Brandon; nothing here is decided)
+
+1. **The per-installation operator-load bound.** The existing controls (the
+   per-review limits, `ATLAS_REVIEW_CONCURRENCY`, S9's per-repo daily
+   budget in operator terms) bound operator-paid load per review and per
+   repo, but no existing control bounds a **per-installation total across
+   its repos** — an installation holding many repos multiplies the per-repo
+   bound. Recommended default: add a per-installation daily operator-cost
+   cap (proposed name `ATLAS_INSTALLATION_DAILY_USD`), counted in operator
+   terms exactly as S9's budget is, with its number pending Brandon's —
+   the same working-default treatment S9's bounds carry. **Not decided
+   here.**
+2. **Which tier the merge-base lens preference protects.** Today the
+   picker's `review_lens_exclude:` cannot remove the four `CRITICAL_TIER`
+   lenses, but the manifest's floor tier is one larger — it adds
+   `hunting-silent-failures`, which a merge-base `review_lens_exclude:`
+   **can** remove (§4 states this). Extending the protection to the whole
+   floor tier would change D69's recorded behavior, so it is Brandon's
+   call. Recommended default: keep D69's behavior as recorded (the
+   critical four protected) and treat the fifth lens's excludeability as a
+   named limitation until he decides. **Not decided here.**
