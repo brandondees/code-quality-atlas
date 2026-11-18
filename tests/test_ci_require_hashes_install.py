@@ -51,7 +51,7 @@ def test_require_hashes_install_exists_and_ignores_installed():
     assert "--ignore-installed" in run, (
         "the --require-hashes install no longer passes --ignore-installed. "
         "Without it, a pin already satisfied by the hosted image's own "
-        "tool-cache interpreter reports \"Requirement already satisfied\" "
+        'tool-cache interpreter reports "Requirement already satisfied" '
         "and skips its hash check -- the #366 failure mode, triggered by an "
         "image refresh rather than cross-job accumulation."
     )
