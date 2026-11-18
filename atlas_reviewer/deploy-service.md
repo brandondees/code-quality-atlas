@@ -279,9 +279,12 @@ review to settle) and a per-job `delta_from` (the delta review's base),
 which a release from before #702 ignores: a downgrade strands a kept
 head — its record is unread by the older release, and a redelivery of
 that head is answered duplicate, so it is never reviewed. Before
-downgrading, stop the service and let it drain (the boot log's
-`pending follow-ups N` count, and `service.jsonl`'s `follow-up queued`
-events, are the observables); a pending head recovered by the running
+downgrading, stop the service and let it drain (the queue file's
+`pending` key is the exact observable, and `service.jsonl`'s
+`follow-up queued` events the live signal; the boot log's
+`pending follow-ups N` count is taken once at boot, after the recovery
+pass has already installed the heads it could, and does not track the
+drain). A pending head recovered by the running
 release is an ordinary queued job the older release understands.
 
 ## Tear down

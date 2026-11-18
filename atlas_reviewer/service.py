@@ -350,6 +350,12 @@ def _head_change_decision(
         if posting
         else read_progress(*_progress_paths(config.state_dir, candidate.event))
     )
+    if not posting and candidate.state is JobState.POSTING:
+        # The snapshot was taken before the <=8s classification window;
+        # the review crossed into posting during it. Re-read rather than
+        # decide on the stale snapshot, so the recorded verdict and the
+        # action the caller takes agree (round-3 review of #747, R3-F5).
+        posting = True
     verdict = decide(push, progress, config.cancel_fraction, posting=posting)
     _record(
         telemetry,
@@ -529,10 +535,11 @@ class Worker:
 
     def _recover(self) -> None:
         """Queue a pending head whose pull request has no active job
-        (round-1 review of #747, F7): the crash window between a review's
-        ``finish`` persisting and ``take_pending`` running, the
-        materializing save's failure window, and a full queue at
-        materialize time can all strand one, and a redelivery of that
+        (round-1 review of #747, F7): the crash window inside a review's
+        ``settle`` -- the one lock and save that stores the review's
+        terminal state and installs its follow-up together -- a failed
+        settle save, and a full queue at settle time can all strand one,
+        and a redelivery of that
         head is answered duplicate, so without the recovery it is never
         reviewed. Runs on every worker pass; it installs only when there
         is something to install."""
@@ -846,21 +853,6 @@ class Worker:
         if follow_up is not None:
             self._telemetry.record("service", "follow-up queued", _fields(follow_up))
         return committed
-
-    def _materialize(self, job: Job, succeeded: bool) -> None:
-        """Queue the head the keep side of the decision held back (#702).
-
-        A kept head waits for exactly this: the review that was running
-        when its push landed has now settled. A success queues the head
-        as a delta review building on the head that just finished; a
-        failure queues it as an ordinary review, because there is no
-        finished review to build on. Nothing here supersedes anything --
-        the finished job is terminal, so the pending head takes its
-        slot."""
-        event = self._board.take_pending(job.event, succeeded=succeeded)
-        if event is None:
-            return
-        self._telemetry.record("service", "follow-up queued", _fields(event))
 
     def _stored_supersede(self, job: Job, stored: JobState | None) -> None:
         """The Board settled a supersede the worker had not seen yet.
@@ -1371,7 +1363,7 @@ def _head_change_classifier(
         client = GitHubClient(UrllibTransport(), tokens, timeout_s=_CLASSIFY_TIMEOUT_S)
     except (ValueError, BoundaryError) as exc:
         return None, f"the head-change classifier could not be built: {exc}"
-    return lambda running, new: classify_delivery(client, new, running), ""
+    return lambda running, new: classify_delivery(client, running, new), ""
 
 
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:

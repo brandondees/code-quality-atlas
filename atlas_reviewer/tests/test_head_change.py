@@ -468,7 +468,7 @@ def test_the_range_is_classified_from_three_reads():
         _compare([_merge(OLD, BASE)], ["src/x.py"], OLD),
         {"merge_base_commit": {"sha": BASE}},
     )
-    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    push = classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
     assert push.kind is PushKind.MERGE_ONLY
     assert github.calls == [
         ("get_pull", "o/r", "7"),
@@ -482,7 +482,7 @@ def test_a_diverged_history_reads_as_code_without_the_base_read():
         _pull(),
         _compare([_commit(NEW)], ["src/x.py"], BASE),
     )
-    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    push = classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
     assert push.kind is PushKind.CODE
     assert len(github.calls) == 2
 
@@ -498,7 +498,7 @@ def test_a_comparison_without_a_merge_base_reads_as_diverged():
         {"commits": [], "files": []},
         {"merge_base_commit": {"sha": BASE}},
     )
-    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    push = classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
     assert push.kind is PushKind.CODE
     assert len(github.calls) == 2
 
@@ -506,7 +506,7 @@ def test_a_comparison_without_a_merge_base_reads_as_diverged():
 def test_a_pull_without_a_base_ref_is_a_boundary_error():
     github = _FakeGitHub({})
     with pytest.raises(BoundaryError):
-        classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+        classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
 
 
 def test_a_comparison_without_a_files_array_is_refused_not_vacuous():
@@ -517,7 +517,7 @@ def test_a_comparison_without_a_files_array_is_refused_not_vacuous():
     classify a code push as docs-only here."""
     github = _FakeGitHub(_pull(), {"merge_base_commit": {"sha": OLD}, "commits": []})
     with pytest.raises(BoundaryError):
-        classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+        classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
 
 
 def test_a_file_list_at_the_comparison_cap_reads_as_code():
@@ -534,14 +534,14 @@ def test_a_file_list_at_the_comparison_cap_reads_as_code():
         },
         {"merge_base_commit": {"sha": OLD}},
     )
-    push = classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+    push = classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
     assert push.kind is PushKind.CODE
 
 
 def test_a_failed_read_propagates_to_the_caller():
     github = _FakeGitHub(NotFoundError("gone"))
     with pytest.raises(NotFoundError):
-        classify_delivery(github, PrEvent("o/r", 7, NEW), PrEvent("o/r", 7, OLD))
+        classify_delivery(github, PrEvent("o/r", 7, OLD), PrEvent("o/r", 7, NEW))
 
 
 # --------------------------------------------------------- the environment

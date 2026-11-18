@@ -3339,7 +3339,8 @@ its run's events file after every settled lens and once when its lens
 loop ends — lenses settled of the planned count, spend against the
 derived reservation, the paths still being read), and how early the
 review is (`ATLAS_HEAD_CHANGE_CANCEL_FRACTION`, default 0.5, early on
-early on both the lens and the spend fractions (round-1 F1 corrected the first wording's either-measure reading)). A kept head is recorded as the
+both the lens and the spend fractions; round-1 F1 corrected the first
+wording's either-measure reading). A kept head is recorded as the
 pull request's pending follow-up in the queue file — never holding an
 active slot — and materializes when the running review settles: a
 success queues it as a delta review (`PrEvent.delta_from`, the second

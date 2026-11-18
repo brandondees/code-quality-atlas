@@ -454,6 +454,12 @@ def test_module_entry_point_runs_offline(tmp_path):
             json.dumps({"repo": None, "pr_number": 1, "head_sha": [1]}),
             "invalid event",
         ),
+        (
+            json.dumps(
+                {"repo": "o/r", "pr_number": 1, "head_sha": HEAD, "delta_from": "abc"}
+            ),
+            "invalid event",
+        ),
     ],
 )
 def test_bad_event_files_are_usage_errors(tmp_path, payload, message):
@@ -464,6 +470,19 @@ def test_bad_event_files_are_usage_errors(tmp_path, payload, message):
     )
     assert code == cli.EXIT_USAGE
     assert message in err
+
+
+def test_an_event_file_with_a_delta_base_round_trips_through_load_event(tmp_path):
+    """The wire path (round-3 R3-F3): `load_event` reads the run child's
+    `delta_from` back from the event file it was written to."""
+    path = tmp_path / "event.json"
+    path.write_text(
+        json.dumps(
+            {"repo": "o/r", "pr_number": 7, "head_sha": HEAD, "delta_from": HEAD}
+        ),
+        encoding="utf-8",
+    )
+    assert cli.load_event(path).delta_from == HEAD
 
 
 def test_bad_expect_values_are_usage_errors(tmp_path):

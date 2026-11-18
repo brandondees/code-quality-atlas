@@ -230,8 +230,11 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
 
     The events files are the child's own JSONL telemetry. A line that
     does not parse, or a read that fails, contributes nothing rather
-    than failing the decision: the progress is evidence for the cancel
-    direction, and losing it degrades to the owner's default. Rotation
+    than failing the decision: a lost read reads as zero settled lenses
+    and zero spend -- early on both measures -- which cancels, the
+    degradation D79 records (`test_missing_progress_reads_as_early`);
+    the telemetry cannot distinguish a record not yet written from a
+    read that failed, so both surface as the zero reading. Rotation
     puts the older events in `<file>.1`; the older file is read first so
     a lens settled before a rotation is still counted. The count of
     settled lenses is the record's own `lenses_done` field -- the one
@@ -454,10 +457,15 @@ def _spend_fraction(progress: Progress | None) -> float:
 
 
 def classify_delivery(
-    github: GitHubReader, new_event: PrEvent, running: PrEvent
+    github: GitHubReader, running: PrEvent, new_event: PrEvent
 ) -> PushClass:
     """Fetch and classify the range between the running review's head and
     the new one, from live GitHub reads.
+
+    The argument order matches the classifier protocol it adapts --
+    `(running, new)` both here and in `PushClassifier` -- so a direct
+    caller cannot transpose two same-typed heads (round-3 review of
+    #747, R3-F8).
 
     Three reads: the pull request (for its base ref), the comparison of
     the two heads (commits and changed paths), and the comparison of the

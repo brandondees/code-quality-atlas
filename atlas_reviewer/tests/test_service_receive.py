@@ -3136,6 +3136,10 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
     slow classifier past the budget."""
     import atlas_reviewer.service as service_module
 
+    # Read the shipped budget before the monkeypatch is active (round-3
+    # R3-F4): the final assertion must judge the constant that ships,
+    # not the patched 0.2 s this test installs.
+    shipped_budget = service_module._CLASSIFY_BUDGET_S
     board = Board(tmp_path / "queue.json")
     config = _config(tmp_path)
     started = threading.Event()
@@ -3177,9 +3181,10 @@ def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
     finally:
         release.set()
         worker.stop()
-    # The bounded budget is the module's own constant, small enough to
-    # sit inside GitHub's response window.
-    assert service_module._CLASSIFY_BUDGET_S <= 10.0
+    # The bounded budget is the shipped constant, read before this
+    # test's monkeypatch was active, small enough to sit inside
+    # GitHub's response window.
+    assert shipped_budget <= 10.0
 
 
 def test_the_decision_duration_pin_uses_a_clock_that_advances(tmp_path):
@@ -3239,3 +3244,182 @@ def test_the_decision_duration_pin_uses_a_clock_that_advances(tmp_path):
     # record's own moment (about zero), not the decision's 50 advanced
     # seconds.
     assert decisions[0].duration_s >= 40.0
+
+
+# ------------------------------------------------- round-3 fixes (#747)
+
+
+def test_a_failed_save_rolls_back_keep_head(tmp_path, monkeypatch):
+    """The keep path's rollback (round-3 R3-F2): a failed save inside
+    `keep_head` puts the pending record, the head pointer and any
+    touched job's flags back, the way the enqueue/finish/begin-post
+    rollback does. Mutant: the rollback dropped, which leaves a pending
+    head recorded for a push the queue never acknowledged."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    assert board.pending_heads() == ()
+    assert job.superseded is False
+    assert job.cancel.is_set() is False
+
+
+def test_a_failed_save_rolls_back_settle(tmp_path, monkeypatch):
+    """The settle rollback (round-3 R3-F2): a failed save inside
+    `settle` puts the job's terminal state, the installed follow-up and
+    the pending record back together -- the one-save atomicity the
+    two-step path could not give, which this failing save is also what
+    pins structurally (round-3 R3-F10). Mutant: the rollback dropped,
+    which leaves a queued follow-up whose review never settled."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.settle(job, JobState.DONE)
+    assert job.state is JobState.RUNNING
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+
+def test_a_failed_save_rolls_back_the_recovery(tmp_path, monkeypatch):
+    """The recovery's rollback (round-3 R3-F2): a failed save inside
+    `recover_pending` pops the job it appended and puts the pending
+    record back, so a stranded head stays recorded for the next pass
+    instead of half-installed in memory while absent from the queue
+    file. Mutant: the rollback dropped, which leaves the appended job
+    and the lost pending entry."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.recover_pending()
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+
+def test_a_queued_delta_job_survives_a_queue_file_reload_with_its_delta_base(
+    tmp_path,
+):
+    """The wire path (round-3 R3-F3): a queued delta job's `delta_from`
+    survives the queue-file save and reload -- a dropped field in
+    `as_dict` or in the reload parser would strand the delta base
+    silently across a restart. Mutant: the field dropped from the
+    record."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    committed, follow_up = board.settle(job, JobState.DONE)
+    assert committed is JobState.DONE
+    assert follow_up is not None
+    assert follow_up.head_sha == SHA_B
+    reloaded = Board(path)
+    requeued = reloaded.claim()
+    assert requeued is not None
+    assert requeued.event.head_sha == SHA_B
+    assert requeued.event.delta_from == SHA_A
+
+
+def test_the_childs_event_file_carries_the_delta_base_round_trip(tmp_path):
+    """The wire path (round-3 R3-F3): the run child's event file carries
+    `delta_from` and `load_event` reads it back; a malformed value is
+    refused rather than silently dropped."""
+    from atlas_reviewer.cli import UsageError, load_event
+    from atlas_reviewer.service_run import _write_event
+
+    path = tmp_path / "event.json"
+    _write_event(path, PrEvent(REPO, 7, SHA_B, delta_from=SHA_A))
+    assert load_event(path).delta_from == SHA_A
+    path.write_text(
+        json.dumps(
+            {"repo": REPO, "pr_number": 7, "head_sha": SHA_B, "delta_from": "abc"}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(UsageError, match="invalid event"):
+        load_event(path)
+
+
+def test_a_candidate_that_crosses_into_posting_during_the_window_is_kept(
+    tmp_path,
+):
+    """The posting snapshot re-check (round-3 R3-F5): the snapshot is
+    read before the <=8s classification window; a review that crosses
+    into posting during it is decided on the re-read state, so the
+    recorded verdict and the action the caller takes agree. Mutant: the
+    re-check dropped -- the stale snapshot decides, and a code push
+    against a review that is already posting its comment cancels."""
+    from atlas_reviewer.service import _head_change_decision
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    telemetry = Telemetry(SystemClock())
+
+    def late_posting(running: PrEvent, new: PrEvent):
+        # The review's lens loop ended and it began posting while the
+        # classification ran.
+        job.state = JobState.POSTING
+        return _code_push(running, new)
+
+    verdict = _head_change_decision(
+        job,
+        PrEvent(REPO, 7, SHA_B),
+        _config(tmp_path),
+        late_posting,
+        telemetry,
+    )
+    assert verdict.cancel is False
+    assert verdict.reason == "the review was already posting its comment"
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"

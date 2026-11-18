@@ -358,10 +358,11 @@ class Board:
             return Enqueue.KEPT
 
     def take_pending(self, finished: PrEvent, *, succeeded: bool) -> PrEvent | None:
-        """Queue the pull request's pending head, if any, for review.
+        """The single pending-head step a settling review composes with
+        its terminal state.
 
-        Called when a review settles successfully or fails: a kept head
-        waits for exactly that. A settled success queues the pending
+        A kept head waits for its review's settle: a settled success
+        queues the pending
         head as a delta review building on the head that just finished;
         a failure queues it as an ordinary review, because the failed
         review posted nothing for the delta to build on. The pending
@@ -369,15 +370,18 @@ class Board:
         current head -- a later push that was itself held back replaced
         it in ``_pending`` and ``_heads``, and the newest one wins -- and
         only while the queue has room for it: the finished job's slot
-        was freed by its own ``finish``, but another thread's ``enqueue``
+        was freed by its own terminal state, but another thread's
+        ``enqueue``
         can take it in between, and appending past the cap unconditionally
         would breach it (round-1 review of #747, F13). When the queue is
         full the pending head is left recorded for the idle recovery
         (`recover_pending`) to retry. None of this supersedes anything:
         the finished job is terminal, so the pending head takes its slot
-        without a supersede. The whole step is one lock and one save; a
-        review that settles takes both steps together (`settle`), so the
-        recovery cannot interleave (round-2 review of #747, R2-F4)."""
+        without a supersede. Production never calls this directly: a
+        review that settles takes this step and its terminal state
+        together, under one lock and one save (`settle`, round-2 review
+        of #747, R2-F4) -- this is the single-step form the tests drive
+        and `settle` composes."""
         with self._cv:
             head_key = (finished.repo, finished.pr_number)
             plan = self._take_plan(head_key, finished, succeeded)
@@ -724,7 +728,10 @@ class Board:
             return True
 
     def finish(self, job: Job, state: JobState) -> JobState:
-        """The state actually stored. A job that was superseded is stored
+        """The single terminal-state step a settling review composes with
+        its follow-up install (`settle`): production never calls this
+        directly, the tests drive it on its own. The state actually
+        stored; a job that was superseded is stored
         as superseded even when the caller asked for a success."""
         with self._cv:
             if job.superseded and state is not JobState.SUPERSEDED:
