@@ -385,10 +385,10 @@ def _payload(
     if not request.tools and _carries_tool_work(request.messages):
         raise BoundaryError(
             "a request carrying tool calls or results cannot go out with "
-            "an empty tools array: the pinned routes reject tool history "
-            "next to no toolConfig (Bedrock Converse's toolConfig rule), "
-            "so the adapter refuses the shape instead of failing the call "
-            "mid-review"
+            "an empty tools array: the pinned routes are documented to "
+            "reject tool history next to no toolConfig (Bedrock "
+            "Converse's toolConfig rule), so the adapter refuses the "
+            "shape instead of failing the call mid-review"
         )
     caching = sends_cache_control(provider.model_id, selected.supported)
     payload: dict[str, Any] = {

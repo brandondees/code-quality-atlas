@@ -3093,3 +3093,20 @@ carried schemas), the shape guard removed (the adapter test fails), the
 detail-keeping dropped (the later-stop test fails), and the round-1
 suite (shared counter, threshold, wiring) re-killed. Full local checks
 green; offline only.
+
+## 2026-11-18 (same day) — #745 round-3 fixes: the Bedrock premise marked (verify), and the nudge-label lists completed
+
+Round 3 returned APPROVE with two documentation items. D77 stated the
+Bedrock Converse tool-history premise as fact; it now carries the repo's
+`(verify)` marker -- documented across OpenAI-to-Bedrock translation
+layers' issue trackers, not yet probed on this repo's own live route --
+and its revisit trigger now includes the first live run settling the
+premise (a finalize reply that still calls tools, or the shape turning
+out to be accepted). The README and the adapter guard's message say
+"documented to reject" instead of the bare claim.
+
+The `session-limit` nudge label joined the two label lists it was
+missing from -- `note_nudge`'s docstring and the `atlas.nudge` comment
+in `tracing.py`, the latter also gaining the `quote-repair` label it had
+been missing before this PR. Docs-only round; the suites, lint, format,
+mypy and drift are unchanged-green.
