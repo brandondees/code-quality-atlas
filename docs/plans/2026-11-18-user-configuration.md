@@ -112,7 +112,10 @@ one of the two per-tenant spend bounds the owner added on 2026-11-18
 (3:39 PM CT): an operator max per review and a per-repo daily budget.
 Nothing in user config can change the model, providers, or data policy,
 widen network, secret, or Sprite access, or enlarge the set of events the
-service acts on beyond the operator's envelope — and the one exception to
+service acts on beyond the operator's envelope — where the envelope itself
+has exactly one planned widening, the owner's #758 decision below (admit
+base-change `edited` events), which is an operator decision and never a
+repo-config surface — and the one exception to
 "the model" is not config at all: BYOK, below, is an installation-level
 credential surface, not a `REVIEW.md` key.
 
@@ -147,8 +150,18 @@ note), not as separate comment bursts on every PR a misconfigured repo
 produces; the one dedicated COMMENT is on the PR that *introduced* the
 broken line — the diff touching the config file is already something the
 protocol reports in its coverage line, and the service can do the same.
-Every posted error names the key, the rejected value, and the default that
-stands.
+Every posted error names the key, the condition, and the default that
+stands — **never the raw rejected value.** The value is unvalidated input,
+and merge-base `REVIEW.md` is author-controllable in same-repo and stacked
+PRs (§4), so echoing it raw into the App's post would be an injection
+surface into the reviewer's own comment — the class #739's round-3 fixes
+removed from the posted label echo. The notes follow the D68/D69 pattern
+they generalize (`review_wide.py`'s `_UNUSABLE_NOTE`): a constant
+description naming the condition ("a `review_ceiling_usd:` line that is not
+a positive dollar amount; it is ignored and the configured ceiling
+(default $10) stands"), with schema-validated *numbers* the only values
+that may be named, and any echoed text length-bounded and escaped or
+repr'd like every other untrusted field.
 
 **Skipped reviews are recorded, not silent.** A rule-based skip (S4's
 narrowing) records a one-line reason — which rule matched, on which input —
@@ -184,10 +197,11 @@ endpoints and keys." Scope: a GitHub App installation — a user account or an
 org — supplies a model API endpoint (an OpenAI- or OpenRouter-compatible
 base URL) and an API key, and its reviews run on that key instead of the
 operator's. **Keys never go in `REVIEW.md` or any repo file** (nor a PR
-conversation): the intake surface is operator-hosted, and the recommended
+conversation): the intake surface is operator-hosted, and the decided
 path is a **settings page authenticated as the installation's admin via
-GitHub** (an org owner or the account owner, per GitHub's own
-installation-admin notion), with rotation, revocation, and deletion on the
+GitHub** (an organization owner, who manages an org's App installations, or
+the user-account owner — GitHub defines no separate "installation admin"
+role), with rotation, revocation, and deletion on the
 same page (§7's decision 1). Storage: encrypted at rest under an
 operator-held key; never logged, never in a post, never passed to Sprites,
 cloud agents, or child environments beyond the one model-call client; on
@@ -209,7 +223,7 @@ live in §7; the slice is S10.
 | Per-review budget | the repo's own `review_ceiling_usd:` line, or `ATLAS_REVIEW_CEILING_USD` ($10) when absent | the repo sets its own ceiling, up or down — D68's semantics, kept by D81 Q2 — but the **effective** value is clamped to the operator's max per review (D81's update; out-of-range → named fallback, D68's pattern); the ceiling actually used is named in the post (D68's ceiling note) | user (the repo's ceiling), operator (the max) | the read exists (D68); the operator max does not |
 | Per-repo daily budget | a working default of $100 per repo per UTC day, pending the owner's number | operator-set (`ATLAS_REPO_DAILY_BUDGET_USD`, proposed name); once a repo has spent its day's budget, further reviews are refused at admission and re-checked at preflight; the record says plainly "skipped: daily budget reached" and never reads as a clean review; the total resets at the UTC day boundary | operator | not built |
 | Head-change policy | `keep` (D79) | keep | operator | exists, env |
-| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on **inputs a PR author cannot control** — the base branch, the event type, the draft state; never widen past the operator's envelope. The config is read from the repo's **default branch** (§4), not the PR's base ref or merge-base, both of which an author can move in same-repo or stacked PRs; the base-retarget dodge (open against an excluded base, then retarget via `edited`) is S4's consideration to close. Label- and head-branch-based rules are author-controlled (the head branch's name and the PR's labels are the author's or triage's to set, so a skip rule matching either is an author-controlled opt-out) and sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | admission exists (`service_admit.py`); filters not built |
+| When to review | non-draft; `opened`/`synchronize`/`ready_for_review`; allowlisted repos | a repo may narrow on delivery properties where **a skip cannot land unreviewed changes on a branch the repo reviews** — the base branch (the skip and the landing coincide: the repo's narrowing *is* the choice of where reviews happen) and the event type; the patterns matched against come from the default branch (§4), so a PR cannot write its own admission. The draft state is not a narrowing input: drafts are already excluded by the operator envelope (`service_admit.py` skips them), so a draft filter would be vacuous. A head-branch or label skip has no such property — the author names the head branch or sets the label and can still merge into the protected base — so those sit behind the deferred PR-level-overrides decision (D81 Q5), not in S4. The config is read from the repo's **default branch** (§4), not the PR's base ref or merge-base, both of which an author can move in same-repo or stacked PRs. The base-retarget dodge — a PR opened against an excluded base (skipped at `opened`), then retargeted into a should-review base via an `edited` event — is the gap #756 documents and #758 closes (the owner's 4:28 PM CT decision admits base-change `edited` events). Any rule-based skip is recorded with a one-line reason, so a skipped review is distinguishable from the service being down | user (narrowing), operator (envelope) | **in flight at #756** |
 | Post format and verbosity | the current post body (D75) | verbosity may be lowered only; the Findings section, the coverage note and the REVIEW INCOMPLETE banner are never suppressible | user | not built |
 | #734 tool allow-lists | deny-all; structured `run_tests`/`mutate` with bridge-built argv | a repo's requested additions are **proposals** that become operator-approval requests (the #734 decision: approval may apply within the same run, bounded by the wall and dollar limits); never auto-granted | operator approves, user proposes | #734 not started |
 | Coding guidelines / AGENTS.md ingestion | none | delivered as fenced untrusted context blocks under the D67/D73 room budget, like the conversation and CI blocks; never instructions | user (content), engine (delivery) | not built |
@@ -243,16 +257,25 @@ live in §7; the slice is S10.
     two reads to the default branch is the safer end-state and is a
     candidate follow-up; until then their author-influence is stated here
     rather than claimed away.
-  - **The base-retarget dodge is S4's consideration to close.** A PR
-    opened against an excluded base branch passes admission at `opened`,
-    then retargets — GitHub delivers `pull_request.edited` with a
-    `base` change and no new `opened` event — and a rule keyed on the
-    base branch would then be stale. Since S4's read source is the
-    default branch, a base-retarget cannot change the admission answer
-    through the config; the remaining surface is rules that compare the
-    PR's own base branch, which S4 must either re-evaluate on `edited`
-    events or define against the default branch so retargeting cannot
-    move the answer.
+  - **The base-retarget dodge is a real gap: #756 documents it, and #758
+    closes it.** A PR opened against an excluded base branch is *skipped*
+    at `opened`, then retargets — GitHub delivers `pull_request.edited`
+    with a `base` change and no new `opened` event — and no review ever
+    re-evaluates: that is the merge-before-any-review path #756's body
+    records as "documented, not widened", because admitting the `edited`
+    event would widen the operator's envelope, which is an operator
+    decision. Two things are now separated. Retargeting cannot move the
+    *config's* answer — the read source is the default branch, so the
+    patterns a rule matches against do not move with the retarget — but a
+    rule whose *matched value* is the delivery's base branch does move,
+    and that is the gap. **The owner decided it (Brandon, 2026-11-18
+    4:28 PM CT): "Yes, admit base-change edited events as a follow-up."**
+    The service will admit `pull_request` `edited` deliveries only when
+    `changes.base` is present, re-running admission against the new base,
+    with config still read from the default branch — an explicit, narrow
+    widening of the operator event envelope, tracked as **issue #758**, a
+    follow-up to #756. Until #758 lands, the gap stands as #756 documents
+    it, named rather than claimed closed.
 - **Schema-validated, bounded, fail-open with named notes.** Every value
   carries a range the schema enforces; out-of-range or unparseable input
   falls back to the default and names itself, generalizing D68's
@@ -280,15 +303,31 @@ live in §7; the slice is S10.
   boundary is the UTC day, and the running total lives where the service's
   durable state already lives — the state root on the Fly volume
   (`ATLAS_REVIEWER_STATE_DIR`), as one append-only
-  `<state root>/spend/<repo flattened>-<UTC date>.jsonl` file per repo per
-  day, the same pattern D74's per-PR round logs use; the date in the file
+  `<state root>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per
+  day, where **`<owner>` and `<repo>` are each percent-encoded with every
+  byte outside `[A-Za-z0-9]` escaped** (so `a-b/c` and `a/b-c` become
+  distinct files, and the join `-` is unambiguous because a literal `-`
+  inside a segment always appears as `%2D`), the same append-only pattern
+  D74's per-PR round logs use; the date in the file
   name makes the UTC reset structural, and a lost file loses only the
   day's total, the way a lost round log loses only prior-round context.
+  **The check-then-act race is named and bounded.** Two concurrent
+  deliveries for the same repo can both pass admission (and preflight)
+  before either commits spend — the queue's one-active-job rule is per
+  pull request, not per repo, and the append-only total is read, not
+  locked. The plan accepts the bounded overshoot explicitly rather than
+  adding a per-repo lock: the worst case is the repo's in-flight reviews
+  each spending up to the operator max past the day's budget, the
+  refusal applies to the *next* admission after the total is committed,
+  and the overshoot is visible in the same telemetry the total comes
+  from. A per-repo lock is the alternative if the operator wants the
+  overshoot eliminated, at the cost of serializing a repo's reviews;
+  the record states which behavior a deployment has.
   `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the shared key's
   *total* credit limit, not a per-repo bound — which is exactly why the
   per-tenant bounds exist alongside it.
 - **BYOK keys are never repo content.** The intake surface is
-  operator-hosted (recommended: a settings page authenticated as the
+  operator-hosted (the decided path: a settings page authenticated as the
   installation's admin via GitHub — §7's decision 1), never `REVIEW.md`, never a repo
   file, never a PR conversation. A stored key is encrypted at rest under an
   operator-held key; it is never logged, never quoted in a post or draft,
@@ -302,7 +341,11 @@ live in §7; the slice is S10.
 - **A user-supplied base URL is user-controlled egress.** The service makes
   outbound requests to it, which is an SSRF surface: HTTPS only; private,
   link-local, loopback and metadata addresses blocked at connect time with
-  the resolved IP pinned for the connection (DNS rebinding); redirects
+  the resolved IP pinned for the connection (DNS rebinding) — over IPv4
+  *and* IPv6, the blocked set naming ULA `fc00::/7`, link-local
+  `fe80::/10`, `::1`, and IPv4-mapped IPv6 `::ffff:0:0/96`, since a
+  pinned-IP check that only parses IPv4 is the classic rebinding bypass;
+  redirects
   re-checked against the same rules; the model client's existing timeouts
   and response caps apply; responses are model replies — already untrusted
   under the existing pipeline, never trusted instructions. **Data policy:**
@@ -319,26 +362,24 @@ live in §7; the slice is S10.
 
 ## 5. Sequencing (issue-sized slices)
 
-| Slice | What | Files | Against the parity track | Order |
-|---|---|---|---|---|
-| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | **concurrent with the parity track** — verified against the code: #750's fix is reservation accounting (`budget.py`'s per-call pricing and `derive_review_wide`'s derived, ceiling-clamped reservation) plus the budget-stopped headline (`coordinator.py`'s `_headline` and the post path), all of which *consume* the resolved ceiling; none of it plausibly changes the `REVIEW.md` ceiling read S1 refactors (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`'s precedence). Same-file caveat: both edit `review_wide.py`, so a rebase may still be needed if hunks land adjacently | first |
-| ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | dropped |
-| S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | concurrent — disjoint from #734/#713/#708's files | after S1 |
-| S4 | When-to-review admission — narrowing on the inputs a PR author cannot control: the base branch, the event type, the draft state. Config read from the repo's **default branch** (#756's approach — §4's corrected rule), not the PR's base ref or merge-base; the base-retarget dodge (`pull_request.edited` retargeting after an excluded-base `opened`) is considered and closed here. Label- and head-branch-based rules are author-controlled opt-outs and sit behind Q5's deferred PR-level overrides, not here; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, README | **free** — can start now, concurrently with the whole parity track | first available |
-| S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | rebase-check against the D79 PRs' delta work before starting | after S1 |
-| S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | **hot files** — `cli.py` is in #734's and the #654/#655 drafts' edit sets; wait for #734 | after #734 |
-| S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | **depends on #734 (D80) landing** | after #734 |
-| S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | **deferred by D81** (Q4: repo-level only; Q7: quiet hours deferred) | deferred |
-| S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | **against the parity track:** touches `review_wide.py`, where #750's reservation accounting also lands — rebase-check against #750; and it rides S1's parse module (the operator max is a config-bounded value) and S4's admission surface, so it follows both | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
-| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | **against the parity track:** mostly disjoint from #734/#750/#713/#708's edit sets, but `tool_model.py` sits beside the #654/#655 drafts' edit set — rebase-check; **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
+| Slice | What | Files | Done when | Parity-track pointers | Order |
+|---|---|---|---|---|---|
+| S1 | The config parse module (`atlas_reviewer/repo_config.py`): the two existing `REVIEW.md` lines move onto it unchanged; new keys parse as unsupported with named notes | new module, `review_wide.py` call sites, tests | both existing lines parse identically through the new module (no behavior change); unknown/out-of-range keys yield named fail-open notes that never echo the raw rejected value (§2's rule); the 64 KiB read bound preserved | **concurrent** — the #750 fix is open as **#757 (D82)** and its file list (`budget.py`, `openrouter.py`, `service_post.py`, `tool_model.py`) includes neither `review_wide.py` nor `coordinator.py`, so S1's refactor of the ceiling *read* (`CEILING_LINE`, `review_md_ceiling`, `_lens_preferences`, `resolve_ceiling`) is disjoint; this plan's earlier same-file prediction was wrong and is corrected here | first |
+| ~~S2~~ | **Dropped by D81** — Q2 keeps D68's repo-set ceiling, so there is no ceiling direction to change | — | — | — | dropped |
+| S3 | Severity floor + post verbosity | `service_run.py`, `service_post.py`, README | floor keys honored and named in the post; floor-tier lenses' findings never silently suppressed (the tier rule carries over); lowering-only pinned by tests | **rebase-check against #757 (D82)** — its file list includes `service_post.py`, which S3 edits | after S1 |
+| S4 | When-to-review admission — narrowing on delivery properties where **a skip cannot land unreviewed changes on a branch the repo reviews**: the base branch (the skip and the landing coincide) and the event type; the draft state is vacuous as a narrowing input (the operator envelope already skips drafts). Config read from the repo's **default branch** (#756's approach — §4's rule); the base-retarget dodge is the gap #756 documents and #758 closes; label- and head-branch-based rules sit behind Q5's deferred PR-level overrides; every rule-based skip records a one-line reason | `service_admit.py`, `service.py`, `github_api.py`, README | retargeting cannot change the config's answer (the default-branch read); no skip key matches a head branch or a label; a retarget into a should-review state is re-evaluated under #758's envelope extension or, until #758 lands, recorded as the named gap #756 documents; skips carry their one-line reason | **in flight at #756** ("Config slice S4: repo-narrowed review admission (#755)") — the remaining work is #756's review-and-land path plus **#758**; do not start it twice | in flight |
+| S5 | Path re-ranking + generated-file handling (ordering only) | `diffs.py` | no path is ever dropped from review by user config; re-ranking is recorded in the draft; Q25 untouched | rebase-check against the merged D79 delta work before starting | after S1 |
+| S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | the blocks reach every lens fenced and budgeted; omissions are named; injected content stays inside the fence | **concurrent** — corrected against the open #734 PRs' actual file lists: #752/#753 (D80) touch `bridge.py`, `bridge_args.py`, `bridge_staging.py`, `interpreter.py`, `lens_loop.py`, `attestation.py`, `coordinator.py`, `ports.py`, `tool_model.py` — **not** `cli.py` or `conversation.py`, so the earlier "hot files" premise (based on the pre-#752 prediction) was wrong; rebase-check only | after S1 |
+| S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
+| S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | — | **deferred by D81** (Q4: repo-level only — amended for credentials only by §7's decision 9, which is S10's store, not a general defaults store; Q7: quiet hours deferred) | deferred |
+| S9 | The per-tenant spend bounds (D81's update): the operator max per review clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | a repo-raised ceiling cannot pass the operator max and the clamp is named; a repo over its daily budget is refused with the plain record and never a clean-looking post; **two distinct owner/repo pairs never share a spend file** (the percent-encoding of §4); the bounded overshoot is pinned by a test (concurrent admissions over-commit by at most the in-flight reviews × the operator max); the total survives a restart and resets at the UTC boundary | **rebase-check against #757 (D82)** — its file list includes `budget.py`, which S9's daily-total accounting edits; follows S1 (the operator max is a config-bounded value) and S4 (the refusal rides its admission surface, already in flight at #756) | after S1 and S4; **precondition for opening the App beyond the operator's allowlisted repos** |
+| S10 | BYOK: the installation-supplied model endpoint and key — the intake surface, the encrypted store, the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; no silent operator-key fallback | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
 
-Recommended order: S4 immediately (touching nothing the parity track
-touches), then S1 (concurrent with the parity track, same-file caveat
-against #750 noted above), then S3 and S5, then S9 once S1 and S4 have
-landed (rebase-checked against #750), then S6 and S7 once issue #734 has
-landed, then S10 last (its §7 decisions are recorded; it still follows
-S9). S2 is dropped and S8 is
-deferred by D81.
+Recommended order: S4 is already in flight at #756 (its retarget
+follow-up is issue #758), then S1 (concurrent with the parity track), then S3 and S5, then S9
+once S1 and S4 have landed (rebase-checked against #757), then S6, then S7
+once #752/#753 have landed, then S10 last (its §7 decisions are recorded; it
+still follows S9). S2 is dropped and S8 is deferred by D81.
 
 ## 6. Decisions (D81)
 
@@ -351,8 +392,10 @@ answer to Q2. Summary:
 2. **Ceiling direction.** "Let each repo set its own limits": D68's
    semantics stay — a repo's `review_ceiling_usd:` may raise or lower its
    per-review ceiling. The plan's clamp recommendation was **not taken**;
-   the operator backstop outside repo control is `ATLAS_KEY_CEILING_USD`,
-   and a repo-set ceiling is still named in the post (D68's ceiling note).
+   the operator backstop outside repo control is `ATLAS_KEY_CEILING_USD`
+   *(superseded — see the 3:39 PM CT update below, which replaces this
+   backstop with the per-tenant bounds)*, and a repo-set ceiling is still
+   named in the post (D68's ceiling note).
    S2 is dropped.
 3. **Severity floor.** As recommended: default post everything, a repo may
    raise its floor, the manifest tier split and the overlay's
@@ -378,6 +421,18 @@ volume (§4). This adds slice **S9** and is a **precondition for opening the
 App beyond the operator's allowlisted repos**. The plan's earlier claim
 that `ATLAS_KEY_CEILING_USD` was the spend backstop is corrected: it caps
 the shared key's total, not a per-repo bound.
+
+**Update (2026-11-18, 4:28 PM CT — the base-change `edited` envelope).**
+Resolving the retarget gap (Major 1 of PR #751's round-1 protocol review —
+the gap issue #756 documents as "documented, not widened"), Brandon
+decided: **"Yes, admit base-change edited events as a follow-up."** The
+service will admit
+`pull_request` `edited` deliveries only when `changes.base` is present,
+re-running admission against the new base, with config still read from the
+default branch — an explicit, narrow widening of the operator event
+envelope (the one widening §2's invariant names), tracked as the
+follow-up **issue #758** to #756. Until #758 lands, the gap stands named,
+the way issue #756 documents it.
 
 ## 7. BYOK decisions (D81 — Brandon accepted all nine recommendations, 2026-11-18 4:15 PM CT)
 
