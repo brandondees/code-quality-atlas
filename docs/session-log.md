@@ -2977,3 +2977,115 @@ last kept line's integrity. Mutants applied by hand and killed with
 M16 (the anchor dropped), M17 (the mid-line fallback). One measured pair
 each on the rebased head: 3,202 reviewer tests at 96.43%, 882 tooling at
 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #692: a later clean run of a lens supersedes its earlier NOT RUN for coverage
+
+Found in the Nov 14 model-trials rerun (Haiku #640): `sweeping-for-security`
+was NOT RUN after a Sprites 502, its continuation ran it to clean as entry
+L13, and the original NOT RUN entry (L2) stayed in `lenses` — so
+`_lens_gap`'s per-entry check read a standing gap out of an entry the lens
+had already made good, `coverage_complete` stayed false, the draft opened
+with REVIEW INCOMPLETE, the event was held at COMMENT, and the service post
+listed a lens under "Lenses not run" that had in fact run.
+
+The fix is in the shared coverage computation (`coordinator._lens_gap`), so
+every consumer agrees: a lens blocks coverage only when none of its own
+entries is clean. Supersession is by presence, not position — a later clean
+run supersedes an earlier NOT RUN, and a later NOT RUN does not undo an
+earlier clean run — with D42's per-file gate and the runner gate unchanged
+(a failed runner is still not approved away). Findings are untouched:
+D61/D73's keep-findings rules are coverage-independent, and minting still
+walks every attested entry. The record is not rewritten — the status line's
+per-entry counts keep the `not_run` count — and the draft marks the
+superseded entry with a controller note (`recovered by L<n>'s clean run`)
+appended last, outside the quoted reason; the service parser reads the
+marker off the line's end, so a quoted reason carrying the same words can
+never forge a recovery, and carries the whole ledger line among the limit
+stops so the posted COMMENT keeps the failure. Recorded as D76 in
+`docs/open-questions.md`.
+
+Tests pin both directions of the ordering semantics, the lens-identity
+isolation, the surviving failure record in the draft and in the post, and
+the unsuperseded NOT RUN still blocking. Mutants applied by hand and
+killed: M1 (the supersede check dropped, back to per-entry `any`), M2 (the
+grouping collapsed to one bucket — lens identity ignored), M3 (the
+recovered note dropped from the draft), M4 (the service's recovered branch
+dropped), M5 (last-entry-decides ordering). 3,225 reviewer tests at 96.40%,
+882 tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #744 round-1 fixes: the scoped path's carve-out hole closed, the `$` anchor pinned, the cross-references added
+
+The round-1 protocol review, Brandon's routine review and the
+atlas-reviewer-service review all returned COMMENT on the same Major, and
+the protocol review reproduced it before fixing: the scoped path implemented
+"none of its entries blocks" through `_blocks_coverage`, whose unread-only
+carve-out (PARTIAL, attested, `FILES_UNREAD` only) returns False for a
+partial that merely left a file unread — so such a partial excused a sibling
+that failed for a real cause. The repro (an unread-only partial plus a
+continuation that read every file and then failed `QUOTES_FAILED`) reached
+`coverage_complete` with no clean entry at all: APPROVE on the branch,
+COMMENT on origin/main, with the headline printing "Every selected lens ran
+whole, attested, with every quote verified" over a lens that never had a
+clean run. Exactly the parity failure the fix was meant to prevent,
+introduced by the fix's own first cut.
+
+The fix takes the stated rule literally: one per-lens predicate
+(`_uncovered_lens` — at least one clean entry, presence not position, per
+lens) now drives both the scoped and the no-scope paths, retiring
+`_blocks_coverage` and its two-definition divergence (the module-design note
+folded into the Major). The unread-only partial's files still gate through
+`_unread_paths` exactly as before, so nothing about D42's per-file gate
+moves; a lone unread-only partial stays incomplete, now charged to the state
+rule as well. Pinned by the reviewer's repro
+(`test_an_unread_only_partial_does_not_excuse_a_failed_sibling`, killing the
+carve-out-restored mutant) and by a positive control
+(`test_a_clean_run_still_covers_an_unread_only_partial_and_a_failure`)
+guarding against over-correction; the round-0 supersede and identity pins
+were re-verified against the new structure (M1′ per-entry `any`, M2 one
+bucket, M5 last-entry-decides all still die).
+
+The Minors: the `$` anchor on `_AGENTIC_RECOVERED` — load-bearing for
+forgery resistance and unpinned, M6 had survived all 179 round-0 tests — is
+now pinned by `test_a_quoted_reason_cannot_forge_the_recovered_marker`, a
+NOT RUN lens with no clean run whose quoted reason carries the marker's
+words and stays a not-run lens in the report and the post; and the vacuous
+`or "complete" in report.files_note` assertion is now the exact
+complete-coverage note text, so `incomplete` can no longer satisfy it. D40,
+D42, D44 and D70 gained their `Update (2026-11-17, D76 ...)` cross-reference
+notes, and D76 gained this correction. The module docstring's
+order-dependent wording ("whose own later run settled clean") is reworded to
+the presence-based rule. 3,229 reviewer tests, 882 tooling; ruff/format/
+mypy/drift clean. Offline only.
+
+## 2026-11-18 — #744 round-2 cleanups: the D76 residue superseded by name, the marker given one definition, the order-dependent wordings reworded
+
+The round-2 protocol review returned APPROVE and confirmed all five round-1
+fixes; its two Minors and two Nits are advisory, and all four are fixed
+here.
+
+Minor 1: D76's original body still described the retired `_blocks_coverage`
+carve-out as live and its Reversibility note still named the retired code —
+one record, two conflicting accounts. The entry is append-only
+(`test_decision_updates_are_appended`), so the body stays as written and a
+new note names both sentences verbatim and supersedes them, restating the
+current revert path (give either check back its per-entry form; drop
+`_uncovered_lens` and `_clean_runs` with them).
+
+Minor 2: the "recovered by L<n>'s clean run" marker was a free-text
+interface — an f-string in `coordinator._lens_line`, a hand-copied regex in
+`service_run`. One definition now: `notes.RECOVERED_NOTE` (the template),
+`notes.recovered_note(index)` (the builder the draft renders) and
+`notes.RECOVERED_NOTE_PATTERN` (the service-side pattern, built from the
+same template and anchored at the line's end), so the two sides cannot
+drift. Pinned by `test_the_recovered_note_and_its_pattern_are_one_definition`
+(the wording, the derived pattern's match, and the anchor property at the
+unit level) beside the existing end-to-end round-trip and forgery tests;
+the one-sided mutants — the draft appending its own literal instead of the
+builder, and the service matching its own regex — die on the existing
+recovered/forge tests.
+
+Nit 1: D44's D76 update note and `deploy-service.md` reworded from "a later
+run / the lens's own later runs" to the presence-based rule the code
+implements. Nit 2: the forgery test's "forgeable-free" typo is now "keeps
+the marker unforgeable by a quoted reason". 3,230 reviewer tests, 882
+tooling; ruff/format/mypy/drift clean. Offline only.

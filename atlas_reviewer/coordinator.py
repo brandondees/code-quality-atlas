@@ -15,7 +15,12 @@ Coverage is complete only when every lens read every changed file's
 diff in full, through its own attempts or its own continuations (D42:
 a read by another lens does not cover a file for this one), no lens
 failed for another cause, and, when this review ran a runner, every
-runner completed. A single-lens result with no assigned scope keeps the
+runner completed. A lens with any clean run of its own is covered
+however its other entries ended (#692): a continuation after a
+failed or never-started run supersedes that failure for coverage, a
+later failure does not undo an earlier clean run, and the failure
+stays in the draft as a recovered note. A single-lens
+result with no assigned scope keeps the
 older rule: that lens itself must be clean and have read every file.
 A runner whose delete was not verified does not block approval, but the
 draft names it so it can be swept.
@@ -115,7 +120,7 @@ from atlas_reviewer.lens_loop import (
     run_attempt,
 )
 from atlas_reviewer.lenses import LensLibrary
-from atlas_reviewer.notes import quote_untrusted
+from atlas_reviewer.notes import quote_untrusted, recovered_note
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -291,7 +296,10 @@ class AgenticReview:
         review cannot approve on a partial picture of this head. So is a
         finding dropped for an unknown severity, which could have been a
         Blocker. A superseded round, and a line that names another pull request
-        or no pull request, are not that gap."""
+        or no pull request, are not that gap. A lens is held to its own
+        entries only (#692): one clean run of that lens covers it, however
+        its other entries -- an earlier NOT RUN, a later NOT RUN -- ended;
+        the failures stay in the draft, marked recovered."""
         if _lens_gap(self):
             return False
         return self.runner is None or self.runner.status is RunnerStatus.COMPLETED
@@ -1645,7 +1653,19 @@ def render_draft(
         lines += ["", "## Possible committed secrets (controller findings)", ""]
         lines += [_secret_line(s, scrub) for s in review.secrets]
     lines += ["", "## Lens coverage (attestation ledger)", ""]
-    lines += [_lens_line(r, scrub) for r in review.lenses]
+    clean = _clean_runs(review.lenses)
+    lines += [
+        _lens_line(
+            r,
+            scrub,
+            recovered_by=(
+                clean[r.lens].index
+                if r.state is not LensState.CLEAN and r.lens in clean
+                else None
+            ),
+        )
+        for r in review.lenses
+    ]
     lines += [
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
@@ -1725,7 +1745,15 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
             "Every selected lens ran whole, attested, with every quote verified."
             + files
         )
-    short = [r for r in review.lenses if r.state is not LensState.CLEAN]
+    # A lens one of whose own runs came back clean is covered (#692): its
+    # earlier NOT RUN or failed entries are recovered, not gaps, so they
+    # are not named as reasons the review cannot approve.
+    clean = _clean_runs(review.lenses)
+    short = [
+        r
+        for r in review.lenses
+        if r.state is not LensState.CLEAN and r.lens not in clean
+    ]
     if short:
         named = "; ".join(f"{r.lens}: {r.state.value}" for r in short)
     elif (
@@ -1749,17 +1777,6 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
 
 def _scoped(lenses: Sequence[LensResult]) -> bool:
     return any(result.scope is not None for result in lenses)
-
-
-def _blocks_coverage(result: LensResult) -> bool:
-    """A lens that is partial only because it left a file unread does not
-    block once that same lens, or its continuation, has read the file."""
-    unread_only = (
-        result.outcome is not None
-        and result.outcome.attestation is Attestation.ATTESTED
-        and result.outcome.causes == frozenset({Cause.FILES_UNREAD})
-    )
-    return result.state is not LensState.CLEAN and not unread_only
 
 
 def _pending_by_lens(
@@ -1802,11 +1819,51 @@ def _still_unread(
     return tuple(sorted(paths, key=lambda path: (risk_tier(path).rank, path)))
 
 
+def _clean_runs(lenses: Sequence[LensResult]) -> dict[str, LensResult]:
+    """Each lens's clean run, the last one in run order when there are
+    several (#692). A lens with one is covered however its other entries
+    ended: a later clean run supersedes an earlier NOT RUN, and a later
+    NOT RUN does not undo an earlier clean run's coverage. Supersession is
+    per lens -- one lens's clean run never covers another lens's failure."""
+    runs: dict[str, LensResult] = {}
+    for result in lenses:
+        if result.state is LensState.CLEAN:
+            runs[result.lens] = result
+    return runs
+
+
+def _entries_by_lens(lenses: Sequence[LensResult]) -> dict[str, list[LensResult]]:
+    grouped: dict[str, list[LensResult]] = {}
+    for result in lenses:
+        grouped.setdefault(result.lens, []).append(result)
+    return grouped
+
+
+def _uncovered_lens(lenses: Sequence[LensResult]) -> bool:
+    """Whether any lens lacks a clean run of its own (#692, D76): a lens
+    blocks coverage unless at least one of its entries is clean, however
+    its other entries ended. Supersession is by presence, not position --
+    a later clean run supersedes an earlier NOT RUN, and a later NOT RUN
+    does not undo an earlier clean run -- and per lens, so one lens's
+    clean run never covers another lens's failure. The one "is this lens
+    covered" predicate: the headline and the draft's recovered notes read
+    `_clean_runs`, the same rule from the clean side."""
+    return any(
+        all(entry.state is not LensState.CLEAN for entry in entries)
+        for entries in _entries_by_lens(lenses).values()
+    )
+
+
 def _lens_gap(review: AgenticReview) -> str:
     """Why the lenses do not give complete coverage, or "" when they do.
     The one coverage rule: `coverage_complete`, the headline and the
     unread list all read it. A clean outcome can still lack coverage:
-    unread paths, or no changed-file count from before the per-file gate."""
+    unread paths, or no changed-file count from before the per-file gate.
+    A lens blocks unless at least one of its entries is clean (#692), in
+    both the scoped and the no-scope paths -- an unread-only partial is
+    not a clean run, so it never excuses a sibling that failed for a real
+    cause; the files it left unread gate separately through
+    `_unread_paths`."""
     if review.context_omissions:
         return "partial context"
     if review.not_picked:
@@ -1818,14 +1875,14 @@ def _lens_gap(review: AgenticReview) -> str:
     if _unread_paths(review):
         return "unread files"
     if _scoped(review.lenses):
-        if any(_blocks_coverage(result) for result in review.lenses):
+        if _uncovered_lens(review.lenses):
             return "a lens did not finish clean"
         return ""
     if any(
         r.outcome is not None and r.outcome.changed_files is None for r in review.lenses
     ):
         return "no recorded file coverage"
-    if any(r.state is not LensState.CLEAN for r in review.lenses):
+    if _uncovered_lens(review.lenses):
         return "a lens did not finish clean"
     return ""
 
@@ -1907,11 +1964,27 @@ def _secret_line(s: BridgeSecret, scrub: Callable[[str], str]) -> str:
     return f"- possible committed secret ({s.label}) in {where}, {kind}; rotate if real"
 
 
-def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
+def _lens_line(
+    r: LensResult, scrub: Callable[[str], str], recovered_by: int | None = None
+) -> str:
+    """One coverage-section ledger line. `recovered_by` is the index of the
+    same lens's clean run when this entry's failure does not block coverage
+    (#692): the note is controller text appended last, outside the quoted
+    reason, so a quoted reason cannot carry it (the service report reads
+    the marker off the line's end)."""
     head = f"- L{r.index} {r.lens}: **{r.state.value}**"
     if r.outcome is None:
-        return f"{head}; {quote_untrusted(r.reason, QUOTED_CHARS, scrub=scrub)}"
+        line = f"{head}; {quote_untrusted(r.reason, QUOTED_CHARS, scrub=scrub)}"
+    else:
+        line = f"{head}; " + "; ".join(_lens_line_parts(r, scrub))
+    if recovered_by is not None:
+        line += f"; {recovered_note(recovered_by)}"
+    return line
+
+
+def _lens_line_parts(r: LensResult, scrub: Callable[[str], str]) -> list[str]:
     o = r.outcome
+    assert o is not None
     parts = [
         f"body sha256 {r.body_sha256}",
         f"attestation: {o.attestation.value}",
@@ -1940,7 +2013,7 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append(o.diff_prefix)
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
-    return f"{head}; " + "; ".join(parts)
+    return parts
 
 
 def _reassess_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:

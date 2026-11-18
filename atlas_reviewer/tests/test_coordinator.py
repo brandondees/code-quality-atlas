@@ -30,7 +30,6 @@ from atlas_reviewer.coordinator import (
     LATE_REASON,
     LensResult,
     Verdict,
-    _blocks_coverage,
     _still_unread,
     render_draft,
     review_lens,
@@ -1688,6 +1687,66 @@ def test_no_lens_selected_is_not_complete_coverage():
     assert not synthesize([]).coverage_complete
 
 
+def not_run_result(lens=LENS, index=1):
+    return LensResult(lens, index, DIGEST, None, reason="Sprites HTTP 502 for POST")
+
+
+def test_a_superseded_not_run_no_longer_blocks_coverage():
+    """#692: a later clean run of the same lens supersedes the lens's
+    earlier NOT RUN entry for coverage; an unsuperseded NOT RUN still
+    blocks. The clean run keeps its own findings (D73): supersession is
+    a coverage rule, never a findings one."""
+    lost = not_run_result()
+    rerun = replace(lens_result(clean()), index=2)
+    assert not synthesize([lost]).coverage_complete
+    recovered = synthesize([lost, rerun])
+    assert recovered.coverage_complete
+    assert recovered.event is ReviewEvent.APPROVE
+    assert status_line(recovered).count('"coverage_complete": true') == 1
+
+
+def test_a_later_not_run_does_not_undo_an_earlier_clean_runs_coverage():
+    first = lens_result(clean())
+    later = not_run_result(index=2)
+    assert synthesize([first, later]).coverage_complete
+
+
+def test_one_lens_clean_run_does_not_cover_another_lens_failure():
+    """The supersede check reads lens identity: one lens's clean run never
+    covers another lens's NOT RUN."""
+    ok = lens_result(clean())
+    lost = not_run_result(lens=OTHER, index=2)
+    result = synthesize([ok, lost])
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+
+
+def test_a_recovered_entry_keeps_its_failure_and_its_note_in_the_draft():
+    lost = not_run_result(index=2)
+    rerun = replace(lens_result(clean()), index=3)
+    draft = render_draft(synthesize([lost, rerun]), Redactor())
+    coverage = draft.split("## Lens coverage (attestation ledger)", 1)[1]
+    assert "**NOT RUN**" in coverage
+    assert "Sprites HTTP 502" in coverage
+    assert "recovered by L3's clean run" in coverage
+    assert "REVIEW INCOMPLETE" not in draft
+
+
+def test_the_incomplete_headline_does_not_name_a_recovered_entry():
+    lost = not_run_result(index=2)
+    rerun = replace(lens_result(clean()), index=3)
+    failed = LensResult(
+        OTHER, 4, DIGEST,
+        AttemptOutcome(Attestation.MISACKNOWLEDGED),
+        attempts=1,
+    )  # fmt: skip
+    result = synthesize([lost, rerun, failed])
+    assert not result.coverage_complete
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert f"{OTHER}: failed" in headline
+    assert "NOT RUN" not in headline
+
+
 def test_a_failed_runner_is_not_complete_coverage_even_when_the_lens_is_clean():
     from atlas_reviewer.domain import RunnerReport
 
@@ -1847,9 +1906,59 @@ def test_a_file_unread_by_one_lens_is_covered_once_that_lens_reads_it():
 
 def test_a_partial_with_no_cause_still_blocks_coverage():
     unexplained = scoped(LENS, ["a.py"], attestation=Attestation.UNACKNOWLEDGED)
-    assert _blocks_coverage(unexplained)
+    assert not synthesize([unexplained]).coverage_complete
+
+
+def test_an_unread_only_partial_alone_is_incomplete_until_the_lens_runs_clean():
     only_unread = scoped(LENS, ["a.py"], unread=["a.py"])
-    assert not _blocks_coverage(only_unread)
+    result = synthesize([only_unread])
+    assert not result.coverage_complete
+    assert result.unreviewed_paths == ("a.py",)
+
+
+def test_an_unread_only_partial_does_not_excuse_a_failed_sibling():
+    """Round-1 Major on #744, the reviewer's repro: the unread-only
+    carve-out is not a clean run. A partial that left a file unread plus a
+    continuation that read everything but failed the quote contract give
+    the lens no clean entry, so coverage stays incomplete and the review
+    is held at COMMENT -- the shape origin/main held at COMMENT and this
+    branch briefly approved."""
+    partial = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    failed = LensResult(
+        LENS, 2, DIGEST,
+        AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.QUOTES_FAILED}),
+            changed_files=2,
+        ),
+        attempts=1,
+        scope=frozenset({"a.py", "b.py"}),
+    )  # fmt: skip
+    result = synthesize([partial, failed])
+    assert not result.coverage_complete
+    assert result.event is ReviewEvent.COMMENT
+    assert "REVIEW INCOMPLETE" in render_draft(result, Redactor()).splitlines()[2]
+
+
+def test_a_clean_run_still_covers_an_unread_only_partial_and_a_failure():
+    """The positive control for the supersede rule: one clean run of the
+    lens covers an unread-only partial and a real-cause failure beside it,
+    and the unread gap clears because the clean run read every file."""
+    partial = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    failed = LensResult(
+        LENS, 2, DIGEST,
+        AttemptOutcome(
+            Attestation.UNACKNOWLEDGED,
+            frozenset({Cause.QUOTES_FAILED}),
+            changed_files=2,
+        ),
+        attempts=1,
+        scope=frozenset({"a.py", "b.py"}),
+    )  # fmt: skip
+    rerun = replace(scoped(LENS, ["a.py", "b.py"]), index=3)
+    result = synthesize([partial, failed, rerun])
+    assert result.coverage_complete
+    assert result.unreviewed_paths == ()
 
 
 def test_a_byok_refusal_stops_the_lenses_that_have_not_started(tmp_path):
@@ -1964,6 +2073,55 @@ def test_a_502_during_the_base_tree_upload_leaves_that_lens_not_run(tmp_path):
     draft = render_draft(result, Redactor())
     assert "REVIEW INCOMPLETE" in draft
     assert "502" in draft
+
+
+def test_a_later_clean_run_supersedes_an_earlier_not_run_for_coverage(
+    tmp_path, monkeypatch
+):
+    """#692's shape: Sprites refuses one lens's first runner create, its
+    entry is NOT RUN with the refusal as its reason, and the continuation
+    the gap earns runs that same lens clean. The clean run supersedes the
+    failure for coverage, so the review can approve and the event is not
+    held at COMMENT, while the failure stays in the draft, marked
+    recovered."""
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", lambda seconds: None)
+    refused_names = {lens_runner_name(EVENT, f"{OTHER}:2")}
+
+    class Refused(LocalSprites):
+        def create(self, name):
+            if name in refused_names:
+                with self._lock:
+                    self.calls.append(("create", name))
+                raise RateLimitedError("Sprites HTTP 502 for POST")
+            super().create(name)
+
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, sprites = _lenses(
+        tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+        limits=replace(LIMITS, pool_size=2, create_retries=0),
+        sprites=Refused(),
+    )  # fmt: skip
+    by_index = {lens.index: lens for lens in result.lenses}
+    assert by_index[2].lens == OTHER
+    assert by_index[2].state is LensState.NOT_RUN and by_index[2].outcome is None
+    assert "refused to create" in by_index[2].reason
+    assert "502" in by_index[2].reason
+    assert by_index[3].lens == OTHER
+    assert by_index[3].state is LensState.CLEAN
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert sum(name in refused_names for name in created) == 1
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+    parsed = status(result)
+    assert parsed["coverage_complete"] is True
+    draft = render_draft(result, Redactor())
+    assert "502" in draft
+    assert "recovered by L3's clean run" in draft
+    assert "REVIEW INCOMPLETE" not in draft
 
 
 def test_the_review_gates_its_creates_at_the_configured_concurrency(tmp_path):
@@ -2216,7 +2374,7 @@ def test_an_attested_reply_that_skipped_files_and_failed_a_quote_still_blocks():
         changed_files=1,
     )
     result = LensResult(LENS, 1, DIGEST, outcome, attempts=1, scope=frozenset({"a.py"}))
-    assert _blocks_coverage(result)
+    assert not synthesize([result]).coverage_complete
 
 
 def test_an_unverified_runner_delete_is_named_in_a_multi_lens_draft():
