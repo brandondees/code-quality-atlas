@@ -46,6 +46,7 @@ from atlas_reviewer.telemetry import JsonlSink, Telemetry
 SECRET = "webhook-secret-value"
 SHA_A = "a" * 40
 SHA_B = "b" * 40
+SHA_C = "c" * 40
 REPO = "brandondees/code-quality-atlas"
 OTHER = "other/repo"
 REPORT = ReviewReport(
@@ -106,20 +107,32 @@ def _deliver(
     method="POST",
     path="/webhook",
     worker=None,
+    classifier=None,
+    telemetry=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
         headers["X-Hub-Signature-256"] = _sign(body)
     elif signature:
         headers["X-Hub-Signature-256"] = signature
-    return handle_delivery(method, path, headers, body, config, board, worker=worker)
+    return handle_delivery(
+        method,
+        path,
+        headers,
+        body,
+        config,
+        board,
+        worker=worker,
+        classifier=classifier,
+        telemetry=telemetry,
+    )
 
 
-def _worker(board, runner, publisher=None, root=None):
+def _worker(board, runner, publisher=None, root=None, telemetry=None):
     return Worker(
         board,
         runner,
-        Telemetry(SystemClock()),
+        telemetry or Telemetry(SystemClock()),
         publisher,
         state_root=root,
     )
@@ -970,13 +983,13 @@ def test_a_supersede_during_a_deferred_post_is_not_logged_as_a_retry(tmp_path):
     board.enqueue(PrEvent(REPO, 7, SHA_A))
     job = board.claim()
     assert job is not None
-    real = board.finish
+    real = board.settle
 
-    def finish(current, state):
+    def settle(current, state):
         current.superseded = True
         return real(current, state)
 
-    board.finish = finish
+    board.settle = settle
     worker._defer_post(job, "github down")
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
     steps = [event.step for event in worker._telemetry.events]
@@ -1054,13 +1067,14 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
 
         board = Board(root / "queue.json")
         finishes: list[JobState] = []
-        real = board.finish
+        real = board.settle
 
-        def finish(job, state):
-            finishes.append(state)
-            return real(job, state)
+        def settle(job, state):
+            committed, _follow_up = real(job, state)
+            finishes.append(committed)
+            return committed, _follow_up
 
-        board.finish = finish
+        board.settle = settle
         worker = Worker(
             board,
             runner,
@@ -1095,13 +1109,14 @@ def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
     board = Board(tmp_path / "superseded" / "queue.json")
     board_box["board"] = board
     finishes: list[JobState] = []
-    real = board.finish
+    real = board.settle
 
-    def finish(job, state):
-        finishes.append(state)
-        return real(job, state)
+    def settle(job, state):
+        committed, _follow_up = real(job, state)
+        finishes.append(committed)
+        return committed, _follow_up
 
-    board.finish = finish
+    board.settle = settle
     worker = Worker(
         board,
         mark_runner,
@@ -1640,13 +1655,13 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
         return ReviewRun(True, REPORT)
 
     worker = _worker(board, runner, root=tmp_path)
-    real = board.finish
+    real = board.settle
 
-    def finish(job, state):
+    def settle(job, state):
         job.superseded = True
         return real(job, state)
 
-    monkeypatch.setattr(board, "finish", finish)
+    monkeypatch.setattr(board, "settle", settle)
     assert worker.run_one() is True
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
     assert not directory.exists()
@@ -2224,3 +2239,1187 @@ def test_the_review_deadline_is_read_and_bounded():
             config_from_env({**base, "ATLAS_SERVICE_DEADLINE_S": raw})
     with pytest.raises(ServiceError):
         ServiceConfig(secret=SECRET, allowlist=frozenset({REPO}), deadline_s=10.0)
+
+
+# --------------------------------------------------- keep or cancel (#702)
+
+REPORT_COST = ReviewReport(
+    ("tracing",),
+    (),
+    "note",
+    (),
+    (),
+    ("Model calls: 12; committed: $3.40.",),
+    "COMMENT",
+)
+
+
+def _newer_body(sha: str, updated_at: str) -> bytes:
+    return _body(sha=sha, updated_at=updated_at)
+
+
+def _code_push(running: PrEvent, new: PrEvent):
+    from atlas_reviewer.head_change import PushClass, PushKind
+
+    return PushClass(PushKind.CODE, ("src/x.py",))
+
+
+def _docs_push(running: PrEvent, new: PrEvent):
+    from atlas_reviewer.head_change import PushClass, PushKind
+
+    return PushClass(PushKind.DOCS_TESTS, ("docs/a.md",))
+
+
+def test_a_push_mid_review_is_kept_and_queued_as_the_follow_up(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[tuple[str, str]] = []
+
+    def runner(event, cancel):
+        seen.append((event.head_sha, event.delta_from))
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        # The classifier is None: an unclassifiable push keeps the
+        # review, the owner's default. The response names the keep.
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        assert (REPO, 7, SHA_B) in board.pending_heads()
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and (SHA_B, SHA_A) not in seen:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    # Mutant: the pending head never materialized, or materialized
+    # without its delta base -- either drops the follow-up review or
+    # detaches it from the head it builds on.
+    assert seen == [(SHA_A, ""), (SHA_B, SHA_A)]
+    assert board.pending_heads() == ()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert [event.fields["decision"] for event in decisions] == ["keep"]
+
+
+def test_an_early_code_push_cancels_the_running_review(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[str] = []
+
+    def runner(event, cancel):
+        seen.append(event.head_sha)
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=_code_push,
+                telemetry=telemetry,
+            ).body
+            == b"queued\n"
+        )
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and seen != [SHA_A, SHA_B]:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    # Mutant: the cancel branch dropped (or the classifier ignored), so
+    # a push that changes code under review never restarts early.
+    assert seen == [SHA_A, SHA_B]
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "cancel"
+    assert decisions[0].fields["kind"] == "code"
+    # No progress events exist, so the fractions read as early.
+    assert decisions[0].fields["lens_fraction"] == "0.00"
+
+
+def test_a_docs_push_is_kept_without_any_progress(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=_docs_push,
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"
+    assert decisions[0].fields["kind"] == "docs or tests only"
+
+
+def test_a_classification_failure_keeps_the_review_and_records_the_gap(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def broken(running: PrEvent, new: PrEvent):
+        raise RuntimeError("github unreachable")
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=broken,
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert len(decisions) == 1
+    assert decisions[0].fields["decision"] == "keep"
+    assert decisions[0].status == "error"
+    assert "RuntimeError" in decisions[0].error
+
+
+def test_a_posting_review_is_never_cancelled(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.QUEUED
+    claimed = board.claim()
+    assert claimed is not None
+    assert board.begin_post(claimed) is True
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        config,
+        board,
+        _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+        classifier=_code_push,
+        telemetry=telemetry,
+    )
+    assert result.body == b"kept\n"
+    # Mutant: a posting review treated like an early one, which would
+    # cancel a review whose spend is fully spent.
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"
+    assert "posting" in decisions[0].fields["reason"]
+
+
+def test_a_redelivery_of_the_pending_head_is_a_duplicate(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.QUEUED
+    claimed = board.claim()
+    assert claimed is not None
+    assert (
+        _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z")).body
+        == b"kept\n"
+    )
+    again = _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z"))
+    assert again.body == b"duplicate\n"
+    older = _deliver(config, board, _newer_body(SHA_C, "2026-11-12T19:30:00Z"))
+    assert older.body == b"stale\n"
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+
+def test_a_newer_push_while_a_delta_is_queued_inherits_its_delta_from(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[tuple[str, str]] = []
+
+    def runner(event, cancel):
+        seen.append((event.head_sha, event.delta_from))
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+
+    assert (
+        _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+        == b"queued\n"
+    )
+    runner_thread = threading.Thread(target=worker.run_one)
+    runner_thread.start()
+    try:
+        assert started.wait(2)
+        assert (
+            _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z")).body
+            == b"kept\n"
+        )
+        release.set()
+        runner_thread.join(2)
+        # A settled; its pending head B is queued as the follow-up, and
+        # the worker is not looping, so B stays queued for this push.
+        assert board.pending_heads() == ()
+        assert (
+            _deliver(config, board, _newer_body(SHA_C, "2026-11-12T21:00:00Z")).body
+            == b"queued\n"
+        )
+        # Mutant: the superseded queued follow-up's delta base dropped,
+        # so the replacement review would build on nothing and re-review
+        # the whole pull request.
+        assert worker.run_one() is True
+    finally:
+        release.set()
+        runner_thread.join(2)
+    assert seen == [(SHA_A, ""), (SHA_C, SHA_A)]
+
+
+def test_a_kept_head_is_materialized_as_a_full_review_when_the_review_fails(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[tuple[str, str]] = []
+
+    def runner(event, cancel):
+        seen.append((event.head_sha, event.delta_from))
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+            return ReviewRun(False, error="boom")
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z")).body
+            == b"kept\n"
+        )
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and (SHA_B, "") not in seen:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    # Mutant: the failed review materialized a delta review anyway,
+    # building on a review that never posted.
+    assert seen == [(SHA_A, ""), (SHA_B, "")]
+
+
+def test_the_pending_head_survives_a_restart(tmp_path):
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(5)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z")).body
+            == b"kept\n"
+        )
+    finally:
+        # A stop cancels the running review without settling it: it
+        # returns to queued, and the pending head stays recorded.
+        worker.stop()
+        release.set()
+    reloaded = Board(path)
+    assert (REPO, 7, SHA_B) in reloaded.pending_heads()
+    # The reloaded review runs to completion, and the pending head
+    # materializes with its delta base from the reloaded board.
+    seen: list[tuple[str, str]] = []
+
+    def rerun(event, cancel):
+        seen.append((event.head_sha, event.delta_from))
+        return ReviewRun(True, REPORT)
+
+    worker2 = _worker(reloaded, rerun, root=tmp_path)
+    assert worker2.run_one() is True
+    assert worker2.run_one() is True
+    assert worker2.run_one() is False
+    assert seen == [(SHA_A, ""), (SHA_B, SHA_A)]
+
+
+def test_the_cancel_policy_restores_the_blanket_supersede(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = ServiceConfig(
+        secret=SECRET,
+        allowlist=frozenset({REPO}),
+        state_dir=tmp_path,
+        host="127.0.0.1",
+        port=0,
+        head_change_policy="cancel",
+    )
+    started = threading.Event()
+    release = threading.Event()
+    cancelled: list[bool] = []
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+            cancelled.append(cancel.is_set())
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(config, board, _newer_body(SHA_B, "2026-11-12T20:00:00Z")).body
+            == b"queued\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    assert cancelled == [True]
+    assert board.pending_heads() == ()
+
+
+def test_a_progress_record_lets_a_late_code_push_keep_the_review(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            # The child's events file, as the coordinator's progress
+            # records land in it: three of the four planned lenses have
+            # settled, most of the budget spent, nothing left reading
+            # but a file the push never touches.
+            run = run_dir(tmp_path, event)
+            run.mkdir(parents=True, exist_ok=True)
+            lines = [
+                json.dumps(
+                    {
+                        "seq": index,
+                        "phase": "progress",
+                        "step": "lens settled",
+                        "status": "ok",
+                        "lens": lens,
+                        "lenses_done": index,
+                        "lenses_total": 4,
+                        "calls": 3 * index,
+                        "settled_usd": str(2 * index),
+                        "reservation_usd": "10",
+                        "reading": "src/untouched.py",
+                    }
+                )
+                for index, lens in enumerate(("tracing", "security", "hygiene"), 1)
+            ]
+            (run / "events.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=_code_push,
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    # Mutant: the progress read dropped, so the decision cancels on the
+    # zero-progress default instead of reading the review's real state.
+    assert decisions[0].fields["decision"] == "keep"
+    assert decisions[0].fields["lens_fraction"] == "0.75"
+
+
+def test_a_finished_review_logs_its_cost(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT_COST),
+        root=tmp_path,
+        telemetry=telemetry,
+    )
+    _deliver(_config(tmp_path), board, _body())
+    assert worker.run_one() is True
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    # Mutant: the cost logging dropped, which loses the measure-first
+    # numbers the decision's tuning reads.
+    assert costs[0].fields["calls"] == 12
+    assert costs[0].fields["committed_usd"] == "3.40"
+    assert costs[0].fields["measured"] == "final"
+
+
+def test_a_cancelled_review_logs_the_cost_its_progress_recorded(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            run = run_dir(tmp_path, event)
+            run.mkdir(parents=True, exist_ok=True)
+            (run / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "seq": 1,
+                        "phase": "progress",
+                        "step": "lens settled",
+                        "status": "ok",
+                        "lens": "tracing",
+                        "lenses_done": 1,
+                        "lenses_total": 4,
+                        "calls": 3,
+                        "settled_usd": "1.10",
+                        "committed_usd": "2.20",
+                        "reservation_usd": "10",
+                        "reading": "src/x.py",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=_code_push,
+                telemetry=telemetry,
+            ).body
+            == b"queued\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    # Mutant: the cost event read after the run directory was dropped,
+    # which would log every cancelled review as unknown.
+    assert costs[0].fields["calls"] == 3
+    assert costs[0].fields["measured"] == "partial"
+
+
+def test_a_review_whose_cost_is_nowhere_is_logged_as_unknown(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        telemetry=telemetry,
+    )
+    _deliver(_config(tmp_path), board, _body())
+    assert worker.run_one() is True
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    assert costs[0].fields["measured"] == "unknown"
+
+
+def test_the_head_change_settings_are_validated_at_boot():
+    base = {"ATLAS_GITHUB_WEBHOOK_SECRET": SECRET, "ATLAS_SERVICE_PROVIDER": "offline"}
+    defaults = config_from_env(base)
+    assert defaults.head_change_policy == "keep"
+    assert defaults.cancel_fraction == 0.5
+    assert (
+        config_from_env(
+            {**base, "ATLAS_HEAD_CHANGE_POLICY": "cancel"}
+        ).head_change_policy
+        == "cancel"
+    )
+    assert (
+        config_from_env(
+            {**base, "ATLAS_HEAD_CHANGE_CANCEL_FRACTION": "0.25"}
+        ).cancel_fraction
+        == 0.25
+    )
+    with pytest.raises(ServiceError):
+        config_from_env({**base, "ATLAS_HEAD_CHANGE_POLICY": "maybe"})
+    for raw in ("1.5", "-0.1", "half"):
+        with pytest.raises(ServiceError):
+            config_from_env({**base, "ATLAS_HEAD_CHANGE_CANCEL_FRACTION": raw})
+
+
+# ------------------------------------------------- round-1 fixes (#747)
+
+
+def test_a_kept_head_with_no_running_review_is_installed_not_dropped(tmp_path):
+    """The race branch (round-1 F2): the review settled between
+    `head_change_candidate` and `keep_head` -- up to three GitHub reads
+    later -- and `keep_head` must install the head under the same lock,
+    because a 202 `queued` is an acknowledgment GitHub will not
+    redeliver. Mutant: the branch answers QUEUED and installs nothing,
+    which drops the pushed head permanently."""
+    board = Board(tmp_path / "queue.json")
+    result = board.keep_head(
+        PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+    )
+    assert result is Enqueue.QUEUED
+    # The head is a real queued job now, not a lost acknowledgment.
+    assert (SHA_B, JobState.QUEUED) in board.states()
+    job = board.claim()
+    assert job is not None
+    assert job.event.head_sha == SHA_B
+    # A full review, with no delta base to build on, and no pending
+    # record left behind.
+    assert job.event.delta_from == ""
+    assert board.pending_heads() == ()
+
+
+def test_a_delivery_through_the_race_path_queues_the_new_head(tmp_path):
+    """The same race through `handle_delivery`: nothing running, so the
+    keep decision's keep path installs and answers queued -- the head
+    the next worker claims is the pushed one."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    result = _deliver(
+        config, board, _body(sha=SHA_B, updated_at="2026-11-12T20:00:00Z")
+    )
+    assert result.body == b"queued\n"
+    assert (SHA_B, JobState.QUEUED) in board.states()
+
+
+def test_a_no_classifier_decision_records_the_gap_with_an_error_status(tmp_path):
+    """A deployment with no classifier (round-1 F3) keeps every push --
+    the owner's default -- but the decision event carries the gap with
+    an error status, so the lost cancel branch is visible in the
+    telemetry instead of reading as a normal keep. Mutant: the gap
+    dropped (status ok, no gap), which is the defect."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"
+    assert decisions[0].status == "error"
+    assert "no head-change classifier" in decisions[0].error
+    # The decision's own duration is on the event (round-1 F8).
+    assert decisions[0].duration_s >= 0.0
+
+
+def test_a_timing_out_classification_is_marked_on_the_event(tmp_path):
+    """A classification that runs past its transport timeout is recorded
+    with the `timed_out` flag, so GitHub-side delivery failures
+    correlate with classifications (round-1 F8)."""
+    from atlas_reviewer.ports import TransportTimeoutError
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def slow(running: PrEvent, new: PrEvent):
+        raise TransportTimeoutError("the compare read timed out")
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=slow,
+                telemetry=telemetry,
+            ).body
+            == b"kept\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields.get("timed_out") == "1"
+    assert decisions[0].status == "error"
+
+
+def test_a_stranded_pending_head_is_recovered_at_boot(tmp_path):
+    """The crash window (round-1 F7): a kept head whose review finished
+    and whose materialization never ran -- the process died, or the
+    save failed -- is queued by `recover_pending`, as an ordinary review
+    (what it should have built on is not knowable there). Mutant: the
+    recovery dropped, which leaves the head stranded forever, with its
+    redelivery answered duplicate."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    # The materialization never ran (the crash window): the pending head
+    # is stranded, and its PR has no active job.
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    reloaded = Board(path)
+    recovered = reloaded.recover_pending()
+    assert [(event.head_sha, event.delta_from) for event in recovered] == [(SHA_B, "")]
+    assert (SHA_B, JobState.QUEUED) in reloaded.states()
+    assert reloaded.pending_heads() == ()
+    # A worker claims and runs it.
+    worker = _worker(
+        reloaded, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    assert worker.run_one() is True
+
+
+def test_a_pending_head_on_a_full_queue_waits_for_the_recovery(tmp_path):
+    """`take_pending` does not append past the queue's cap (round-1
+    F13): the finished job's freed slot can be taken by another thread's
+    enqueue in between, so a full queue leaves the pending head recorded
+    for the recovery to retry when there is room."""
+    path = tmp_path / "queue.json"
+    board = Board(path, max_remembered=2)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    # While the review runs, another PR's job fills the second slot.
+    assert board.enqueue(PrEvent(OTHER, 8, SHA_B)) is Enqueue.QUEUED
+    assert board.finish(job, JobState.DONE) is JobState.DONE
+    # Another enqueue takes the slot the settled job freed, before the
+    # materialization runs -- the interleaving the cap check exists for.
+    assert board.enqueue(PrEvent(OTHER, 9, SHA_C)) is Enqueue.QUEUED
+    assert board.take_pending(PrEvent(REPO, 7, SHA_A), succeeded=True) is None
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    # The worker's own idle pass retries it once there is room: the
+    # second pass's recovery installs B while the queue is under the cap.
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    assert (
+        worker.run_one() is True
+    )  # runs one OTHER job; the recovery is still capped out
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    assert worker.run_one() is True  # runs the other; the recovery installs B
+    assert (REPO, 7, SHA_B) not in board.pending_heads()
+    assert (SHA_B, JobState.QUEUED) in board.states()
+
+
+def test_the_worker_loop_recovers_a_stranded_pending_head(tmp_path):
+    """The idle recovery (round-1 F7): a worker pass finds the stranded
+    pending head and queues it, with the follow-up telemetry naming it."""
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        telemetry=telemetry,
+    )
+    assert (
+        _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+        == b"queued\n"
+    )
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    # One worker pass: the recovery installs the stranded head, and the
+    # same pass claims and runs it.
+    assert worker.run_one() is True
+    assert (REPO, 7, SHA_B) not in board.pending_heads()
+    assert (SHA_B, JobState.DONE) in board.states()
+    queued = [e for e in telemetry.events if e.step == "follow-up queued"]
+    assert [e.fields["sha12"] for e in queued] == [SHA_B[:12]]
+
+
+def test_a_stale_pending_head_is_dropped_not_installed_by_the_recovery(tmp_path):
+    """The recovery's stale window (round-2 R2-F4): a pending head the
+    pull request has moved past must not be installed -- it would
+    review, and post for, a head that is no longer the PR's head
+    (`still_current` compares nothing against the accepted heads). The
+    recovery drops the stale record, the way `take_pending` drops one.
+    The state is built directly -- a pending entry outliving its head is
+    the crash/recovery shape the check exists for. Mutant: the check
+    dropped, which installs the stale head."""
+    path = tmp_path / "queue.json"
+    stamp = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+    path.write_text(
+        json.dumps(
+            {
+                "jobs": [],
+                "seen": [],
+                "heads": [
+                    {"repo": REPO, "pr": 7, "sha": SHA_C, "at": stamp.isoformat()}
+                ],
+                "pending": [
+                    {"repo": REPO, "pr": 7, "sha": SHA_B, "at": stamp.isoformat()}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    board = Board(path)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+    # Mutant target: B installed (and eventually posted) though C is the
+    # pull request's head.
+    assert board.recover_pending() == ()
+    assert board.pending_heads() == ()
+    assert board.states() == ()
+
+
+def test_a_classification_past_its_budget_is_unclassifiable_and_flagged(
+    tmp_path, monkeypatch
+):
+    """The classification's overall budget (round-2 R2-F8): a fetch that
+    runs past `_CLASSIFY_BUDGET_S` is given up on inside the webhook
+    handler -- the push is unclassifiable (the owner's keep default),
+    the gap names the budget, and the `timed_out` flag is on -- so the
+    handler's occupancy is bounded. Mutant: the budget wait removed
+    (the handler blocks on the classifier), which hangs this test's
+    slow classifier past the budget."""
+    import atlas_reviewer.service as service_module
+
+    # Read the shipped budget before the monkeypatch is active (round-3
+    # R3-F4): the final assertion must judge the constant that ships,
+    # not the patched 0.2 s this test installs.
+    shipped_budget = service_module._CLASSIFY_BUDGET_S
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def slow(running: PrEvent, new: PrEvent):
+        release.wait(30)
+        return _code_push(running, new)
+
+    telemetry = Telemetry(SystemClock())
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    monkeypatch.setattr(service_module, "_CLASSIFY_BUDGET_S", 0.2)
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+            classifier=slow,
+            telemetry=telemetry,
+        )
+        # The past-budget classification is the keep default, flagged.
+        assert result.body == b"kept\n"
+        decisions = [e for e in telemetry.events if e.step == "head change"]
+        assert decisions[0].fields["decision"] == "keep"
+        assert decisions[0].fields.get("timed_out") == "1"
+        assert "budget" in decisions[0].error
+    finally:
+        release.set()
+        worker.stop()
+    # The bounded budget is the shipped constant, read before this
+    # test's monkeypatch was active, small enough to sit inside
+    # GitHub's response window.
+    assert shipped_budget <= 10.0
+
+
+def test_the_decision_duration_pin_uses_a_clock_that_advances(tmp_path):
+    """The duration pin made real (round-2 R2-F11): the classification
+    consumes clock time, so a recorded `start_s` yields the decision's
+    own duration, while a dropped `start_s` (the mutant) measures from
+    the record's own moment and reads about zero. The decision here is
+    the classifier's code push with no progress recorded, so it cancels
+    -- and the event's duration is what is pinned."""
+    from atlas_reviewer.tests.helpers import FakeClock
+
+    board = Board(tmp_path / "queue.json")
+    config = _config(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    clock = FakeClock()
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    telemetry = Telemetry(clock, scrub=lambda text: text)
+    clock.advance(100.0)
+
+    def slow_clock(running: PrEvent, new: PrEvent):
+        # The classification consumes clock time: the recorded duration
+        # is the decision's own only when `start_s` names when it began.
+        clock.advance(50.0)
+        return _code_push(running, new)
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry)
+    worker.start()
+    try:
+        assert (
+            _deliver(config, board, _body(updated_at="2026-11-12T19:00:00Z")).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        assert (
+            _deliver(
+                config,
+                board,
+                _newer_body(SHA_B, "2026-11-12T20:00:00Z"),
+                classifier=slow_clock,
+                telemetry=telemetry,
+            ).body
+            == b"queued\n"
+        )
+        release.set()
+    finally:
+        worker.stop()
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "cancel"
+    # Mutant: `start_s` dropped -- the duration then reads from the
+    # record's own moment (about zero), not the decision's 50 advanced
+    # seconds.
+    assert decisions[0].duration_s >= 40.0
+
+
+# ------------------------------------------------- round-3 fixes (#747)
+
+
+def test_a_failed_save_rolls_back_keep_head(tmp_path, monkeypatch):
+    """The keep path's rollback (round-3 R3-F2): a failed save inside
+    `keep_head` puts the pending record, the head pointer and any
+    touched job's flags back, the way the enqueue/finish/begin-post
+    rollback does. Mutant: the rollback dropped, which leaves a pending
+    head recorded for a push the queue never acknowledged."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    assert board.pending_heads() == ()
+    assert job.superseded is False
+    assert job.cancel.is_set() is False
+
+
+def test_a_failed_save_rolls_back_settle(tmp_path, monkeypatch):
+    """The settle rollback (round-3 R3-F2): a failed save inside
+    `settle` puts the job's terminal state, the installed follow-up and
+    the pending record back together -- the one-save atomicity the
+    two-step path could not give, which this failing save is also what
+    pins structurally (round-3 R3-F10). Mutant: the rollback dropped,
+    which leaves a queued follow-up whose review never settled."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.settle(job, JobState.DONE)
+    assert job.state is JobState.RUNNING
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+
+def test_a_failed_save_rolls_back_the_recovery(tmp_path, monkeypatch):
+    """The recovery's rollback (round-3 R3-F2): a failed save inside
+    `recover_pending` pops the job it appended and puts the pending
+    record back, so a stranded head stays recorded for the next pass
+    instead of half-installed in memory while absent from the queue
+    file. Mutant: the rollback dropped, which leaves the appended job
+    and the lost pending entry."""
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    board.finish(job, JobState.DONE)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.recover_pending()
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert (REPO, 7, SHA_B) in board.pending_heads()
+
+
+def test_a_queued_delta_job_survives_a_queue_file_reload_with_its_delta_base(
+    tmp_path,
+):
+    """The wire path (round-3 R3-F3): a queued delta job's `delta_from`
+    survives the queue-file save and reload -- a dropped field in
+    `as_dict` or in the reload parser would strand the delta base
+    silently across a restart. Mutant: the field dropped from the
+    record."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    assert (
+        board.keep_head(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        )
+        is Enqueue.KEPT
+    )
+    committed, follow_up = board.settle(job, JobState.DONE)
+    assert committed is JobState.DONE
+    assert follow_up is not None
+    assert follow_up.head_sha == SHA_B
+    reloaded = Board(path)
+    requeued = reloaded.claim()
+    assert requeued is not None
+    assert requeued.event.head_sha == SHA_B
+    assert requeued.event.delta_from == SHA_A
+
+
+def test_the_childs_event_file_carries_the_delta_base_round_trip(tmp_path):
+    """The wire path (round-3 R3-F3): the run child's event file carries
+    `delta_from` and `load_event` reads it back; a malformed value is
+    refused rather than silently dropped."""
+    from atlas_reviewer.cli import UsageError, load_event
+    from atlas_reviewer.service_run import _write_event
+
+    path = tmp_path / "event.json"
+    _write_event(path, PrEvent(REPO, 7, SHA_B, delta_from=SHA_A))
+    assert load_event(path).delta_from == SHA_A
+    path.write_text(
+        json.dumps(
+            {"repo": REPO, "pr_number": 7, "head_sha": SHA_B, "delta_from": "abc"}
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(UsageError, match="invalid event"):
+        load_event(path)
+
+
+def test_a_candidate_that_crosses_into_posting_during_the_window_is_kept(
+    tmp_path,
+):
+    """The posting snapshot re-check (round-3 R3-F5): the snapshot is
+    read before the <=8s classification window; a review that crosses
+    into posting during it is decided on the re-read state, so the
+    recorded verdict and the action the caller takes agree. Mutant: the
+    re-check dropped -- the stale snapshot decides, and a code push
+    against a review that is already posting its comment cancels."""
+    from atlas_reviewer.service import _head_change_decision
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    telemetry = Telemetry(SystemClock())
+
+    def late_posting(running: PrEvent, new: PrEvent):
+        # The review's lens loop ended and it began posting while the
+        # classification ran.
+        job.state = JobState.POSTING
+        return _code_push(running, new)
+
+    verdict = _head_change_decision(
+        job,
+        PrEvent(REPO, 7, SHA_B),
+        _config(tmp_path),
+        late_posting,
+        telemetry,
+    )
+    assert verdict.cancel is False
+    assert verdict.reason == "the review was already posting its comment"
+    decisions = [e for e in telemetry.events if e.step == "head change"]
+    assert decisions[0].fields["decision"] == "keep"

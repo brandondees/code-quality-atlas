@@ -69,7 +69,71 @@ must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
 A second delivery of a head SHA whose review already finished does nothing.
 A head whose review failed can be queued again. A newer head SHA
 cancels the review of the previous one, and that cancelled review is not
-posted.
+posted — unless the head-change policy below decides to keep it.
+
+### A push that lands mid-review (#702, D79)
+
+When a newer head arrives while a review of the previous head is still
+running, the service decides per push whether to keep that review or
+cancel it. The policy is `ATLAS_HEAD_CHANGE_POLICY`: `keep` (the
+default) decides per push; `cancel` restores the blanket supersede this
+policy replaced. The decision compares the push against the running
+review's progress, which the review child records into its events file
+after every settled lens and once when its lens loop ends (`progress`
+records: lenses settled of the planned count, spend against the derived
+reservation, and the paths still being read):
+
+- a push that only merges the base branch, or only touches docs or
+  tests, or touches no file a lens without a clean run is still
+  reading, keeps the review however late it lands;
+- a push that changes code under review cancels a review that is still
+  early — early meaning under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` (a
+  fraction, default `0.5`) on **both** the lenses settled and the budget
+  spent — so cancelling stays the narrow exception. The spend measure
+  alone cannot tell an early review from a cheap one (a review whose
+  every lens has settled can sit far under its derived worst-case
+  reservation), so either measure alone would cancel completed work
+  (round-1 review of #747, F1);
+- otherwise the review is kept and a follow-up review of the new head
+  queues behind it.
+
+The classification reads GitHub's comparison of the two heads plus the
+pull request's base (`classify_delivery` in `head_change.py`), and the
+benign kinds are claimed only on evidence: a failed fetch, a cut commit
+list (a comparison at GitHub's files cap may be cut, and a comparison
+with no `files` array is refused outright), or a merge whose base side
+cannot be identified reads as code; an empty, untruncated range changes
+nothing the review reads and is benign. A push no evidence classified
+at all keeps the review — the owner's default — and the gap is on the
+decision's telemetry with an error status: a deployment whose App
+credentials are absent or unusable has no classifier, and its boot log
+says so once while every such decision carries the gap (round-1 review
+of #747, F3). A review that is already posting is never cancelled. The
+classification's evidence comes from the same party the review judges —
+a crafted merge commit can present a code push as a merge of the base —
+and every consequence of that lands on the keep side, since the
+follow-up reviews the new head regardless (round-1 F18).
+
+A kept head does not hold a queue slot while it waits: the queue records
+it as the pull request's pending follow-up, and queues it when the
+running review settles — as a delta review building on the settled head
+when that review succeeded, as an ordinary review when it failed. A
+pending head can be stranded — the process dying between the review's
+settle and the materialization, a failed materializing save, a full
+queue at materialize time — and a redelivery of a stranded head is
+answered duplicate, so the queue recovers one: at boot, and on every
+worker pass, a pending head whose pull request has no active job is
+queued as an ordinary review and named on the `follow-up queued` event
+(round-1 review of #747, F7). The decision is the `head change`
+telemetry event (both heads, the kind, the fractions, the reason, the
+decision's duration, and a `timed_out` flag when a classification read
+ran past its transport timeout — round-1 F8), the costs are `review
+cost` events (from the
+draft's cost lines when the review finished, from the last progress
+record when it was cancelled, `measured: unknown` when neither exists),
+and the queued follow-up is a `follow-up queued` event — all in
+`service.jsonl`, tagged with the heads, so the numbers the threshold is
+tuned on can be read against each decision.
 
 The review child follows the service mode, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
@@ -506,6 +570,8 @@ Environment variables (names only; never commit values):
 | `ATLAS_CALL_RETRIES` | agentic lens entry | Times a failed model call is sent again within a turn, 0 to 3. Unset is 1 |
 | `ATLAS_MIN_OUTPUT_TOKENS` | agentic lens entry | Smallest output cap a call is fitted to when the reservation cannot cover its full cap. Unset is 16,000 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
+| `ATLAS_HEAD_CHANGE_POLICY` | webhook service | The keep-or-cancel policy for a push that lands mid-review (#702, D79): `keep` (the default) decides per push and queues a kept head as the settled review's follow-up; `cancel` restores the blanket supersede. An unknown value refuses to start |
+| `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` | webhook service | The "early" threshold the cancel branch compares the lenses-settled and budget-spent fractions against, 0.0 to 1.0 (default 0.5). A code push under it on both measures cancels the running review |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
@@ -1540,7 +1606,8 @@ D41 records the 2026-11-12 probe that did.
 | `lens_script.py` | the dry-run lens script: the scripted reviewer's fixed reading behavior and the JSON scenarios the fixture ships | reads the script file |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
 | `service_admit.py` | webhook signature, event and allowlist admission | no |
-| `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |
+| `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
+| `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |
 | `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74) | the review child |
 | `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
 | `service.py` | webhook HTTP server and the review worker | network |

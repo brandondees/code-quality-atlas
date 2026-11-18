@@ -17,7 +17,7 @@ import json
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -31,6 +31,7 @@ class Enqueue(StrEnum):
     DUPLICATE = "duplicate"
     STALE = "stale"
     FULL = "full"
+    KEPT = "kept"
 
 
 class JobState(StrEnum):
@@ -50,6 +51,16 @@ _RELOAD = {
     JobState.RUNNING: JobState.QUEUED,
     JobState.POSTING: JobState.POST_PENDING,
 }
+
+
+@dataclass
+class _TakePlan:
+    """A pending head's in-memory installation, awaiting the caller's
+    save: the queued follow-up and the rollback record (the pending
+    entry as it was)."""
+
+    event: PrEvent
+    backup: tuple[str, datetime | None]
 
 
 class QueueError(ValueError):
@@ -77,6 +88,7 @@ class Job:
             "superseded": self.superseded,
             "attempts": self.attempts,
             "retry_at": self.retry_at,
+            "delta_from": self.event.delta_from,
         }
 
 
@@ -127,12 +139,17 @@ class Board:
         self._seen_order: list[tuple[str, int, str]] = []
         self._seen: set[tuple[str, int, str]] = set()
         self._heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
+        # A head the keep side of the keep-or-cancel decision (#702) held
+        # back while an earlier review kept running: `(repo, pr) ->
+        # (sha, updated_at)`. It is queued for review when that review
+        # settles, so it never holds an active slot while it waits.
+        self._pending: dict[tuple[str, int], tuple[str, datetime | None]] = {}
         self._max_remembered = max_remembered
         self._max_seen = max_seen
         self._saves_ok = True
         self._save_retry_at = 0.0
         if path.exists():
-            self._jobs, seen, self._heads = _load(path)
+            self._jobs, seen, self._heads, self._pending = _load(path)
             for key in seen:
                 self._remember(key)
 
@@ -142,13 +159,30 @@ class Board:
         *,
         at: datetime | None = None,
         superseded: list[Job] | None = None,
+        delta_from: str = "",
     ) -> Enqueue:
         """``at`` is the pull request's ``updated_at`` on this delivery.
         A different head cancels the current review only when ``at`` is
-        later than the head already accepted for that PR."""
+        later than the head already accepted for that PR.
+
+        ``delta_from`` names the head the new job reviews the delta
+        against (#702): the previously reviewed head, when the caller
+        queues a follow-up review for a head that was held back. A
+        queued job of the same pull request that this enqueue supersedes
+        passes its own ``delta_from`` on when the caller names none, so a
+        push that lands while a follow-up review is queued does not
+        detach the follow-up from the head it builds on."""
         with self._cv:
             key = (event.repo, event.pr_number, event.head_sha)
             if key in self._seen:
+                return Enqueue.DUPLICATE
+            if (
+                self._pending.get((event.repo, event.pr_number), ("",))[0]
+                == event.head_sha
+            ):
+                # The head a kept review is holding back is already
+                # accepted as this pull request's follow-up; a
+                # redelivery of it adds nothing.
                 return Enqueue.DUPLICATE
             failed_job: Job | None = None
             for job in self._jobs:
@@ -181,14 +215,328 @@ class Board:
             # is at most the worker concurrency.
             if active >= self._max_remembered and not replaces:
                 return Enqueue.FULL
-            settled = self._install(event, at, failed_job)
+            inherited = delta_from or self._queued_delta_from(event)
+            settled = self._install(event, at, failed_job, inherited)
             if superseded is not None:
                 superseded.extend(settled)
             self._cv.notify()
             return Enqueue.QUEUED
 
+    def _queued_delta_from(self, event: PrEvent) -> str:
+        """The ``delta_from`` of the first active queued or pending job of
+        this pull request, or "" when there is none."""
+        for job in self._jobs:
+            if (
+                job.event.repo == event.repo
+                and job.event.pr_number == event.pr_number
+                and job.state in {JobState.QUEUED, JobState.POST_PENDING}
+                and job.event.delta_from
+            ):
+                return job.event.delta_from
+        return ""
+
+    def _known_head(self, event: PrEvent, at: datetime | None) -> Enqueue | None:
+        """The refusal for a head this queue already knows -- seen and
+        remembered, held by an existing job (a superseded or superseding
+        one is stale, the rest duplicates), or older than the accepted
+        head -- or None when the delivery is a new, current head."""
+        key = (event.repo, event.pr_number, event.head_sha)
+        if key in self._seen:
+            return Enqueue.DUPLICATE
+        for job in self._jobs:
+            if job.key() == key:
+                return (
+                    Enqueue.STALE
+                    if job.state is JobState.SUPERSEDED or job.superseded
+                    else Enqueue.DUPLICATE
+                )
+        if not self._newer_than_current(event, at):
+            return Enqueue.STALE
+        return None
+
+    def keep_head(
+        self,
+        event: PrEvent,
+        *,
+        at: datetime | None = None,
+        superseded: list[Job] | None = None,
+    ) -> Enqueue:
+        """Hold a pushed head back while an earlier review of this pull
+        request keeps running (#702, D79).
+
+        The head is recorded as the pull request's pending follow-up: it
+        is queued for review -- as a delta review of the commits between
+        the finished review's head and this one, when that review
+        settles successfully -- when the running review settles. The
+        running review itself is not touched, so it posts its comment at
+        the head it reviewed. A queued or post-pending job of the same
+        pull request is still superseded here, exactly as ``enqueue``
+        would: a review that has not started is cancelled rather than
+        kept.
+
+        A redelivery of the pending head is a duplicate, and an older
+        delivery is stale, against the pending head as against an
+        installed one. When no running or posting review remains by the
+        time this runs -- the decision raced a review that settled first,
+        or a stop/restart intervened -- the head is installed here, under
+        the same lock and save, as an ordinary review without a delta
+        base: answering ``queued`` without installing anything would
+        acknowledge a delivery GitHub will not redeliver, and the pushed
+        head would never be reviewed (round-1 review of #747, F2)."""
+        with self._cv:
+            refused = self._known_head(event, at)
+            if refused is not None:
+                return refused
+            running = any(
+                job.event.repo == event.repo
+                and job.event.pr_number == event.pr_number
+                and job.state in {JobState.RUNNING, JobState.POSTING}
+                and not job.superseded
+                for job in self._jobs
+            )
+            active = sum(1 for job in self._jobs if job.state in _ACTIVE)
+            if not running:
+                # The race branch installs a job, which takes an active
+                # slot, so it is subject to the same cap as ``enqueue``.
+                # Recording a pending head is not: it holds no slot, so a
+                # full queue still records it rather than dropping the
+                # delivery to a 503 GitHub will not redeliver.
+                replaces = any(
+                    job.event.repo == event.repo
+                    and job.event.pr_number == event.pr_number
+                    and job.state in _ACTIVE
+                    for job in self._jobs
+                )
+                if active >= self._max_remembered and not replaces:
+                    return Enqueue.FULL
+                installed = self._install(event, at, None, "")
+                if superseded is not None:
+                    superseded.extend(installed)
+                self._cv.notify()
+                return Enqueue.QUEUED
+            previous_head = self._heads.get((event.repo, event.pr_number))
+            previous_pending = self._pending.get((event.repo, event.pr_number))
+            touched: list[tuple[Job, JobState, bool, bool]] = []
+            kept_back: list[Job] = []
+            for job in self._jobs:
+                if (
+                    job.event.repo != event.repo
+                    or job.event.pr_number != event.pr_number
+                ):
+                    continue
+                if job.state not in {JobState.QUEUED, JobState.POST_PENDING}:
+                    continue
+                touched.append((job, job.state, job.superseded, job.cancel.is_set()))
+                job.superseded = True
+                job.cancel.set()
+                kept_back.append(job)
+                job.state = JobState.SUPERSEDED
+            self._pending[(event.repo, event.pr_number)] = (event.head_sha, at)
+            self._heads[(event.repo, event.pr_number)] = (event.head_sha, at)
+            try:
+                self._save()
+            except Exception:
+                if previous_pending is None:
+                    self._pending.pop((event.repo, event.pr_number), None)
+                else:
+                    self._pending[(event.repo, event.pr_number)] = previous_pending
+                if previous_head is None:
+                    self._heads.pop((event.repo, event.pr_number), None)
+                else:
+                    self._heads[(event.repo, event.pr_number)] = previous_head
+                for job, state, was_superseded, cancelled in touched:
+                    job.state = state
+                    job.superseded = was_superseded
+                    if cancelled:
+                        job.cancel.set()
+                    else:
+                        job.cancel.clear()
+                raise
+            if superseded is not None:
+                superseded.extend(kept_back)
+            self._cv.notify()
+            return Enqueue.KEPT
+
+    def take_pending(self, finished: PrEvent, *, succeeded: bool) -> PrEvent | None:
+        """The single pending-head step a settling review composes with
+        its terminal state.
+
+        A kept head waits for its review's settle: a settled success
+        queues the pending
+        head as a delta review building on the head that just finished;
+        a failure queues it as an ordinary review, because the failed
+        review posted nothing for the delta to build on. The pending
+        head is installed only while it is still the pull request's
+        current head -- a later push that was itself held back replaced
+        it in ``_pending`` and ``_heads``, and the newest one wins -- and
+        only while the queue has room for it: the finished job's slot
+        was freed by its own terminal state, but another thread's
+        ``enqueue``
+        can take it in between, and appending past the cap unconditionally
+        would breach it (round-1 review of #747, F13). When the queue is
+        full the pending head is left recorded for the idle recovery
+        (`recover_pending`) to retry. None of this supersedes anything:
+        the finished job is terminal, so the pending head takes its slot
+        without a supersede. Production never calls this directly: a
+        review that settles takes this step and its terminal state
+        together, under one lock and one save (`settle`, round-2 review
+        of #747, R2-F4) -- this is the single-step form the tests drive
+        and `settle` composes."""
+        with self._cv:
+            head_key = (finished.repo, finished.pr_number)
+            plan = self._take_plan(head_key, finished, succeeded)
+            if plan is None:
+                return None
+            try:
+                self._save()
+            except Exception:
+                self._jobs.pop()
+                self._pending[head_key] = plan.backup
+                raise
+            self._cv.notify()
+            return plan.event
+
+    def _take_plan(
+        self,
+        head_key: tuple[str, int],
+        finished: PrEvent,
+        succeeded: bool,
+    ) -> _TakePlan | None:
+        """The pending head to install, installed in memory, with the
+        rollback record -- the lock is held; the caller saves. None when
+        there is nothing to install, in which case a stale pending entry
+        was dropped here."""
+        pending = self._pending.get(head_key)
+        if pending is None:
+            return None
+        sha = pending[0]
+        current = self._heads.get(head_key)
+        if current is None or current[0] != sha:
+            # A newer head replaced this one while the review ran.
+            self._pending.pop(head_key, None)
+            return None
+        key = (head_key[0], head_key[1], sha)
+        if key in self._seen or any(job.key() == key for job in self._jobs):
+            self._pending.pop(head_key, None)
+            return None
+        if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
+            self._max_remembered
+        ):
+            # The slot this job freed is already taken. The pending
+            # head stays recorded; the idle recovery retries it.
+            return None
+        event = PrEvent(
+            head_key[0],
+            head_key[1],
+            sha,
+            delta_from=finished.head_sha if succeeded else "",
+        )
+        self._pending.pop(head_key, None)
+        self._jobs.append(Job(event, JobState.QUEUED))
+        return _TakePlan(event, pending)
+
+    def settle(self, job: Job, state: JobState) -> tuple[JobState, PrEvent | None]:
+        """The terminal state stored and the pull request's pending head
+        taken, under one lock and one save (round-2 review of #747,
+        R2-F4).
+
+        As separate lock acquisitions -- ``finish``, then
+        ``take_pending`` -- two windows opened: an idle recovery pass
+        between them saw no active job and installed the pending head as
+        a plain review before the delta base was set, costing the
+        follow-up its delta; and a process death between the two saves
+        stranded a head whose redelivery is refused. Here the supersede
+        coercion, the pending checks, the follow-up install and the
+        queue-file save are one step, and the rollback puts both sides
+        back when the save fails. The follow-up event, when one was
+        queued, comes back for the caller's telemetry."""
+        with self._cv:
+            if job.superseded and state is not JobState.SUPERSEDED:
+                state = JobState.SUPERSEDED
+            previous = job.state
+            job.state = state
+            head_key = (job.event.repo, job.event.pr_number)
+            plan = (
+                self._take_plan(head_key, job.event, state is JobState.DONE)
+                if state in {JobState.DONE, JobState.FAILED}
+                else None
+            )
+            try:
+                self._save()
+            except Exception:
+                job.state = previous
+                if plan is not None:
+                    self._jobs.pop()
+                    self._pending[head_key] = plan.backup
+                raise
+            self._cv.notify_all()
+            return state, plan.event if plan is not None else None
+
+    def recover_pending(self) -> tuple[PrEvent, ...]:
+        """Queue every pending head whose pull request has no active job
+        (round-1 review of #747, F7).
+
+        A kept head can be stranded: the process can die between the
+        review's ``finish`` persisting and ``take_pending`` running, the
+        materializing save can fail (the pending entry is put back and
+        the error surfaces as a generic worker error), and ``take_pending``
+        can leave it recorded on a full queue. A redelivery of a stranded
+        head is answered DUPLICATE by the pending check, so without this
+        recovery the head is never reviewed. Each stranded head is
+        installed as an ordinary review without a delta base -- what the
+        stranded head should have built on is not knowable here, and a
+        full review of the head is the safe shape -- and returned so the
+        caller can log what was recovered. Called when the service boots
+        and whenever a worker loop finds no queued work."""
+        with self._cv:
+            recovered: list[PrEvent] = []
+            for head_key, (sha, at) in list(self._pending.items()):
+                if any(
+                    job.event.repo == head_key[0]
+                    and job.event.pr_number == head_key[1]
+                    and job.state in _ACTIVE
+                    for job in self._jobs
+                ):
+                    continue
+                current = self._heads.get(head_key)
+                if current is None or current[0] != sha:
+                    # A newer head took over while this one was held back
+                    # (a cancel-decision push installed it): the pending
+                    # record is stale, and installing it would review --
+                    # and post for -- a head the pull request has moved
+                    # past. Dropped, the way `take_pending` drops one
+                    # (round-2 review of #747, R2-F4). Mutant: the check
+                    # dropped, which posts a stale head's review.
+                    self._pending.pop(head_key, None)
+                    continue
+                key = (head_key[0], head_key[1], sha)
+                if key in self._seen or any(job.key() == key for job in self._jobs):
+                    self._pending.pop(head_key, None)
+                    continue
+                if sum(1 for job in self._jobs if job.state in _ACTIVE) >= (
+                    self._max_remembered
+                ):
+                    break
+                event = PrEvent(head_key[0], head_key[1], sha)
+                self._pending.pop(head_key, None)
+                self._jobs.append(Job(event, JobState.QUEUED))
+                try:
+                    self._save()
+                except Exception:
+                    self._jobs.pop()
+                    self._pending[head_key] = (sha, at)
+                    raise
+                recovered.append(event)
+            if recovered:
+                self._cv.notify()
+            return tuple(recovered)
+
     def _install(
-        self, event: PrEvent, at: datetime | None, failed_job: Job | None
+        self,
+        event: PrEvent,
+        at: datetime | None,
+        failed_job: Job | None,
+        delta_from: str = "",
     ) -> tuple[Job, ...]:
         """Swap in ``event`` and save. A failed save puts the memory back."""
         head_key = (event.repo, event.pr_number)
@@ -212,7 +560,8 @@ class Board:
             if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
                 settled.append(job)
                 job.state = JobState.SUPERSEDED
-        self._jobs.append(Job(event, JobState.QUEUED))
+        installed = replace(event, delta_from=delta_from or event.delta_from)
+        self._jobs.append(Job(installed, JobState.QUEUED))
         self._heads[head_key] = (event.head_sha, at)
         try:
             self._save()
@@ -320,6 +669,45 @@ class Board:
                 job.state in {JobState.RUNNING, JobState.POSTING} and not job.superseded
             )
 
+    def head_change_candidate(
+        self, event: PrEvent, *, at: datetime | None = None
+    ) -> Job | None:
+        """The review a keep-or-cancel decision would be made about
+        (#702): the pull request's running or posting job, when this
+        delivery is a newer head for it. None when nothing is running,
+        when the delivery is a duplicate or stale against the accepted
+        heads, or when the job was already superseded -- a delivery in
+        any of those shapes takes the ordinary enqueue path, which is
+        the cancel policy's whole path."""
+        with self._cv:
+            key = (event.repo, event.pr_number, event.head_sha)
+            if key in self._seen:
+                return None
+            if any(job.key() == key for job in self._jobs):
+                return None
+            if not self._newer_than_current(event, at):
+                return None
+            for job in self._jobs:
+                if (
+                    job.event.repo == event.repo
+                    and job.event.pr_number == event.pr_number
+                    and job.state in {JobState.RUNNING, JobState.POSTING}
+                    and not job.superseded
+                ):
+                    return job
+            return None
+
+    def pending_heads(self) -> tuple[tuple[str, int, str], ...]:
+        """Every head currently held back, as ``(repo, pr, sha)`` triples.
+
+        The diagnostic view of ``_pending``, read by the service's boot
+        log, so an operator can see a kept head that is waiting; the
+        queue's own paths use the internal record."""
+        with self._cv:
+            return tuple(
+                (repo, pr, sha) for (repo, pr), (sha, _at) in self._pending.items()
+            )
+
     def begin_post(self, job: Job) -> bool:
         """True only when this job may be sent. A running job becomes
         POSTING under the lock, so a supersede that lands before this
@@ -340,7 +728,10 @@ class Board:
             return True
 
     def finish(self, job: Job, state: JobState) -> JobState:
-        """The state actually stored. A job that was superseded is stored
+        """The single terminal-state step a settling review composes with
+        its follow-up install (`settle`): production never calls this
+        directly, the tests drive it on its own. The state actually
+        stored; a job that was superseded is stored
         as superseded even when the caller asked for a success."""
         with self._cv:
             if job.superseded and state is not JobState.SUPERSEDED:
@@ -467,6 +858,10 @@ class Board:
                 [job.as_dict() for job in self._jobs],
                 [_key_text(key) for key in self._seen_order],
                 [_head_record(key, sha, at) for key, (sha, at) in self._heads.items()],
+                [
+                    _head_record(key, sha, at)
+                    for key, (sha, at) in self._pending.items()
+                ],
             )
         except Exception:
             self._saves_ok = False
@@ -518,12 +913,15 @@ def _store(
     jobs: list[dict[str, object]],
     seen: list[str],
     heads: list[dict[str, object]],
+    pending: list[dict[str, object]],
 ) -> None:
     make_private_dirs(path.parent)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump({"jobs": jobs, "seen": seen, "heads": heads}, handle)
+        json.dump(
+            {"jobs": jobs, "seen": seen, "heads": heads, "pending": pending}, handle
+        )
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp, path)
@@ -539,6 +937,7 @@ def _load(
 ) -> tuple[
     list[Job],
     list[tuple[str, int, str]],
+    dict[tuple[str, int], tuple[str, datetime | None]],
     dict[tuple[str, int], tuple[str, datetime | None]],
 ]:
     try:
@@ -559,7 +958,9 @@ def _load(
         loaded.append(job)
     seen = _seen(raw.get("seen") if isinstance(raw, dict) else None, path)
     heads = _heads(raw.get("heads") if isinstance(raw, dict) else None, loaded, path)
-    return loaded, seen, heads
+    pending_raw = raw.get("pending") if isinstance(raw, dict) else None
+    pending = {} if pending_raw is None else _heads(pending_raw, loaded, path)
+    return loaded, seen, heads, pending
 
 
 def _job(item: object, path: Path) -> Job:
@@ -580,8 +981,8 @@ def _job(item: object, path: Path) -> Job:
     ):
         raise QueueError(f"review queue {path} holds a job that cannot be loaded")
     try:
-        event = PrEvent(repo=repo, pr_number=pr, head_sha=sha)
         state = JobState(state_raw)
+        event = PrEvent(repo, pr, sha, delta_from=item.get("delta_from", "") or "")
     except (InvalidEventError, ValueError) as exc:
         raise QueueError(
             f"review queue {path} holds a job that cannot be loaded"

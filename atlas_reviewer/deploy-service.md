@@ -62,6 +62,8 @@ ATLAS_SPRITES_TOKEN=
 ATLAS_OPENROUTER_API_KEY=
 ATLAS_ALLOW_LIVE_INFERENCE=1
 ATLAS_SERVICE_PROVIDER=openrouter
+ATLAS_HEAD_CHANGE_POLICY=keep
+ATLAS_HEAD_CHANGE_CANCEL_FRACTION=0.5
 ```
 
 `ATLAS_GITHUB_WEBHOOK_SECRET` is new. It is the App webhook secret, at
@@ -246,7 +248,18 @@ cover a repository on another account.
 `opened`, `synchronize`, and `ready_for_review` on a non-draft PR are
 queued. A draft is ignored. A bad signature is refused with HTTP 401. A
 second delivery of the same head SHA does nothing. A newer head cancels
-the review in progress, and that cancelled review is not posted. A review
+the review in progress, and that cancelled review is not posted — unless
+the head-change policy decides to keep it: under the default
+`ATLAS_HEAD_CHANGE_POLICY=keep`, a push that lands while a review is
+still running is decided per push (a merge of the base branch, a
+docs-or-tests-only change, or a push touching no file the review is
+still reading keeps the review; a code push cancels a review that is
+still early, under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION`), and a kept head
+is recorded as the pull request's pending follow-up, queued when the
+running review settles. Setting the policy to `cancel` restores the
+blanket supersede. The decision and the review costs are telemetry
+events in `/data/service.jsonl` (`head change`, `review cost`,
+`follow-up queued`). A review
 that exits 0, 4, or 5 is posted as one COMMENT review. Any other exit
 posts nothing and writes a telemetry event under the Machine's state
 directory.
@@ -258,6 +271,21 @@ an earlier entry left NOT RUN but one of the lens's own runs recovered
 is listed as run, with the failure carried as a recovered note
 among the limit stops (#692, D76); a lens with no clean run is still not
 run.
+
+## Downgrading
+
+The queue file carries a `pending` key (a kept head waiting for its
+review to settle) and a per-job `delta_from` (the delta review's base),
+which a release from before #702 ignores: a downgrade strands a kept
+head — its record is unread by the older release, and a redelivery of
+that head is answered duplicate, so it is never reviewed. Before
+downgrading, stop the service and let it drain (the queue file's
+`pending` key is the exact observable, and `service.jsonl`'s
+`follow-up queued` events the live signal; the boot log's
+`pending follow-ups N` count is taken once at boot, after the recovery
+pass has already installed the heads it could, and does not track the
+drain). A pending head recovered by the running
+release is an ordinary queued job the older release understands.
 
 ## Tear down
 

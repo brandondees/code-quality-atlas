@@ -91,7 +91,11 @@ from atlas_reviewer.evidence import PullInfo, Remark, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.gather import Collected, pr_commits
 from atlas_reviewer.github_api import GitHubClient
-from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
+from atlas_reviewer.github_auth import (
+    READ_PERMISSIONS,
+    AppInstallationTokens,
+    normalize_pem_key,
+)
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
@@ -215,6 +219,7 @@ def load_event(path: Path) -> PrEvent:
             repo=data.get("repo", ""),
             pr_number=data.get("pr_number", 0),
             head_sha=data.get("head_sha", ""),
+            delta_from=data.get("delta_from", "") or "",
         )
     except InvalidEventError as exc:
         raise UsageError(f"invalid event: {exc}") from exc
@@ -238,10 +243,6 @@ def _require_env(env: Mapping[str, str], name: str) -> str:
     if not value:
         raise UsageError(f"this command needs the {name} environment variable")
     return value
-
-
-def _pem(raw: str) -> str:
-    return raw.replace("\\n", "\n") if "\n" not in raw else raw
 
 
 def _installation_id(env: Mapping[str, str]) -> int:
@@ -314,7 +315,7 @@ class _Credentials:
 
     def __init__(self, env: Mapping[str, str]) -> None:
         values = [env.get(name, "") for name in SECRET_ENV]
-        values.append(_pem(env.get(ENV_APP_KEY, "")))
+        values.append(normalize_pem_key(env.get(ENV_APP_KEY, "")))
         values.append(env.get(ENV_INSTALLATION_TOKEN, ""))
         values.extend(header_values(env))
         self._sources: list[Callable[[], Sequence[str]]] = []
@@ -520,7 +521,7 @@ def _app_tokens(
         transport,
         SystemClock(),
         app_id=_require_env(env, ENV_APP_ID),
-        private_key=_pem(_require_env(env, ENV_APP_KEY)),
+        private_key=normalize_pem_key(_require_env(env, ENV_APP_KEY)),
         installation_id=_installation_id(env),
         permissions=_permissions(include_issues),
         repositories=(event.repo.split("/", 1)[1],),

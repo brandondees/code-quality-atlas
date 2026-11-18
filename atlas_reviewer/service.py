@@ -28,8 +28,23 @@ from pathlib import Path
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.head_change import (
+    DECISION_CANCEL,
+    DECISION_KEEP,
+    DEFAULT_CANCEL_FRACTION,
+    POLICIES,
+    POLICY_CANCEL,
+    POLICY_KEEP,
+    Decision,
+    PushClass,
+    cancel_fraction,
+    classify_delivery,
+    decide,
+    head_change_policy,
+    read_progress,
+)
 from atlas_reviewer.ledger import make_private_dirs
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, TransportTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
@@ -42,6 +57,7 @@ from atlas_reviewer.service_admit import (
 )
 from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
 from atlas_reviewer.service_run import (
+    APP_KEY_ENV,
     CLEANUP_WAIT_S,
     DEFAULT_SERVICE_MODE,
     MAX_SERVICE_DEADLINE_S,
@@ -53,12 +69,13 @@ from atlas_reviewer.service_run import (
     ReviewRun,
     RunConfig,
     make_runner,
+    review_cost,
     run_dir,
     service_deadline,
     service_mode,
 )
 from atlas_reviewer.stops import install_interrupts
-from atlas_reviewer.telemetry import ERROR, Event, EventSink, JsonlSink, Telemetry
+from atlas_reviewer.telemetry import ERROR, OK, Event, EventSink, JsonlSink, Telemetry
 
 DEFAULT_REPO = "brandondees/code-quality-atlas"
 # A pool past this is a bad environment value, not a review budget. Each
@@ -138,6 +155,13 @@ class ServiceConfig:
     # agentic default is the deadline bound's ceiling -- there the parent
     # deadline is a backstop; the child's derived wall is the real limit.
     deadline_s: float | None = None
+    # The keep-or-cancel policy for a push that lands mid-review (#702,
+    # D79): `keep` holds the new head back while the running review
+    # finishes and queues it as its follow-up; `cancel` restores the
+    # blanket supersede. `cancel_fraction` is the "early" threshold the
+    # cancel branch compares the lens and spend fractions against.
+    head_change_policy: str = POLICY_KEEP
+    cancel_fraction: float = DEFAULT_CANCEL_FRACTION
 
     def __post_init__(self) -> None:
         if len(self.secret) < 16:
@@ -174,6 +198,18 @@ class ServiceConfig:
                 f"{MIN_SERVICE_DEADLINE_S:.0f} and "
                 f"{MAX_SERVICE_DEADLINE_S:.0f} seconds"
             )
+        if self.head_change_policy not in POLICIES:
+            raise ServiceError(
+                f"the head-change policy must be {POLICY_KEEP} or "
+                f"{POLICY_CANCEL}, not {self.head_change_policy!r}"
+            )
+        if (
+            isinstance(self.cancel_fraction, bool)
+            or not isinstance(self.cancel_fraction, (int, float))
+            or not math.isfinite(self.cancel_fraction)
+            or not 0.0 <= self.cancel_fraction <= 1.0
+        ):
+            raise ServiceError("the cancel fraction must be between 0.0 and 1.0")
 
 
 @dataclass(frozen=True)
@@ -192,6 +228,8 @@ def handle_delivery(
     board: Board,
     *,
     worker: Worker | None = None,
+    classifier: PushClassifier | None = None,
+    telemetry: Telemetry | None = None,
 ) -> HttpResult:
     """One HTTP request. A bad signature is refused. Everything else that
     is not a queued review is acknowledged so GitHub does not keep the
@@ -215,17 +253,174 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
-        settled: list[Job] = []
+        return _admit_to_queue(
+            decision,
+            config,
+            board,
+            worker=worker,
+            classifier=classifier,
+            telemetry=telemetry,
+        )
+    return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
+
+
+PushClassifier = Callable[[PrEvent, PrEvent], PushClass]
+
+
+def _admit_to_queue(
+    decision: Admitted,
+    config: ServiceConfig,
+    board: Board,
+    *,
+    worker: Worker | None,
+    classifier: PushClassifier | None,
+    telemetry: Telemetry | None,
+) -> HttpResult:
+    """Queue an admitted delivery, deciding keep-or-cancel first (#702).
+
+    Under the `keep` policy a delivery that would supersede a running or
+    posting review is decided instead: `classify_delivery` fetches the
+    range between the two heads, the review's own progress is read back
+    from its events file, and `decide` keeps or cancels. The decision is
+    recorded as telemetry either way. Under the `cancel` policy the
+    supersede is decided by the queue alone, exactly as before this
+    policy existed."""
+    settled: list[Job] = []
+    candidate = (
+        board.head_change_candidate(decision.event, at=decision.updated_at)
+        if config.head_change_policy == POLICY_KEEP
+        else None
+    )
+    if candidate is None:
         result = board.enqueue(
             decision.event, at=decision.updated_at, superseded=settled
         )
-        if worker is not None:
-            for job in settled:
-                worker._stored_supersede(job, JobState.SUPERSEDED)
-        if result is Enqueue.FULL:
-            return HttpResult(503, b"full\n", "full")
-        return HttpResult(202, f"{result.value}\n".encode(), result.value)
-    return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
+    else:
+        verdict = _head_change_decision(
+            candidate, decision.event, config, classifier, telemetry
+        )
+        if verdict.cancel:
+            result = board.enqueue(
+                decision.event, at=decision.updated_at, superseded=settled
+            )
+        else:
+            result = board.keep_head(
+                decision.event, at=decision.updated_at, superseded=settled
+            )
+    if worker is not None:
+        for job in settled:
+            worker._stored_supersede(job, JobState.SUPERSEDED)
+    if result is Enqueue.FULL:
+        return HttpResult(503, b"full\n", "full")
+    return HttpResult(202, f"{result.value}\n".encode(), result.value)
+
+
+def _head_change_decision(
+    candidate: Job,
+    new_event: PrEvent,
+    config: ServiceConfig,
+    classifier: PushClassifier | None,
+    telemetry: Telemetry | None,
+) -> Decision:
+    """The keep-or-cancel decision for one mid-review push, and its
+    telemetry record. A classification failure keeps the review and
+    records the gap; the progress read can only contribute nothing."""
+    posting = candidate.state is JobState.POSTING
+    push: PushClass | None = None
+    gap = ""
+    timed_out = False
+    started = telemetry.elapsed() if telemetry is not None else 0.0
+    if not posting and classifier is not None:
+        push, gap, timed_out = _classify_bounded(
+            classifier, candidate.event, new_event, _CLASSIFY_BUDGET_S
+        )
+    elif not posting:
+        # No classifier on this deployment -- the App credentials are
+        # absent or unusable -- so the push could not be classified and
+        # the cancel branch cannot fire. That is the owner's default
+        # direction, but it is a gap, not a normal decision: the event
+        # carries it with an error status, so a deployment that lost its
+        # credentials is visible in the telemetry instead of silently
+        # keep-everything (round-1 review of #747, F3).
+        gap = (
+            "no head-change classifier is configured; the push could not be classified"
+        )
+    progress = (
+        None
+        if posting
+        else read_progress(*_progress_paths(config.state_dir, candidate.event))
+    )
+    if not posting and candidate.state is JobState.POSTING:
+        # The snapshot was taken before the <=8s classification window;
+        # the review crossed into posting during it. Re-read rather than
+        # decide on the stale snapshot, so the recorded verdict and the
+        # action the caller takes agree (round-3 review of #747, R3-F5).
+        posting = True
+    verdict = decide(push, progress, config.cancel_fraction, posting=posting)
+    _record(
+        telemetry,
+        "head change",
+        _decision_fields(candidate, new_event, push, verdict),
+        start_s=started,
+        error=gap,
+        timed_out=timed_out,
+    )
+    return verdict
+
+
+def _decision_fields(
+    candidate: Job,
+    new_event: PrEvent,
+    push: PushClass | None,
+    verdict: Decision,
+) -> dict[str, str | int]:
+    fields: dict[str, str | int] = {
+        **_fields(new_event),
+        "from": candidate.event.head_sha[:12],
+    }
+    if push is not None:
+        fields["kind"] = push.kind.value
+    fields.update(
+        {
+            "decision": DECISION_CANCEL if verdict.cancel else DECISION_KEEP,
+            "reason": verdict.reason,
+            "lens_fraction": f"{verdict.lens_fraction:.2f}",
+            "spend_fraction": f"{verdict.spend_fraction:.2f}",
+        }
+    )
+    return fields
+
+
+def _record(
+    telemetry: Telemetry | None,
+    step: str,
+    fields: dict[str, str | int],
+    *,
+    start_s: float | None = None,
+    error: str = "",
+    timed_out: bool = False,
+) -> None:
+    if telemetry is None:
+        return
+    try:
+        if timed_out:
+            fields = {**fields, "timed_out": "1"}
+        telemetry.record(
+            "service",
+            step,
+            fields,
+            status=ERROR if error else OK,
+            start_s=start_s,
+            error=error,
+        )
+    except Exception:  # noqa: BLE001, S110 -- the log itself failed; the decision stands
+        pass
+
+
+def _progress_paths(state_root: Path, running: PrEvent) -> tuple[Path, ...]:
+    run = run_dir(state_root, running)
+    events = run / "events.jsonl"
+    return (events.with_name(events.name + ".1"), events)
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -284,6 +479,7 @@ class Worker:
     def run_one(self) -> bool:
         if self._stop.is_set():
             return False
+        self._recover()
         job = self._board.claim()
         if job is None:
             return False
@@ -337,6 +533,28 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 -- a post retry must not kill the worker
             self._fail_closed(job, exc)
 
+    def _recover(self) -> None:
+        """Queue a pending head whose pull request has no active job
+        (round-1 review of #747, F7): the crash window inside a review's
+        ``settle`` -- the one lock and save that stores the review's
+        terminal state and installs its follow-up together -- a failed
+        settle save, and a full queue at settle time can all strand one,
+        and a redelivery of that
+        head is answered duplicate, so without the recovery it is never
+        reviewed. Runs on every worker pass; it installs only when there
+        is something to install."""
+        try:
+            for event in self._board.recover_pending():
+                self._telemetry.record("service", "follow-up queued", _fields(event))
+        except Exception as exc:  # noqa: BLE001 -- recovery must not kill the worker
+            self._telemetry.record(
+                "service",
+                "worker error",
+                {},
+                status=ERROR,
+                error=f"pending-head recovery failed: {type(exc).__name__}: {exc}",
+            )
+
     def _fail_closed(self, job: Job, exc: BaseException) -> None:
         """The job stays FAILED when the save works. When the save itself
         raises, the in-memory state is left as it was so a restart can
@@ -384,6 +602,7 @@ class Worker:
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
         fields = _fields(job.event)
         if job.superseded:
+            self._cost_event(job, None)
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.cancel.is_set():
@@ -391,9 +610,11 @@ class Worker:
             # again after the process starts. A newer head that landed
             # after the check above is SUPERSEDED, and that directory
             # still has to go.
+            self._cost_event(job, None)
             self._stored_supersede(job, self._board.release_claim(job))
             return
         if not run.ok or run.report is None:
+            self._cost_event(job, None)
             committed = self._settle(job, JobState.FAILED)
             if committed is JobState.SUPERSEDED:
                 self._note(job, committed, fields)
@@ -406,10 +627,39 @@ class Worker:
                 error=run.error or "review failed",
             )
             return
+        self._cost_event(job, run.report)
         if not self._board.still_current(job):
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         self._publish(job, run.report)
+
+    def _cost_event(self, job: Job, report: ReviewReport | None) -> None:
+        """The review's cost, logged when it settles (#702's measure-first
+        rule): a finished review's cost comes from its draft's cost lines;
+        a cancelled or failed one's from the last progress record its
+        events file holds, read before the run directory goes. A review
+        whose cost is in neither is logged as unknown, so the gap between
+        the decision records and the cost records stays visible."""
+        fields: dict[str, str | int] = dict(_fields(job.event))
+        cost = review_cost(report) if report is not None else None
+        if cost is not None:
+            fields.update(
+                {"calls": cost[0], "committed_usd": cost[1], "measured": "final"}
+            )
+        else:
+            progress = read_progress(*_progress_paths(self._state_root, job.event))
+            if progress is not None:
+                fields.update(
+                    {
+                        "calls": progress.calls,
+                        "committed_usd": str(progress.committed_usd),
+                        "settled_usd": str(progress.settled_usd),
+                        "measured": "partial",
+                    }
+                )
+            else:
+                fields["measured"] = "unknown"
+        self._telemetry.record("service", "review cost", fields)
 
     def _publish(self, job: Job, report: ReviewReport) -> None:
         fields = _fields(job.event)
@@ -420,11 +670,15 @@ class Worker:
             # Keep the draft. This process publishes nothing, and the
             # draft is the record of the review. The child's stderr is
             # not: it can hold a secret the log scrubber would remove.
-            committed = self._board.finish(job, JobState.DONE)
+            committed, follow_up = self._board.settle(job, JobState.DONE)
             if committed is JobState.SUPERSEDED:
                 self._drop_run_dir(job)
                 self._telemetry.record("service", "review superseded", fields)
                 return
+            if follow_up is not None:
+                self._telemetry.record(
+                    "service", "follow-up queued", _fields(follow_up)
+                )
             stderr = run_dir(self._state_root, job.event) / "stderr.txt"
             if stderr.is_file():
                 try:
@@ -588,9 +842,16 @@ class Worker:
             self._telemetry.record("service", "review stopped", fields)
 
     def _settle(self, job: Job, state: JobState) -> JobState:
-        committed = self._board.finish(job, state)
+        """The terminal state stored and the kept head's follow-up taken
+        as one queue step (`Board.settle`, round-2 review of #747,
+        R2-F4): the recovery pass can no longer interleave between the
+        review's settle and its follow-up's install, and one save covers
+        both, so a crash cannot strand a head between them."""
+        committed, follow_up = self._board.settle(job, state)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
             self._drop_run_dir(job)
+        if follow_up is not None:
+            self._telemetry.record("service", "follow-up queued", _fields(follow_up))
         return committed
 
     def _stored_supersede(self, job: Job, stored: JobState | None) -> None:
@@ -633,7 +894,14 @@ class Worker:
 
 
 def _fields(event: PrEvent) -> dict[str, str | int]:
-    return {"pr": event.pr_number, "sha12": event.head_sha[:12], "repo": event.repo}
+    fields: dict[str, str | int] = {
+        "pr": event.pr_number,
+        "sha12": event.head_sha[:12],
+        "repo": event.repo,
+    }
+    if event.delta_from:
+        fields["delta_from"] = event.delta_from[:12]
+    return fields
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -715,6 +983,8 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.config,
             self.server.board,
             worker=getattr(self.server, "worker", None),
+            classifier=getattr(self.server, "classifier", None),
+            telemetry=getattr(self.server, "telemetry", None),
         )
         self._send(result.status, result.body)
         route = self.path.split("?", 1)[0][:200]
@@ -773,6 +1043,8 @@ def _monotonic() -> float:
 
 class ReviewServer(ThreadingHTTPServer):
     worker: Worker | None = None
+    classifier: PushClassifier | None = None
+    telemetry: Telemetry | None = None
 
     def __init__(
         self,
@@ -830,6 +1102,8 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     try:
         mode = service_mode(env)
         deadline_s = service_deadline(env, mode=mode)
+        policy = head_change_policy(env)
+        fraction = cancel_fraction(env)
     except ValueError as exc:
         raise ServiceError(str(exc)) from exc
     return ServiceConfig(
@@ -843,6 +1117,8 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         allow_live_inference=live,
         mode=mode,
         deadline_s=deadline_s,
+        head_change_policy=policy,
+        cancel_fraction=fraction,
     )
 
 
@@ -898,6 +1174,8 @@ def serve(
     *,
     runner: Runner | None = None,
     publisher: Publisher | None = None,
+    classifier: PushClassifier | None = None,
+    classifier_reason: str = "",
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
@@ -938,12 +1216,38 @@ def serve(
         )
         server = ReviewServer(config, board, log)
         server.worker = worker
+        server.classifier = classifier
+        server.telemetry = telemetry
+        # A pending head stranded by a crash or a failed save (round-1
+        # review of #747, F7) is queued here at boot, before any worker
+        # runs, and the same recovery runs on the worker's idle passes.
+        try:
+            for event in board.recover_pending():
+                telemetry.record("service", "follow-up queued", _fields(event))
+        except Exception as exc:  # noqa: BLE001 -- a failed boot recovery is the worker loop's problem
+            log(f"atlas-reviewer: pending-head recovery failed: {exc}")
+        if config.head_change_policy == POLICY_KEEP and classifier is None:
+            # The lost cancel branch is a visible condition, not a silent
+            # one (round-1 review of #747, F3): the boot log names it, and
+            # every unclassifiable decision records the gap on its event.
+            log(
+                "atlas-reviewer: head-change policy is keep with NO"
+                " classifier: every mid-review push will be kept and the"
+                f" gap recorded ({classifier_reason or 'no reason given'})"
+            )
         worker.start()
         log(
             "atlas-reviewer: service listening"
             f" on {config.host}:{config.port};"
             f" concurrency {config.concurrency} (refuses above {MAX_CONCURRENCY});"
-            f" repos {', '.join(sorted(config.allowlist))}"
+            f" repos {', '.join(sorted(config.allowlist))};"
+            f" head-change policy {config.head_change_policy}"
+            f" (cancel fraction {config.cancel_fraction:.0%})"
+            + (
+                f"; pending follow-ups {len(board.pending_heads())}"
+                if board.pending_heads()
+                else ""
+            )
         )
         try:
             server.serve_forever()
@@ -953,6 +1257,113 @@ def serve(
     finally:
         sink.__exit__(None, None, None)
     return 0
+
+
+_CLASSIFY_TIMEOUT_S = 5.0
+_CLASSIFY_BUDGET_S = 8.0
+"""The classification's overall budget, inside the webhook handler
+thread (round-2 review of #747, R2-F8): a token mint plus three reads at
+their own 5-second timeouts could hold the handler past GitHub's ~10
+second response window with no bound; past this budget the push is
+unclassifiable -- the owner's keep default, with the gap and the
+`timed_out` flag on the decision's event -- and the handler answers. The
+read still finishes in its background thread and is then simply not
+used."""
+
+
+def _classify_bounded(
+    classifier: PushClassifier,
+    running: PrEvent,
+    new_event: PrEvent,
+    budget_s: float,
+) -> tuple[PushClass | None, str, bool]:
+    """The classification under one overall deadline (round-2 review of
+    #747, R2-F8): the fetches run in a helper thread and the caller
+    waits at most `budget_s`; past it the push is unclassifiable (the
+    owner's keep default) with the gap set and the `timed_out` flag on,
+    so the handler's occupancy is bounded and the over-run is visible.
+    The helper thread outlives the wait only until its own per-read
+    timeouts end it."""
+    outcome: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            outcome["push"] = classifier(running, new_event)
+        except Exception as exc:  # noqa: BLE001 -- the caller keeps the review on any failure
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(budget_s)
+    if worker.is_alive():
+        return (
+            None,
+            f"the classification exceeded its {budget_s:.0f}-second budget",
+            True,
+        )
+    error = outcome.get("error")
+    if error is not None:
+        return (
+            None,
+            f"{type(error).__name__}: {error}",
+            isinstance(error, TransportTimeoutError),
+        )
+    push = outcome.get("push")
+    return push if isinstance(push, PushClass) else None, "", False
+
+
+def _head_change_classifier(
+    config: ServiceConfig, env: Mapping[str, str]
+) -> tuple[PushClassifier | None, str]:
+    """The live classifier behind the keep side of the decision, built
+    from the same App credentials the poster mints from, scoped to the
+    allowlist's repositories with read permissions only -- and the reason
+    there is none, for the boot log and the decision events to name.
+
+    The reason is empty when the classifier is built. A deployment
+    without usable credentials gets None plus the reason: it keeps every
+    mid-review push (the owner's default) rather than failing a webhook
+    over a missing classification, and every such decision is recorded
+    with the gap, so the lost cancel branch is visible, not silent
+    (round-1 review of #747, F3). The short timeout bounds the three
+    reads the classification takes; a delivery that outlives the
+    webhook's own response window is marked failed in GitHub's UI and is
+    NOT redelivered on its own (D53) -- the decision is nonetheless made
+    and recorded before the response, so the delivery's loss costs the
+    webhook acknowledgment, never the review's correctness."""
+    from atlas_reviewer.github_api import GitHubClient
+    from atlas_reviewer.github_auth import (
+        READ_PERMISSIONS,
+        AppInstallationTokens,
+        normalize_pem_key,
+    )
+    from atlas_reviewer.http import UrllibTransport
+    from atlas_reviewer.service_post import repository_names
+
+    app_id = env.get("ATLAS_GITHUB_APP_ID", "")
+    private_key = env.get(APP_KEY_ENV, "")
+    installation = env.get("ATLAS_GITHUB_INSTALLATION_ID", "")
+    if not app_id or not private_key or not installation.isdigit():
+        return None, (
+            "the App credentials (ATLAS_GITHUB_APP_ID, "
+            "ATLAS_GITHUB_APP_PRIVATE_KEY, ATLAS_GITHUB_INSTALLATION_ID) are "
+            "absent or malformed"
+        )
+    try:
+        tokens = AppInstallationTokens(
+            UrllibTransport(),
+            SystemClock(),
+            app_id=app_id,
+            private_key=normalize_pem_key(private_key),
+            installation_id=int(installation),
+            permissions=READ_PERMISSIONS,
+            repositories=repository_names(config.allowlist),
+            timeout_s=_CLASSIFY_TIMEOUT_S,
+        )
+        client = GitHubClient(UrllibTransport(), tokens, timeout_s=_CLASSIFY_TIMEOUT_S)
+    except (ValueError, BoundaryError) as exc:
+        return None, f"the head-change classifier could not be built: {exc}"
+    return lambda running, new: classify_delivery(client, running, new), ""
 
 
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
@@ -984,11 +1395,14 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
+    classifier, classifier_reason = _head_change_classifier(config, env)
     try:
         return serve(
             config,
             env,
             publisher=publisher.post,
+            classifier=classifier,
+            classifier_reason=classifier_reason,
             secret_sources=(
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,

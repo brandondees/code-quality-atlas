@@ -46,6 +46,17 @@ def test_a_head_sha_that_is_not_a_full_lowercase_40_hex_id_is_invalid(sha):
         PrEvent("o/r", 1, sha)
 
 
+def test_a_delta_from_that_is_not_a_full_lowercase_40_hex_id_is_invalid():
+    """`delta_from` is validated like `head_sha` (round-3 R3-F3): a
+    malformed value is refused, and only the empty string means a full
+    review."""
+    with pytest.raises(InvalidEventError, match="delta_from must be"):
+        PrEvent("o/r", 1, HEAD, delta_from=HEAD[:7])
+    with pytest.raises(InvalidEventError, match="delta_from must be"):
+        PrEvent("o/r", 1, HEAD, delta_from=HEAD.upper())
+    assert PrEvent("o/r", 1, HEAD, delta_from="").delta_from == ""
+
+
 @pytest.mark.parametrize(
     "repo,number,sha",
     [
