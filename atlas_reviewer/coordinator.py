@@ -3141,6 +3141,8 @@ def status_line(review: AgenticReview) -> str:
         "unverified_findings": len(review.unverified),
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
+        "test_runs": _test_runs(review),
+        "mutants_survived": _mutants_survived(review),
         "context_omissions": len(review.context_omissions),
         "other_pull_requests": review.other_pull_requests,
         "withdrawn": _withdrawn_count(review),
@@ -3592,6 +3594,23 @@ def _changed_file_count(review: AgenticReview) -> int | None:
     if not counts:
         return None
     return max(counts)
+
+
+def _executed(review: AgenticReview, pick: Callable[[Any], int]) -> int:
+    """The summed execution count D80's status line carries, over every
+    lens's best outcome. A lens with no outcome contributes zero, the way
+    it contributes no file count."""
+    return sum(
+        pick(result.outcome) for result in review.lenses if result.outcome is not None
+    )
+
+
+def _test_runs(review: AgenticReview) -> int:
+    return _executed(review, lambda outcome: outcome.test_runs)
+
+
+def _mutants_survived(review: AgenticReview) -> int:
+    return _executed(review, lambda outcome: outcome.mutants_survived)
 
 
 def _unread_clause(review: AgenticReview, scrub: Callable[[str], str]) -> str:

@@ -1705,6 +1705,16 @@ recorded HTTP for the adapter, and `LocalSprites` plus a fake Tasks
 socket for the hold. The tests make no live model, Sprite or Fly call.
 D41 records the 2026-11-12 probe that did.
 
+- **Execution (D80).** The bridge's `run_tests` and `mutate` are on every
+  lens's tool list, and the instructions name what they are: a test run
+  or a mutant on a disposable copy of the head tree, evidence at the
+  head SHA the result line names, output that is untrusted data inside
+  the fence and can support a finding but never replace the reading it
+  cites. The attempt counts what executed: an outcome carries
+  `test_runs` and `mutants_survived` next to `changed_files` (the
+  status line sums them), and an inconclusive mutant is a `TOOL_GAP`
+  cause -- a run that proved nothing either way is an execution gap,
+  never evidence, so a review with one open cannot approve.
 - **Limits.** `lens_loop.AgenticLimits` has a $5 per-review reservation,
   kept by D43 (2026-11-12). The one-token-per-byte input bound stays,
   and the headroom is this reservation. The other defaults are still
@@ -1994,6 +2004,11 @@ D41 records the 2026-11-12 probe that did.
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
     `coverage_complete`, `changed_files`, `unreviewed_files`,
+    `test_runs` and `mutants_survived` (D80: the summed counts over the
+    lenses' outcomes -- the `run_tests` calls that came back with a run,
+    and the mutants whose verdict was survived; zero on an attempt that
+    executed nothing, and an inconclusive mutant never counts as a
+    survivor),
     `context_omissions`, `other_pull_requests`, `withdrawn`,
     `round_log_note`, `trace_id` when a span was recorded, the lens
     counts by state, and `limit_stop`. The two file fields are counts.

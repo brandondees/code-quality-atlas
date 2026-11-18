@@ -4250,6 +4250,25 @@ scripted framing tests and pure verdict tests; thirteen hand-applied
 mutants each die on a named test (listed in D80). No live model, Sprite
 or GitHub call; no secret read; no deployed setting changed.
 
+## 2026-11-18 — #734 part 2: the loop counts what executed, and the draft says so
+
+The stacked slice that closes #734: the execution tools reach the lens
+loop's instructions (one shared paragraph for the paged and shared-prefix
+variants, so the two cannot drift), and the attempt's counts ride the
+outcome the way `changed_files` does. `_tool` counts a `run_tests` call
+that came back with a run and a mutant whose verdict was survived onto
+the `_Progress`; the outcome carries `test_runs` and
+`mutants_survived`, the ledger round-trip reads both back, and the
+status line sums them over the lenses as `test_runs` and
+`mutants_survived`. An inconclusive mutant adds `TOOL_GAP` — an
+execution gap a review cannot approve over, the same rule a failed or
+timed-out run already rode; a failing suite is a result, not a gap, and
+still counts as a run. The plan's Status header now records Part B as
+implemented with D80, phase 5's parity rerun still open (and out of
+the issue's scope). Four counting tests run real pytest through
+`LocalSprites`; the status-line test sums over three lenses; the
+round-trip pins the two new fields.
+
 ## 2026-11-18 — #752 round 1: execution copies come from the object store, and MUTANT reads are hash-checked
 
 The round's Major (the routine's Blocker) was real and the review's

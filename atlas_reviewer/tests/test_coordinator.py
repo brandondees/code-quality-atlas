@@ -1660,12 +1660,41 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "unverified_findings": 0,
         "changed_files": 1,
         "unreviewed_files": 0,
+        "test_runs": 0,
+        "mutants_survived": 0,
         "context_omissions": 0,
         "other_pull_requests": 0,
         "withdrawn": 0,
         "round_log_note": "",
         "limit_stop": None,
     }
+
+
+def test_the_status_line_counts_the_runs_and_survivors_over_the_lenses():
+    result = synthesize(
+        [
+            lens_result(
+                AttemptOutcome(
+                    Attestation.ATTESTED,
+                    changed_files=1,
+                    test_runs=2,
+                    mutants_survived=1,
+                )
+            ),
+            lens_result(
+                AttemptOutcome(
+                    Attestation.ATTESTED,
+                    changed_files=1,
+                    test_runs=1,
+                    mutants_survived=0,
+                )
+            ),
+            lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1)),
+        ]
+    )
+    parsed = parse_status(render_draft(result, Redactor()))
+    assert parsed["test_runs"] == 3
+    assert parsed["mutants_survived"] == 1
 
 
 # ------------------------------------------------------ synthesis rules

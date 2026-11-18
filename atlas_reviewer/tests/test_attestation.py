@@ -192,6 +192,10 @@ def ledger(tmp_path):
     return AttemptLedger(tmp_path / "state" / "attestations.jsonl", FakeClock())
 
 
+def ledger_path(path):
+    return AttemptLedger(path, FakeClock())
+
+
 def test_a_finished_attempt_reads_back_exactly(tmp_path):
     book = ledger(tmp_path)
     book.start(KEY, 1)
@@ -229,6 +233,35 @@ def test_a_ledger_line_with_a_bad_unread_list_is_abandoned(tmp_path):
     (attempt,) = again.attempts(KEY)
     assert attempt.outcome is ABANDONED
     assert again.damaged == 1
+
+
+def test_the_execution_counts_round_trip_and_are_checked(tmp_path):
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(test_runs=2, mutants_survived=1), scrub=str)
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert (attempt.outcome.test_runs, attempt.outcome.mutants_survived) == (2, 1)
+    # A ledger line from before the tools existed reads as zero.
+    lines = book.path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    del finished["outcome"]["test_runs"]
+    del finished["outcome"]["mutants_survived"]
+    lines[-1] = json.dumps(finished)
+    book.path.write_text("\n".join(lines) + "\n")
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert (attempt.outcome.test_runs, attempt.outcome.mutants_survived) == (0, 0)
+    # A negative count is not a count.
+    damaged = AttemptLedger(tmp_path / "state" / "damaged.jsonl", FakeClock())
+    damaged.start(KEY, 1)
+    damaged.finish(KEY, 1, outcome(), scrub=str)
+    lines = damaged.path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    finished["outcome"]["test_runs"] = -1
+    lines[-1] = json.dumps(finished)
+    damaged.path.write_text("\n".join(lines) + "\n")
+    again = ledger_path(tmp_path / "state" / "damaged.jsonl")
+    (attempt,) = again.attempts(KEY)
+    assert attempt.outcome is ABANDONED
 
 
 def test_the_ledger_file_is_private_and_holds_the_key_and_head(tmp_path):
