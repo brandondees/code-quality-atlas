@@ -3615,12 +3615,30 @@ treats a `---`-shaped line as a header only before the first hunk (a
 SQL or Lua comment inside a hunk is content) and the
 `\ No newline at end of file` marker moves no counter (a7); the delta
 note goes through the quote discipline like every other model-adjacent
-field (a8); the D79 Update's parse-format sentence names the
-quoted-location form (a9); the #747-owned session-log heading restored
-to its own layer's text (a10). The Nits: the unused `names` parameter
+field (a8); the D79 Update's parse-format sentence was to name the
+quoted-location form (a9 — claimed in this entry and not applied; the
+round-4 fix corrects it, below); the #747-owned session-log heading
+restored to its own layer's text (a10). The Nits: the unused `names` parameter
 dropped from `_range_removals` (n9); the module docstring's acceptance
 sentence names `DeltaScope.removed` and the span bound (n10). Skipped
 with reason: n11 (the coordinator-level pool test injects its pool
 synthetically — the real `delta_scope`→`_carry_call` wiring is pinned
 at the delta.py level with a compare fixture; wiring the coordinator
 test through a fixture-backed reader would duplicate that pin).
+
+## 2026-11-18 (same day) — #748 round 4: the a9 sentence actually corrected (b1)
+
+The round-4 protocol review's one Minor (b1): the round-3 fix claimed —
+in its commit message and in the round-3 entry above — that the D79
+Update's parse-format sentence named the quoted-location form, but the
+fix commit touched no `docs/open-questions.md`, and the Update still
+described the record's finding line as the unquoted
+`{id} {severity} {location} {finding}`, while `_round_record` has
+written the quoted-location form `{id} {severity} "{location}" {finding}`
+since the round-1 fix (the location quoted so a path containing a space
+cannot be misread as the finding's first word). The sentence now names
+the shipped form, with the correction owned in place, and the round-3
+entry's a9 clause above was corrected to say the fix was claimed and
+not applied. The round-4 verdict is APPROVE with nothing else at or
+above Nit; the round-3 mutants were re-applied by the reviewer and all
+13 died.
