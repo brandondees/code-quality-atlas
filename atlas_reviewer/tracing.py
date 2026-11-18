@@ -480,7 +480,8 @@ def _retry_attributes(
     gate."""
     if nudge:
         # The harness-injected turn this completion answers: one of
-        # `unread-files`, `no-progress`, `duplicate-calls`.
+        # `unread-files`, `no-progress`, `duplicate-calls`,
+        # `quote-repair`, `session-limit`.
         note.set("atlas.nudge", nudge)
     if timeout_retries:
         # This completion follows a timed-out request's one retry (review

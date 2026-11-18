@@ -3089,3 +3089,136 @@ run / the lens's own later runs" to the presence-based rule the code
 implements. Nit 2: the forgery test's "forgeable-free" typo is now "keeps
 the marker unforgeable by a quoted reason". 3,230 reviewer tests, 882
 tooling; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #693: the bridge session budget is per lens attempt, and repeated session-limit refusals end the attempt
+
+Found in the Nov 14 model-trials rerun: `SessionLimits.max_calls = 64` was
+per runner session, and a lens's attempt 1 and its retry share that
+session, so eight DeepSeek #661 retries, DeepSeek #640's
+decision-lifecycle retry (16 `OVER_SESSION_LIMIT` refusals) and one
+Kimi #640 retry started nearly out of tool calls and ended `TOOL_GAP`
+`FILES_UNREAD`, every duplicate-call nudge earned from re-issuing refused
+calls. D77 records the decision.
+
+The budget moved to the attempt: the coordinator calls
+`Bridge.begin_attempt(lens, number)` before each attempt it runs on a
+bridge, the attempt's call and shown-output counters start over, and a
+refusal names the attempt that spent the budget
+("all 64 calls of this attempt made (lens attempt 2)"). The session
+ledger (`Bridge.calls`) still keeps every call across the attempts. The
+loop then cuts an attempt at `SESSION_REFUSAL_LIMIT` (3) consecutive
+`OVER_SESSION_LIMIT` results, mid-turn, at a limit stop
+(`limit: session_limits`, cause `TOOL_GAP`) naming the lens, the attempt
+and the cap -- carried into the ledger's per-attempt `limit` record, the
+status line, and the round log's new `limit_stop` field, which the next
+round's first turn shows back (a pre-field line parses with an empty
+stop). The dollar ceiling and the wall clocks still bound the whole
+review; D42's structural rule (a diff over 1 MiB cannot come clean in one
+attempt) stands; the cap is deliberately not model-aware yet, and the
+attempt the threshold stops is not retried, like every other limit stop.
+
+Tests pin a retry starting with a full budget (one loop-level and one
+end-to-end, the latter also pinning the round-log record), the threshold
+cut mid-turn with the stop's text, and the field's round-trip. Mutants
+applied by hand and killed with `PYTHONDONTWRITEBYTECODE=1`: M1 (the
+session-wide counter restored), M2 (the threshold raised out of reach),
+M3 (`begin_attempt` not called by the coordinator), M4 (the attempt
+number not passed to the loop). 3,224 reviewer tests at 96.40%, 882
+tooling at 95.20%; ruff/format/mypy/drift clean. Offline only.
+
+## 2026-11-17 (same day) — #745 round-1 fixes: the refusal stop delivers instead of discarding, and the decision records catch up
+
+Round 1 (the protocol review, Brandon's routine review, and the atlas
+reviewer service converging on one Major) caught the round-1 cut
+throwing away an attempt's ready findings: when a tool batch straddled
+the attempt budget, the mid-turn cut fired before the model saw any
+refusal, so the results and the final reply both vanished into an
+unretried `UNACKNOWLEDGED` outcome where the pre-#693 code ended
+attested with the finding delivered.
+
+The stop no longer ends the attempt. Once `SESSION_REFUSAL_LIMIT` (3)
+`OVER_SESSION_LIMIT` results have accumulated -- cumulative, since once
+either cap is spent every later call refuses, so the round-1
+"consecutive" streak and its untestable reset branch are gone -- the
+turn's results go back and the attempt gets a tool-less turn to finalize
+with what it has: the next request carries no tool schemas, so
+re-issuing refused calls is impossible, and the reply the model then
+gives is judged like any final reply. The stop is built once at that
+boundary and rides on the delivered outcome's `limit_hit` (a later
+stop's own hit wins), so the ledger, the status line, the round log and
+the service report still name the lens, the attempt and the cap; the
+unread-list nudge is not earned on the finalize path (its request has no
+tools to read with), and the stall detector's own nudge does not also
+fire on the stop's turn. D77 now amends D39 and records the
+alternatives, the accepted cost (one more reserved, clock-gated model
+call; an unread-file finalize stays partial) and a revisit trigger;
+D39 and D42 carry the `Update (2026-11-17, D77)` notes; the coordinator
+test's call arithmetic and the session log's Kimi-retry sentence are
+restored; the README's stray triple space and rewrap noise are cleaned.
+
+The rewritten regression tests pin the reviewer's repro shape: a batch
+straddling the budget ends attested with the finding delivered, the
+tool-less finalize request carries no schemas, and the stop rides on the
+outcome (loop-level) and reaches the status line and the round log
+(coordinator-level, which also pins that the retry's 64 reads really
+ran). Mutants applied by hand and killed with
+`PYTHONDONTWRITEBYTECODE=1`: the round-1 four (M1 shared counter, M2
+threshold raised, M3 `begin_attempt` dropped, M4 attempt number
+dropped) plus the round-1 fixes' own: the finalize turn never built (the
+loop and coordinator tests lose the stop and the tool-less request), the
+tool-less request reverted to the full tool set, and the stop not
+attached to the delivered outcome. Full local checks green; offline
+only.
+
+## 2026-11-18 — #745 round-2 fixes: the finalize turn keeps its tools, and the stop never vanishes under a later one
+
+Round 2 caught the finalize turn's request shape: it sent an empty tools
+array next to a conversation already carrying assistant tool calls and
+tool results -- a shape the pinned Bedrock Converse route rejects
+(tool history requires a toolConfig), so the finalize call would have
+failed as a non-retryable model error and lost the findings the turn
+exists to deliver, on the route every live run takes.
+
+The tool schemas now stay on the finalize request: the model is asked to
+finalize, and the spent bridge refuses whatever it still calls -- a
+re-issue is a logged refusal, bounded by the turn cap, the dollar
+reservation and the wall clocks, and cannot restart the stop, which
+fires once per attempt. The adapter gained the shape invariant itself:
+`_payload` refuses any request that carries tool history next to an
+empty tools array before any request goes out (the one tool-less
+request that exists, the re-assessment call's single user turn, carries
+no history), so a future tool-less finalize turn cannot fail the call
+mid-review. When a later stop claims the outcome the session-limit stop
+once lost -- the turn cap landing on the finalize boundary -- its
+message is now kept in the outcome's detail. The unread-list nudge is
+still not earned on the finalize path: the stop asked for a reply, not
+more reads the bridge will refuse.
+
+D77 and the README now describe the tools-kept design and record the
+tool-less shape as a rejected alternative; the stale "consecutive"
+vocabulary left the loop test's name and the rounds fixture; the
+"round 1" journal citations left the new code comments; the PR title and
+body were rewritten to the current design. Mutants applied by hand and
+killed with `PYTHONDONTWRITEBYTECODE=1`: the tools dropped from the
+finalize request again (the loop and coordinator tests fail on the
+carried schemas), the shape guard removed (the adapter test fails), the
+detail-keeping dropped (the later-stop test fails), and the round-1
+suite (shared counter, threshold, wiring) re-killed. Full local checks
+green; offline only.
+
+## 2026-11-18 (same day) — #745 round-3 fixes: the Bedrock premise marked (verify), and the nudge-label lists completed
+
+Round 3 returned APPROVE with two documentation items. D77 stated the
+Bedrock Converse tool-history premise as fact; it now carries the repo's
+`(verify)` marker -- documented across OpenAI-to-Bedrock translation
+layers' issue trackers, not yet probed on this repo's own live route --
+and its revisit trigger now includes the first live run settling the
+premise (a finalize reply that still calls tools, or the shape turning
+out to be accepted). The README and the adapter guard's message say
+"documented to reject" instead of the bare claim.
+
+The `session-limit` nudge label joined the two label lists it was
+missing from -- `note_nudge`'s docstring and the `atlas.nudge` comment
+in `tracing.py`, the latter also gaining the `quote-repair` label it had
+been missing before this PR. Docs-only round; the suites, lint, format,
+mypy and drift are unchanged-green.

@@ -120,6 +120,7 @@ from atlas_reviewer.lens_loop import (
     run_attempt,
 )
 from atlas_reviewer.lenses import LensLibrary
+from atlas_reviewer.limit_stop import LimitHit
 from atlas_reviewer.notes import quote_untrusted, recovered_note
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import (
@@ -1321,6 +1322,10 @@ def _attempts(
     while isinstance(step, RunAttempt):
         attempts = ledger.attempts(key)
         ledger.start(key, step.number)
+        # The bridge session budget is per attempt (#693): each attempt,
+        # a retry included, begins with the full call and output budget,
+        # and its refusals name the attempt that spent them.
+        bridge.begin_attempt(job.lens, step.number)
         secrets_seen: list[BridgeSecret] = []
         try:
             outcome = run_attempt(
@@ -1328,6 +1333,7 @@ def _attempts(
                 review_deadline=review_deadline,
                 review_started=review_started,
                 retry_of=attempts[-1].outcome if step.forced and attempts else None,
+                attempt=step.number,
                 secrets=secrets_seen,
             )  # fmt: skip
         except ByokRefusedError as exc:
@@ -1479,6 +1485,7 @@ def _round_record(
         )
         for item in review.verified
     )
+    stop = _first_limit_stop(review)
     return fit_record(
         RoundRecord(
             event.repo,
@@ -1488,6 +1495,7 @@ def _round_record(
             review.event.value,
             lines,
             bool(review.context_omissions),
+            limit_stop="" if stop is None else scrub(stop.message()),
         )
     )
 
@@ -1593,13 +1601,18 @@ def _status_log_note(note: str) -> str:
     return note
 
 
-def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
-    """The first limit that stopped a lens, or null when none did."""
+def _first_limit_stop(review: AgenticReview) -> LimitHit | None:
+    """The first limit that stopped a lens, or None when none did."""
     for result in review.lenses:
         found = None if result.outcome is None else result.outcome.limit_hit
         if found is not None:
-            return found.as_dict()
+            return found
     return None
+
+
+def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
+    stop = _first_limit_stop(review)
+    return None if stop is None else stop.as_dict()
 
 
 def render_draft(

@@ -1750,6 +1750,160 @@ def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     assert outcome.state is LensState.PARTIAL
 
 
+def test_the_refusal_stop_finalizes_with_the_tools_still_on_the_request(tmp_path):
+    """Issue #693: once `SESSION_REFUSAL_LIMIT` results have been
+    `OVER_SESSION_LIMIT`, the budget is spent. The turn's results go back
+    -- so a model whose batch straddled the budget still sees what ran --
+    and one finalize turn asks the model to finalize with what it has:
+    the finding it then delivers is attested, with the stop attached,
+    instead of the mid-turn cut's `UNACKNOWLEDGED` attempt that discarded
+    both the results and the reply. The tool schemas stay on the request:
+    tool history next to an empty tools array is a shape the pinned
+    Bedrock Converse route rejects, and the spent bridge refuses whatever
+    the model still calls."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    outcome, model, _ = attempt(
+        tmp_path,
+        [tools(("diff_file", {"path": "calc.py"})), spent, final(finding())],
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.attestation is Attestation.ATTESTED
+    assert [f.finding.finding for f in outcome.findings] == [
+        "rounds each item before summing, so totals drift"
+    ]
+    assert outcome.causes == {Cause.TOOL_GAP, Cause.FILES_UNREAD}
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "session_limits"
+    assert outcome.limit_hit.configured == (
+        "1 call(s) and 1048576 output bytes per attempt"
+    )
+    assert outcome.limit_hit.observed == (
+        "4 session-limit refusals ended "
+        "tracing-correctness-and-invariants attempt 1; the last: "
+        "session-limit: all 1 calls of this attempt made"
+    )
+    assert outcome.limit_hit.setting == (
+        "the bridge's session limits (SessionLimits in bridge.py)"
+    )
+    assert "session_limits stopped the review" in outcome.detail
+    assert outcome.nudges == ("session-limit",)
+    # Every call of the refused batch was answered, then exactly one
+    # finalize turn was asked for: no third reading turn was requested,
+    # and its request carries the tool schemas next to the tool history.
+    assert [t.status for t in outcome.tools] == [
+        "OK",
+        "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
+        "OVER_SESSION_LIMIT",
+    ]
+    assert len(model.requests) == 3
+    assert model.requests[2].tools == tool_schemas()
+    assert "tool budget is spent" in model.requests[2].messages[-1].text
+
+
+def test_a_finalize_turn_that_still_calls_tools_earns_no_second_stop(tmp_path):
+    """A re-issued call on the finalize turn is a logged refusal: the stop
+    fires once per attempt, so the repeated calls neither restart the
+    stop nor loop it -- the attempt ends when the model finally replies,
+    or at the turn cap."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    again = tools(*[("read_file", {"path": "calc.py"})] * 2)
+    outcome, model, _ = attempt(
+        tmp_path,
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            spent,
+            again,
+            final(finding()),
+        ],
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.attestation is Attestation.ATTESTED
+    assert [f.finding.finding for f in outcome.findings] == [
+        "rounds each item before summing, so totals drift"
+    ]
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.observed == (
+        "4 session-limit refusals ended "
+        "tracing-correctness-and-invariants attempt 1; the last: "
+        "session-limit: all 1 calls of this attempt made"
+    )
+    # One stop, one refusal-stop nudge; the finalize turn's own repeated
+    # refusals are named by the duplicate detector, not by a second stop.
+    assert outcome.nudges == ("session-limit", "duplicate-calls")
+    assert len(model.requests) == 4
+
+
+def test_a_later_stop_keeps_the_session_stop_in_its_detail(tmp_path):
+    """The turn cap landing exactly on the finalize boundary claims the
+    outcome's limit_hit; the session-limit stop stays in the record
+    through the detail, so the budget the attempt hit is still named in
+    the ledger, the draft and the round log."""
+    spent = tools(*[("read_file", {"path": "calc.py"})] * 4)
+    outcome, _, _ = attempt(
+        tmp_path,
+        [tools(("diff_file", {"path": "calc.py"})), spent],
+        limits=replace(LIMITS, max_turns=2),
+        session_limits=SessionLimits(max_calls=1),
+    )
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert "max_turns stopped the review" in outcome.detail
+    assert "session_limits stopped the review" in outcome.detail
+
+
+def test_a_retry_begins_with_a_full_bridge_budget(tmp_path):
+    """Issue #693: attempt 1 spends the bridge's whole call budget, and
+    the retry begun on the same bridge session still has all of its own:
+    its reads run and the lens settles clean. The shared-counter mutant,
+    where the retry inherits what attempt 1 spent, fails here."""
+    bad = final(text="not json")
+    # Attempt 1 reads the whole diff (so no unread-list nudge holds it),
+    # spends the budget doing it, then fails its contract twice, which
+    # is retryable; the retry re-reads on a fresh budget and settles
+    # clean.
+    script = [READ_ALL, bad, bad, READ_ALL, final()]
+    model = ScriptedLensModel(list(script))
+    clock = FakeClock()
+    spend = Spend(LIMITS.resolve())
+    outcomes = []
+
+    def body(bridge):
+        started = clock.monotonic()
+        for number in (1, 2):
+            bridge.begin_attempt(LENS, number)
+            outcomes.append(
+                run_attempt(
+                    job(),
+                    bridge,
+                    model,
+                    spend,
+                    clock,
+                    review_deadline=started + 600,
+                    review_started=started,
+                    retry_of=outcomes[-1] if outcomes else None,
+                    attempt=number,
+                    sleep=clock.advance,
+                )
+            )
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(), MemoryLedger(), trees(), body,
+        redactor=Redactor(), changed=CHANGED, name="cqa-lens-test",
+        deadline_s=900, clock=clock, root=str(tmp_path / "bridge"),
+        session_limits=SessionLimits(max_calls=2),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    first, second = outcomes
+    assert first.causes == {Cause.UNPARSED}
+    assert first.state is LensState.FAILED
+    assert second.state is LensState.CLEAN
+    assert [t.status for t in second.tools] == ["OK", "OK"]
+
+
 def test_a_rejected_tool_call_is_answered_and_the_lens_goes_on(tmp_path):
     bad = tools(("shell", {"cmd": "cat /etc/passwd"}))
     outcome, model, _ = attempt(tmp_path, [bad, READ_ALL, final()])
