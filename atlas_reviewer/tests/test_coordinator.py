@@ -2969,6 +2969,7 @@ def _last_progress_lens(path):
             last = data.get("lens")
     return last
 
+
 # ----------------------------------------------------- the delta review (#702)
 
 PRIOR_TEXT = "rounds each item before summing, so totals drift"
