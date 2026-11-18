@@ -3222,3 +3222,99 @@ missing from -- `note_nudge`'s docstring and the `atlas.nudge` comment
 in `tracing.py`, the latter also gaining the `quote-repair` label it had
 been missing before this PR. Docs-only round; the suites, lint, format,
 mypy and drift are unchanged-green.
+
+## 2026-11-17 — CI moves to GitHub-hosted runners for every event (D78)
+
+main's `gate` runs had been stuck `queued` since roughly 3 AM CT: the
+workflow's `runs-on:` sent `pull_request` to `ubuntu-latest` but
+`push`(main)/`schedule` to `fromJSON('["self-hosted", "Linux"]')`, and the
+fleet's runner for this repo was down — the single point of failure the
+self-hosted guide's own Accepted Risks section had already recorded ("no
+automatic failover... a job with no available runner sits `queued` rather
+than erroring"). Brandon called the migration at 5:43 PM CT (D78): every
+event of every workflow under `.github/workflows/` now runs on GitHub-hosted
+runners — `runs-on: ubuntu-latest`, left floating rather than pinned to a
+dated image because every gate already version-pins its tools independently
+of the runner OS (hash-pinned `requirements.txt`, exact-pinned
+pip-tools/pip-audit/pip-licenses, checksum-verified upstream shellcheck and
+actionlint tarballs — the apt-pin breakage the tarballs replaced was itself
+coupling to a runner OS archive). Only `ci.yml` existed; no other workflow
+file carried a runner label.
+
+Workarounds retired with the persistent hardware, each in place: #366's
+fresh-venv install (its precondition — site-packages accumulating across
+jobs on one shared interpreter, silently skipping a pin's hash check —
+cannot occur on a per-run VM; the image-baked tool-cache interpreter can
+still in principle satisfy a pin, so the install keeps
+`--require-hashes --ignore-installed`, resolving and downloading every pin
+whatever the image holds — round-1 review of #746, Minor 2), the
+event-conditional `cache: 'pip'` (#475/#589), the fleet's arch-agnostic
+`runs-on:` notes, and the `$RUNNER_TEMP`-vs-`$HOME` persistent-host defense
+notes. Kept because still useful: the hash-verified `pip install
+--require-hashes` gate, the per-arch shellcheck/actionlint downloads (any
+hosted Linux arch), and the fail-fast step ordering. The concurrency block
+keeps `cancel-in-progress: ${{ github.event_name == 'pull_request' }}` and
+adds the event name to the group (`ci-<event>-<ref>`) so the weekly schedule
+never shares a group with main pushes: schedule resolves to the default
+branch's ref, so a ref-only group put them together, and — the correction
+this entry's first draft got wrong — a concurrency group holds at most one
+running and one pending run, and a newer run cancels an older *pending* one
+regardless of `cancel-in-progress` (observed live: push run 44087837195 was
+cancelled at 2026-11-17T23:41:36Z, the instant run 44181631062 queued; round-
+1 review, Minor 1). So no config can promise a recorded run per commit: what
+the group split buys is that a mid-week push can neither cancel an
+in-progress audit nor supersede a pending one, superseded *pending* main
+pushes are accepted (the newest head's result is the one that matters), and
+PR runs keep the cancel. D78 does not close #471's residual gap: GitHub
+evaluates a plain `pull_request` workflow from the PR's own head, so a
+hostile PR can still edit its own `runs-on:`; the protection is the Settings
+value ("Require approval for all outside collaborators"), not this file.
+
+Guards moved with the decision: `tests/test_ci_runners_are_github_hosted.py`
+replaces `test_ci_pull_request_runner_is_hosted.py` (which pinned the split
+shape D78 removes — every job's `runs-on` must now be a plain hosted label,
+with no `self-hosted` and no event-conditional expression) and globs every
+`*.y*ml` file under `.github/workflows/` with a non-vacuity assert, not
+`ci.yml` alone — a second workflow file carrying a self-hosted label must
+fail CI (round-1 review, Minor 3, confirmed by a two-file probe);
+`test_ci_require_hashes_targets_fresh_venv.py` becomes the slimmer
+`test_ci_require_hashes_install.py`, which pins the `--ignore-installed`
+flag the install needs once the venv is gone.
+`docs/self-hosted-runners.md` stays as the fleet how-to for the
+repos that still self-host, with this repo's state updated in its header
+and Per-repo notes; the review-lens content about self-hosted runners
+(`auditing-deployment-and-trust-boundaries` and its `collapsed/` copy) is
+guidance about other repos and was left alone, as were the historical logs.
+
+Deliberately not touched: the stuck runs on main (no cancel, re-run, or
+settings change), the runner registrations, and `docs/research/` (records
+of findings, not live state). Round-1 review fixes on #746 landed in the
+same PR: the concurrency wording and group (`ci-<event>-<ref>`) above, the
+`--ignore-installed` flag, the guard's whole-directory glob, the
+`$RUNNER_TEMP` comment's PATH contradiction, and the runner doc's
+self-check grep — each pinned by a test or killed mutant: dropping
+`--ignore-installed` fails
+`test_require_hashes_install_exists_and_ignores_installed`; a second
+workflow file carrying `[self-hosted, Linux]` fails
+`test_every_job_in_every_workflow_runs_on_a_github_hosted_runner`; the
+event-conditional expression shape stays killed by
+`test_no_job_conditions_its_runner_on_the_event`. Round-2 review added one
+Minor — the group expression itself had zero CI signal, mutant M4 (revert
+to the ref-only group) passed the whole suite — closed by
+`tests/test_ci_concurrency_group.py`, which pins the parsed
+`concurrency.group` to carry `github.event_name` and `github.ref` and
+`cancel-in-progress` to the PR-only expression (M4 now fails
+`test_concurrency_group_carries_the_event_name`; a bare-`true`
+cancel-in-progress fails `test_cancel_in_progress_stays_pull_request_only`).
+Round-3 review hardened the cancel-in-progress pin from a substring check to
+an exact whitespace-normalized match on
+`${{ github.event_name == 'pull_request' }}` — the substring version let the
+inverted split `!= 'pull_request'` pass (mutant M7, the semantically worst
+survivor: push would cancel an in-progress audit and PR runs would stop
+superseding); M7 now fails the exact-match assert, with M4 and the bare
+literals re-verified dying.
+Verification, all on the
+PR head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
+94%); `pytest atlas_reviewer/tests` 3,242 passed, 96.42%; ruff
+check/format, mypy (84 files), `tooling.cli drift` clean; actionlint 1.7.12
+clean on `ci.yml`. Offline only.
