@@ -1248,19 +1248,34 @@ def test_a_delta_drafts_resolved_and_carried_sections_reach_the_report():
 
 
 def test_a_full_review_draft_has_no_delta_sections():
-    report = summarize_draft(
-        _delta_draft()
-        .replace("## Resolved by the new commits\n\n- **P2**\n", "")
-        .replace(
-            '- **P2** `"calc.py:9"`: `"the secret is logged"`. '
-            'Reason, quoted: `"the delta deletes the log line"`\n',
-            "",
-        )
-        .replace(
-            '## Carried, not re-verified\n\n- **P3** `"docs/x.md:2"`: `"stale example"`\n',
-            "",
-        ),
-        expect="agentic",
+    """A full review's draft (no delta sections at all -- a real one, not
+    a stripped delta draft) parses with empty resolved and carried
+    lists, so the post of a full review gains neither section."""
+    status = json.dumps(
+        {
+            "mode": "agentic",
+            "review_event": "COMMENT",
+            "proposed_event": "COMMENT",
+            "coverage_complete": True,
+        }
     )
+    draft = (
+        f"<!-- atlas-review-status: {status} -->\n"
+        "**Review event: COMMENT.**\n"
+        "\n"
+        "## Findings (verified quotes only)\n"
+        "\n"
+        '- **L1-F1** [minor] `"calc.py:2"` (`"lens"`): "rounds early"\n'
+        "\n"
+        "## Lens coverage (attestation ledger)\n"
+        "\n"
+        "- L1 lens: **clean**; body sha256 ab12\n"
+        "\n"
+        "Model calls: 4; committed: $0.12.\n"
+    )
+    report = summarize_draft(draft, expect="agentic")
     assert report.resolved == ()
     assert report.carried_unverified == ()
+    assert report.findings == (
+        '**L1-F1** [minor] `"calc.py:2"` (`"lens"`): "rounds early"',
+    )

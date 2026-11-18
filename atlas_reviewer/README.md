@@ -142,32 +142,56 @@ never carries merge-from-base content (merging the base moves the merge
 base forward, and the base's changes drop out of the three-dot diff), so
 the restriction is the range diff with that content excluded, with no
 per-commit reads. A merge-only push yields an empty delta, and the
-review then exists to carry the earlier findings forward. After its
-lenses settle, one bounded, tool-less **carry-forward call** judges the
-earlier review's findings — the round log's records at `delta_from`,
-labeled `P1`, `P2`, ... — against the delta:
+review then exists to carry the earlier findings forward.
+
+The scope carries a **resolution gate that fails closed**
+(`DeltaScope.resolution_paths`): the paths a resolution may be accepted
+for, empty whenever the delta could not actually be established — an
+unfetchable range (the review then runs on the full diff, the fallback
+named), a diverged history after a rebase or force-push (the
+comparison's file list is then measured from the wrong base), or a file
+list that is malformed, holds unreadable entries, or is cut at GitHub's
+comparison cap. With the gate empty, no resolution is accepted however
+the assessor proposes it, and every prior finding is carried.
+
+After the delta's lenses settle, one bounded, tool-less **carry-forward
+call** judges the earlier review's findings — the round log's records at
+`delta_from`, labeled `P1`, `P2`, ... — against the delta:
 
 - a finding the carry-forward re-states is quote-checked against the new
   head's files exactly like an ordinary finding's, and a verified
   restatement is carried into the findings set under its `P` label;
-- a finding the new commits fixed is marked **resolved** with the stated
-  reason — accepted only when the delta touched the file the finding
-  cites, so PR content cannot resolve a finding on a file the commits
-  never changed, and a refused resolution is recorded as the proposal it
-  is;
+- a finding the new commits fixed is marked **resolved** only on real
+  evidence: the proposal's `evidence` must quote code that is among the
+  lines the delta's diff removed for that file, alongside the file being
+  one the established delta touched. A withdrawal without that evidence
+  is recorded as the proposal it is and the finding stands carried — a
+  withdrawal never removes a finding on the model's say-so alone, the
+  D73 path's rule;
 - everything else is carried as the record stored it, in the draft's
   `Carried, not re-verified` section and back into the round record, so
-  the next review re-offers it — nothing silently dropped (D73).
+  the next review re-offers it — including a line that does not parse,
+  which travels as the record's raw text verbatim (round-1 review of
+  #748, M3), and a record whose finding lines did not fit the record
+  cap, whose `findings_omitted` count the draft states rather than
+  reading as "no findings recorded" (round-1 M5). A carried finding
+  that did not re-anchor still counts for the verdict — a prior Blocker
+  can never become an approval because its quote moved (round-1 M4);
+  an unreadable round log names the read failure instead of claiming
+  nothing was recorded (round-1 m1).
 
-A finding identical to a carried one (same location and text) is posted
-once, as the carried copy. The delta review's post cites the review it
-builds on — the post says "Follows the review of" the head — and shows the resolved and
-carried sections. The carry-forward call spends against the review's own
+A finding identical to a carried one (same re-anchored location and
+text) is posted once, as the carried copy; two records at the same
+`delta_from` carrying the same finding are carried once too. The carry
+assessor adds no findings: the instructions ask for dispositions only,
+and an entry with no `revises` label is dropped and named (round-1 m5).
+The delta review's post cites the review it builds on — the post says
+"Follows the review of" the head — and shows the resolved and carried
+sections. The carry-forward call spends against the review's own
 derived limits and the dollar ceiling (D68) like every other call; its
 failure — a contract refusal, a transport error, a spent-out review —
-falls back to carrying every prior finding as recorded, with the failure
-named. An unfetchable delta range falls back to the full pull request
-diff, recorded in the draft.
+falls back to carrying every prior finding as recorded, with the
+failure named.
 
 The review child follows the service mode, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
@@ -1555,7 +1579,11 @@ D41 records the 2026-11-12 probe that did.
     written. `limit_stop` is the first limit that stopped a lens -- a
     lens's own run, or its latest re-assessment's refused reservation or
     spent-out call cap (round-1 review of #731, N4) -- or null. Paths
-    stay out of the line.
+    stay out of the line. A delta review adds three counts -- `carried`
+    (re-anchored, verified carried findings), `carried_unverified`
+    (carried without a verified quote, raw unparsed lines included, so
+    an all-clear on `carried` cannot hide them), and `resolved` -- and
+    `delta_note` when the carry named a gap (round-1 review of #748).
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner

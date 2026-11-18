@@ -2793,7 +2793,7 @@ def test_a_delta_dry_run_carries_the_earlier_finding_forward(tmp_path):
     # label, so the next delta builds on it.
     record = _last_round_record(log)
     assert record.head_sha == "4e5f6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5"
-    assert record.findings == (f"P1 blocker calc.py:4 {DELTA_TEXT}",)
+    assert record.findings == (f'P1 blocker "calc.py:4" {DELTA_TEXT}',)
 
 
 def _last_round_record(path: str):

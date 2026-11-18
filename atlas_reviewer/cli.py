@@ -74,7 +74,7 @@ from atlas_reviewer.coordinator import (
     render_draft,
     review_lenses,
 )
-from atlas_reviewer.delta import CARRY_TARGET_PREFIX, delta_review_diff
+from atlas_reviewer.delta import CARRY_TARGET_PREFIX, DeltaScope, delta_scope
 from atlas_reviewer.diffs import diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -927,7 +927,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         if not isinstance(ref, str) or not ref:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
-        delta_from, diff, delta_note = _delta_input(event, github, diff)
+        diff, delta = _delta_input(event, github, diff)
         # The derivation's refusals are planned-count independent (D68;
         # round-1 review of #717, m-3): validate them here, before the
         # picker can spend, so a misconfiguration is a clean usage error
@@ -1090,8 +1090,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     evidence_digest=snapshot_digest(
                         ci_collected, remarks, remarks_collected
                     ),
-                    delta_from=delta_from,
-                    delta_note=delta_note,
+                    delta=delta,
                 )
                 review = replace(
                     review,
@@ -1129,25 +1128,25 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
 
 def _delta_input(
     event: PrEvent, github: FixtureGitHub | GitHubClient, diff: str
-) -> tuple[str, str, str]:
-    """The delta review's inputs from the event (#702, D79): the delta
-    base, the diff to review, and the controller note.
+) -> tuple[str, DeltaScope | None]:
+    """The diff to review and the delta review's scope from the event
+    (#702, D79); the scope is None on a full review.
 
     A delta review's diff is the pull request's diff at this head,
     restricted to the paths the range `delta_from..head` touched -- the
     range diff with merge-from-base content excluded, which the pull
-    request's diff never carries anyway. An unfetchable range falls back
-    to the full diff, recorded in the note; the carry-forward still
-    applies, because the earlier review's findings do not depend on the
-    range being readable. A delta base equal to the head is a usage
-    error: it reviews nothing."""
+    request's diff never carries anyway. The scope also carries the
+    resolution gate: empty whenever the delta could not actually be
+    established, so no resolution is accepted on evidence the delta
+    cannot back. A delta base equal to the head is a usage error: it
+    reviews nothing."""
     delta_from = event.delta_from
     if not delta_from:
-        return "", diff, ""
+        return diff, None
     if delta_from == event.head_sha:
         raise UsageError("the event's delta_from equals its head_sha")
-    review_diff, note = delta_review_diff(github, event, diff)
-    return delta_from, review_diff, note
+    scope = delta_scope(github, event, diff)
+    return scope.diff, scope
 
 
 def _with_preference_note(

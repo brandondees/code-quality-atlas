@@ -60,7 +60,7 @@ class ContractError(ValueError):
     """The reply does not meet the finding contract; the message says where."""
 
 
-class _UnknownSeverity(ContractError):
+class UnknownSeverity(ContractError):
     """The one finding problem that drops the finding instead of refusing
     the reply."""
 
@@ -177,8 +177,8 @@ def parse_reply(text: str) -> LensReply:
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
-        data = _last_fenced_object(stripped)
-        if data is _NO_OBJECT:
+        data = last_fenced_object(stripped)
+        if data is NO_OBJECT:
             raise ContractError("the reply is not one JSON object") from None
     if not isinstance(data, dict) or set(data) != _REPLY_KEYS:
         raise ContractError(
@@ -201,25 +201,25 @@ def parse_reply(text: str) -> LensReply:
     for index, raw in enumerate(findings, 1):
         try:
             kept.append(_finding(index, raw))
-        except _UnknownSeverity as exc:
-            dropped.append(_dropped(exc, raw))
+        except UnknownSeverity as exc:
+            dropped.append(dropped_note(exc, raw))
     return LensReply(lens, digest, tuple(kept), tuple(dropped))
 
 
-def _last_fenced_object(text: str) -> Any:
-    """The last ```-fenced block's JSON, or `_NO_OBJECT` when there is no
+def last_fenced_object(text: str) -> Any:
+    """The last ```-fenced block's JSON, or `NO_OBJECT` when there is no
     closed fence or its content does not parse. A model often writes prose
     before the JSON it meant as the reply; the last block is that JSON."""
     blocks = _ANY_FENCE.findall(text)
     if not blocks:
-        return _NO_OBJECT
+        return NO_OBJECT
     try:
         return json.loads(blocks[-1])
     except (json.JSONDecodeError, RecursionError):
-        return _NO_OBJECT
+        return NO_OBJECT
 
 
-_NO_OBJECT: Any = object()
+NO_OBJECT: Any = object()
 
 
 def _finding(index: int, raw: Any) -> Finding:
@@ -251,7 +251,7 @@ def _parse_finding(raw: Any) -> Finding:
     # Last, so a finding with an unknown severity and any other problem
     # refuses the reply rather than being dropped.
     if severity is None:
-        raise _UnknownSeverity("severity must be one of blocker, major, minor, nit")
+        raise UnknownSeverity("severity must be one of blocker, major, minor, nit")
     return Finding(
         location,
         severity,
@@ -307,7 +307,7 @@ def _severity(value: str) -> Severity | None:
         return _SEVERITY_ALIASES.get(key)
 
 
-def _dropped(exc: _UnknownSeverity, raw: dict[str, str]) -> str:
+def dropped_note(exc: UnknownSeverity, raw: dict[str, str]) -> str:
     """The contract message plus the raw severity, so a later log can
     show the value that was refused."""
     shown = " ".join(raw["severity"].split())[:_RAW_SEVERITY_CHARS]

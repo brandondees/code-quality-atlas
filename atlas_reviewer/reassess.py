@@ -99,20 +99,20 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.evidence import Remark
 from atlas_reviewer.gather import Collected
 from atlas_reviewer.lens_contract import (
-    _NO_OBJECT,
     DIGEST,
     MAX_FINDINGS,
     MAX_LENS_CHARS,
     MAX_TEXT_CHARS,
+    NO_OBJECT,
     ContractError,
     Finding,
     LineRange,
     Severity,
+    UnknownSeverity,
     WholeFile,
-    _dropped,
-    _last_fenced_object,
     _parse_finding,
-    _UnknownSeverity,
+    dropped_note,
+    last_fenced_object,
 )
 from atlas_reviewer.lens_loop import retry_reasons
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
@@ -228,8 +228,8 @@ def parse_reassess_reply(text: str) -> ReassessReply:
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
-        data = _last_fenced_object(stripped)
-        if data is _NO_OBJECT:
+        data = last_fenced_object(stripped)
+        if data is NO_OBJECT:
             raise ContractError("the reply is not one JSON object") from None
     if not isinstance(data, dict) or not _REPLY_KEYS >= set(data):
         raise ContractError(
@@ -259,9 +259,9 @@ def parse_reassess_reply(text: str) -> ReassessReply:
     dropped: list[str] = []
     for index, raw in enumerate(findings, 1):
         try:
-            parsed.append(_reassess_finding(index, raw))
-        except _UnknownSeverity as exc:
-            dropped.append(_dropped(exc, raw))
+            parsed.append(reassess_finding(index, raw))
+        except UnknownSeverity as exc:
+            dropped.append(dropped_note(exc, raw))
     return ReassessReply(
         lens,
         digest,
@@ -271,7 +271,7 @@ def parse_reassess_reply(text: str) -> ReassessReply:
     )
 
 
-def _reassess_finding(index: int, raw: Any) -> ReassessFinding:
+def reassess_finding(index: int, raw: Any) -> ReassessFinding:
     if not isinstance(raw, dict):
         raise ContractError(f"finding {index}: must be an object")
     revises = raw.get("revises", "")

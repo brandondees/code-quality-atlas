@@ -23,21 +23,26 @@ Three pieces live here; the coordinator wires them.
 - **The prior findings.** They come from the round log, the one durable
   per-pull-request record (D74): the records at `delta_from`, their
   finding lines parsed back into findings. A line that does not parse is
-  named, never dropped (D73's rule): it travels as raw text.
+  never dropped (D73's rule): it is carried as the record's raw text,
+  shown in the draft and re-recorded, so the next review re-offers it.
 - **The carry-forward call.** One bounded, tool-less model call, built
   like D73's re-assessment: the prior findings labeled `P1`, `P2`, ...
   and the delta diff travel fenced; the reply re-states every prior
   finding that still applies (`revises`, with a re-anchored location and
   quote) and proposes the ones the new commits fixed (`withdrawn`, with
-  the reason). Every re-statement is quote-checked against the new
-  head's files exactly like an ordinary reply's -- through the
-  re-assessment judge itself, so the two paths cannot drift apart. A
-  resolution is accepted only when the prior finding's location is a
-  path the delta touched: the new commits cannot have fixed a file they
-  did not change, so a resolution proposed anywhere else is recorded as
-  an annotation and the finding stands. Silence keeps the finding --
-  carried in its original wording, re-offered to the next review -- so
-  nothing is silently dropped.
+  the reason and the evidence). Every re-statement is quote-checked
+  against the new head's files exactly like an ordinary reply's --
+  through the re-assessment judge itself, so the two paths cannot drift
+  apart. A resolution is accepted only on all three of: the model's
+  proposal with its reason; the prior finding's file being one the
+  established delta touched (`DeltaScope.resolution_paths` -- empty
+  whenever the delta could not actually be established, so the gate
+  fails closed); and evidence the new commits removed the cited code --
+  every quoted line among the delta diff's removed lines for that file.
+  Without any one of the three the finding stays carried, and the
+  refusal is named. Silence keeps the finding -- carried in its
+  original wording, re-offered to the next review -- so nothing is
+  silently dropped.
 
 The carry-forward call spends against the review's shared `Spend` (D68's
 derived limits and dollar ceiling) like every other call, and its reply
@@ -49,7 +54,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -57,8 +62,9 @@ from atlas_reviewer.attestation import CheckedFinding
 from atlas_reviewer.diffs import diff_paths, scope_text
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.lens_contract import (
-    _NO_OBJECT,
     MAX_FINDINGS,
+    MAX_TEXT_CHARS,
+    NO_OBJECT,
     Attribution,
     ContractError,
     DesignRef,
@@ -67,20 +73,20 @@ from atlas_reviewer.lens_contract import (
     Location,
     Route,
     Severity,
+    UnknownSeverity,
     Valence,
     WholeFile,
-    _dropped,
-    _last_fenced_object,
-    _UnknownSeverity,
+    dropped_note,
+    last_fenced_object,
 )
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 from atlas_reviewer.prompt import UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import QuoteSource, SourceText
 from atlas_reviewer.reassess import (
+    PRIOR_LABEL_CHARS,
     ReassessFinding,
     ReassessReply,
-    _reassess_finding,
-    _withdrawn_entry,
+    reassess_finding,
 )
 from atlas_reviewer.reassess import (
     judge as judge_reply,
@@ -110,23 +116,29 @@ each against the delta:
   files exactly like an ordinary finding's quote; one that does not
   verify is not carried as verified.
 - A prior finding the new commits fixed: name its label in `withdrawn`
-  with a `reason` key stating what fixed it. The controller accepts a
-  resolution only for a finding whose file the delta touched; anywhere
-  else it is recorded as your proposal and the finding stands.
+  with a `reason` key stating what fixed it, and an `evidence` key
+  quoting the line or lines of the prior finding's code that the delta
+  removed -- the `-` lines of the delta diff for that file. The
+  controller accepts a resolution only when every line you quote is
+  among the delta's removed lines for the finding's file: that is the
+  evidence the new commits took the cited code out. Anywhere else -- a
+  file the delta never touched, a quote that is not among the removed
+  lines -- the resolution is recorded as your proposal and the finding
+  stands.
 - A prior finding you cannot judge: say nothing about it. It is carried
   in its original wording, never silently dropped.
 
-To add a finding the delta reveals, report it in `findings` with no
-`revises` key. Every finding you report meets the Finding contract below
-and is quoted from the current files.
+Report nothing else in `findings`: new findings on the delta are the
+lenses' work, not yours, and an entry with no `revises` key is not a
+re-statement.
 
 When you are done, reply with exactly one JSON object and nothing else:
 {"findings": [...], "withdrawn": [...]}. Each entry of `findings` has
 the keys location, evidence, severity, valence, route, attribution,
 finding and fix, and optionally siblings, with the values the Finding
-contract below defines, plus the optional `revises` and `reason` keys
-this preamble defines. Each entry of `withdrawn` is an object with
-exactly the keys `id` and `reason`. Severity is exactly one of
+contract below defines, plus the `revises` and `reason` keys this
+preamble defines. Each entry of `withdrawn` is an object with exactly
+the keys `id`, `reason` and `evidence`. Severity is exactly one of
 "blocker", "major", "minor" or "nit"; a finding whose severity cannot
 be read as one of those names is dropped, and the other findings stand.
 Do not call a tool; this turn has none."""
@@ -166,25 +178,50 @@ def carry_turn(
 def parse_prior_line(line: str) -> tuple[str, Finding] | None:
     """One round-record finding line parsed back into `(id, finding)`.
 
-    A record's finding line is `{id} {severity} {location} {finding}` --
-    the shape the controller writes -- so this parse is its exact
-    inverse: the id and severity are validated against their closed
-    sets, the location parses into one of its three shapes, and the rest
-    of the line is the finding text. A carried finding is reconstructed
-    defect-introduced (it set the earlier review's verdict once), with
-    no fix or evidence text, because the record stores neither. None
-    when the line is not that shape; the caller names it, never drops
+    A record's finding line is `{id} {severity} "{location}" {finding}` --
+    the shape the controller writes, the location quoted so a path that
+    contains a space cannot be misread as the finding's first word. The
+    unquoted legacy form (`{id} {severity} {location} {finding}`) is
+    still read, for records written before the quote; its location token
+    is one space-free token by construction, and a line whose third
+    token cannot be a location is refused rather than guessed, so a
+    garbled line is named and carried as raw text, never mis-parsed.
+    A carried finding is reconstructed defect-introduced (it set the
+    earlier review's verdict once), with no fix or evidence text,
+    because the record stores neither. None when the line is not that
+    shape; the caller carries it as raw text and names it, never drops
     it."""
-    parts = line.split(" ", 3)
-    if len(parts) != 4:
+    parts = line.split(" ", 2)
+    if len(parts) != 3:
         return None
-    identifier, severity, location, text = parts
+    identifier, severity, rest = parts
     if PRIOR_ID.fullmatch(identifier) is None:
         return None
     known = _SEVERITIES.get(severity)
     if known is None:
         return None
-    place = _parse_location(location)
+    if rest.startswith('"'):
+        # The quoted form: the location may contain spaces, so it ends at
+        # its closing quote, not at the next space.
+        end = rest.find('"', 1)
+        if end < 0 or not rest[end + 1 :].startswith(" "):
+            return None
+        location = rest[1:end]
+        text = rest[end + 2 :]
+        place = _parse_location(location)
+    else:
+        # The legacy form's location is one space-free token, so only a
+        # line-range location is unambiguous: a bare token could equally
+        # be the first word of a location that contains a space, and
+        # guessing a whole-file path out of it would corrupt the finding
+        # silently. Such a line is refused here, so the caller names it
+        # and carries it as raw text.
+        location, _, text = rest.partition(" ")
+        place = (
+            _line_range(location)
+            if not location.startswith(_DESIGN_PREFIXES) and '"' not in location
+            else None
+        )
     if place is None:
         return None
     return identifier, Finding(
@@ -198,40 +235,57 @@ def parse_prior_line(line: str) -> tuple[str, Finding] | None:
     )
 
 
+def _line_range(text: str) -> LineRange | None:
+    span = re.fullmatch(r"(.+):([1-9][0-9]*)(?:-([1-9][0-9]*))?", text)
+    if span is None:
+        return None
+    end = span.group(3)
+    return LineRange(
+        span.group(1), int(span.group(2)), int(end) if end else int(span.group(2))
+    )
+
+
 def _parse_location(text: str) -> Location | None:
     """A location as the Finding contract accepts it: `path:span`, a
     whole file's path, or a `boundary:`/`component:` reference."""
     if text.startswith(_DESIGN_PREFIXES):
         return DesignRef(text)
-    span = re.fullmatch(r"(.+):([1-9][0-9]*)(?:-([1-9][0-9]*))?", text)
+    span = _line_range(text)
     if span is not None:
-        end = span.group(3)
-        return LineRange(
-            span.group(1), int(span.group(2)), int(end) if end else int(span.group(2))
-        )
+        return span
     return WholeFile(text)
-
-
-def prior_findings(records: Sequence[Any]) -> tuple[tuple[str, Finding], ...]:
-    """Every finding line of the given round records, in record order,
-    as `(id, finding)` pairs. Lines that do not parse are skipped here
-    and named by the caller, which has the raw line."""
-    parsed: list[tuple[str, Finding]] = []
-    for record in records:
-        for line in record.findings:
-            found = parse_prior_line(line)
-            if found is not None:
-                parsed.append(found)
-    return tuple(parsed)
 
 
 # ---------------------------------------------------------------- scope
 
 
-def delta_paths(github: GitHubReader, event: PrEvent, pr_diff: str) -> tuple[str, ...]:
-    """The paths the delta review covers: the paths the range
-    `delta_from..head` touched that the pull request's diff at the new
-    head still shows.
+@dataclass(frozen=True)
+class DeltaScope:
+    """What the delta review runs on, and what a resolution may be
+    accepted for.
+
+    `diff` is the diff the review's lenses run on. `resolution_paths` is
+    the set of paths a resolution proposal may be accepted for -- empty
+    whenever the delta could not actually be established (an unfetchable
+    range, a diverged history, a cut or malformed comparison), because
+    the resolution gate must fail closed, never open: with no established
+    delta there is no evidence the new commits changed anything, so
+    nothing is resolvable and every prior finding is carried. `note` is
+    controller text naming the fallback or gap, empty when the delta is
+    the real delta; `gate_reason` is the clause a refused resolution is
+    named with, empty when the ordinary "the delta did not touch the
+    file it cites" applies."""
+
+    delta_from: str
+    diff: str
+    resolution_paths: frozenset[str]
+    note: str = ""
+    gate_reason: str = ""
+
+
+def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScope:
+    """The delta review's scope, from one range comparison and the pull
+    request's diff at the new head.
 
     The pull request's diff never carries merge-from-base content (the
     merge moves the base forward and the base's changes drop out of the
@@ -239,25 +293,86 @@ def delta_paths(github: GitHubReader, event: PrEvent, pr_diff: str) -> tuple[str
     the range diff with that content excluded, with no per-commit reads.
     A path the range touched that the pull request's diff no longer
     shows was changed and changed back, or its change came and went with
-    the base merge; there is nothing left on it to review."""
-    compare = github.get_compare(event.repo, event.delta_from, event.head_sha)
-    names = _range_paths(compare)
+    the base merge; there is nothing left on it to review.
+
+    Three conditions refuse the delta as the resolution gate's evidence,
+    each named on the scope's note and each leaving `resolution_paths`
+    empty: a range that cannot be fetched at all (the review then runs
+    on the full pull request diff rather than skipping the push); a
+    comparison whose merge base is not `delta_from` -- a rebase or a
+    force-push, after which the comparison's file list is measured from
+    the wrong base and is not the range's; and a file list that is
+    missing, malformed, or cut at GitHub's comparison cap, which cannot
+    prove what the range touched."""
+    try:
+        compare = github.get_compare(event.repo, event.delta_from, event.head_sha)
+        names, complete = _range_paths(compare)
+    except BoundaryError as exc:
+        return DeltaScope(
+            event.delta_from,
+            pr_diff,
+            frozenset(),
+            f"the delta range could not be fetched ({type(exc).__name__}); "
+            "the review ran on the full pull request diff, and no "
+            "resolution is accepted",
+            "the delta range could not be established",
+        )
     shown = set(diff_paths(pr_diff))
-    return tuple(path for path in names if path in shown)
+    paths = tuple(path for path in names if path in shown)
+    if _diverged(compare, event.delta_from):
+        return DeltaScope(
+            event.delta_from,
+            scope_text(pr_diff, paths),
+            frozenset(),
+            "the range comparison shows the histories diverged (a rebase or "
+            "a force-push); the review ran on the paths that differ, and no "
+            "resolution is accepted",
+            "the delta could not be established: the histories diverged",
+        )
+    if not complete:
+        return DeltaScope(
+            event.delta_from,
+            scope_text(pr_diff, paths),
+            frozenset(),
+            "the range comparison's file list was cut or malformed, so the "
+            "delta's touched paths are not fully known; no resolution is "
+            "accepted",
+            "the delta's touched paths are not fully known",
+        )
+    return DeltaScope(event.delta_from, scope_text(pr_diff, paths), frozenset(paths))
 
 
-def _range_paths(compare: Json) -> tuple[str, ...]:
+_COMPARE_FILES_CAP = 300
+"""GitHub's comparison response caps its `files` array; a list at the cap
+may be cut, and a cut list cannot prove what the range touched."""
+
+
+def _range_paths(compare: Json) -> tuple[tuple[str, ...], bool]:
+    """The comparison's changed paths, and whether the list is complete.
+
+    A missing or non-array `files` raises: a comparison reply without one
+    is not a comparison reply this reader can trust. Entries that are not
+    objects, or that name no path, make the list incomplete -- what they
+    would have named is unknown -- and a list at the comparison cap may
+    be cut, which is incomplete the same way."""
     files = compare.get("files")
-    if files is None:
-        return ()
     if not isinstance(files, list):
         raise BoundaryError("the comparison has no files array")
-    paths = []
+    paths: list[str] = []
+    complete = len(files) < _COMPARE_FILES_CAP
     for item in files:
         name = item.get("filename") if isinstance(item, dict) else None
         if isinstance(name, str) and name:
             paths.append(name)
-    return tuple(paths)
+        else:
+            complete = False
+    return tuple(paths), complete
+
+
+def _diverged(compare: Json, delta_from: str) -> bool:
+    base = compare.get("merge_base_commit")
+    sha = base.get("sha") if isinstance(base, dict) else None
+    return isinstance(sha, str) and sha != delta_from
 
 
 # ------------------------------------------------- the reply and its judge
@@ -266,23 +381,27 @@ def _range_paths(compare: Json) -> tuple[str, ...]:
 @dataclass(frozen=True)
 class CarryReply:
     findings: tuple[ReassessFinding, ...]
-    withdrawn: tuple[tuple[str, str], ...]
+    withdrawn: tuple[tuple[str, str, str], ...]
     dropped: tuple[str, ...] = ()
 
 
 def parse_carry_reply(text: str) -> CarryReply:
     """The carry-forward reply: one JSON object `{"findings",
     "withdrawn"}` -- `withdrawn` optional -- bare or as the last fenced
-    object, with each entry validated exactly as the re-assessment
-    reply's are (`revises` with its `reason` on a finding; `id` with its
-    `reason` on a withdrawal). There is no lens or body acknowledgement:
-    the assessor is the controller's own, not a lens."""
+    object, with each finding entry validated exactly as the
+    re-assessment reply's are (`revises` with its `reason`). A withdrawn
+    entry is `{"id", "reason", "evidence"}`: the resolution's stated
+    reason and the quoted line or lines of the prior finding's code that
+    the delta removed -- a withdrawal without either is refused, because
+    the reason and the evidence are what a reader and the controller's
+    own check rely on. There is no lens or body acknowledgement: the
+    assessor is the controller's own, not a lens."""
     stripped = text.strip()
     try:
         data = json.loads(stripped)
     except json.JSONDecodeError:
-        data = _last_fenced_object(stripped)
-        if data is _NO_OBJECT:
+        data = last_fenced_object(stripped)
+        if data is NO_OBJECT:
             raise ContractError("the reply is not one JSON object") from None
     if not isinstance(data, dict) or not {"findings", "withdrawn"} >= set(data):
         raise ContractError(
@@ -304,14 +423,47 @@ def parse_carry_reply(text: str) -> CarryReply:
     dropped: list[str] = []
     for index, raw in enumerate(findings, 1):
         try:
-            parsed.append(_reassess_finding(index, raw))
-        except _UnknownSeverity as exc:
-            dropped.append(_dropped(exc, raw))
+            parsed.append(reassess_finding(index, raw))
+        except UnknownSeverity as exc:
+            dropped.append(dropped_note(exc, raw))
     return CarryReply(
         tuple(parsed),
-        tuple(_withdrawn_entry(i, raw) for i, raw in enumerate(withdrawn, 1)),
+        tuple(_resolution_entry(i, raw) for i, raw in enumerate(withdrawn, 1)),
         tuple(dropped),
     )
+
+
+def _resolution_entry(index: int, raw: Any) -> tuple[str, str, str]:
+    if not isinstance(raw, dict) or set(raw) != {"id", "reason", "evidence"}:
+        raise ContractError(
+            f"withdrawn entry {index}: must be an object with exactly the "
+            "keys id, reason and evidence"
+        )
+    prior, reason, evidence = raw["id"], raw["reason"], raw["evidence"]
+    if (
+        not isinstance(prior, str)
+        or not isinstance(reason, str)
+        or not isinstance(evidence, str)
+    ):
+        raise ContractError(
+            f"withdrawn entry {index}: id, reason and evidence must be strings"
+        )
+    if not prior.strip() or not reason.strip() or not evidence.strip():
+        raise ContractError(
+            f"withdrawn entry {index}: a resolution carries the reason the "
+            "new commits fixed the finding and the quoted code they removed"
+        )
+    if len(prior) > PRIOR_LABEL_CHARS:
+        raise ContractError(
+            f"withdrawn entry {index}: id is over {PRIOR_LABEL_CHARS} characters"
+        )
+    for value in (reason, evidence):
+        if len(value) > MAX_TEXT_CHARS:
+            raise ContractError(
+                f"withdrawn entry {index}: a resolution's reason and evidence "
+                f"are each over {MAX_TEXT_CHARS} characters"
+            )
+    return prior, reason, evidence
 
 
 def judged_carry(
@@ -320,47 +472,29 @@ def judged_carry(
     sources: SourceText,
     head_tree: bytes,
     tolerance: int,
-) -> tuple[
-    tuple[CheckedFinding, ...],
-    tuple[tuple[str, str], ...],
-    tuple[tuple[int, str, str], ...],
-]:
-    """The reply quote-checked and its labels resolved, through the
-    re-assessment judge itself (the reply shape is the same minus the
-    lens acknowledgement), so the two paths' quote checks cannot drift
-    apart. The prior findings all take part: each was a verified finding
-    of the review it came from, and the labels the reply names resolve
-    against all of them."""
+) -> tuple[tuple[CheckedFinding, ...], tuple[tuple[int, str, str], ...]]:
+    """The reply's findings quote-checked and its resolution labels
+    resolved, through the re-assessment judge itself (the finding shape
+    is the same minus the lens acknowledgement), so the two paths' quote
+    checks cannot drift apart. The prior findings all take part: each was
+    a verified finding of the review it came from, and the labels the
+    reply names resolve against all of them. A resolution's evidence is
+    not the judge's to check: it is checked against the delta's removed
+    lines, which the judge never sees."""
     checked_prior = [
         CheckedFinding(finding, QuoteSource.HEAD) for _id, finding in prior
     ]
-    shim = ReassessReply("", "0" * 64, reply.findings, reply.withdrawn, reply.dropped)
+    shim = ReassessReply(
+        "",
+        "0" * 64,
+        reply.findings,
+        tuple(
+            (identifier, reason) for identifier, reason, _evidence in reply.withdrawn
+        ),
+        reply.dropped,
+    )
     judged = judge_reply(shim, checked_prior, sources, head_tree, tolerance)
-    return judged.checked, judged.withdrawn, judged.revises
-
-
-def delta_review_diff(
-    github: GitHubReader, event: PrEvent, pr_diff: str
-) -> tuple[str, str]:
-    """The diff a delta review runs on, and the controller note when it
-    could not be the delta's.
-
-    The delta's diff is the pull request's diff at the new head,
-    restricted to the paths the range `delta_from..head` touched
-    (`delta_paths`). When the range itself cannot be fetched -- the delta
-    base force-pushed away, a transport failure -- the review runs on the
-    full pull request diff rather than skipping the push, and the note
-    records the fallback; the carry-forward still applies, because the
-    earlier review's findings do not depend on the range being
-    readable."""
-    try:
-        return scope_text(pr_diff, delta_paths(github, event, pr_diff)), ""
-    except BoundaryError as exc:
-        return pr_diff, (
-            "the delta range could not be fetched "
-            f"({type(exc).__name__}); the review ran on the full pull "
-            "request diff"
-        )
+    return judged.checked, judged.revises
 
 
 # ---------------------------------------------------------- composition
@@ -377,8 +511,8 @@ class CarryResult:
     resolution was refused -- and travels back into the round record, so
     the next review re-offers it. `resolved` pairs each accepted
     resolution with its stated reason; the finding leaves the chain
-    there, by a stated reason the post shows. `notes` is controller
-    text for the draft."""
+    there, on evidence the new commits removed its cited code. `notes`
+    is controller text for the draft."""
 
     carried: tuple[tuple[str, CheckedFinding], ...]
     unanchored: tuple[tuple[str, Finding], ...]
@@ -390,15 +524,31 @@ def apply_carry(
     prior: Sequence[tuple[str, Finding]],
     checked: Sequence[CheckedFinding],
     revises: Sequence[tuple[int, str, str]],
-    withdrawn: Sequence[tuple[str, str]],
-    delta_paths: frozenset[str],
+    withdrawn: Sequence[tuple[str, str, str]],
+    resolution_paths: frozenset[str],
+    removed_lines: Mapping[str, frozenset[str]],
+    gate_reason: str = "",
 ) -> CarryResult:
     """The reply's judgment composed over the prior findings.
 
     `checked` is the reply's quote-checked findings in reply order,
     `revises` their `(index, label, reason)` references, `withdrawn` the
-    resolution proposals. Every prior finding ends in exactly one of the
-    three buckets; nothing is dropped."""
+    resolution proposals as `(label, reason, evidence)`. Every prior
+    finding ends in exactly one of the three buckets; nothing is dropped.
+
+    A resolution is accepted only on all three of: the model's proposal
+    with its stated reason; the prior finding's file being one the
+    established delta touched (`resolution_paths` -- empty whenever the
+    delta could not be established, which refuses every resolution); and
+    real evidence that the new commits removed the cited code -- every
+    non-blank line of the proposal's `evidence` quoting a line among the
+    delta diff's removed lines for that file. Without any one of the
+    three the finding stays carried, and the refusal is named.
+
+    An entry with no `revises` key is not a re-statement and is not a
+    prior disposition; it is dropped from the buckets and named in the
+    notes, because new findings on the delta are the lenses' work."""
+
     restated: dict[str, CheckedFinding] = {}
     for index, label, _reason in revises:
         if 1 <= index <= len(checked) and checked[index - 1].verified:
@@ -407,25 +557,64 @@ def apply_carry(
     unanchored: list[tuple[str, Finding]] = []
     resolved: list[tuple[str, str, Finding]] = []
     notes: list[str] = []
-    withdrawn_labels = {label for label, _reason in withdrawn}
+    added = len(checked) - len(revises)
+    if added > 0:
+        notes.append(
+            f"the carry-forward reply added {added} finding(s) with no "
+            "revises label; they are not carried -- new findings on the "
+            "delta are the lenses' work"
+        )
+    withdrawn_labels = {label for label, _reason, _evidence in withdrawn}
     for identifier, finding in prior:
         if identifier in restated:
             carried.append((identifier, restated[identifier]))
             continue
         if identifier in withdrawn_labels:
-            reason = next(reason for label, reason in withdrawn if label == identifier)
+            proposal = next(
+                (label, reason, evidence)
+                for label, reason, evidence in withdrawn
+                if label == identifier
+            )
+            _label, reason, evidence = proposal
             path = _cited_path(finding.location)
-            if path is not None and path in delta_paths:
+            quoted = _quoted_removed(evidence, path, removed_lines)
+            if path is not None and path in resolution_paths and quoted:
                 resolved.append((identifier, reason, finding))
                 continue
             unanchored.append((identifier, finding))
-            notes.append(
-                f"{identifier}: a resolution was proposed, but the delta did "
-                "not touch the file it cites, so it stands"
-            )
+            if path is None or path not in resolution_paths:
+                why = gate_reason or "the delta did not touch the file it cites"
+                notes.append(
+                    f"{identifier}: a resolution was proposed, but {why}, so it stands"
+                )
+            else:
+                notes.append(
+                    f"{identifier}: a resolution was proposed, but its quoted "
+                    "code is not among the lines the delta removed, so it "
+                    "stands"
+                )
             continue
         unanchored.append((identifier, finding))
+    for label, _reason, _evidence in withdrawn:
+        if label not in {identifier for identifier, _finding in prior}:
+            notes.append(f"{label}: the resolution named no prior finding")
     return CarryResult(tuple(carried), tuple(unanchored), tuple(resolved), tuple(notes))
+
+
+def _quoted_removed(
+    evidence: str,
+    path: str | None,
+    removed_lines: Mapping[str, frozenset[str]],
+) -> bool:
+    """Whether every non-blank line of a resolution's quoted evidence is a
+    line the delta removed from the finding's file. Whitespace is
+    ignored on both sides: the model quotes the code, the diff holds it
+    with its indentation."""
+    if path is None or not evidence.strip():
+        return False
+    removed = removed_lines.get(path, frozenset())
+    quoted = [line.strip() for line in evidence.splitlines() if line.strip()]
+    return bool(quoted) and all(line in removed for line in quoted)
 
 
 def _cited_path(location: Location) -> str | None:

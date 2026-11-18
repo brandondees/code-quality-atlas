@@ -401,14 +401,24 @@ def test_the_carryforward_section_loads_and_validates_its_entries(tmp_path):
                         "reason": "the code is unchanged",
                     }
                 ],
-                "withdrawn": [{"id": "P2", "reason": "the delta replaced it"}],
+                "withdrawn": [
+                    {
+                        "id": "P2",
+                        "reason": "the delta replaced it",
+                        "evidence": "old_call(x)",
+                    }
+                ],
             },
         },
     )
     (finding,) = loaded.carryforward.findings
     assert finding["revises"] == "P1"
     (withdrawn,) = loaded.carryforward.withdrawn
-    assert withdrawn == {"id": "P2", "reason": "the delta replaced it"}
+    assert withdrawn == {
+        "id": "P2",
+        "reason": "the delta replaced it",
+        "evidence": "old_call(x)",
+    }
 
 
 @pytest.mark.parametrize(
@@ -416,10 +426,17 @@ def test_the_carryforward_section_loads_and_validates_its_entries(tmp_path):
     [
         {"findings": [{"location": "calc.py:4"}]},
         {"withdrawn": [{"id": "P1"}]},
+        {"withdrawn": [{"id": "P1", "reason": "r"}]},
         {"extra": []},
         {"findings": "not a list"},
     ],
-    ids=["bad-finding", "no-reason", "unknown-key", "findings-not-a-list"],
+    ids=[
+        "bad-finding",
+        "no-reason",
+        "no-evidence",
+        "unknown-key",
+        "findings-not-a-list",
+    ],
 )
 def test_a_malformed_carryforward_entry_is_refused_at_load(tmp_path, raw):
     with pytest.raises(LensScriptError):
@@ -439,14 +456,22 @@ def test_the_carryforward_turn_is_answered_from_the_scenario(tmp_path):
             "findings": {LENS: []},
             "unread": [],
             "carryforward": {
-                "withdrawn": [{"id": "P1", "reason": "the delta replaced it"}]
+                "withdrawn": [
+                    {
+                        "id": "P1",
+                        "reason": "the delta replaced it",
+                        "evidence": "old_code()",
+                    }
+                ]
             },
         },
     )
     model = LensScriptModel(loaded)
     reply = model.turn(TurnRequest("no body markers here", (_carry_message(),), ()))
     payload = json.loads(reply.text)
-    assert payload["withdrawn"] == [{"id": "P1", "reason": "the delta replaced it"}]
+    assert payload["withdrawn"] == [
+        {"id": "P1", "reason": "the delta replaced it", "evidence": "old_code()"}
+    ]
     assert payload["findings"] == []
     walk = model.turn(request_with(base_message()))
     assert isinstance(walk, ToolCalls)

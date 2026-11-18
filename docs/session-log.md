@@ -3369,7 +3369,6 @@ on the PR head: `pytest tests/` 880 passed / 14 skipped, coverage
 96.06%; ruff check/format, mypy (85 files), `tooling.cli drift` clean.
 Offline only.
 
-
 ## 2026-11-18 (same day) — #702 part 2: the delta review and its carry-forward (D79 update, PR 2 of the stack)
 
 The follow-up a kept head materializes as (PR 1's `take_pending`) is now
@@ -3413,6 +3412,44 @@ carried line, and the no-prior gap named). Verification, all on the PR
 head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
 94%); `pytest atlas_reviewer/tests` 3,332 passed, 95.78%; ruff
 check/format, mypy (86 files), `tooling.cli drift` clean. Offline only.
+
+## 2026-11-18 (same day) — #748 round 1: the carry-forward's gate fails closed, resolutions need evidence, nothing leaves the chain
+
+The protocol review's five Majors, fixed on the delta branch (the
+correction appended to D79 carries the full list and its tests):
+the resolution gate no longer fails open where the delta is not the
+delta — `DeltaScope.resolution_paths` is empty on an unfetchable range,
+a diverged compare (rebase or force-push), and a malformed or
+cap-cut `files` list, refusing every resolution and naming the reason;
+a resolution now requires evidence the new commits removed the cited
+code (every quoted line among the delta diff's removed lines for that
+file), not the model's say-so; an unparsed prior line travels as the
+record's raw text verbatim — shown and re-recorded — instead of
+vanishing behind a note that claimed it carried, and the location in a
+record's finding line is now quoted, so a path with a space parses
+whole instead of silently corrupting (the legacy unquoted form still
+parses when its token is unambiguously a line range, and an ambiguous
+one is refused rather than guessed); a carried prior that fails to
+re-anchor still counts for the verdict, so a standing prior Blocker can
+never become an approval — including when the carry call fails whole;
+and a record whose finding lines did not fit the 8 KB cap is named as
+the omission it is instead of reading as "no findings recorded". The
+Minors: the unreadable-log naming, the double-counted raw lines (one
+walk now), the compare-cap and malformed-`files` shapes, the
+carried-vs-carried dedupe across two records at one head (the
+paraphrase case stated as the exact-match limitation it is), the
+instructions no longer inviting findings the composition drops (a
+non-`revises` entry is dropped and named), the D79 test list and the
+"5 delta flows" count corrected (13 in `test_coordinator.py` now), the
+no-delta-sections test parsing a real full-review draft, and the shared
+parsers promoted to public names so `delta.py` stops reaching into
+underscore internals. The Nits: the docstring churn reverted, the dead
+helper removed and the shadowed parameter renamed, the carry call's
+model now wrapped by the lens trace (it was the one review-stage call
+with no span), and the status line carrying `carried_unverified` beside
+`carried` and `resolved`. One test flake observed once
+(`test_instrumented.py::test_every_read_returns_what_the_inner_reader_returned`,
+a tarball read) and not on retry or in the full re-run; left alone.
 ## 2026-11-18 (same day) — #747 round 1: finishing is the default, the race installs, the gap is recorded
 
 The protocol review's three Majors, fixed on the bottom layer (the

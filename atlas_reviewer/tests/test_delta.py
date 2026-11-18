@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: MIT
 """The delta review's pieces (#702): the prior findings parsed back from
 the round record, the reply's contract, the carry-forward's composition,
-and the delta scope. Each behavior is a test that fails when reverted;
-the mutant each kills is named. The quote check itself is the
-re-assessment judge's (shared, not re-pinned here); what is pinned here
-is what the delta review does around it."""
+the delta scope and its resolution gate, and the evidence a resolution
+must carry. Each behavior is a test that fails when reverted; the mutant
+each kills is named. The quote check itself is the re-assessment judge's
+(shared, not re-pinned here); what is pinned here is what the delta
+review does around it."""
 
 import json
 
@@ -15,8 +16,7 @@ from atlas_reviewer.delta import (
     apply_carry,
     carry_system,
     carry_turn,
-    delta_paths,
-    delta_review_diff,
+    delta_scope,
     parse_carry_reply,
     parse_prior_line,
 )
@@ -33,6 +33,7 @@ from atlas_reviewer.lens_contract import (
 )
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
+from atlas_reviewer.quotes import QuoteSource
 
 OLD = "a" * 40
 NEW = "b" * 40
@@ -40,6 +41,28 @@ EVENT = PrEvent("example-org/example-app", 42, NEW, delta_from=OLD)
 
 # A nonce fence's marker pair, as `fence` renders it.
 NONCE = "f00dfeed"
+
+
+def _finding(text: str, path: str = "calc.py", start: int = 2) -> Finding:
+    return Finding(
+        LineRange(path, start, start),
+        Severity.MAJOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        text,
+        "",
+    )
+
+
+def _prior(identifier: str, text: str, path: str = "calc.py") -> tuple[str, Finding]:
+    return identifier, _finding(text, path)
+
+
+def _checked(finding: Finding, verified: bool = True) -> CheckedFinding:
+    if verified:
+        return CheckedFinding(finding, QuoteSource.HEAD)
+    return CheckedFinding(finding, problem="the quote does not verify")
 
 
 def _line(identifier: str, severity: str, location: str, text: str) -> str:
@@ -54,7 +77,7 @@ def test_a_record_finding_line_parses_back():
         _line(
             "L1-F1",
             "major",
-            "calc.py:2",
+            '"calc.py:2"',
             "rounds each item before summing, so totals drift",
         )
     )
@@ -70,7 +93,7 @@ def test_a_record_finding_line_parses_back():
 
 def test_a_carried_label_parses_back_too():
     found = parse_prior_line(
-        _line("P3", "blocker", "src/auth.py:10-12", "token compared unsafely")
+        _line("P3", "blocker", '"src/auth.py:10-12"', "token compared unsafely")
     )
     assert found is not None
     identifier, finding = found
@@ -79,17 +102,44 @@ def test_a_carried_label_parses_back_too():
     assert finding.location == LineRange("src/auth.py", 10, 12)
 
 
-def test_a_whole_file_location_parses_as_whole_file():
-    found = parse_prior_line(_line("P2", "nit", "README.md", "the example is stale"))
+def test_a_quoted_whole_file_location_parses_as_whole_file():
+    found = parse_prior_line(_line("P2", "nit", '"README.md"', "the example is stale"))
     assert found is not None
     assert found[1].location == WholeFile("README.md")
 
 
+def test_the_unquoted_legacy_form_still_parses_a_line_range():
+    """Records written before the location quote keep parsing: a
+    space-free line-range token is unambiguous."""
+    found = parse_prior_line(_line("L1-F1", "major", "calc.py:2", "rounds early"))
+    assert found is not None
+    assert found[1].location == LineRange("calc.py", 2, 2)
+
+
+def test_an_ambiguous_unquoted_location_is_refused_not_mis_parsed():
+    """A legacy line whose third token could be either a whole-file path
+    or the first word of a location that contains a space is refused:
+    the caller names it and carries it as raw text. Mutant: the refusal
+    dropped into a whole-file guess, which would corrupt the finding
+    silently (round-1 M3)."""
+    assert (
+        parse_prior_line(_line("L1-F1", "major", "my", "file.py:12 is wrong")) is None
+    )
+    assert parse_prior_line(_line("L1-F1", "major", "'weird", "location text")) is None
+
+
+def test_a_quoted_location_with_a_space_parses_whole():
+    found = parse_prior_line(
+        _line("P1", "minor", '"my file.py:12-14"', "the span drifts")
+    )
+    assert found is not None
+    assert found[1].location == LineRange("my file.py", 12, 14)
+
+
 def test_a_line_that_is_not_a_record_finding_parses_to_none():
     # Not four space-separated parts, an unknown severity, and an id
-    # outside the two shapes. The location token is always one token by
-    # the record's own format, so any token parses as a whole-file path;
-    # the id and the severity are the closed sets the parse enforces.
+    # outside the two shapes. The id and the severity are the closed
+    # sets the parse enforces.
     assert parse_prior_line("L1-F1 major") is None
     assert parse_prior_line("L1-F1 urgent calc.py:2 text") is None
     assert parse_prior_line("nope major calc.py:2 text") is None
@@ -100,7 +150,7 @@ def test_a_carried_finding_is_reconstructed_defect_introduced():
     reconstructs it so it still counts for the verdict (the conservative
     direction), with no fix or evidence text, because the record stores
     neither."""
-    found = parse_prior_line(_line("P1", "major", "calc.py:2", "rounds early"))
+    found = parse_prior_line(_line("P1", "major", '"calc.py:2"', "rounds early"))
     assert found is not None
     finding = found[1]
     assert finding.sets_verdict is True
@@ -111,8 +161,25 @@ def test_a_carried_finding_is_reconstructed_defect_introduced():
 # -------------------------------------------------------- the reply
 
 
+def _restated(**overrides: str) -> dict[str, str]:
+    base = {
+        "location": "calc.py:2",
+        "evidence": "return sum(round(x, 2) for x in xs)",
+        "severity": "major",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "still rounds early",
+        "fix": "round once",
+        "revises": "P1",
+        "reason": "the delta did not touch the rounding",
+    }
+    return {**base, **overrides}
+
+
 def _carry(
-    findings: list[dict[str, str]], withdrawn: list[dict[str, str]] | None = None
+    findings: list[dict[str, str]],
+    withdrawn: list[dict[str, str]] | None = None,
 ) -> str:
     payload: dict[str, object] = {"findings": findings}
     if withdrawn is not None:
@@ -120,64 +187,49 @@ def _carry(
     return json.dumps(payload)
 
 
-def test_the_carry_reply_parses_findings_and_withdrawals():
+def _resolution(identifier: str, reason: str, evidence: str) -> dict[str, str]:
+    """The reply's withdrawn entry as JSON holds it (for the parse tests);
+    the composition tests pass the parsed `(id, reason, evidence)`
+    tuples directly."""
+    return {"id": identifier, "reason": reason, "evidence": evidence}
+
+
+def test_the_carry_reply_parses_findings_and_resolutions():
     reply = parse_carry_reply(
         _carry(
-            [
-                {
-                    "location": "calc.py:2",
-                    "evidence": "return sum(round(x, 2) for x in xs)",
-                    "severity": "major",
-                    "valence": "defect",
-                    "route": "eng",
-                    "attribution": "introduced",
-                    "finding": "still rounds early",
-                    "fix": "round once",
-                    "revises": "P1",
-                    "reason": "the delta did not touch the rounding",
-                }
-            ],
-            [{"id": "P2", "reason": "the delta replaced the unsafe call"}],
+            [_restated()],
+            [_resolution("P2", "the delta replaced the unsafe call", "old_call(x)")],
         )
     )
     assert len(reply.findings) == 1
     assert reply.findings[0].revises == "P1"
     assert reply.findings[0].reason
-    assert reply.withdrawn == (("P2", "the delta replaced the unsafe call"),)
+    assert reply.withdrawn == (
+        ("P2", "the delta replaced the unsafe call", "old_call(x)"),
+    )
 
 
-def test_a_withdrawal_without_a_reason_is_refused():
-    with pytest.raises(ContractError):
-        parse_carry_reply(_carry([], [{"id": "P1", "reason": ""}]))
+def test_a_resolution_without_evidence_is_refused():
+    # Mutant: the evidence requirement dropped -- a resolution would then
+    # stand on the model's say-so alone (round-1 M2).
+    for broken in (
+        {"id": "P1", "reason": "fixed"},
+        {"id": "P1", "reason": "fixed", "evidence": ""},
+        {"id": "P1", "reason": "", "evidence": "code()"},
+        {"id": "P1", "reason": "fixed", "evidence": "code()", "extra": "x"},
+    ):
+        with pytest.raises(ContractError):
+            parse_carry_reply(_carry([], [broken]))
 
 
 def test_a_revision_without_a_reason_is_refused():
-    raw = {
-        "location": "calc.py:2",
-        "evidence": "the line",
-        "severity": "major",
-        "valence": "defect",
-        "route": "eng",
-        "attribution": "introduced",
-        "finding": "x",
-        "fix": "y",
-        "revises": "P1",
-    }
+    raw = _restated(reason="")
     with pytest.raises(ContractError):
         parse_carry_reply(_carry([raw]))
 
 
 def test_an_unknown_severity_is_dropped_not_fatal():
-    raw = {
-        "location": "calc.py:2",
-        "evidence": "the line",
-        "severity": "urgent",
-        "valence": "defect",
-        "route": "eng",
-        "attribution": "introduced",
-        "finding": "x",
-        "fix": "y",
-    }
+    raw = _restated(severity="urgent")
     reply = parse_carry_reply(_carry([raw]))
     assert reply.findings == ()
     assert len(reply.dropped) == 1
@@ -193,69 +245,32 @@ def test_the_reply_must_name_its_keys():
 # ------------------------------------------------------- the composition
 
 
-def _checked(finding: Finding, verified: bool = True) -> CheckedFinding:
-    from atlas_reviewer.quotes import QuoteSource
-
-    if verified:
-        return CheckedFinding(finding, QuoteSource.HEAD)
-    return CheckedFinding(finding, problem="the quote does not verify")
-
-
-def _prior(identifier: str, text: str, path: str = "calc.py") -> tuple[str, Finding]:
-    finding = Finding(
-        LineRange(path, 2, 2),
-        Severity.MAJOR,
-        Valence.DEFECT,
-        Route.ENG,
-        Attribution.INTRODUCED,
-        text,
-        "",
-    )
-    return identifier, finding
-
-
 def test_a_restated_prior_that_verifies_is_carried():
     prior = [_prior("P1", "rounds early")]
-    reply_finding = Finding(
-        LineRange("calc.py", 2, 2),
-        Severity.MAJOR,
-        Valence.DEFECT,
-        Route.ENG,
-        Attribution.INTRODUCED,
-        "rounds early, restated",
-        "round once",
-    )
     result = apply_carry(
         prior,
-        [_checked(reply_finding)],
+        [_checked(_finding("rounds early, restated"))],
         [(1, "P1", "unchanged code")],
         (),
         frozenset({"calc.py"}),
+        {},
     )
     # Mutant: the composition dropped the re-anchored restatement, which
     # would carry the stale original wording instead.
-    assert result.carried == (("P1", _checked(reply_finding)),)
+    assert result.carried == (("P1", _checked(_finding("rounds early, restated"))),)
     assert result.unanchored == ()
     assert result.resolved == ()
 
 
 def test_a_restated_prior_that_does_not_verify_is_carried_as_recorded():
     prior = [_prior("P1", "rounds early")]
-    unverified = Finding(
-        LineRange("calc.py", 2, 2),
-        Severity.MAJOR,
-        Valence.DEFECT,
-        Route.ENG,
-        Attribution.INTRODUCED,
-        "not the code",
-        "",
-    )
     result = apply_carry(
         prior,
-        [_checked(unverified, verified=False)],
+        [_checked(_finding("not the code"), verified=False)],
         [(1, "P1", "moved")],
         (),
         frozenset(),
+        {},
     )
     # Mutant: an unverified restatement carried as verified, which would
     # post a finding whose quote does not verify at this head.
@@ -265,38 +280,105 @@ def test_a_restated_prior_that_does_not_verify_is_carried_as_recorded():
 
 def test_a_silent_prior_is_carried_as_recorded():
     prior = [_prior("P1", "rounds early")]
-    result = apply_carry(prior, [], [], (), frozenset({"calc.py"}))
+    result = apply_carry(prior, [], [], (), frozenset({"calc.py"}), {})
     # Mutant: silence read as resolution, which would let PR content
     # suppress a finding by saying nothing about it.
     assert result.unanchored == (("P1", prior[0][1]),)
     assert result.resolved == ()
 
 
-def test_a_resolution_on_a_path_the_delta_touched_is_accepted():
+def _removed(*lines: str) -> dict[str, frozenset[str]]:
+    return {"calc.py": frozenset(line.strip() for line in lines)}
+
+
+def test_a_resolution_with_evidence_on_a_delta_path_is_accepted():
     prior = [_prior("P1", "rounds early")]
     result = apply_carry(
         prior,
         [],
         [],
-        [("P1", "the delta replaced the rounding with integer math")],
+        [("P1", "the delta replaced the rounding", "return sum(xs)")],
         frozenset({"calc.py"}),
+        _removed("    return sum(xs)", "    other = 1"),
     )
-    assert result.resolved == (
-        ("P1", "the delta replaced the rounding with integer math", prior[0][1]),
-    )
+    # The quoted code is among the lines the delta removed: real evidence
+    # the new commits took the cited code out (round-1 M2).
+    assert result.resolved == (("P1", "the delta replaced the rounding", prior[0][1]),)
     assert result.unanchored == ()
+
+
+def test_a_resolution_whose_evidence_still_stands_is_refused():
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "claims the fix", "unrelated_line()")],
+        frozenset({"calc.py"}),
+        _removed("    return sum(xs)"),
+    )
+    # Mutant: the evidence check dropped -- a resolution would be
+    # accepted for code the delta never removed (round-1 M2).
+    assert result.resolved == ()
+    assert result.unanchored == (("P1", prior[0][1]),)
+    assert any("not among the lines" in note for note in result.notes)
+
+
+def test_a_resolution_whose_evidence_partially_matches_is_refused():
+    """Every quoted line must be among the removed lines: a resolution
+    quoting one removed and one still-standing line is ambiguous, and
+    ambiguity keeps the finding."""
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "partial rewrite", "return sum(xs)\n    kept = 2")],
+        frozenset({"calc.py"}),
+        _removed("    return sum(xs)"),
+    )
+    assert result.resolved == ()
+    assert result.unanchored == (("P1", prior[0][1]),)
 
 
 def test_a_resolution_off_the_delta_is_recorded_as_a_proposal():
     prior = [_prior("P1", "rounds early", path="docs/notes.md")]
     result = apply_carry(
-        prior, [], [], [("P1", "claims the delta fixed it")], frozenset({"calc.py"})
+        prior,
+        [],
+        [],
+        [("P1", "claims the delta fixed it", "gone()")],
+        frozenset({"calc.py"}),
+        {},
     )
     # Mutant: the delta-touched gate dropped, which would let PR content
     # resolve a finding on a file the new commits never changed.
     assert result.resolved == ()
     assert result.unanchored == (("P1", prior[0][1]),)
     assert any("did not touch" in note for note in result.notes)
+
+
+def test_an_unestablished_delta_refuses_every_resolution():
+    """The gate fails closed (#702 round-1 M1): when the delta could not
+    be established -- an unfetchable range, a diverged history, a cut
+    comparison -- `resolution_paths` is empty, and no resolution is
+    accepted however well-evidenced its quote looks, because the
+    evidence's meaning depends on the delta being the delta."""
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [],
+        [],
+        [("P1", "claims the fix", "return sum(xs)")],
+        frozenset(),
+        _removed("    return sum(xs)"),
+        gate_reason="the delta range could not be established",
+    )
+    # Mutant: the empty gate treated as "everything is touchable", which
+    # would accept resolutions on the fallback path (round-1 M1).
+    assert result.resolved == ()
+    assert result.unanchored == (("P1", prior[0][1]),)
+    assert any("could not be established" in note for note in result.notes)
 
 
 def test_no_prior_finding_is_dropped_by_the_composition():
@@ -306,10 +388,11 @@ def test_no_prior_finding_is_dropped_by_the_composition():
     ]
     result = apply_carry(
         prior,
-        [_checked(_prior("P1", "restated")[1])],
+        [_checked(_finding("restated"))],
         [(1, "P1", "same")],
-        [("P2", "unfounded")],
+        [("P2", "unfounded", "gone()")],
         frozenset(),
+        {},
     )
     seen = (
         {identifier for identifier, _ in result.carried}
@@ -317,6 +400,24 @@ def test_no_prior_finding_is_dropped_by_the_composition():
         | {identifier for identifier, _reason, _finding in result.resolved}
     )
     assert seen == {"P1", "P2"}
+
+
+def test_a_reply_addition_is_dropped_and_named():
+    """The assessor's job is dispositions, not new findings: an entry
+    with no `revises` key is dropped from the buckets and named, because
+    the lenses report the delta's findings (round-1 m5)."""
+    prior = [_prior("P1", "rounds early")]
+    result = apply_carry(
+        prior,
+        [_checked(_finding("a new finding the assessor added"))],
+        [],
+        [],
+        frozenset({"calc.py"}),
+        {},
+    )
+    assert result.carried == ()
+    assert result.unanchored == (("P1", prior[0][1]),)
+    assert any("added" in note for note in result.notes)
 
 
 # ---------------------------------------------------------- the scope
@@ -336,47 +437,54 @@ class _FakeGitHub:
         return self._compare
 
 
+PR_DIFF = (
+    "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+    "@@ -1,1 +1,1 @@\n-old\n+new\n"
+    "diff --git a/settings.ini b/settings.ini\n--- a/settings.ini\n+++ b/settings.ini\n"
+    "@@ -1,1 +1,1 @@\n-a\n+b\n"
+)
+
+
 def test_the_delta_scope_is_the_range_paths_the_pr_diff_shows():
     github = _FakeGitHub(
-        {"files": [{"filename": "calc.py"}, {"filename": "docs/from-main.md"}]}
+        {
+            "merge_base_commit": {"sha": OLD},
+            "files": [{"filename": "calc.py"}, {"filename": "docs/from-main.md"}],
+        }
     )
-    pr_diff = (
-        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
-        "@@ -1,1 +1,1 @@\n-old\n+new\n"
-        "diff --git a/settings.ini b/settings.ini\n--- a/settings.ini\n+++ b/settings.ini\n"
-        "@@ -1,1 +1,1 @@\n-a\n+b\n"
-    )
-    paths = delta_paths(github, EVENT, pr_diff)
+    scope = delta_scope(github, EVENT, PR_DIFF)
     # Mutant: the restriction dropped, which would hand the delta review
     # the whole pull request diff -- re-reviewing what the earlier
     # review already covered.
-    assert paths == ("calc.py",)
+    assert scope.diff == PR_DIFF.split("diff --git a/settings.ini")[0]
+    assert scope.resolution_paths == frozenset({"calc.py"})
+    assert scope.note == ""
     assert github.calls == [
-        ("get_compare", "example-org/example-app", f"{OLD}...{NEW}")
+        ("get_compare", "example-org/example-app", f"{OLD}...{NEW}"),
     ]
 
 
-def test_a_merge_only_push_yields_an_empty_scope():
-    github = _FakeGitHub({"files": [{"filename": "docs/from-main.md"}]})
-    pr_diff = (
-        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
-        "@@ -1,1 +1,1 @@\n-old\n+new\n"
+def test_a_merge_only_push_yields_an_empty_trusted_scope():
+    github = _FakeGitHub(
+        {
+            "merge_base_commit": {"sha": OLD},
+            "files": [{"filename": "docs/from-main.md"}],
+        }
     )
-    assert delta_paths(github, EVENT, pr_diff) == ()
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    assert scope.diff == ""
+    assert scope.resolution_paths == frozenset()
+    assert scope.note == ""
 
 
-def test_a_comparison_without_files_is_an_empty_scope():
-    github = _FakeGitHub({})
-    assert delta_paths(github, EVENT, "diff --git a/x b/x\n") == ()
+def test_an_unfetchable_range_falls_back_to_the_full_diff_and_refuses_resolutions():
+    """The gate fails closed on the fallback (round-1 M1): the review
+    still runs, on the full diff, but the scope's resolution paths are
+    empty and the gap is named, because a full diff is not evidence of
+    what the delta's commits touched. Mutant: the fallback's gate kept
+    the full diff's paths, which would accept resolutions for files the
+    new commits never changed."""
 
-
-def test_a_malformed_files_array_is_a_boundary_error():
-    github = _FakeGitHub({"files": "nope"})
-    with pytest.raises(BoundaryError):
-        delta_paths(github, EVENT, "")
-
-
-def test_an_unfetchable_range_falls_back_to_the_full_diff_with_a_note():
     class Failing:
         def get_pull(self, repo: str, number: int) -> dict[str, object]:
             return {}
@@ -384,19 +492,58 @@ def test_an_unfetchable_range_falls_back_to_the_full_diff_with_a_note():
         def get_compare(self, repo: str, base: str, head: str) -> dict[str, object]:
             raise BoundaryError("GitHub HTTP 404")
 
-    diff = "diff --git a/calc.py b/calc.py\n"
-    review_diff, note = delta_review_diff(Failing(), EVENT, diff)
+    scope = delta_scope(Failing(), EVENT, PR_DIFF)
     # Mutant: the fallback dropped, which would fail a whole review over
     # an unreadable range instead of reviewing the push in full.
-    assert review_diff == diff
-    assert "could not be fetched" in note
+    assert scope.diff == PR_DIFF
+    assert scope.resolution_paths == frozenset()
+    assert "could not be fetched" in scope.note
+    assert scope.gate_reason
 
 
-def test_a_fetchable_range_returns_its_scope_with_no_note():
-    github = _FakeGitHub({"files": []})
-    review_diff, note = delta_review_diff(github, EVENT, "diff --git a/x b/x\n")
-    assert review_diff == ""
-    assert note == ""
+def test_a_diverged_history_refuses_resolutions_and_names_the_condition():
+    """A rebase or force-push leaves `delta_from` a non-ancestor: the
+    comparison's file list is then measured from the wrong base, so it is
+    not the range's, and the resolution gate refuses (round-1 M1)."""
+    github = _FakeGitHub(
+        {"merge_base_commit": {"sha": "e" * 40}, "files": [{"filename": "calc.py"}]}
+    )
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    assert scope.resolution_paths == frozenset()
+    assert "diverged" in scope.note
+    assert "diverged" in scope.gate_reason
+
+
+def test_a_cut_file_list_refuses_resolutions_and_names_the_cap():
+    """A comparison at GitHub's files cap may be cut: what the range
+    touched is then not fully known, so the gate refuses rather than
+    silently shrinking the delta (round-1 m3)."""
+    capped = [{"filename": f"src/f{n}.py"} for n in range(300)]
+    github = _FakeGitHub({"merge_base_commit": {"sha": OLD}, "files": capped})
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    assert scope.resolution_paths == frozenset()
+    assert "not fully known" in scope.note
+    assert scope.gate_reason
+
+
+def test_a_malformed_files_entry_makes_the_list_incomplete():
+    github = _FakeGitHub(
+        {"merge_base_commit": {"sha": OLD}, "files": [{"filename": "calc.py"}, "junk"]}
+    )
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    assert scope.resolution_paths == frozenset()
+    assert "not fully known" in scope.note
+
+
+def test_a_comparison_without_a_files_array_is_untrusted():
+    github = _FakeGitHub({"merge_base_commit": {"sha": OLD}})
+    scope = delta_scope(github, EVENT, PR_DIFF)
+    # Mutant: a missing files key read as an empty delta -- which would
+    # be indistinguishable from a merge-only push and would silently
+    # shrink the review (round-1 m3).
+    assert scope.diff == PR_DIFF
+    assert scope.resolution_paths == frozenset()
+    assert "could not be fetched" in scope.note
 
 
 # ------------------------------------------------------------- the turn
@@ -429,3 +576,14 @@ def test_the_carry_system_carries_the_contract_and_the_fence_rule():
     assert "carry-forward assessor" in system
     assert "FINDING CONTRACT TEXT" in system
     assert NONCE in system
+    # The resolution's evidence requirement is in the instructions, so
+    # the assessor knows a proposal carries the removed code's quote.
+    assert "removed" in system
+
+
+def test_the_instructions_do_not_invite_findings_the_composition_drops():
+    """The instructions ask for dispositions only: an added finding is
+    dropped and named by the composition, so the prompt must not request
+    work the composition throws away (round-1 m5)."""
+    system = carry_system("", NONCE)
+    assert "add a finding the delta reveals" not in system
