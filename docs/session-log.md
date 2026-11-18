@@ -3315,6 +3315,6 @@ superseding); M7 now fails the exact-match assert, with M4 and the bare
 literals re-verified dying.
 Verification, all on the
 PR head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
-94%); `pytest atlas_reviewer/tests` 3,230 passed, 96.40%; ruff
+94%); `pytest atlas_reviewer/tests` 3,242 passed, 96.42%; ruff
 check/format, mypy (84 files), `tooling.cli drift` clean; actionlint 1.7.12
 clean on `ci.yml`. Offline only.
