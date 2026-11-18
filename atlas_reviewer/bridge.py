@@ -122,9 +122,14 @@ class ToolLimits:
 
 @dataclass(frozen=True)
 class SessionLimits:
-    """Bounds across every call one bridge serves: calls made (rejected
-    ones too) and output bytes shown. A call is never shown more than the
-    output left; once either is spent, calls are refused without running."""
+    """Bounds on what one attempt of a lens may spend of the bridge
+    session it runs on (#693): calls made (rejected ones too) and output
+    bytes shown. A call is never shown more than the output left; once
+    either is spent, calls are refused without running. A lens's retry
+    runs on the same disposable runner session, so `begin_attempt` starts
+    these counters over per attempt -- a retry begins with the full
+    budget, and the session as a whole is bounded by the review's wall
+    clock instead."""
 
     max_calls: int = 64
     max_output_bytes: int = 1024 * 1024
@@ -535,7 +540,11 @@ def _secrets(scan: SecretScan, places: Sequence[_Where]) -> tuple[BridgeSecret, 
 class Bridge:
     """The tools over one staged runner. `changed` are the paths the PR
     changes (from its diff): a secret found in any other file, or outside
-    HEAD, is pre-existing. Every call, rejected or run, is in `calls`."""
+    HEAD, is pre-existing. Every call, rejected or run, is in `calls` --
+    the session's whole ledger, across every attempt it serves. The
+    budget `session_limits` bounds is per attempt (#693): `begin_attempt`
+    starts the attempt's counters over, so a lens's retry runs on a full
+    budget instead of one its first attempt spent."""
 
     session: Session
     staged: Staged
@@ -547,6 +556,19 @@ class Bridge:
     calls: list[CallRecord] = field(default_factory=list)
     _flagged: list[str] = field(default_factory=list, repr=False)
     _renames: Mapping[str, tuple[str, str]] | None = field(default=None, repr=False)
+    # The attempt now running, as `_spent`'s refusals name it, and the
+    # counters its budget spends. Empty/unspent until `begin_attempt`.
+    _attempt: str = field(default="", repr=False)
+    _attempt_calls: int = field(default=0, repr=False)
+    _attempt_shown: int = field(default=0, repr=False)
+
+    def begin_attempt(self, lens: str, number: int) -> None:
+        """Start one attempt's budget (#693): the call and output counters
+        the session limits spend begin again, and a refusal names the
+        attempt that spent them."""
+        self._attempt = f"{lens} attempt {number}"
+        self._attempt_calls = 0
+        self._attempt_shown = 0
 
     def flagged(self) -> tuple[str, ...]:
         """Every secret value found so far, for `Redactor.sources`."""
@@ -564,18 +586,21 @@ class Bridge:
 
     def _spent(self) -> str | None:
         limits = self.session_limits
-        if len(self.calls) >= limits.max_calls:
-            return f"session-limit: all {limits.max_calls} calls of this session made"
-        if self._output_left() <= 0:
+        scope = f" ({self._attempt})" if self._attempt else ""
+        if self._attempt_calls >= limits.max_calls:
             return (
-                f"session-limit: all {limits.max_output_bytes} output bytes of this "
-                "session shown"
+                f"session-limit: all {limits.max_calls} calls of this attempt "
+                f"made{scope}"
+            )
+        if self._attempt_shown >= limits.max_output_bytes:
+            return (
+                f"session-limit: all {limits.max_output_bytes} output bytes of "
+                f"this attempt shown{scope}"
             )
         return None
 
     def _output_left(self) -> int:
-        used = sum(c.shown_bytes for c in self.calls)
-        return self.session_limits.max_output_bytes - used
+        return self.session_limits.max_output_bytes - self._attempt_shown
 
     def _refused(self, tool: Any, status: Status, reason: str) -> BridgeResult:
         """Names a known tool, or `UNKNOWN_TOOL`; the arguments are not shown."""
@@ -699,6 +724,8 @@ class Bridge:
                 len(result.secrets),
             )
         )
+        self._attempt_calls += 1
+        self._attempt_shown += result.shown_bytes
         return result
 
 

@@ -54,7 +54,8 @@ def take_call() -> CallFacts | None:
 
 def note_nudge(label: str) -> None:
     """Name the harness-injected turn the next model call answers: one of
-    `unread-files`, `no-progress`, `duplicate-calls`, `quote-repair`."""
+    `unread-files`, `no-progress`, `duplicate-calls`, `quote-repair`,
+    `session-limit`."""
     _NUDGE.set(label)
 
 

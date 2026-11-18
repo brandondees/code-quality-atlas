@@ -207,6 +207,55 @@ def test_the_tool_request_omits_parameters_the_endpoint_does_not_list():
     assert sent_body["reasoning"]["exclude"] is True
 
 
+def test_a_finalize_turn_keeps_the_tools_alongside_the_tool_history():
+    """The repeated-refusal stop's finalize turn (issue #693) rides on a
+    conversation that already holds assistant tool calls and tool
+    results. A request carrying that history next to an empty tools
+    array is a shape the pinned routes reject -- Bedrock Converse
+    requires a toolConfig when toolUse and toolResult blocks are present
+    -- so the finalize request keeps the tool schemas, and the spent
+    bridge refuses whatever the model still calls."""
+    lens, fake = model(reply(completion("done")))
+    lens.turn(
+        request(
+            UserText("Review the change."),
+            AssistantCalls((ToolRequest("diff_stat", {}),)),
+            ToolResults(("fenced result",)),
+        )
+    )
+    body = sent(fake)
+    assert [tool["function"]["name"] for tool in body["tools"]] == [
+        "diff_stat",
+        "diff_file",
+        "list_files",
+        "read_file",
+        "grep",
+    ]
+    assert body["messages"][-1]["role"] == "tool"
+
+
+def test_a_request_with_tool_history_and_no_tools_is_refused_before_any_call():
+    """The adapter's shape invariant, pinned: tool history next to an
+    empty tools array is refused before any request, so a future
+    tool-less finalize turn cannot fail the call mid-review on the pinned
+    route. The one tool-less request that exists -- the re-assessment
+    call's single user turn -- carries no tool history and still goes
+    out."""
+    lens, fake = model(reply(completion("done")))
+    with pytest.raises(BoundaryError, match="empty tools array"):
+        _payload_of(
+            lens,
+            request(
+                UserText("Review the change."),
+                AssistantCalls((ToolRequest("diff_stat", {}),)),
+                ToolResults(("fenced result",)),
+                tools=(),
+            ),
+        )
+    assert fake.chat_requests() == []
+    assert _payload_of(lens, request(tools=()))["tools"] == []
+
+
 def test_a_tool_result_is_forwarded_with_its_nonce_fence_unchanged():
     fenced = fence(UntrustedBlock("tool-result", RepoText("diff text")), NONCE)
     lens, fake = model(reply(completion("done")))

@@ -57,6 +57,12 @@ class RoundRecord:
     findings: tuple[str, ...]
     context_partial: bool
     findings_omitted: int = 0
+    # The first limit stop the review's lenses hit, as its own message
+    # (issue #693): the text names the lens, the attempt and the cap, so
+    # the next round -- and the operator reading the log -- can tell a
+    # budget stop from a model failure. Empty when no limit stopped
+    # anything.
+    limit_stop: str = ""
 
 
 @dataclass(frozen=True)
@@ -222,6 +228,7 @@ def fit_record(record: RoundRecord) -> RoundRecord:
         (),
         record.context_partial,
         record.findings_omitted + len(record.findings),
+        record.limit_stop,
     )
 
 
@@ -307,6 +314,8 @@ def _render(record: RoundRecord, current_head: str, scrub: Callable[[str], str])
         f"Recorded at {_q(record.head_sha, scrub)} ({relation}).",
         f"Review event {_q(record.event, scrub)}. Lens {_q(record.lens, scrub)}.",
     ]
+    if record.limit_stop:
+        lines.append(f"That round stopped on a limit: {_q(record.limit_stop, scrub)}")
     if record.context_partial:
         lines.append("That round's own context was partial.")
     if record.findings_omitted:
@@ -339,6 +348,7 @@ def _dump(record: RoundRecord) -> dict[str, object]:
         "findings": list(record.findings),
         "context_partial": record.context_partial,
         "findings_omitted": record.findings_omitted,
+        "limit_stop": record.limit_stop,
     }
 
 
@@ -369,6 +379,9 @@ def _parse(line: str) -> RoundRecord | None:
         or omitted < 0
     ):
         return None
+    stop = data.get("limit_stop", "")
+    if not isinstance(stop, str):
+        return None
     return RoundRecord(
         data["repo"],
         pr,
@@ -378,6 +391,7 @@ def _parse(line: str) -> RoundRecord | None:
         tuple(findings),
         data["context_partial"],
         omitted,
+        stop,
     )
 
 
