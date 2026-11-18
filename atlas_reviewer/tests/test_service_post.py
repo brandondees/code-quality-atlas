@@ -1401,6 +1401,42 @@ def test_a_delta_post_cites_the_review_it_builds_on_and_shows_the_carry():
     )
 
 
+def test_a_delta_post_lists_the_lens_decisions():
+    """The posted comment summarizes the coordinator's per-lens decisions
+    (D83): which lenses the follow-up re-ran and which it reused, each
+    with the reason. Mutant: the section dropped -- the post would show
+    the decision's outcome (lenses run / not run) without the judgment
+    that decided it, and a reused lens would be invisible in the post
+    entirely."""
+    report = ReviewReport(
+        ("sweeping-for-security",),
+        (),
+        "note",
+        (),
+        (),
+        ("Model calls: 2; committed: $0.04.",),
+        "COMMENT",
+        lens_decisions=(
+            "`sweeping-for-security`: re-ran -- the delta touches the code",
+            "`tracing-correctness-and-invariants`: reused -- the incoming changes only merge the base branch",
+        ),
+    )
+    body = render_comment(
+        report, post_key(EVENT), lambda item: item, delta_from=EVENT.head_sha
+    )
+    assert "## Lens decisions" in body
+    assert "re-ran -- the delta touches the code" in body
+    assert "reused -- the incoming changes only merge the base branch" in body
+    # The decisions sit with the lens lists, before the files section.
+    assert body.index("## Lens decisions") < body.index("## Files read")
+
+
+def test_a_full_post_has_no_lens_decisions_section():
+    report = ReviewReport(("lens",), (), "note", (), (), (), "COMMENT")
+    body = render_comment(report, post_key(EVENT), lambda item: item)
+    assert "## Lens decisions" not in body
+
+
 def test_a_full_post_has_no_delta_citation_or_sections():
     report = ReviewReport(("lens",), (), "note", (), (), (), "COMMENT")
     body = render_comment(report, post_key(EVENT), lambda item: item)

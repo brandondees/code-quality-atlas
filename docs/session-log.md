@@ -3713,3 +3713,51 @@ coverage incomplete, and the review lands COMMENT — never an approval
 over the gap); recorded in D79 as a known limitation with the
 record-format follow-up as its escape, not a behavior change. Docs
 only; no code touched.
+
+## 2026-11-18 — #759: the delta review redesigned — the whole changeset stays the subject, the coordinator judges each lens (D83)
+
+Brandon amended the delta review the same day #748 shipped: a live
+delta post had told the PR's readers "This is a delta-only review:
+unchanged content (...) is not re-reviewed", and the design backed it —
+the lenses ran on the diff restricted to the range's touched paths, and
+the prompts and docs said so. The wrong contract was in the design
+itself, so the fix is in the design: `DeltaScope` is no longer a lens
+scope (the `diff` field and its pr-diff intersection are gone), the
+review's diff is the whole pull request at the new head, and only the
+incremental diff travels as the new material. Before any lens runs, the
+coordinator makes one bounded, tool-less judgment call over the
+incremental diff and the reuse-eligible lens names (read from the round
+records at `delta_from` — the per-head ledger is unreachable across
+heads, and its run directory is dropped on job end, so the round log is
+the only durable cross-head record): per lens, re-run on the whole pull
+request or reuse the earlier settled result, each with a stated
+reason. A re-run lens may report findings anywhere in the pull request
+(unchanged content included) and sees the incremental diff highlighted
+in its first turn as a `delta-diff` block sized like the CI block; a
+reused lens makes no turn, its findings stand through the carry-forward
+(D73's rules intact, resolutions still gated on the range's removed
+lines), and its files count as covered — "complete coverage" means
+every file in the pull request covered by a re-run or by a reused
+result that read it, never merely every delta file. Fallbacks run to
+the safe side: an unestablished delta reuses nothing and skips the
+call, an empty (merge-only) delta reuses every eligible lens without a
+call, and a failed or refused decision reply re-runs every eligible
+lens with the failure named. Every decision lands in the telemetry
+(one event per lens), the round record (a new `decisions` field, bound
+at 4,096 characters with the overflow named — and the record's lens
+list now names reused lenses too, so the next delta can reuse what this
+one reused), the draft's `Lens decisions (delta review)` section, and
+the posted comment's `Lens decisions` section; the status line carries
+`reused`, and the headline no longer claims every lens ran when some
+were reused. D68's cost goals hold: a reused lens costs nothing, and no
+turn re-sends the full diff where the incremental one answers. D83 is
+recorded in `docs/open-questions.md` with a Correction on D79 marking
+the superseded scoping sentences as history, not silently rewriting
+them. The Claude Code routine's protocol needed no counterpart fix: its
+only-new-findings and proportional-output rules are about posting, and
+its lenses already run the pull request's full diff every round.
+Eleven hand-applied mutants died on their named tests (the
+path-restricted scope restored, both payload flips, the lookup
+inverted, the decision ignored, the reused-as-uncovered count, both
+record drops, the eligibility drop, and the two no-call branch drops),
+plus three on the reply parser and one on the highlight block.

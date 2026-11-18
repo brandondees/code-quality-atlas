@@ -3052,16 +3052,23 @@ def _delta_scope(
     note="",
     gate_reason="",
     removed=None,
-    range_diff="",
+    range_diff=(
+        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n"
+        " def total(xs):\n"
+        "-    return sum(xs)\n"
+        "+    return sum(round(x, 2) for x in xs)\n"
+    ),
 ):
-    """The delta scope the CLI would thread in: the review's changed
-    paths as the resolution gate, and the range's own removed-line pool,
-    unless the test narrows either."""
+    """The delta scope the CLI would thread in: an established delta
+    with material (the review runs its lenses and the coordinator's
+    decision call over it), the range's own removed-line pool, unless
+    the test narrows either. An empty `range_diff` is the merge-only
+    case, which reuses every eligible lens without a decision call."""
     from atlas_reviewer.delta import DeltaScope
 
     return DeltaScope(
         delta_from,
-        "",
         frozenset(resolution_paths),
         note,
         gate_reason,
@@ -3710,7 +3717,6 @@ def test_a_carry_call_past_the_review_deadline_is_not_sent():
             CHANGED,
             frozenset({"calc.py"}),
             "",
-            "",
             {},
             spend,
             LIMITS.resolve(cross_limits=False),
@@ -3761,7 +3767,6 @@ def test_a_carry_call_crossing_the_deadline_mid_reservation_is_not_sent():
             trees(),
             CHANGED,
             frozenset({"calc.py"}),
-            "",
             "",
             {},
             spend,
@@ -3824,3 +3829,305 @@ def test_a_delta_scoped_ledger_entry_is_not_reused_by_a_full_run(tmp_path):
     # zero requests -- and claimed the files it never read.
     assert len(model.requests) == 2
     assert second.coverage_complete
+
+
+# ------------------------------------------------- the per-lens decision (D83)
+
+
+def _decided(**entry: str) -> dict[str, str]:
+    return {"lens": entry.pop("lens"), **entry}
+
+
+def test_a_followup_whose_changes_affect_a_lens_concern_re_runs_it(tmp_path):
+    """The coordinator judged the incoming changes could affect the
+    lens's concern, so the lens re-runs on the whole pull request: its
+    turns reach the model after the decision call, and its findings join
+    the review. Mutant: the rerun/reuse lookup inverted, which reuses
+    the lens the coordinator decided to re-run -- the lens makes no
+    turn and reports nothing."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [READ_ALL, final(finding()), _carry_reply((_restated(),))],
+        decisions=(
+            _decided(
+                lens=LENS, decision="rerun", reason="the delta rewrites the rounding"
+            ),
+        ),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    # The lens ran: its tool turn and final reply after the decision
+    # call, and its entry is in the review's lens list.
+    assert len(model.requests) == 4
+    assert [r.lens for r in result.lenses] == [LENS]
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, False)]
+    assert result.lens_decisions[0].reason == "the delta rewrites the rounding"
+
+
+def test_a_followup_whose_changes_do_not_affect_a_lens_reuses_the_settled_result(
+    tmp_path,
+):
+    """The coordinator judged the incoming changes could not affect the
+    lens's concern, so the lens does not run: no lens turn reaches the
+    model, the earlier review's findings stand -- carried forward and
+    re-anchored by the carry-forward -- and the review still covers the
+    whole pull request. Mutant: the decision ignored, which re-runs the
+    lens the coordinator reused."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(
+            _decided(
+                lens=LENS, decision="reuse", reason="the delta only merges the base"
+            ),
+        ),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    # The decision call and the carry-forward call are the review's only
+    # model contact; the lens made no turn.
+    assert len(model.requests) == 2
+    assert result.lenses == ()
+    assert [(f.id, f.verified) for f in result.findings if f.carried] == [("P1", True)]
+    assert result.coverage_complete
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, True)]
+
+
+def test_a_re_run_lens_can_report_a_finding_outside_the_delta(tmp_path):
+    """The delta review's subject is the whole pull request (D83): a
+    re-run lens reads every changed file -- the changed-files listing
+    names the file the delta never touched -- and a finding it reports
+    on that file verifies and stands. Mutant: the path-restricted lens
+    scope restored, which narrows the review to the delta's files: the
+    off-delta file reaches no lens and the finding cannot verify."""
+    log = _round_log_with_prior(tmp_path)
+    evidence = f'TOKEN = "{TOKEN}"'
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(
+                finding(
+                    location="config/keys.py:1",
+                    evidence=evidence,
+                    finding="a committed credential ships in the new config file",
+                    fix="read it from the environment",
+                )
+            ),
+            _carry_reply(()),
+        ],
+        decisions=(
+            _decided(lens=LENS, decision="rerun", reason="the delta touches the code"),
+        ),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(resolution_paths=frozenset({"calc.py"})),
+    )
+    off_delta = [f for f in result.verified if not f.carried]
+    assert [(f.finding.location.path) for f in off_delta] == ["config/keys.py"]
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+
+
+def test_the_decision_is_recorded_everywhere_it_is_read_from(tmp_path):
+    """Each lens's decision and reason are recorded in the telemetry, in
+    the round record, and summarized in the draft. Mutant: the telemetry
+    event dropped, or the record's decisions field dropped -- the
+    judgment leaves no trace in that surface."""
+    from atlas_reviewer.telemetry import Telemetry
+
+    log = _round_log_with_prior(tmp_path)
+    telemetry = Telemetry(FakeClock())
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(),))],
+        decisions=(
+            _decided(
+                lens=LENS, decision="rerun", reason="the delta touches the arithmetic"
+            ),
+        ),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        telemetry=telemetry,
+    )
+    events = [e for e in telemetry.events if e.step == "lens decision"]
+    assert [
+        (e.fields["lens"], e.fields["decision"], e.fields["reason"]) for e in events
+    ] == [(LENS, "rerun", "the delta touches the arithmetic")]
+    record = log.read().records[-1]
+    assert record.decisions == (f"{LENS} rerun: the delta touches the arithmetic",)
+    draft = render_draft(result, Redactor())
+    assert "## Lens decisions (delta review)" in draft
+    assert "re-ran --" in draft
+    assert "the delta touches the arithmetic" in draft
+    status = parse_status(draft)
+    assert status["reused"] == 0
+
+
+def test_coverage_counts_reused_files(tmp_path):
+    """Every planned lens reused: no lens ran, no runner started, and
+    the review still covers the whole pull request -- each file was read
+    by the reused settled result the coordinator stood behind. Mutant:
+    the reused lens counted as uncovered, which would hold an
+    all-reuse follow-up at COMMENT forever."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.coverage_complete
+    assert result.runner is None
+    assert not [call for call in sprites.calls if call[0] == "create"]
+    status = parse_status(render_draft(result, Redactor()))
+    assert status["reused"] == 1
+    # The record's lens list names the reused lens too, so the NEXT delta
+    # review can reuse its settled result again instead of silently
+    # forcing the re-run the reuse was meant to avoid.
+    assert log.read().records[-1].lens == LENS
+
+
+def test_the_payload_carries_the_incremental_diff_not_the_full_diff(tmp_path):
+    """The decision call and the carry-forward call travel the range's
+    own patches -- the new material -- never the whole pull request's
+    diff re-sent (D68). Mutant: the payload flipped to the full diff,
+    which re-sends what the earlier review already established."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    decision_text, carry_text = (request.messages[0].text for request in model.requests)
+    for turn in (decision_text, carry_text):
+        # The range's own patch is the new material...
+        assert "+    return sum(round(x, 2) for x in xs)" in turn
+        # ...and the pull request's other changed file -- which the
+        # earlier review already established -- is not re-sent.
+        assert "config/keys.py" not in turn
+    assert result.carried_unverified == ()
+
+
+def test_a_failed_decision_call_reruns_every_lens_and_names_it(tmp_path):
+    """A decision reply that breaks the contract refuses the whole call
+    and falls back to re-running every lens, with the failure named in
+    the decisions and on the telemetry. Mutant: the fallback silently
+    reused, which acts on a judgment nobody made."""
+    from atlas_reviewer.telemetry import Telemetry
+
+    log = _round_log_with_prior(tmp_path)
+    telemetry = Telemetry(FakeClock())
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(),))],
+        decisions=(),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        telemetry=telemetry,
+    )
+    # The lens ran: the fallback is all-rerun.
+    assert len(model.requests) == 4
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, False)]
+    assert "decision call failed" in result.lens_decisions[0].reason
+    failures = [
+        e for e in telemetry.events if e.step == "lens decision" and e.status == "error"
+    ]
+    assert len(failures) == 1
+    draft = render_draft(result, Redactor())
+    assert "decision call failed" in draft
+
+
+def test_a_lens_the_earlier_review_did_not_run_is_never_offered_for_reuse(tmp_path):
+    """Reuse is available only for a lens the earlier review actually
+    ran: a planned lens outside the records' lens list re-runs
+    structurally, whatever the coordinator would have preferred, and the
+    decision reply is never offered it. Mutant: the eligibility read
+    dropped, which offers the unplanned lens and lets the reply reuse a
+    result that does not exist."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS, OTHER],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        models=[
+            ScriptedLensModel([READ_ALL, final()]),
+            ScriptedLensModel(
+                [
+                    READ_ALL,
+                    final(lens=OTHER, digest=body_digest(OTHER_BODY)),
+                ]
+            ),
+        ],
+    )
+    by_lens = {d.lens: d for d in result.lens_decisions}
+    assert by_lens[LENS].reuse
+    # The unplanned lens re-ran, with the structural reason.
+    assert not by_lens[OTHER].reuse
+    assert "no settled result" in by_lens[OTHER].reason
+    assert any(r.lens == OTHER and r.state is LensState.CLEAN for r in result.lenses)
+
+
+def test_an_unestablished_delta_reuses_nothing_and_makes_no_decision_call(tmp_path):
+    """When the delta could not be established there is no incremental
+    diff to judge from, so no lens is reused and the decision call is
+    never made: the follow-up is an ordinary full review. Mutant: the
+    unestablished check dropped, which judges reuse from no evidence."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(note="the delta range could not be established"),
+    )
+    turns = [request.messages[0].text for request in model.requests]
+    assert not any(t.startswith("Lens decisions target") for t in turns)
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, False)]
+    assert "could not be established" in result.lens_decisions[0].reason
+
+
+def test_a_merge_only_delta_reuses_every_eligible_lens_without_a_call(tmp_path):
+    """An empty established delta -- a merge-only push -- has no incoming
+    change to judge, so every eligible lens's settled result stands
+    without a decision call, and the carry-forward does the carrying.
+    Mutant: the empty-delta branch dropped, which spends a judgment call
+    on nothing and, on its failure, re-runs the lenses the push never
+    affected."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="rerun", reason="unreachable"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope(range_diff="")
+    )
+    turns = [request.messages[0].text for request in model.requests]
+    assert not any(t.startswith("Lens decisions target") for t in turns)
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, True)]
+    assert result.coverage_complete

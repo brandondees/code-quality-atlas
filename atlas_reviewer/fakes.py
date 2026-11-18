@@ -11,6 +11,7 @@ interpreter resolution from `pythons`.
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 from collections.abc import Mapping, Sequence
@@ -18,8 +19,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from atlas_reviewer.delta import DECISION_TARGET_PREFIX
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
-from atlas_reviewer.lens_loop import ModelTurn, TurnRequest
+from atlas_reviewer.lens_loop import FinalReply, ModelTurn, TurnRequest, UserText
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
@@ -221,12 +223,20 @@ class ScriptedLensModel:
     """A `LensModel` that plays a script: each turn takes the next entry,
     a `ModelTurn` or a function of the request, or raises it when it is a
     `BoundaryError`. Every request is kept. Past the script's end each
-    turn fails."""
+    turn fails.
+
+    The delta review's controller-level turns are not script entries: a
+    coordinator-decision turn (D83) is answered from `decisions` -- an
+    empty tuple replies with no decisions, which the controller's
+    validation refuses, falling back to re-running every lens -- so a
+    script's entries stay aligned with the lens loop's own turns, the
+    way the carry-forward turn is answered by its own entry."""
 
     script: list[Any]
     worst_usd: Decimal = Decimal("0.10")
     name: str = "scripted"
     requests: list[TurnRequest] = field(default_factory=list)
+    decisions: tuple[Mapping[str, str], ...] = ()
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         return self.worst_usd
@@ -237,12 +247,29 @@ class ScriptedLensModel:
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         self.requests.append(request)
+        if _is_decision_turn(request.messages):
+            return FinalReply(
+                json.dumps({"decisions": [dict(entry) for entry in self.decisions]}),
+                self.worst_usd,
+            )
         if not self.script:
             raise BoundaryError("the scripted model has no turn left")
         step = self.script.pop(0)
         if isinstance(step, BoundaryError):
             raise step
         return step(request) if callable(step) else step
+
+
+def _is_decision_turn(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the delta review's coordinator
+    decision turn (D83): its first message opens with the controller's
+    own decision subject, which no PR-written text can be the first line
+    of."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(DECISION_TARGET_PREFIX)
+    )
 
 
 def _fed(script: str, stdin: bytes) -> bytes:

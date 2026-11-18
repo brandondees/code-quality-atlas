@@ -318,6 +318,12 @@ class ReviewReport:
     quote (#702): the draft's carried-section bullets. They are not
     findings, but the post shows them, so a carried finding is never
     silently dropped between the draft and the comment."""
+    lens_decisions: tuple[str, ...] = ()
+    """A delta review's per-lens decisions (D83): the draft's
+    decisions-section bullets -- which lenses the follow-up re-ran and
+    which it reused, each with the coordinator's reason -- so the posted
+    comment shows the judgment, not only its outcome. Empty on a full
+    review."""
 
 
 @dataclass(frozen=True)
@@ -642,6 +648,7 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         findings=_findings(draft),
         resolved=tuple(_bullets(section(draft, "Resolved by the new commits"))),
         carried_unverified=tuple(_bullets(section(draft, "Carried, not re-verified"))),
+        lens_decisions=tuple(_bullets(section(draft, "Lens decisions (delta review)"))),
         coverage_complete=_status_flag(status, "coverage_complete"),
         delta_note=_status_flag(status, "delta_note"),
     )

@@ -260,17 +260,22 @@ running review settles. The follow-up of a settled success is a delta
 review only when that review read every changed file (its draft's
 `coverage_complete` flag): a review that finished with incomplete
 coverage cannot stand in for the files it never read, so its follow-up
-is an ordinary full review of the pull request. A delta review's lens
-scope is the changed paths the range between the settled head and the
-new head touched — every hunk the pull request's diff shows on such a
-path, older hunks included; when the range cannot be established at all
-(an unfetchable range, a diverged history after a rebase or force-push,
-or a comparison file list cut at GitHub's cap), the review runs on the
-full pull request diff and accepts no resolutions. The delta review
+is an ordinary full review of the pull request. A delta review's
+subject is still the whole pull request at the new head (D83): its
+lenses run on the full pull request diff, the coordinator judges each
+planned lens — one bounded call over the incremental diff — whether to
+re-run it or reuse the earlier review's settled result, and the range
+between the settled head and the new head supplies only the incremental
+diff the payload highlights and the resolutions' evidence. When the
+range cannot be established at all (an unfetchable range, a diverged
+history after a rebase or force-push, or a comparison file list cut at
+GitHub's cap), no lens is reused, no incremental payload is sent, and
+no resolutions are accepted. The delta review
 carries the earlier review's findings forward through
 one bounded carry-forward call (re-anchored through the quote checker,
 the new commits' fixes marked resolved), and its post cites the review
-it builds on and quotes the carry-forward's own note, so an unreadable
+it builds on, lists the per-lens decisions, and quotes the
+carry-forward's own note, so an unreadable
 round record is never posted as a review with no prior findings.
 Setting the policy to `cancel` restores the
 blanket supersede. The decision and the review costs are telemetry
@@ -286,7 +291,9 @@ run, lenses not run, the file-coverage note, limit stops, and cost. A lens
 an earlier entry left NOT RUN but one of the lens's own runs recovered
 is listed as run, with the failure carried as a recovered note
 among the limit stops (#692, D76); a lens with no clean run is still not
-run.
+run. A delta review's post adds the per-lens decisions (D83): which
+lenses the follow-up re-ran and which it reused, each with the
+coordinator's reason.
 
 ## Downgrading
 

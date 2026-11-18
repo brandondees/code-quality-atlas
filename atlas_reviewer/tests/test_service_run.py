@@ -867,6 +867,38 @@ def test_an_agentic_draft_reports_selection_stops_and_cost():
     assert report.findings == ()
 
 
+def test_an_agentic_draft_reports_the_lens_decisions():
+    """The draft's `Lens decisions (delta review)` section reaches
+    `ReviewReport.lens_decisions` bullet by bullet (D83), so the posted
+    comment can summarize the coordinator's judgment. Mutant: the
+    extraction dropped, which leaves the decisions in the draft only and
+    posts a comment whose lens lists cannot explain a reused lens."""
+    status = json.dumps(
+        {
+            "mode": "agentic",
+            "review_event": "COMMENT",
+            "coverage_complete": True,
+            "reused": 1,
+        }
+    )
+    draft = (
+        f"<!-- atlas-review-status: {status} -->\n"
+        "## Lens decisions (delta review)\n"
+        "\n"
+        "- `tracing-correctness-and-invariants`: reused -- docs only\n"
+        "- `sweeping-for-security`: re-ran -- the delta touches the code\n"
+        "\n"
+        "## Findings (verified quotes only)\n"
+        "\n"
+        "No verified findings.\n"
+    )
+    report = summarize_draft(draft)
+    assert report.lens_decisions == (
+        "`tracing-correctness-and-invariants`: reused -- docs only",
+        "`sweeping-for-security`: re-ran -- the delta touches the code",
+    )
+
+
 def test_a_draft_reports_lenses_limits_cost_and_files():
     report = summarize_draft(DRAFT)
     assert report.lenses_run == ("tracing-correctness-and-invariants",)

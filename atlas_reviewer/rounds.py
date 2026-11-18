@@ -63,6 +63,14 @@ class RoundRecord:
     # budget stop from a model failure. Empty when no limit stopped
     # anything.
     limit_stop: str = ""
+    # A delta review's per-lens decisions (D83), one line per lens:
+    # `<lens> reuse|rerun: <reason>`. The record keeps them for the
+    # chain -- the next delta review reads the lens lists to know what a
+    # reuse can build on, and the operators read the judgments -- but
+    # they are metadata, not findings: `prior_blocks` renders them into
+    # no lens's context, so a lens is never primed by an earlier
+    # coordinator's decisions.
+    decisions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -229,6 +237,7 @@ def fit_record(record: RoundRecord) -> RoundRecord:
         record.context_partial,
         record.findings_omitted + len(record.findings),
         record.limit_stop,
+        record.decisions,
     )
 
 
@@ -349,6 +358,7 @@ def _dump(record: RoundRecord) -> dict[str, object]:
         "context_partial": record.context_partial,
         "findings_omitted": record.findings_omitted,
         "limit_stop": record.limit_stop,
+        "decisions": list(record.decisions),
     }
 
 
@@ -382,6 +392,11 @@ def _parse(line: str) -> RoundRecord | None:
     stop = data.get("limit_stop", "")
     if not isinstance(stop, str):
         return None
+    decisions = data.get("decisions", [])
+    if not isinstance(decisions, list) or not all(
+        isinstance(item, str) for item in decisions
+    ):
+        return None
     return RoundRecord(
         data["repo"],
         pr,
@@ -392,6 +407,7 @@ def _parse(line: str) -> RoundRecord | None:
         data["context_partial"],
         omitted,
         stop,
+        tuple(decisions),
     )
 
 

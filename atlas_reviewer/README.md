@@ -256,19 +256,42 @@ and the queued follow-up is a `follow-up queued` event — all in
 tuned on can be read against each decision.
 
 The follow-up review of a kept head is a **delta review** (`delta.py`).
-Its diff is the pull request's diff at the new head, restricted to the
-paths the range `delta_from..head` touched: the pull request's diff
-never carries merge-from-base content (merging the base moves the merge
-base forward, and the base's changes drop out of the three-dot diff), so
-the restriction is the range diff with that content excluded, with no
-per-commit reads. A merge-only push yields an empty delta, and the
-review then exists to carry the earlier findings forward.
+Its subject is still the whole pull request at the new head — the
+earlier review's verdict covered the whole changeset, and so does this
+one's — but the payload carries only the **incremental diff**: the
+range `delta_from..head`'s own per-file patches, the new material since
+the earlier review. Context the earlier review already established is
+not re-sent, which keeps D68's cost goals. A merge-only push yields an
+empty delta, and the review then exists to carry the earlier findings
+forward.
+
+The coordinator judges **each planned lens** before any of them runs
+(D83): one bounded, tool-less call — over the incremental diff and the
+lens names — decides, per lens, whether to re-run it or reuse the
+earlier review's settled result. The decision is the coordinator's
+judgment over the incoming changes, not a fixed path-intersection rule,
+and each decision and its reason are recorded in the telemetry, in the
+round record, and in the draft and post. A lens the earlier review did
+not run has no settled result to reuse and re-runs structurally. A
+**re-run lens** runs on the whole pull request's diff — the
+incremental diff highlighted in its first turn as the new material —
+and may report findings anywhere in the pull request, unchanged content
+included. A **reused lens** does not run: its earlier findings stand,
+carried forward and re-assessed against the new evidence (D73), and the
+files it would have read are covered by the reused settled result —
+"complete coverage" means every file in the pull request is covered,
+either by a re-run or by a reused settled result that read it, not
+every delta file. When the delta could not be established there is no
+incremental diff to judge from, so no lens is reused and no decision
+call is made; an empty established delta (a merge-only push) reuses
+every eligible lens without a call. A failed or refused decision call
+falls back to re-running every lens, the safe direction — a reuse is
+never silently invented, and never silently kept on a broken reply.
 
 The scope carries a **resolution gate that fails closed**
 (`DeltaScope.resolution_paths`): the paths a resolution may be accepted
 for, empty whenever the delta could not actually be established — an
-unfetchable range (the review then runs on the full diff, the fallback
-named), a diverged history after a rebase or force-push (the
+unfetchable range, a diverged history after a rebase or force-push (the
 comparison's file list is then measured from the wrong base), or a file
 list that is malformed, holds unreadable entries, or is cut at GitHub's
 comparison cap. With the gate empty, no resolution is accepted however
@@ -276,7 +299,7 @@ the assessor proposes it, and every prior finding is carried.
 
 After the delta's lenses settle, one bounded, tool-less **carry-forward
 call** judges the earlier review's findings — the round log's records at
-`delta_from`, labeled `P1`, `P2`, ... — against the delta:
+`delta_from`, labeled `P1`, `P2`, ... — against the incremental diff:
 
 - a finding the carry-forward re-states is quote-checked against the new
   head's files exactly like an ordinary finding's, and a verified
@@ -297,7 +320,7 @@ call** judges the earlier review's findings — the round log's records at
 - the carry turn shows the range's own patches, so the assessor quotes
   what the commits between the heads actually changed; a comparison with
   no readable merge base is untrusted like every other malformed shape
-  (round-2 a1), and a delta block over its cap is cut with the
+  (round-2 a1), and an incremental diff over its cap is cut with the
   truncation marker (round-2 a4);
 - everything else is carried as the record stored it, in the draft's
   `Carried, not re-verified` section and back into the round record, so
@@ -320,12 +343,12 @@ text) is posted once, as the carried copy; two records at the same
 assessor adds no findings: the instructions ask for dispositions only,
 and an entry with no `revises` label is dropped and named (round-1 m5).
 The delta review's post cites the review it builds on — the post says
-"Follows the review of" the head — and shows the resolved and carried
-sections. The carry-forward call spends against the review's own
-derived limits and the dollar ceiling (D68) like every other call; its
-failure — a contract refusal, a transport error, a spent-out review —
-falls back to carrying every prior finding as recorded, with the
-failure named.
+"Follows the review of" the head — and shows the lens decisions, the
+resolved and carried sections. The decision call and the carry-forward
+call each spend against the review's own derived limits and the dollar
+ceiling (D68) like every other call; the carry-forward's failure — a
+contract refusal, a transport error, a spent-out review — falls back to
+carrying every prior finding as recorded, with the failure named.
 
 The review child follows the service mode, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
@@ -1713,11 +1736,13 @@ D41 records the 2026-11-12 probe that did.
     written. `limit_stop` is the first limit that stopped a lens -- a
     lens's own run, or its latest re-assessment's refused reservation or
     spent-out call cap (round-1 review of #731, N4) -- or null. Paths
-    stay out of the line. A delta review adds three counts -- `carried`
+    stay out of the line. A delta review adds four counts -- `carried`
     (re-anchored, verified carried findings), `carried_unverified`
     (carried without a verified quote, raw unparsed lines included, so
-    an all-clear on `carried` cannot hide them), and `resolved` -- and
-    `delta_note` when the carry named a gap (round-1 review of #748).
+    an all-clear on `carried` cannot hide them), `resolved`, and
+    `reused` (D83: how many planned lenses the coordinator reused
+    instead of re-running) -- and `delta_note` when the carry named a
+    gap (round-1 review of #748).
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -1726,7 +1751,10 @@ D41 records the 2026-11-12 probe that did.
     earlier NOT RUN a later clean run superseded, or a later NOT RUN
     after an earlier clean run — while a lens with no clean run still
     blocks, and the superseded failure stays in the coverage section
-    marked `recovered by L<n>'s clean run`. Otherwise a REVIEW INCOMPLETE
+    marked `recovered by L<n>'s clean run`. A delta review's reused
+    lenses (D83) make no entry: their reuse is their coverage, and the
+    files they would have read are covered by the reused settled result.
+    Otherwise a REVIEW INCOMPLETE
     warning follows, and the
     review never approves. A failed runner's note is quoted in the draft.
     A settled outcome with no changed-file count shows no coverage.
@@ -1803,7 +1831,7 @@ D41 records the 2026-11-12 probe that did.
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
 | `service_admit.py` | webhook signature, event and allowlist admission; the repo-narrowed admission config (config slice S4): the default-branch `REVIEW.md` narrowing lines parsed bounded and fail-open with named notes, and the pure narrowing of an admitted delivery — skip events and base-branch include/exclude — that can only remove a review, never widen the operator's envelope | no |
 | `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
-| `delta.py` | the delta review a kept head's follow-up runs (#702): the delta scope, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
+| `delta.py` | the delta review a kept head's follow-up runs (#702, D83): the delta scope — what is new and the resolution gate, not a lens scope — the coordinator's per-lens re-run/reuse decision, the incremental-diff highlight block, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |
 | `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74) | the review child |
 | `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |

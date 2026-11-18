@@ -12,14 +12,21 @@ import json
 import pytest
 
 from atlas_reviewer.attestation import CheckedFinding
-from atlas_reviewer.coordinator import CARRY_DIFF_CHARS, _capped
 from atlas_reviewer.delta import (
+    DELTA_DIFF_CHARS,
+    DeltaScope,
     _patch_removed,
     apply_carry,
+    capped,
     carry_system,
     carry_turn,
+    decision_system,
+    decision_turn,
+    delta_block,
     delta_scope,
+    fallback_decisions,
     parse_carry_reply,
+    parse_decision_reply,
     parse_prior_line,
 )
 from atlas_reviewer.domain import PrEvent
@@ -36,7 +43,7 @@ from atlas_reviewer.lens_contract import (
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
-from atlas_reviewer.redact import TRUNCATION_MARKER
+from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
 
 OLD = "a" * 40
 NEW = "b" * 40
@@ -453,19 +460,18 @@ PR_DIFF = (
 )
 
 
-def test_the_delta_scope_is_the_range_paths_the_pr_diff_shows():
+def test_the_delta_scope_is_the_ranges_touched_paths():
     github = _FakeGitHub(
         {
             "merge_base_commit": {"sha": OLD},
             "files": [{"filename": "calc.py"}, {"filename": "docs/from-main.md"}],
         }
     )
-    scope = delta_scope(github, EVENT, PR_DIFF)
-    # Mutant: the restriction dropped, which would hand the delta review
-    # the whole pull request diff -- re-reviewing what the earlier
-    # review already covered.
-    assert scope.diff == PR_DIFF.split("diff --git a/settings.ini")[0]
-    # The resolution gate is the range's own touched paths, not the
+    scope = delta_scope(github, EVENT)
+    # The scope is what is NEW, not a lens scope (D83): the review's
+    # lenses run on the whole pull request's diff, and the range's
+    # touched paths gate resolutions only.
+    # The resolution gate is the range's own touched paths, not any
     # lens diff's intersection with them (round-5 review of #748): a
     # follow-up that deletes a file the earlier head added takes it out
     # of the net diff, and the range's patch is then the only place its
@@ -485,22 +491,23 @@ def test_a_merge_only_push_yields_an_empty_trusted_scope():
             "files": [{"filename": "docs/from-main.md"}],
         }
     )
-    scope = delta_scope(github, EVENT, PR_DIFF)
-    assert scope.diff == ""
+    scope = delta_scope(github, EVENT)
     # The gate is the range's own touched paths (round-5 review of
     # #748); this path has no patch in the comparison, so a resolution
-    # against it still refuses on evidence.
+    # against it still refuses on evidence. The empty delta builds no
+    # highlight and reuses every eligible lens without a call (D83).
     assert scope.resolution_paths == frozenset({"docs/from-main.md"})
+    assert scope.range_diff == ""
     assert scope.note == ""
 
 
-def test_an_unfetchable_range_falls_back_to_the_full_diff_and_refuses_resolutions():
+def test_an_unfetchable_range_refuses_resolutions_and_names_the_condition():
     """The gate fails closed on the fallback (round-1 M1): the review
-    still runs, on the full diff, but the scope's resolution paths are
-    empty and the gap is named, because a full diff is not evidence of
-    what the delta's commits touched. Mutant: the fallback's gate kept
-    the full diff's paths, which would accept resolutions for files the
-    new commits never changed."""
+    still runs -- on the whole pull request, as every review does (D83)
+    -- but the scope's resolution paths are empty and the gap is named,
+    because no diff is evidence of what the delta's commits touched.
+    Mutant: the fallback's gate kept some paths, which would accept
+    resolutions for files the new commits never changed."""
 
     class Failing:
         def get_pull(self, repo: str, number: int) -> dict[str, object]:
@@ -509,10 +516,9 @@ def test_an_unfetchable_range_falls_back_to_the_full_diff_and_refuses_resolution
         def get_compare(self, repo: str, base: str, head: str) -> dict[str, object]:
             raise BoundaryError("GitHub HTTP 404")
 
-    scope = delta_scope(Failing(), EVENT, PR_DIFF)
+    scope = delta_scope(Failing(), EVENT)
     # Mutant: the fallback dropped, which would fail a whole review over
     # an unreadable range instead of reviewing the push in full.
-    assert scope.diff == PR_DIFF
     assert scope.resolution_paths == frozenset()
     assert "could not be fetched" in scope.note
     assert scope.gate_reason
@@ -522,17 +528,16 @@ def test_a_diverged_history_refuses_resolutions_and_names_the_condition():
     """A rebase or force-push leaves `delta_from` a non-ancestor: the
     comparison's file list is then measured from the wrong base, so it is
     not the range's, and the resolution gate refuses (round-1 M1). The
-    lens diff is not narrowed to that list either (round-5 review of
-    #748): a wrong-base list cannot prove what the range touched, and a
-    pull-request file it omits would reach no lens while the coverage
-    read complete. Mutant: the narrowing restored, which drops those
-    files from the review."""
+    review is not narrowed to that list either (round-5 review of #748;
+    D83): a wrong-base list cannot prove what the range touched, and no
+    lens payload narrows to it -- the follow-up is an ordinary full
+    review with nothing reused. Mutant: the narrowing restored, which
+    hides the files the wrong-base list omits."""
     github = _FakeGitHub(
         {"merge_base_commit": {"sha": "e" * 40}, "files": [{"filename": "calc.py"}]}
     )
-    scope = delta_scope(github, EVENT, PR_DIFF)
-    # Mutant: the lens diff narrowed to the wrong-base list's paths.
-    assert scope.diff == PR_DIFF
+    scope = delta_scope(github, EVENT)
+    # Mutant: the review narrowed to the wrong-base list's paths.
     assert scope.resolution_paths == frozenset()
     assert "diverged" in scope.note
     assert "full pull request diff" in scope.note
@@ -542,16 +547,15 @@ def test_a_diverged_history_refuses_resolutions_and_names_the_condition():
 def test_a_cut_file_list_refuses_resolutions_and_names_the_cap():
     """A comparison at GitHub's files cap may be cut: what the range
     touched is then not fully known, so the gate refuses rather than
-    silently shrinking the delta (round-1 m3). The lens diff does not
-    narrow to the cut list either (round-5 review of #748, Major 1):
-    files past the cap would reach no lens while `coverage_complete`
-    stayed true, and `_lens_gap` does not read the delta note. Mutant:
-    the narrowing restored, which hides the cap-tail files."""
+    silently shrinking the delta (round-1 m3). The review does not
+    narrow to the cut list either (round-5 review of #748, Major 1;
+    D83): files past the cap would reach no lens while
+    `coverage_complete` stayed true. Mutant: the narrowing restored,
+    which hides the cap-tail files."""
     capped = [{"filename": f"src/f{n}.py"} for n in range(300)]
     github = _FakeGitHub({"merge_base_commit": {"sha": OLD}, "files": capped})
-    scope = delta_scope(github, EVENT, PR_DIFF)
-    # Mutant: the lens diff narrowed to the cut list's paths.
-    assert scope.diff == PR_DIFF
+    scope = delta_scope(github, EVENT)
+    # Mutant: the review narrowed to the cut list's paths.
     assert scope.resolution_paths == frozenset()
     assert "not fully known" in scope.note
     assert "full pull request diff" in scope.note
@@ -562,18 +566,17 @@ def test_a_malformed_files_entry_makes_the_list_incomplete():
     github = _FakeGitHub(
         {"merge_base_commit": {"sha": OLD}, "files": [{"filename": "calc.py"}, "junk"]}
     )
-    scope = delta_scope(github, EVENT, PR_DIFF)
+    scope = delta_scope(github, EVENT)
     assert scope.resolution_paths == frozenset()
     assert "not fully known" in scope.note
 
 
 def test_a_comparison_without_a_files_array_is_untrusted():
     github = _FakeGitHub({"merge_base_commit": {"sha": OLD}})
-    scope = delta_scope(github, EVENT, PR_DIFF)
+    scope = delta_scope(github, EVENT)
     # Mutant: a missing files key read as an empty delta -- which would
     # be indistinguishable from a merge-only push and would silently
     # shrink the review (round-1 m3).
-    assert scope.diff == PR_DIFF
     assert scope.resolution_paths == frozenset()
     assert "could not be fetched" in scope.note
 
@@ -648,13 +651,7 @@ def test_the_pool_is_the_range_patch_not_the_restricted_pr_diff():
         ],
     }
     github = _FakeGitHub(compare)
-    pr_diff = (
-        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
-        "@@ -1,2 +1,2 @@\n"
-        "-removed before the delta\n"
-        "+kept by the delta\n"
-    )
-    scope = delta_scope(github, EVENT, pr_diff)
+    scope = delta_scope(github, EVENT)
     assert scope.removed["calc.py"] == ((3, "deleted by the delta"),)
     assert "deleted by the delta" in scope.range_diff
     assert "removed before the delta" not in scope.range_diff
@@ -700,7 +697,7 @@ def test_a_missing_merge_base_reads_as_diverged():
     github = _FakeGitHub(
         {"files": [{"filename": "calc.py", "patch": "@@ -1,1 +1,1 @@\n-x\n"}]}
     )
-    scope = delta_scope(github, EVENT, PR_DIFF)
+    scope = delta_scope(github, EVENT)
     assert scope.resolution_paths == frozenset()
     assert scope.removed == {}
     assert "diverged" in scope.note
@@ -717,7 +714,7 @@ def test_the_range_patches_render_into_the_turns_diff():
             {"filename": "docs/x.md", "patch": "@@ -1,1 +1,1 @@\n-c\n+d\n"},
         ],
     }
-    scope = delta_scope(_FakeGitHub(compare), EVENT, PR_DIFF)
+    scope = delta_scope(_FakeGitHub(compare), EVENT)
     assert scope.range_diff.count("diff --git") == 2
     assert 'label="delta-diff"' not in scope.range_diff
 
@@ -725,10 +722,10 @@ def test_the_range_patches_render_into_the_turns_diff():
 def test_a_delta_over_its_cap_is_cut_with_the_marker():
     """The carry turn's delta block is capped with the truncation marker,
     never shipped oversized to the per-call token check (round-2 a4)."""
-    text = _capped("x" * (CARRY_DIFF_CHARS + 100), CARRY_DIFF_CHARS)
-    assert len(text) == CARRY_DIFF_CHARS
+    text = capped("x" * (DELTA_DIFF_CHARS + 100), DELTA_DIFF_CHARS)
+    assert len(text) == DELTA_DIFF_CHARS
     assert text.endswith(TRUNCATION_MARKER)
-    whole = _capped("x" * 10, CARRY_DIFF_CHARS)
+    whole = capped("x" * 10, DELTA_DIFF_CHARS)
     assert whole == "x" * 10
 
 
@@ -957,8 +954,7 @@ def test_a_resolution_for_a_file_the_followup_deletes_is_accepted():
             ],
         }
     )
-    pr_diff = ""  # The net diff no longer shows the deleted file at all.
-    scope = delta_scope(github, EVENT, pr_diff)
+    scope = delta_scope(github, EVENT)
     # Mutant: the gate derived from the lens diff's paths (empty here).
     assert scope.resolution_paths == frozenset({"calc.py"})
     prior = [_prior("P1", "rounds early")]
@@ -993,7 +989,7 @@ def test_a_renamed_files_removed_lines_are_keyed_by_the_old_path():
             ],
         }
     )
-    scope = delta_scope(github, EVENT, "diff --git a/renamed.py b/renamed.py\n")
+    scope = delta_scope(github, EVENT)
     assert "calc.py" in scope.removed
     assert "renamed.py" not in scope.removed
     prior = [_prior("P1", "rounds early")]
@@ -1051,3 +1047,184 @@ def test_a_quoted_location_with_a_space_round_trips_through_the_record():
     line = 'P1 major "pkg/a b.py:7" the finding text'
     record = RoundRecord("o/r", 7, NEW, "tracing", "COMMENT", (line,), False)
     assert record.findings == (line,)
+
+
+# ------------------------------------------ the coordinator's decision (D83)
+
+
+def test_the_decision_reply_covers_every_offered_lens_in_offer_order():
+    reply = json.dumps(
+        {
+            "decisions": [
+                {"lens": "lens-b", "decision": "reuse", "reason": "docs only"},
+                {
+                    "lens": "lens-a",
+                    "decision": "rerun",
+                    "reason": "the delta rewrites the arithmetic",
+                },
+            ]
+        }
+    )
+    decided = parse_decision_reply(reply, ("lens-a", "lens-b"))
+    assert [(d.lens, d.reuse) for d in decided] == [
+        ("lens-a", False),
+        ("lens-b", True),
+    ]
+    assert decided[0].reason == "the delta rewrites the arithmetic"
+
+
+def test_a_decision_reply_that_leaves_a_lens_out_is_refused():
+    """Every offered lens is decided or the whole reply fails: a lens
+    left out is not silently reused (or silently dropped from the plan).
+    Mutant: the coverage check dropped, which lets the unjudged lens
+    take whatever disposition the missing entry would have held."""
+    reply = json.dumps(
+        {"decisions": [{"lens": "lens-a", "decision": "rerun", "reason": "code"}]}
+    )
+    with pytest.raises(ContractError, match="left undecided"):
+        parse_decision_reply(reply, ("lens-a", "lens-b"))
+
+
+def test_a_decision_reply_naming_a_lens_the_earlier_review_did_not_run_is_refused():
+    """A reuse can never be invented: only a lens the earlier review
+    actually ran is offered, and a reply naming anything else is refused
+    whole. Mutant: the membership check dropped, which lets the model
+    reuse a lens that has no settled result at the delta base."""
+    reply = json.dumps(
+        {
+            "decisions": [
+                {"lens": "unplanned", "decision": "reuse", "reason": "no changes"}
+            ]
+        }
+    )
+    with pytest.raises(ContractError, match="not one the earlier review ran"):
+        parse_decision_reply(reply, ("lens-a",))
+
+
+def test_a_decision_reply_repeating_a_lens_is_refused():
+    reply = json.dumps(
+        {
+            "decisions": [
+                {"lens": "lens-a", "decision": "rerun", "reason": "code"},
+                {"lens": "lens-a", "decision": "reuse", "reason": "again"},
+            ]
+        }
+    )
+    with pytest.raises(ContractError, match="decided twice"):
+        parse_decision_reply(reply, ("lens-a",))
+
+
+def test_a_decision_value_outside_the_vocabulary_is_refused():
+    """`decision` is exactly `rerun` or `reuse`. Mutant: the vocabulary
+    check dropped, which reads any string as a disposition -- a 'keep'
+    or an injected value lands as a decision nobody made."""
+    reply = json.dumps(
+        {"decisions": [{"lens": "lens-a", "decision": "keep", "reason": "x"}]}
+    )
+    with pytest.raises(ContractError, match="exactly"):
+        parse_decision_reply(reply, ("lens-a",))
+
+
+def test_a_blank_or_oversized_decision_reason_is_refused():
+    blank = json.dumps(
+        {"decisions": [{"lens": "lens-a", "decision": "rerun", "reason": "   "}]}
+    )
+    with pytest.raises(ContractError, match="states what"):
+        parse_decision_reply(blank, ("lens-a",))
+    long = json.dumps(
+        {"decisions": [{"lens": "lens-a", "decision": "rerun", "reason": "x" * 601}]}
+    )
+    with pytest.raises(ContractError, match="over 600"):
+        parse_decision_reply(long, ("lens-a",))
+
+
+def test_a_decision_reply_that_is_not_one_object_is_refused():
+    with pytest.raises(ContractError, match="not one JSON object"):
+        parse_decision_reply("not json at all", ("lens-a",))
+    with pytest.raises(ContractError, match="the key decisions"):
+        parse_decision_reply(json.dumps({"other": []}), ("lens-a",))
+
+
+def test_fallback_decisions_rerun_every_offered_lens():
+    decided = fallback_decisions(("lens-a", "lens-b"), "the call failed")
+    assert [d.reuse for d in decided] == [False, False]
+    assert decided[0].reason == "the call failed"
+
+
+def test_the_decision_turn_lists_the_lenses_and_fences_the_delta():
+    delta = UntrustedBlock("delta-diff", RepoText("diff --git a/calc.py b/calc.py"))
+    text = decision_turn(EVENT, ("lens-a",), delta, NONCE)
+    assert text.startswith("Lens decisions target (from the controller):")
+    assert "- lens-a" in text
+    # Mutant: the delta shipped outside the fence, which would let
+    # PR-written text pose as controller instructions.
+    assert 'label="delta-diff"' in text
+    assert text.count("</untrusted-data") == 1
+    bare = decision_turn(EVENT, ("lens-a",), None, NONCE)
+    assert "delta-diff" not in bare
+
+
+def test_the_decision_system_names_the_two_decisions_and_the_nonce():
+    text = decision_system(NONCE)
+    assert '"rerun"' in text and '"reuse"' in text
+    assert NONCE in text
+
+
+RANGE_DIFF = (
+    "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+    "@@ -1,1 +1,1 @@\n-old\n+new\n"
+)
+
+
+def _delta(**overrides: object) -> DeltaScope:
+    values = {
+        "delta_from": OLD,
+        "resolution_paths": frozenset({"calc.py"}),
+        "note": "",
+        "gate_reason": "",
+        "removed": {},
+        "range_diff": RANGE_DIFF,
+    }
+    values.update(overrides)
+    return DeltaScope(**values)  # type: ignore[arg-type]
+
+
+def test_the_delta_highlight_block_is_the_incremental_diff():
+    block, omissions = delta_block(_delta(), None, Redactor())
+    assert block is not None and block.label == "delta-diff"
+    assert "+new" in block.content.text
+    assert "-old" in block.content.text
+    assert OLD[:12] in block.content.text
+    assert omissions == ()
+
+
+def test_a_delta_highlight_block_over_its_cap_is_cut_with_the_marker():
+    delta = _delta(range_diff="x" * (DELTA_DIFF_CHARS + 100))
+    block, omissions = delta_block(delta, None, Redactor())
+    assert block is not None
+    assert len(block.content.text) == DELTA_DIFF_CHARS + len(TRUNCATION_MARKER)
+    assert block.content.text.endswith(TRUNCATION_MARKER)
+    assert any("kept" in omission.detail for omission in omissions)
+
+
+def test_a_delta_highlight_block_the_room_cannot_hold_is_omitted_whole():
+    delta = _delta()
+    block, omissions = delta_block(delta, 10, Redactor())
+    assert block is None
+    assert any("left out" in omission.detail for omission in omissions)
+    # A room that holds the block yields it whole.
+    block, omissions = delta_block(delta, 4_096, Redactor())
+    assert block is not None
+    assert omissions == ()
+
+
+def test_an_empty_or_unestablished_delta_builds_no_highlight_block():
+    # A merge-only push: established, but no material to highlight.
+    block, omissions = delta_block(_delta(range_diff=""), None, Redactor())
+    assert block is None and omissions == ()
+    # The delta that could not be established: the review is an ordinary
+    # full review, with no incremental payload to send.
+    block, omissions = delta_block(
+        _delta(note="the delta range could not be established"), None, Redactor()
+    )
+    assert block is None and omissions == ()
