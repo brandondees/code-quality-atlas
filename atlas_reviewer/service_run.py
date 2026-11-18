@@ -52,6 +52,7 @@ from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.limit_stop import LimitHit
+from atlas_reviewer.notes import RECOVERED_NOTE_PATTERN
 from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
     ENV_KEY_CEILING_USD,
@@ -539,9 +540,12 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
     """The posted report from an agentic draft. A lens counts as run when
     its ledger line says it ran with its body (``clean`` or ``partial``);
     ``failed`` and ``NOT RUN`` are not run, the way the parity gate reads
-    them. The coverage note is built from the status line's controller
-    counts, and the limit stops are the status line's first stop, the
-    context omissions, and the ceiling note the coverage section carries."""
+    them -- except a line the coordinator marked recovered (#692), whose
+    lens's later clean run supersedes the failure and whose failure text
+    is carried among the limit stops instead. The coverage note is built
+    from the status line's controller counts, and the limit stops are the
+    status line's first stop, the context omissions, and the ceiling note
+    the coverage section carries."""
     skipped: list[str] = []
     named: set[str] = set()
 
@@ -633,7 +637,11 @@ def _agentic_coverage(
     limit notes. A not-run line carries its reason only when the line is
     exactly the state and one quoted reason -- the shape a lens that was
     never attempted renders; a failed lens with an outcome has parts, not
-    a reason, and stays name-only."""
+    a reason, and stays name-only. A line the coordinator marked recovered
+    (#692) is neither: the same lens's later clean run supersedes the
+    failure for coverage, so the lens is run, and the failure stays
+    visible as the line itself, carried among the limit notes rather than
+    dropped."""
     run: list[str] = []
     not_run: list[tuple[str, str]] = []
     cost: list[str] = []
@@ -644,6 +652,8 @@ def _agentic_coverage(
             name, state, rest = match.group(1), match.group(2), match.group(3) or ""
             if state in _AGENTIC_RUN_STATES:
                 run.append(name)
+            elif RECOVERED_NOTE_PATTERN.search(rest):
+                notes.append(line)
             elif "body sha256" not in rest:
                 quoted = _quoted_strings(rest)
                 not_run.append((name, quoted[0] if quoted else ""))

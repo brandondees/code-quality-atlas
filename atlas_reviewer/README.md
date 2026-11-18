@@ -1459,7 +1459,13 @@ D41 records the 2026-11-12 probe that did.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
-    completed. Otherwise a REVIEW INCOMPLETE warning follows, and the
+    completed. Each lens is held to its own entries: one clean run of a
+    lens covers it however its other entries ended (#692, D76) — an
+    earlier NOT RUN a later clean run superseded, or a later NOT RUN
+    after an earlier clean run — while a lens with no clean run still
+    blocks, and the superseded failure stays in the coverage section
+    marked `recovered by L<n>'s clean run`. Otherwise a REVIEW INCOMPLETE
+    warning follows, and the
     review never approves. A failed runner's note is quoted in the draft.
     A settled outcome with no changed-file count shows no coverage.
   - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are

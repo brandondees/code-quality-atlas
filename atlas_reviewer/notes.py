@@ -47,6 +47,30 @@ CLEANUP_SENTENCE = {
     CleanupStatus.NOT_CREATED: "no runner was created, so there was nothing to clean up",
 }
 
+RECOVERED_NOTE = "recovered by L{index}'s clean run"
+"""The coverage-line note the controller appends to a superseded lens
+entry (#692, D76): controller text, appended after every quoted field so
+it ends the line -- which is what lets the service report read it off the
+line's end without a quoted reason forging it. One definition for the
+writer and the reader: `coordinator._lens_line` renders it, and the
+service report matches `RECOVERED_NOTE_PATTERN` against the rendered
+line, so the two sides cannot drift apart."""
+
+
+def recovered_note(index: int) -> str:
+    """The rendered recovered note for one lens's clean run."""
+    return RECOVERED_NOTE.format(index=index)
+
+
+RECOVERED_NOTE_PATTERN = re.compile(
+    re.escape(RECOVERED_NOTE).replace(re.escape("{index}"), r"\d+") + r"$"
+)
+"""The service-side pattern for `RECOVERED_NOTE`, anchored at the line's
+end: only a controller-appended note ends a coverage line this way, so a
+quoted reason carrying the same words -- preserved verbatim inside its
+code span, whose closing backtick always trails the line -- never
+matches."""
+
 
 @dataclass(frozen=True)
 class ControllerFacts:
