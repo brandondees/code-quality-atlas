@@ -4264,7 +4264,11 @@ status line sums them over the lenses as `test_runs` and
 execution gap a review cannot approve over, the same rule a failed or
 timed-out run already rode; a failing suite is a result, not a gap, and
 still counts as a run. The plan's Status header now records Part B as
+<<<<<<< HEAD
 implemented with D80, phase 5's parity rerun still open (and out of
+=======
+implemented with D80, phase 5's parity rerun still open (and outside
+>>>>>>> 07207c4d (docs: the part-2 session-log entry cannot open a line with a hash)
 the issue's scope). Four counting tests run real pytest through
 `LocalSprites`; the status-line test sums over three lenses; the
 round-trip pins the two new fields.
