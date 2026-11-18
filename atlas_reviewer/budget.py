@@ -346,6 +346,19 @@ class ReviewBudget:
         record: CallRecord, outcome: str, actual: Decimal | None = None, usage: str = ""
     ) -> None:
         record.outcome, record.actual_usd, record.usage = outcome, actual, usage
+        if (
+            isinstance(actual, Decimal)
+            and actual.is_finite()
+            and actual > record.reserved_usd
+        ):
+            # D82's tripwire (round-1 review of #757): the reported cost
+            # came in above the worst case the reservation priced. The
+            # accounting keeps the reservation; the note makes the overrun
+            # visible in the usage report.
+            record.usage = (record.usage + " " if record.usage else "") + (
+                f"(settled ${actual:.4f} above its "
+                f"${record.reserved_usd:.4f} reservation; D82's tripwire)"
+            )
 
     def report(self) -> tuple[str, ...]:
         lines = [

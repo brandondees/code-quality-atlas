@@ -1033,6 +1033,30 @@ def test_failed_attempts_stay_counted_at_their_full_reservation():
     assert budget.committed_usd() == Decimal("3.00")
 
 
+def test_a_one_shot_settle_above_its_reservation_is_flagged():
+    """Round-1 review of #757, Minor 1: the one-shot budget's settle keeps
+    its accounting and flags a cost above the call's own reservation on
+    the record's usage line -- the same tripwire the agentic `Spend`
+    records, so a provider billing past the priced worst case is visible
+    on either path. A settle at the reservation is not an overrun."""
+    budget = ReviewBudget(CallLimits())
+    record = budget.reserve(Decimal("0.50"))
+    ReviewBudget.settle(record, "ok", Decimal("0.75"), "tokens in=1 out=1")
+    assert record.actual_usd == Decimal("0.75")
+    assert (
+        "settled $0.7500 above its $0.5000 reservation; D82's tripwire" in record.usage
+    )
+    assert "tokens in=1 out=1" in record.usage
+    at_bound = ReviewBudget(CallLimits())
+    at = at_bound.reserve(Decimal("0.50"))
+    ReviewBudget.settle(at, "ok", Decimal("0.50"), "tokens in=1 out=1")
+    assert "above its" not in at.usage
+    unpriced = ReviewBudget(CallLimits())
+    no_cost = unpriced.reserve(Decimal("0.50"))
+    ReviewBudget.settle(no_cost, "ok", None, "tokens in=1 out=1")
+    assert "above its" not in no_cost.usage
+
+
 def test_settled_actuals_replace_reservations():
     budget = ReviewBudget(CallLimits())
     record = budget.reserve(Decimal("2.90"))

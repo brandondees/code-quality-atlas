@@ -952,7 +952,9 @@ budget (12k), and reserves the call's worst case at the highest listed
 price tier. A reservation is refused if it would be the fourth call in the
 review (retries included), or if it could push the review past $3.00 or
 past the key's remaining credit. The draft's **Model usage** section
-records each call's reservation and its actual cost and tokens. The call cap
+records each call's reservation and its actual cost and tokens; a cost
+above the call's own reservation is flagged on that record's usage line
+(D82's tripwire, round-1 review of #757). The call cap
 (`--max-model-calls`, at most 3) is shared by every diff part and every
 retry: a retry on part 1 can leave part 3 refused, and that part's files are
 then listed as unreviewed.
@@ -1743,7 +1745,12 @@ D41 records the 2026-11-12 probe that did.
   the turn unpriced. That missing-cost
   case stays at the reserved worst case, as do
   an unreadable upstream charge, a BYOK call with no upstream charge, and
-  a turn with neither a readable cost nor usable token counts. A readable
+  a turn with neither a readable cost nor usable token counts. A settle
+  whose reported cost came in above the worst case reserved for the call
+  keeps the reservation it was held at and is recorded as an overrun on
+  the draft's `Model calls:` cost line (D82's tripwire, round-1 review of
+  #757) -- the observable signal that a provider billed past the priced
+  worst case. A readable
   cost is used as reported, including when the reasoning-token count is
   missing and when the response also reports cache tokens. The catalog is
   fetched once per provider for the review and reused, to confirm the

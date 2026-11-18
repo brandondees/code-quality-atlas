@@ -1145,6 +1145,12 @@ class Spend:
     committed_usd: Decimal = Decimal(0)
     derivation: Derivation | None = None
     settled_usd: Decimal = Decimal(0)
+    overruns: list[str] = field(default_factory=list)
+    """Per-settle notes for calls whose reported cost came in above the
+    worst case reserved for them (D82's tripwire, round-1 review of
+    #757): the observable signal that a provider billed past the
+    reservation's priced worst case. The accounting keeps the
+    reservation; only the record grows."""
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
@@ -1282,11 +1288,23 @@ class Spend:
         else to its reservation, kept as spent (D43) -- a call that will
         never report an actual is not in flight waiting to come down.
         Every settle frees the in-flight worst case the reservation held
-        and wakes the backpressure waits."""
+        and wakes the backpressure waits.
+
+        A cost above the call's own worst case is recorded on `overruns`
+        (D82's tripwire) and nothing else: the reservation was the bound
+        that was held, so the accounting keeps it, and the overrun is the
+        observable signal that a provider billed past the worst case the
+        reservation priced -- D82's subset assumption failing on that
+        route, the revisit trigger's condition."""
         with self._lock:
             if _valid_cost(actual_usd):
                 self.committed_usd += actual_usd - worst_usd
                 self.settled_usd += actual_usd
+                if actual_usd > worst_usd:
+                    self.overruns.append(
+                        f"settled ${actual_usd:.4f} above its "
+                        f"${worst_usd:.4f} worst case"
+                    )
             else:
                 self.settled_usd += worst_usd
             self._settled.notify_all()

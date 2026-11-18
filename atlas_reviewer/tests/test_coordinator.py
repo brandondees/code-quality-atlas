@@ -4836,3 +4836,20 @@ def test_a_legacy_records_unattributed_line_carries_no_lens_through_the_carry(tm
     record = RoundLog(path).read().records[-1]
     # The carried line's slot in the new record's attributions is empty.
     assert record.attributions[-1] == ""
+
+
+def test_a_settle_above_its_reservation_reaches_the_drafts_cost_line(tmp_path):
+    """Round-1 review of #757, Minor 1: the tripwire must be observable
+    end to end. A scripted model whose worst case is under the cost its
+    reply reports settles above its reservation; the draft's one
+    `Model calls:` cost line carries the overrun count and the per-settle
+    note (D82's tripwire), which the posted Cost section renders and the
+    cost event parses."""
+    model = ScriptedLensModel([final()], worst_usd=Decimal("0.01"))
+    result, _model, _sprites = review(tmp_path, [], model=model)
+    draft = render_draft(result, Redactor())
+    line = next(line for line in draft.splitlines() if line.startswith("Model calls:"))
+    assert (
+        "1 settle(s) reported a cost above their reservation (D82's tripwire)" in line
+    )
+    assert "settled $0.0200 above its $0.0100 worst case" in line

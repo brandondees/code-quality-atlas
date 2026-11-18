@@ -3888,3 +3888,30 @@ this fix; neither is built here. Tests with fakes across
 `test_service_post.py` pin both behaviors; the mutants applied by hand
 and killed by their named tests are listed in D82's Tests paragraph
 (R1-R6 on the reservation accounting, H1-H4 on the banner).
+
+## 2026-11-18 (same day) — #757 round 1: the overrun tripwire, the correction sweep, and the ceiling's exact boundary
+
+The round-1 protocol review's verdict is APPROVE — two Minors and three
+Nits, all fixed or dispositioned. **M1** — D82's subset assumption
+(reasoning tokens counted inside the output cap, the reported count
+inside the completion count) now has an observable failure signal:
+`Spend.settle` records an overrun note when a settle's reported cost
+exceeds the worst case reserved for the call, the draft's one
+`Model calls:` cost line carries the count and the per-settle note (so
+the posted Cost section renders it and the cost event parses it), and
+the one-shot `ReviewBudget.settle` flags the same on the record's usage
+line; the accounting keeps the reservation (the bound that was held),
+and D82's revisit trigger now names the tripwire's signal. **M2** — the
+superseded sum formula's surviving current-state statements now carry a
+**Correction (2026-11-18, D82).** note in the D55 style at the entries
+that state it (D25, D31, D34, D40, D41, D43, D50 — D41's settle-refusal
+sentence included), and the Q24 narrative sentence and the lens-based
+agentic reviewer plan doc's four passages are corrected in place.
+**N1** — the exactly-at-the-ceiling boundary is pinned: a reservation
+projecting exactly to the cap is accepted (spend never passes the cap;
+the `>` to `>=` mutant dies). **N2** — the PR body's overlap sentence
+now names the decisions log and the session log as append-shared with
+the two open tool PRs. **N3** — `Spend._reserve`'s genuine-stop
+pre-check stays: the review's own mutant showed it behaviorally
+equivalent to the wait's re-check, it is pre-existing defense-in-depth
+in money code, and the review requested no change; left as is.

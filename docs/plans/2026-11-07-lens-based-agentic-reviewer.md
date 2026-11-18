@@ -9,7 +9,8 @@ budget figures remain estimates until the owner sets agentic numbers,
 apart from the per-review reservation (D43).
 D43 (2026-11-12) sets the per-review reservation: it stays $5, and the
 one-token-per-byte input bound stays. The reservation prices the whole
-output cap at the completion rate plus the reasoning rate.
+output cap at the higher of the completion and reasoning rates (D82
+amends the D43 update's sum: one rate per token).
 D34 also replaces this doc's rule that every bridge result is redacted:
 repository content is scanned for committed secrets instead, and runtime
 output stays redacted (see the secret rule in `agentic-reviewer.md`).
@@ -423,8 +424,9 @@ against a dollar cap and a call cap, and settles to the actual cost:
   limit. D43 did not adopt the proposal to lower `max_output_tokens`
   to 4,000. An override can tighten either and cannot exceed the model.
   `reasoning.max_tokens` is a hint. The reservation prices the whole
-  output cap at the completion rate plus the reasoning rate, so it
-  does not shrink when the hint is lowered. The $5 per-review
+  output cap at the higher of the completion and reasoning rates, so it
+  does not shrink when the hint is lowered (D82 amends the D43 update's
+  sum: one rate per token). The $5 per-review
   reservation is D43's.
 - **Breadth** comes from the depth mode. **Rounds** come from `REVIEW.md`.
 - **Parallelism.** The worker-pool size is the only new number. With
@@ -437,7 +439,8 @@ needs roughly *(lenses × turns) + 2* calls. The cap is a hard owner
 limit, so this design can't change it. See open question 1. Update
 (2026-11-12, D43): the per-review dollar reservation is $5, and the
 one-token-per-byte input bound is unchanged. The reservation prices
-the whole output cap at the completion rate plus the reasoning rate.
+the whole output cap at the higher of the completion and reasoning
+rates (amended 2026-11-18 by D82: one rate per token, not the sum).
 The call cap here is not that decision.
 
 ## Failure modes
@@ -533,7 +536,8 @@ The one live data point is D26's single call, which cost $0.17.
    only (4 lenses) until the cost is measured? Update (2026-11-12, D43):
    the review dollar reservation is $5, and the one-token-per-byte input
    bound is unchanged. The reservation prices the whole output cap at
-   the completion rate plus the reasoning rate. The call cap, per-lens slice and key hard limit
+   the higher of the completion and reasoning rates (amended
+   2026-11-18 by D82: one rate per token, not the sum). The call cap, per-lens slice and key hard limit
    asked here are not that decision.
 2. **Source staging.** Option B (two tarballs, no git on the controller)
    first, or straight to Option A (a bundle, real history)?

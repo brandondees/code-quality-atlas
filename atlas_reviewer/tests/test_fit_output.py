@@ -10,6 +10,7 @@ import pytest
 
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import AttemptOutcome, Cause, LensState
+from atlas_reviewer.coordinator import render_draft, synthesize
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
@@ -25,6 +26,7 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.ports import BoundaryError, TransportTimeoutError
 from atlas_reviewer.pricing import PricingUnknownError
+from atlas_reviewer.redact import Redactor
 
 from .agentic import COST, LIMITS, READ_ALL, final
 from .helpers import FakeClock
@@ -345,3 +347,70 @@ def test_a_large_reviews_settles_free_the_ceiling_and_its_keeps_stop_it():
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "reservation_usd"
     assert "$12.50" in outcome.limit_hit.observed
+
+
+def test_a_reservation_projecting_exactly_to_the_ceiling_is_accepted():
+    """Round-1 review of #757, Nit: spend never passes the cap, and a
+    projection equal to it is not past it -- D68's ceiling is a ceiling,
+    not an exclusive bound. Kills the `>` to `>=` mutant, which would
+    spuriously stop a review whose reservations fit its ceiling
+    exactly."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.60")) is None
+    assert spend.reserve(Decimal("0.40")) is None
+    assert spend.committed_usd == Decimal("1.00")
+    stop = spend.reserve(Decimal("0.01"))
+    assert stop is not None
+    assert stop.limit == "reservation_usd"
+
+
+def test_a_settle_above_its_worst_case_is_recorded_as_an_overrun():
+    """Round-1 review of #757, Minor 1: D82's subset assumption can fail
+    on a route that bills reasoning tokens outside its output cap, and
+    the one event that would reveal it -- a settle whose reported cost
+    exceeds the worst case reserved for the call -- must leave a trace.
+    The accounting keeps the reservation (the bound that was held); the
+    overrun note is the draft-visible signal and the condition D82's
+    revisit trigger names. A settle at the worst case, and an unpriced
+    settle, record nothing."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle(Decimal("0.50"), Decimal("0.75"))
+    assert spend.committed_usd == Decimal("0.75")
+    assert spend.overruns == ["settled $0.7500 above its $0.5000 worst case"]
+
+    at_bound = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert at_bound.reserve(Decimal("0.50")) is None
+    at_bound.settle(Decimal("0.50"), Decimal("0.50"))
+    assert at_bound.overruns == []
+
+    unpriced = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert unpriced.reserve(Decimal("0.50")) is None
+    unpriced.settle(Decimal("0.50"), None)
+    assert unpriced.overruns == []
+
+
+def test_the_overrun_rides_the_drafts_cost_line():
+    """Round-1 review of #757, Minor 1: the tripwire is only observable
+    when the draft carries it. The overrun notes join the one
+    `Model calls:` cost line -- the line the posted Cost section renders
+    and the cost event parses -- not the limit stops, which a settle
+    above its reservation is not."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle(Decimal("0.50"), Decimal("0.75"))
+    review = synthesize([], spend=spend)
+    assert review.settle_overruns == ("settled $0.7500 above its $0.5000 worst case",)
+    line = next(
+        line
+        for line in render_draft(review, Redactor()).splitlines()
+        if line.startswith("Model calls:")
+    )
+    assert (
+        "1 settle(s) reported a cost above their reservation (D82's tripwire): "
+        "settled $0.7500 above its $0.5000 worst case" in line
+    )
+    clean = synthesize(
+        [], spend=Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    )
+    assert "settle(s)" not in render_draft(clean, Redactor())
