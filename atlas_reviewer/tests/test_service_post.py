@@ -1361,3 +1361,49 @@ def test_main_does_not_listen_without_a_posting_token(tmp_path, capsys):
     )
     assert code == 2
     assert "ATLAS_GITHUB_APP_ID" in capsys.readouterr().err
+
+
+# --------------------------------------------------- the delta post (#702)
+
+
+def test_a_delta_post_cites_the_review_it_builds_on_and_shows_the_carry():
+    report = ReviewReport(
+        ("tracing-correctness-and-invariants",),
+        (),
+        "note",
+        (),
+        (),
+        ("Model calls: 4; committed: $0.12.",),
+        "COMMENT",
+        findings=("**P1** [carried, blocker] calc.py:4 (lens): rounds per line",),
+        resolved=(
+            (
+                '**P2** calc.py:9: "the secret is logged". '
+                'Reason, quoted: "the delta deletes the log line"'
+            ),
+        ),
+        carried_unverified=('**P3** docs/x.md:2: "stale example"',),
+    )
+    key = post_key(EVENT)
+    body = render_comment(report, key, lambda item: item, delta_from=EVENT.head_sha)
+    # Mutant: the citation dropped -- the post would not say which earlier
+    # review its carried findings build on, which the issue's contract
+    # promises.
+    assert f"Follows the review of `{EVENT.head_sha[:12]}`" in body
+    assert "carried forward" in body
+    assert "## Resolved by the new commits" in body
+    assert "the delta deletes the log line" in body
+    assert "## Carried, not re-verified" in body
+    assert "stale example" in body
+    # The carried finding rides in the Findings section like any other.
+    assert (
+        "rounds per line" in body.split("## Findings", 1)[1].split("## Resolved", 1)[0]
+    )
+
+
+def test_a_full_post_has_no_delta_citation_or_sections():
+    report = ReviewReport(("lens",), (), "note", (), (), (), "COMMENT")
+    body = render_comment(report, post_key(EVENT), lambda item: item)
+    assert "Follows the review of" not in body
+    assert "## Resolved by the new commits" not in body
+    assert "## Carried, not re-verified" not in body

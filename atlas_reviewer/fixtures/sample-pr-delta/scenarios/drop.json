@@ -1,0 +1,17 @@
+{
+  "findings": {
+    "tracing-correctness-and-invariants": [
+      {
+        "location": "calc.py:3",
+        "evidence": "gross = price_cents * quantity",
+        "severity": "severe",
+        "valence": "defect",
+        "route": "eng",
+        "attribution": "introduced",
+        "finding": "the per-line gross can overflow the caller's integer width before the discount is subtracted",
+        "fix": "bound the inputs or widen the accumulator before multiplying"
+      }
+    ]
+  },
+  "unread": []
+}

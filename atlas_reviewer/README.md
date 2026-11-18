@@ -135,6 +135,40 @@ and the queued follow-up is a `follow-up queued` event — all in
 `service.jsonl`, tagged with the heads, so the numbers the threshold is
 tuned on can be read against each decision.
 
+The follow-up review of a kept head is a **delta review** (`delta.py`).
+Its diff is the pull request's diff at the new head, restricted to the
+paths the range `delta_from..head` touched: the pull request's diff
+never carries merge-from-base content (merging the base moves the merge
+base forward, and the base's changes drop out of the three-dot diff), so
+the restriction is the range diff with that content excluded, with no
+per-commit reads. A merge-only push yields an empty delta, and the
+review then exists to carry the earlier findings forward. After its
+lenses settle, one bounded, tool-less **carry-forward call** judges the
+earlier review's findings — the round log's records at `delta_from`,
+labeled `P1`, `P2`, ... — against the delta:
+
+- a finding the carry-forward re-states is quote-checked against the new
+  head's files exactly like an ordinary finding's, and a verified
+  restatement is carried into the findings set under its `P` label;
+- a finding the new commits fixed is marked **resolved** with the stated
+  reason — accepted only when the delta touched the file the finding
+  cites, so PR content cannot resolve a finding on a file the commits
+  never changed, and a refused resolution is recorded as the proposal it
+  is;
+- everything else is carried as the record stored it, in the draft's
+  `Carried, not re-verified` section and back into the round record, so
+  the next review re-offers it — nothing silently dropped (D73).
+
+A finding identical to a carried one (same location and text) is posted
+once, as the carried copy. The delta review's post cites the review it
+builds on (`Follows the review of `<sha>``) and shows the resolved and
+carried sections. The carry-forward call spends against the review's own
+derived limits and the dollar ceiling (D68) like every other call; its
+failure — a contract refusal, a transport error, a spent-out review —
+falls back to carrying every prior finding as recorded, with the failure
+named. An unfetchable delta range falls back to the full pull request
+diff, recorded in the draft.
+
 The review child follows the service mode, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
 so a bad value cannot start an unbounded pool, not a cost cap).
@@ -1607,6 +1641,7 @@ D41 records the 2026-11-12 probe that did.
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
 | `service_admit.py` | webhook signature, event and allowlist admission | no |
 | `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
+| `delta.py` | the delta review a kept head's follow-up runs (#702): the delta scope, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |
 | `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74) | the review child |
 | `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |

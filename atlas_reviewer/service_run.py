@@ -295,6 +295,15 @@ class ReviewReport:
     cost_lines: tuple[str, ...]
     recommended_event: str
     findings: tuple[str, ...] = ()
+    resolved: tuple[str, ...] = ()
+    """A delta review's resolved findings (#702): the draft's
+    resolved-section bullets, each the whole line the draft wrote, so the
+    posted comment shows what the new commits fixed and why."""
+    carried_unverified: tuple[str, ...] = ()
+    """A delta review's carried findings without a re-anchored, verified
+    quote (#702): the draft's carried-section bullets. They are not
+    findings, but the post shows them, so a carried finding is never
+    silently dropped between the draft and the comment."""
 
 
 @dataclass(frozen=True)
@@ -605,6 +614,8 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         tuple(cost),
         recommended if isinstance(recommended, str) else "",
         findings=_findings(draft),
+        resolved=tuple(_bullets(section(draft, "Resolved by the new commits"))),
+        carried_unverified=tuple(_bullets(section(draft, "Carried, not re-verified"))),
     )
 
 

@@ -256,7 +256,12 @@ docs-or-tests-only change, or a push touching no file the review is
 still reading keeps the review; a code push cancels a review that is
 still early, under `ATLAS_HEAD_CHANGE_CANCEL_FRACTION`), and a kept head
 is recorded as the pull request's pending follow-up, queued when the
-running review settles. Setting the policy to `cancel` restores the
+running review settles. The follow-up of a settled success is a delta
+review: it reviews only what the range between the settled head and the
+new head changed, carries the earlier review's findings forward through
+one bounded carry-forward call (re-anchored through the quote checker,
+the new commits' fixes marked resolved), and its post cites the review
+it builds on. Setting the policy to `cancel` restores the
 blanket supersede. The decision and the review costs are telemetry
 events in `/data/service.jsonl` (`head change`, `review cost`,
 `follow-up queued`). A review

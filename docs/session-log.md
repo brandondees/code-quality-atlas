@@ -3369,6 +3369,50 @@ on the PR head: `pytest tests/` 880 passed / 14 skipped, coverage
 96.06%; ruff check/format, mypy (85 files), `tooling.cli drift` clean.
 Offline only.
 
+
+## 2026-11-18 (same day) — #702 part 2: the delta review and its carry-forward (D79 update, PR 2 of the stack)
+
+The follow-up a kept head materializes as (PR 1's `take_pending`) is now
+a delta review. Its diff is the pull request's diff at the new head
+restricted to the paths the range `delta_from..head` touched — the pull
+request's diff never carries merge-from-base content (merging the base
+moves the merge base forward, and the base's changes drop out of the
+three-dot diff), so the restriction IS the range diff with that content
+excluded, with no per-commit reads; a merge-only push yields an empty
+delta, whose review exists to carry the earlier findings forward. After
+the delta's lenses settle, one bounded, tool-less carry-forward call —
+built like D73's re-assessment and quote-checked through the same judge,
+so the two paths' quote checks cannot drift — judges the earlier
+review's findings (the round log's records at `delta_from`, parsed back
+from `{id} {severity} {location} {finding}` lines, labeled by position
+`P1`, `P2`, ...): a verified re-statement joins the findings set under
+its `P` label and counts for the verdict (reconstructed
+defect-introduced, the conservative direction); a resolution is accepted
+only when the prior finding's location is a path the delta touched (the
+mechanical gate that keeps PR content from resolving a finding on a file
+the new commits never changed — a refused resolution is recorded as the
+proposal it is); everything else is carried as the record stored it, in
+the draft's `Carried, not re-verified` section AND back into this
+review's round record, so the next review re-offers it — nothing
+silently dropped (D73). A finding identical to a carried one is posted
+once, as the carried copy. The delta post cites the review it builds on;
+the status line carries `carried`/`resolved` on a delta review; an
+unfetchable range falls back to the full diff, recorded in the draft.
+The dry-run lens script grew a `carryforward` scenario section
+(controller-level), validated at load with the real carry-forward parser;
+the scripted reviewer answers the carry turn from it — checked before
+the body markers, because the carry system prompt carries no lens body
+(the scripted model's `_markers` used to run first and refused the turn,
+which is how the fixture dry run found the ordering bug). Tests: 25 in
+`atlas_reviewer/tests/test_delta.py`, 5 delta flows in
+`test_coordinator.py`, 2 in `test_service_run.py`, 2 in
+`test_service_post.py`, 6 in `test_lens_script.py`, and two delta dry
+runs over the new `fixtures/sample-pr-delta/` in `test_cli.py` (the
+delta scope's two files, the carried blocker, the dedupe, the record's
+carried line, and the no-prior gap named). Verification, all on the PR
+head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
+94%); `pytest atlas_reviewer/tests` 3,332 passed, 95.78%; ruff
+check/format, mypy (86 files), `tooling.cli drift` clean. Offline only.
 ## 2026-11-18 (same day) — #747 round 1: finishing is the default, the race installs, the gap is recorded
 
 The protocol review's three Majors, fixed on the bottom layer (the
@@ -3422,7 +3466,7 @@ the README. Counts corrected: 22 service flows in
 `test_service_receive.py` (15 from the first push, 7 from this round),
 37 in `test_head_change.py`.
 
-## 2026-11-18 (same day) — #747 round 2: the recovery cannot interleave or post stale, and the docs catch up to the code
+## 2026-11-18 (same day) — #747 round 2: the recovery cannot interleave or post stale, and the docs catch up
 
 The round-2 protocol review (APPROVE) asked for the Minors and cheap
 Nits. The behavioral one is the recovery's two windows (R2-F4):

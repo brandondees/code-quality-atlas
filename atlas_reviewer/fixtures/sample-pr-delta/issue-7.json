@@ -1,0 +1,5 @@
+{
+  "number": 7,
+  "title": "Discount rounding is off by one cent",
+  "body": "A 3-item cart at 33% off totals one cent low."
+}

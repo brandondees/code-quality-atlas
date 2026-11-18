@@ -1185,3 +1185,82 @@ class _Proc:
 
     def wait(self, timeout=None):
         return self._code
+
+
+# ------------------------------------------------- the delta report (#702)
+
+
+def _delta_draft() -> str:
+    status = json.dumps(
+        {
+            "mode": "agentic",
+            "review_event": "COMMENT",
+            "proposed_event": "COMMENT",
+            "coverage_complete": True,
+            "carried": 1,
+            "resolved": 1,
+        }
+    )
+    return (
+        f"<!-- atlas-review-status: {status} -->\n"
+        "**Review event: COMMENT.**\n"
+        "\n"
+        "Delta review: builds on the review of `3f6c1e9b2a7d`.\n"
+        "\n"
+        "## Resolved by the new commits\n"
+        "\n"
+        '- **P2** `"calc.py:9"`: `"the secret is logged"`. '
+        'Reason, quoted: `"the delta deletes the log line"`\n'
+        "\n"
+        "## Carried, not re-verified\n"
+        "\n"
+        '- **P3** `"docs/x.md:2"`: `"stale example"`\n'
+        "\n"
+        "## Findings (verified quotes only)\n"
+        "\n"
+        '- **P1** [carried, blocker] `"calc.py:4"` (`"tracing lens"`): '
+        '"rounds per line"\n'
+        "\n"
+        "## Lens coverage (attestation ledger)\n"
+        "\n"
+        "- L1 tracing lens: **clean**; body sha256 ab12\n"
+        "\n"
+        "Model calls: 4; committed: $0.12.\n"
+    )
+
+
+def test_a_delta_drafts_resolved_and_carried_sections_reach_the_report():
+    report = summarize_draft(_delta_draft(), expect="agentic")
+    # Mutant: the two delta sections dropped from the parse -- the post
+    # would lose what the new commits fixed and what was carried
+    # unverifiable, both of which the issue's carry-forward contract
+    # promises to a reader.
+    assert report.findings == (
+        '**P1** [carried, blocker] `"calc.py:4"` (`"tracing lens"`): "rounds per line"',
+    )
+    assert report.resolved == (
+        (
+            '**P2** `"calc.py:9"`: `"the secret is logged"`. '
+            'Reason, quoted: `"the delta deletes the log line"`'
+        ),
+    )
+    assert report.carried_unverified == ('**P3** `"docs/x.md:2"`: `"stale example"`',)
+
+
+def test_a_full_review_draft_has_no_delta_sections():
+    report = summarize_draft(
+        _delta_draft()
+        .replace("## Resolved by the new commits\n\n- **P2**\n", "")
+        .replace(
+            '- **P2** `"calc.py:9"`: `"the secret is logged"`. '
+            'Reason, quoted: `"the delta deletes the log line"`\n',
+            "",
+        )
+        .replace(
+            '## Carried, not re-verified\n\n- **P3** `"docs/x.md:2"`: `"stale example"`\n',
+            "",
+        ),
+        expect="agentic",
+    )
+    assert report.resolved == ()
+    assert report.carried_unverified == ()
