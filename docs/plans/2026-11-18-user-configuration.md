@@ -18,9 +18,10 @@ withdrawn once the 5:13 answers made tenant keys required), the
 tier-coverage correction and its 5:13 answer (§4's merge-base bullet; all
 five floor-tier lenses protected), the S4 event-type decision (4:54 PM CT,
 recorded in §6), the tenant-supplied-keys naming note (§2), the
-invite-only gate (§2), and **§8** — Q1–Q3 decided 5:13 PM CT, **Q4 open**
-(how to keep operator compute for tenants at or near zero) and **Q5 open**
-(who configures the per-installation daily cap). Nothing
+invite-only gate (§2), and **§8** — Q1–Q3 and Q5 decided (5:13/5:51 PM
+CT; Q5's answer amends §7 decision 9 to hold the installation admin's
+daily cap), **Q4 open** (how to keep operator compute for tenants at or
+near zero). Nothing
 in this plan was run live: no model call, no
 GitHub write, no Fly or secret change, no deployed setting touched.
 
@@ -227,11 +228,10 @@ PM CT answers add the requirement that completes this surface: **beyond
 the operator's allowlisted repos a tenant-supplied key is required — there
 is no operator-key path for tenant installations** — so the tenant path's
 dollar bounds are the tenant's own spend protection (§4), a
-**per-installation daily cap, configurable per installation**, joins S9's
-bounds (S9/S10) — who configures it (the operator per invited installation,
-or the installation admin on the intake page, which would need a further
-amendment to §7 decision 9's "credentials only") is **§8 Q5, pending
-Brandon** — and the operator-compute question is §8 Q4, open. The
+**per-installation daily cap** joins S9's bounds (S9/S10), **configured by
+the installation admin on the S10 settings page** (the 5:51 PM CT answer,
+§8 Q5 decided — decision 9 amended to hold it) — and the operator-compute
+question is §8 Q4, open. The
 decisions
 live in §7; the slice is S10. **A naming note:** this plan's "BYOK" — the
 installation supplies its own endpoint and key, the surface this record
@@ -465,8 +465,8 @@ key.
 | S6 | AGENTS.md / coding-guideline ingestion as fenced context blocks | `cli.py`, `conversation.py` | the blocks reach every lens fenced and budgeted; omissions are named; injected content stays inside the fence | **concurrent** — corrected against the open #734 PRs' actual file lists: #752/#753 (D80) touch `bridge.py`, `bridge_args.py`, `bridge_staging.py`, `interpreter.py`, `lens_loop.py`, `attestation.py`, `coordinator.py`, `ports.py`, `tool_model.py` — **not** `cli.py` or `conversation.py`, so the earlier "hot files" premise (based on the pre-#752 prediction) was wrong; rebase-check only | after S1 |
 | S7 | The #734 allow-list and in-run operator approval | `bridge_args.py`, `bridge.py`, service glue | a blocked command routes to an operator-approval request; an approved addition applies within the same run only inside the wall and dollar bounds; an unapproved gap is named by the review | **depends on #734 (D80) landing** — #752/#753 are open and their file sets include S7's own `bridge_args.py`/`bridge.py` | after #752/#753 land |
 | S8 | Installation-level defaults, quiet hours / per-repo rate limits | `service.py`, `service_queue.py`, new store | — | **deferred by D81** (Q4: repo-level only — amended for credentials only by §7's decision 9, which is S10's store, not a general defaults store; Q7: quiet hours deferred) | deferred |
-| S9 | The per-tenant spend bounds (D81's update; values decided 5:13 PM CT): the operator max per review ($25) clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget ($100) refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume. On the operator-key path the bounds bound operator spend; on the tenant-supplied path they are the tenant's own spend protection (§4). The **per-installation daily cap** (the 5:13 answer to §8 Q1: configurable per installation) reuses this same counting machinery — its store side is S10's | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | a repo-raised ceiling cannot pass the operator max and the clamp is named; a repo over its daily budget is refused with the plain record and never a clean-looking post; **two distinct owner/repo pairs never share a spend file** (the percent-encoding of §4); the bounded overshoot is pinned by a test (concurrent admissions over-commit by at most the in-flight reviews × the operator max — 32 × $25 = $800 past the $100 budget at the decided values); the total survives a restart and resets at the UTC boundary | **rebase-check against #757 (D82)** — its file list includes `budget.py`, which S9's daily-total accounting edits; follows S1 (the operator max is a config-bounded value) and S4 (the refusal rides its admission surface, already in flight at #756) | after S1 and S4; with S10, the **precondition for opening the App beyond the operator's allowlisted repos — which now requires a tenant-supplied key, and means adding invited installations to `ATLAS_REVIEW_REPOS`, never removing the invite-only gate (§2)** |
-| S10 | BYOK: the tenant-supplied model endpoint and key — **required beyond the operator's allowlisted repos, with no operator-key path for them** (the 5:13 PM CT answer); the intake surface, the encrypted store, the per-installation daily cap (configurable per installation, the 5:13 answer to §8 Q1), the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), the per-installation cap's per-installation config, `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end, and a non-allowlisted installation **cannot review on the operator's key at all** — no fallback, no operator-key path; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; the **per-installation daily cap is enforced, configurable per installation**; the tenant path's dollar accounting is the tenant's own protection, and **no operator-protective bound consumes a tenant-reported figure** (tests pin: the per-review clamp and hard limits are computed from operator inputs; a deflated reported count changes only the tenant's own settled total); zero-priced models are allowed and the call caps and walls bound them; the OpenRouter-BYOK handling on the operator-key path is untouched (D41) | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
+| S9 | The per-tenant spend bounds (D81's update; values decided 5:13 PM CT): the operator max per review ($25) clamps the repo's effective ceiling (out-of-range → named fallback, D68's pattern), and the per-repo daily budget ($100) refuses further reviews at admission and re-checks at preflight; the record says plainly "skipped: daily budget reached" and never reads clean; UTC-day reset, total on the state volume. On the operator-key path the bounds bound operator spend; on the tenant-supplied path they are the tenant's own spend protection (§4). The **per-installation daily cap** (the 5:13 answer to §8 Q1, its configurer decided 5:51 PM CT: **the installation admin sets it on the S10 settings page**) reuses this same counting machinery and is enforced **alongside the per-repo daily budget — the stricter of the two wins** each admission; when no cap is set, none applies and the per-repo budgets remain the bound. Its store side is S10's installation store, and uninstall removes the cap with the credentials | `review_wide.py` (the clamp beside the ceiling resolution), `budget.py` (the day's committed-spend accounting), `service_admit.py` + `service.py` (the refusal), README, tests | a repo-raised ceiling cannot pass the operator max and the clamp is named; a repo over its daily budget is refused with the plain record and never a clean-looking post; **two distinct owner/repo pairs never share a spend file** (the percent-encoding of §4); the bounded overshoot is pinned by a test (concurrent admissions over-commit by at most the in-flight reviews × the operator max — 32 × $25 = $800 past the $100 budget at the decided values); the total survives a restart and resets at the UTC boundary; **an installation over its admin's cap is refused the same way, the stricter of cap and budget governs each admission, and an unset cap means none applies** | **rebase-check against #757 (D82)** — its file list includes `budget.py`, which S9's daily-total accounting edits; follows S1 (the operator max is a config-bounded value) and S4 (the refusal rides its admission surface, already in flight at #756) | after S1 and S4; with S10, the **precondition for opening the App beyond the operator's allowlisted repos — which now requires a tenant-supplied key, and means adding invited installations to `ATLAS_REVIEW_REPOS`, never removing the invite-only gate (§2)** |
+| S10 | BYOK: the tenant-supplied model endpoint and key — **required beyond the operator's allowlisted repos, with no operator-key path for them** (the 5:13 PM CT answer); the intake surface, the encrypted store, the per-installation daily cap (**set by the installation admin on the settings page** — the 5:51 PM CT answer to §8 Q5, stored with the credentials and removed on uninstall), the model-call client's endpoint/key resolution, the egress checks of §4, the failure-named fallback rule | the intake page (new, outside the package), a secrets-store module (new), the per-installation cap's per-installation config, `providers.py` + `openrouter.py` (endpoint/key resolution), `service.py` (child env assembly), README, tests | a BYOK installation's reviews run on its own key end to end, and a non-allowlisted installation **cannot review on the operator's key at all** — no fallback, no operator-key path; no key can leak into a repo file, log, post, or Sprite; a hostile base URL cannot reach the blocked set over IPv4 *or* IPv6 (§4's list); a key failure names itself; the **per-installation daily cap is enforced, **set and editable by the installation admin on the settings page under the same installation-admin authentication that guards the key**, removed on uninstall with the credentials, and combined with the per-repo daily budget by the stricter-wins rule**; the tenant path's dollar accounting is the tenant's own protection, and **no operator-protective bound consumes a tenant-reported figure** (tests pin: the per-review clamp and hard limits are computed from operator inputs; a deflated reported count changes only the tenant's own settled total); zero-priced models are allowed and the call caps and walls bound them; the OpenRouter-BYOK handling on the operator-key path is untouched (D41) | **rebase-check against #757 (D82)** — its file list includes `openrouter.py` and `tool_model.py`, which S10 edits — **and against #752 (D80)** (`tool_model.py`); this plan's earlier "#654/#655 drafts" pointer was stale (both merged; #655 re-landed as merged #740); **decided in §7** (Brandon accepted all nine recommendations) and after S9 (the spend bounds define what a BYOK review clamps to) | last; the §7-Q9 prereq is decided — the installation-level credential store is in scope |
 
 Recommended order: S4 is already in flight at #756 (its retarget
 follow-up is issue #758), then S1 (concurrent with the parity track), then S3 and S5, then S9
@@ -573,7 +573,12 @@ intending to set up a cost based billing system and roll out access on an
 invite only basis initially."* — the existing repo allowlist is the
 invite-only gate (§2), and cost-based billing is the intended direction
 for covering operator compute (§8 Q4), to be designed later and out of
-scope for this plan.
+scope for this plan. At **5:51 PM CT** he answered the cap's configurer
+question (§8 Q5): *"Installation admins set their own daily cap on the
+settings page"* — decision 9 is amended so installation-level state holds
+the credentials **plus the installation admin's daily cap**, enforced by
+S9's machinery alongside the per-repo daily budget with the stricter of
+the two winning each admission, unset meaning none applies.
 
 ## 7. BYOK decisions (D81 — Brandon accepted all nine recommendations, 2026-11-18 4:15 PM CT)
 
@@ -600,8 +605,9 @@ proposed, are recorded in D81:
    repos (no operator-key path), so on that path these bounds are the
    **tenant's own spend protection** — §4 states what that does and does
    not make tenant-reported figures able to touch; a per-installation
-   daily cap, configurable per installation, is added (S9/S10) — who
-   configures it is **§8 Q5, pending**.
+   daily cap, configurable per installation, is added (S9/S10) —
+   **configured by the installation admin on the settings page** (5:51 PM
+   CT, §8 Q5 decided; decision 9 amended to hold it).
 5. **Model choice.** A BYOK installation may choose the model its reviews
    run on, within what its own endpoint serves; D68's budget shape stays.
 6. **Unknown pricing.** Models with no price-table entry are refused — the
@@ -618,9 +624,13 @@ proposed, are recorded in D81:
    sweep catching a missed event.
 9. **Installation-level storage (the Q4 conflict).** Q4 is **amended
    narrowly**: installation-level state for *credentials only*; review
-   configuration stays repo-level.
+   configuration stays repo-level. **Amended again (5:51 PM CT, Q5's
+   answer):** installation-level state now holds **credentials plus the
+   installation admin's daily cap**, entered on the S10 settings page
+   under the same installation-admin authentication — review
+   configuration still stays repo-level.
 
-## 8. Open questions — Q1–Q3 decided 5:13 PM CT; Q4 and Q5 open
+## 8. Open questions — Q1–Q3 and Q5 decided 5:13/5:51 PM CT; Q4 open
 
 1. **The per-installation operator-load bound — DECIDED (5:13 PM CT).**
    Brandon: *"A cap should be configurable per installation, but it
@@ -659,15 +669,18 @@ proposed, are recorded in D81:
    invite-only rollout; **designing that billing system is out of scope
    for this plan** — this question stays open for the mechanism that lands
    before billing does.
-5. **Who configures the per-installation daily cap — OPEN.** The cap is
-   decided (Q1); its **configurer** is not, and the two options diverge on
-   a recorded boundary: **the operator sets the cap per invited
-   installation** — which conflicts with nothing (it is operator
-   configuration, stored wherever the operator's configuration lives) — or
-   **the installation admin sets it on S10's settings page** — which makes
-   it installation-level *non-credential* configuration, needing a further
-   amendment to §7 decision 9's "installation-level state for credentials
-   only" before it can exist. The cap's default value likewise awaits this
-   answer and §8 Q4's mechanism. Recommended default: the operator-set
-   option (it conflicts with nothing, and the cap can move to the settings
-   page later if Brandon amends decision 9). **Not decided here.**
+5. **Who configures the per-installation daily cap — DECIDED (5:51 PM
+   CT).** Brandon: *"Installation admins set their own daily cap on the
+   settings page."* The installation admin configures it, on S10's
+   settings page under the same installation-admin authentication that
+   guards the key — and **§7 decision 9 is amended accordingly**:
+   installation-level state now holds **credentials plus the
+   installation admin's daily cap**. The cap is the installation's own
+   bound on its own spend (its keys' spend), enforced by S9's machinery
+   alongside the per-repo daily budget — **the stricter of the two wins**:
+   a repo's admission is refused when either the repo's day-budget or the
+   installation's day-cap is spent. **When no cap is set, none applies** —
+   the per-repo daily budgets remain the bound (a stated default, not an
+   owner decision; §8 Q4's mechanism may later add one). Deleting the
+   installation's state on uninstall (`installation.deleted`) removes the
+   cap with the credentials.
