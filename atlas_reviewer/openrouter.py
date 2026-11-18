@@ -1209,6 +1209,45 @@ def _prompt_cost(
     return cost, f" cache_read={cached_n} cache_write={written}"
 
 
+def _output_cost(
+    completion_t: int, reasoning_t: int | None, terms: ModelTerms
+) -> Decimal | None:
+    """Price the turn's output tokens when `usage.cost` is absent.
+
+    The reported reasoning count is a subset of `completion_tokens` on the
+    providers whose usage OpenRouter normalizes (OpenRouter's
+    reasoning-tokens guide, fetched 2026-11-18: subtract
+    `completion_tokens_details.reasoning_tokens` from `completion_tokens`
+    to get the visible tokens; reasoning tokens "are considered output
+    tokens and charged accordingly"), so a reported count inside the
+    completion count splits it: the rest at the completion rate, the
+    reasoning tokens at the reasoning rate -- or, when the catalog lists
+    no reasoning rate, at the completion rate that absence stands for
+    (reasoning tokens are billed as output tokens; a missing rate is not a
+    free one). A count that claims to be
+    larger than the completion count it sits in is not a usable split and
+    reads as None -- the caller keeps the reservation, the way
+    `_prompt_cost` treats counts that sum past `prompt_tokens`. With no
+    reported count the whole completion count is priced at the higher of
+    the two rates -- an upper bound that never undercounts a reasoning
+    token billed above the completion rate and never exceeds the
+    reservation's own per-token worst case (`budget.worst_case_usd` prices
+    the same maximum), so a call whose reasoning count a response omits
+    settles instead of keeping its full reservation as spent (issue #750:
+    those keeps held the ceiling at a few calls on a large pull
+    request)."""
+    reasoning_rate = (
+        terms.reasoning_rate if terms.reasoning_rate > 0 else terms.completion_rate
+    )
+    if reasoning_t is None:
+        return completion_t * max(terms.completion_rate, reasoning_rate)
+    if reasoning_t > completion_t:
+        return None
+    return (completion_t - reasoning_t) * terms.completion_rate + (
+        reasoning_t * reasoning_rate
+    )
+
+
 def _tokens(usage: Json, key: str) -> int | None:
     value = usage.get(key)
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -1249,18 +1288,15 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         from_usage_cost = False
         if prompt_t is None or completion_t is None:
             return None, summary
-        if terms.reasoning_rate > 0 and reasoning_t is None:
-            return None, summary
         prompt_cost, cache_note = _prompt_cost(usage, terms, prompt_t)
         if prompt_cost is None:
             return None, summary
-        reasoning = (reasoning_t or 0) * terms.reasoning_rate
-        base = (
-            prompt_cost
-            + completion_t * terms.completion_rate
-            + reasoning
-            + terms.request_fee
-        )
+        output_cost = _output_cost(completion_t, reasoning_t, terms)
+        if output_cost is None:
+            return None, summary
+        if reasoning_t is None and terms.reasoning_rate > terms.completion_rate:
+            summary += " (reasoning count unreported; output priced at the higher rate)"
+        base = prompt_cost + output_cost + terms.request_fee
         rates = "endpoint rates" if cache_note else "the highest endpoint rates"
         summary = f"{summary}{cache_note} (cost computed at {rates})"
     if not explicitly_non_byok:

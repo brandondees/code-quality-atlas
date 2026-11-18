@@ -896,26 +896,45 @@ def test_call_whose_worst_case_could_pass_three_dollars_is_refused():
     )
 
 
-def test_a_separate_reasoning_price_reserves_the_whole_output_cap():
-    """The hint is not a bound. A separate reasoning rate is reserved on
-    every output token, not only on `reasoning_max_tokens`."""
+def test_the_output_reservation_prices_a_token_at_one_rate_not_two():
+    """Issue #750: the reservation priced the whole output cap at the
+    completion rate PLUS the reasoning rate -- the same token billed
+    twice, which about doubled the output term that dominates a
+    large-context call's worst case. A reasoning token is one of the
+    turn's output tokens, billed once (OpenAI's reasoning guide and
+    Anthropic's extended-thinking page, both fetched 2026-11-18), so the
+    per-token worst case is the higher of the two rates: a reasoning rate
+    under the completion rate adds nothing, and one above it raises the
+    output term to that rate, not to the sum. The hint is still not a
+    bound: the cap, not `reasoning_max_tokens`, is priced."""
     terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
     plain = parse_model_terms(catalog(), MODEL_ID)
     limits = CallLimits()
-    extra = limits.max_output_tokens * terms.reasoning_rate
-    assert extra == Decimal("0.48")
+    assert terms.completion_rate == Decimal("0.0000225")
+    assert terms.reasoning_rate == Decimal("0.00002")
+    # The fixture's reasoning rate is under its completion rate, so the
+    # higher rate is the completion rate and a separate reasoning price
+    # adds nothing to the reservation.
+    assert worst_case_usd(1000, terms, limits) == worst_case_usd(1000, plain, limits)
+    above = parse_model_terms(catalog(internal_reasoning="0.00003"), MODEL_ID)
+    extra = limits.max_output_tokens * (above.reasoning_rate - plain.completion_rate)
+    assert extra == Decimal("0.18")
     assert (
-        worst_case_usd(1000, terms, limits)
+        worst_case_usd(1000, above, limits)
         == worst_case_usd(1000, plain, limits) + extra
     )
     hinted = CallLimits(reasoning_max_tokens=100)
-    assert worst_case_usd(1000, terms, hinted) == worst_case_usd(1000, terms, limits)
+    assert worst_case_usd(1000, above, hinted) == worst_case_usd(1000, above, limits)
 
 
 def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
     """A reply can report more reasoning tokens than the hint. The fallback
     price of that reply, the path `_actual_cost` uses when `usage.cost` is
-    missing, must not exceed the reservation that was held for the call."""
+    missing, must not exceed the reservation that was held for the call.
+    The reported reasoning count is the subset of the completion count it
+    sits in (issue #750), so a completion count that is all reasoning
+    prices at the reasoning rate alone -- the old sum priced the same
+    tokens twice."""
     terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
     assert terms.reasoning_rate == Decimal("0.00002")
     limits = CallLimits()
@@ -937,8 +956,61 @@ def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
     p.complete(SMALL)
     record = p.budget.calls[0]
     assert record.actual_usd is not None
+    # The endpoint rows carry no reasoning rate, so the reported reasoning
+    # tokens price at the completion rate a missing rate stands for: the
+    # whole 24,000-token completion count at $22.5/M, plus the 10-token
+    # prompt at $6/M. The old sum priced the same tokens at two rates.
+    assert record.actual_usd == Decimal(24000) * Decimal("0.0000225") + Decimal(
+        10
+    ) * Decimal("0.000006")
     assert record.actual_usd <= record.reserved_usd
     assert f"reasoning={reasoning}" in record.usage
+
+
+def test_priced_reasoning_without_a_token_count_settles_at_the_higher_rate():
+    """Issue #750: a response that reported no reasoning-token count on a
+    model with a reasoning rate stayed unpriced, and the settle kept the
+    call's full reservation as spent -- on a large pull request those
+    keeps held the review at its dollar ceiling after a few calls, while
+    the real spend stayed far under it. The missing count now prices the
+    whole completion count at the higher of the two rates: an upper bound
+    that cannot exceed the reservation's own per-token worst case, so the
+    settle frees what the reservation held and the review keeps its
+    budget."""
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100}
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    p = provider(fake)
+    p.complete(SMALL)
+    # 1000 x 0.000006 prompt + 100 x 0.00005 at the higher rate; the old
+    # sum would have priced the same 100 tokens at 0.0000225 as well.
+    assert p.budget.committed_usd() == Decimal("0.0110")
+    assert (
+        "reasoning count unreported; output priced at the higher rate"
+        in p.usage_lines()[1]
+    )
+    assert "actual unknown" not in p.usage_lines()[1]
+
+
+def test_a_reasoning_count_outside_the_completion_count_keeps_the_reservation():
+    """A reasoning count larger than the completion count it sits in is
+    not a usable split -- the same fail-closed read `_prompt_cost` gives
+    counts that sum past `prompt_tokens` -- and the settle keeps the full
+    reservation rather than pricing a count it cannot split."""
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "completion_tokens_details": {"reasoning_tokens": 101},
+    }
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    p = provider(fake)
+    p.complete(SMALL)
+    assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
 
 
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():
@@ -1460,20 +1532,12 @@ def test_fallback_cost_includes_a_separate_reasoning_charge():
     )
     p = provider(fake)
     p.complete(SMALL)
-    # 1000 x 0.000006 + 100 x 0.0000225 + 40 x 0.00005
-    assert p.budget.committed_usd() == Decimal("0.01025")
+    # 1000 x 0.000006 + (100 - 40) x 0.0000225 + 40 x 0.00005 -- the
+    # reported reasoning count is the subset of the completion count it
+    # sits in (issue #750), so the same 40 tokens are not priced at both
+    # rates the way the old sum priced them.
+    assert p.budget.committed_usd() == Decimal("0.00935")
     assert "cost computed at the highest endpoint rates" in p.usage_lines()[1]
-
-
-def test_priced_reasoning_without_a_token_count_keeps_the_reservation():
-    usage = {"prompt_tokens": 1000, "completion_tokens": 100}
-    fake = OpenRouterFake(
-        reply(completion(usage=usage)),
-        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
-    )
-    p = provider(fake)
-    p.complete(SMALL)
-    assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
 
 
 def test_refusals_before_a_call_are_reported_and_not_counted_as_calls():

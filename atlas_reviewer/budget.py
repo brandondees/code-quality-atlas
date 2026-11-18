@@ -17,15 +17,32 @@ is unchanged; only the measurement of the prompt against it changed, and
 the meter reports the basis every bound came from.
 
 Worst case of one call = input tokens x highest input rate (cache write
-included) + max output tokens x (completion rate + any separate reasoning
-rate) + any per-request fee. OpenRouter's `reasoning.max_tokens` is a hint,
+included) + max output tokens x the highest of the completion and
+reasoning rates + any per-request fee. OpenRouter's `reasoning.max_tokens`
+is a hint,
 not a cap: a provider can return more reasoning tokens than the hint, up
 to `max_tokens`, and still bill them
 (https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
-`_actual_cost` prices completion tokens at the completion rate and
-reasoning tokens at the reasoning rate, and both counts can be as large
-as the output cap. The reservation prices the whole output cap at the
-sum of those rates, so it does not depend on the hint. The hint is still
+A reasoning token is one of the turn's output tokens, not an addition to
+them: OpenRouter's reasoning-tokens guide (fetched 2026-11-18) says to
+subtract the reported reasoning count from `completion_tokens` to get
+the visible tokens, and that reasoning tokens "are considered output
+tokens and charged accordingly" -- on most providers they also count
+against the request's output cap, and both providers the pinned routes
+reach do (OpenAI's reasoning guide, fetched 2026-11-18: reasoning tokens
+"are billed as output tokens" and `max_output_tokens` caps the total
+"including reasoning tokens"; Anthropic's extended-thinking page,
+fetched 2026-11-18: thinking tokens "count toward the `max_tokens`
+limit" and `max_tokens` "remains the hard ceiling on total output"). One
+token cannot be billed at two rates at once, so the per-token worst case
+is the higher of the two rates, not
+their sum -- the sum double-billed every reasoning token and made each
+large-context call reserve about twice its output term (issue #750).
+`_actual_cost` prices a reported reasoning count as the subset of the
+completion count it is, and falls back to the higher rate for the whole
+completion count when the count is missing, so a settle can never price
+a token at more than the reservation's per-token worst case. The
+reservation does not depend on the hint. The hint is still
 sent.
 """
 
@@ -256,12 +273,20 @@ def check_tokens(input_tokens: int, terms: ModelTerms, limits: TokenLimits) -> N
 def worst_case_usd(
     input_tokens: int, terms: ModelTerms, limits: TokenLimits
 ) -> Decimal:
-    """A cost that stays at least what `_actual_cost` would compute if every
-    output token were also a reasoning token. Independent of
-    `reasoning_max_tokens`: that field is only the hint sent on the request."""
+    """A cost that stays at least what `_actual_cost` would compute for
+    any split of the turn's output between completion and reasoning
+    tokens. Independent of
+    `reasoning_max_tokens`: that field is only the hint sent on the request.
+
+    The output term prices each output token at the higher of the
+    completion and reasoning rates, not at their sum: a token is billed
+    once, at whichever of the two rates applies to it, and the reported
+    reasoning count sits inside the completion count on the providers
+    whose usage OpenRouter normalizes (issue #750)."""
+    output_rate = max(terms.completion_rate, terms.reasoning_rate)
     return (
         input_tokens * terms.input_rate
-        + limits.max_output_tokens * (terms.completion_rate + terms.reasoning_rate)
+        + limits.max_output_tokens * output_rate
         + terms.request_fee
     )
 
