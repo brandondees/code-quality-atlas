@@ -3053,8 +3053,16 @@ self-check grep — each pinned by a test or killed mutant: dropping
 workflow file carrying `[self-hosted, Linux]` fails
 `test_every_job_in_every_workflow_runs_on_a_github_hosted_runner`; the
 event-conditional expression shape stays killed by
-`test_no_job_conditions_its_runner_on_the_event`. Verification, all on the
-PR head: `pytest tests/` 878 passed / 14 skipped, coverage 95.20% (floor
-94%); `pytest atlas_reviewer/tests` 3,216 passed, 96.39%; ruff
+`test_no_job_conditions_its_runner_on_the_event`. Round-2 review added one
+Minor — the group expression itself had zero CI signal, mutant M4 (revert
+to the ref-only group) passed the whole suite — closed by
+`tests/test_ci_concurrency_group.py`, which pins the parsed
+`concurrency.group` to carry `github.event_name` and `github.ref` and
+`cancel-in-progress` to the PR-only expression (M4 now fails
+`test_concurrency_group_carries_the_event_name`; a bare-`true`
+cancel-in-progress fails `test_cancel_in_progress_stays_pull_request_only`).
+Verification, all on the
+PR head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
+94%); `pytest atlas_reviewer/tests` 3,216 passed, 96.40%; ruff
 check/format, mypy (84 files), `tooling.cli drift` clean; actionlint 1.7.12
 clean on `ci.yml`. Offline only.
