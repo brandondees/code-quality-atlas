@@ -199,15 +199,20 @@ class RepoAdmission:
     ``base_include`` is the base branches review is for, ``base_exclude``
     the ones it is not -- exclude wins; ``skip_events`` the accepted
     events the repo does not want a review on. ``skip_events`` is a
-    coverage-reducing opt-out, not a safety feature: what a skipped
-    event would have reviewed lands unreviewed. Skipping ``synchronize``
-    reviews only a PR's opening state, so every later push -- up to and
-    including what merges -- is unreviewed; skipping ``ready_for_review``
-    means a PR opened as a draft is never reviewed, because drafts are
-    already outside the operator envelope and the ready transition is
-    the only trigger left; skipping ``opened`` defers the first review
-    to a later push, and skipping all three means the repository is
-    never reviewed. The draft state and the
+    coverage-reducing opt-out, not a safety feature: the coverage the
+    skipped event alone would have provided is lost and can land
+    unreviewed. Skipping ``synchronize`` means the reviews that do run
+    see the state at ``opened`` -- or, for a PR opened as a draft, at
+    ``ready_for_review`` -- and every push after that, up to and
+    including what merges, lands unreviewed; skipping
+    ``ready_for_review`` defers a draft-opened PR's first review to its
+    first push after becoming ready, which covers the whole diff, so
+    only a PR that becomes ready and merges with no further push is
+    never reviewed; skipping ``opened`` defers a non-draft PR's first
+    review to its first push (that review covers the whole diff, not
+    just the delta), and a draft-opened PR's first review lands at the
+    ready transition; skipping all three means the repository is never
+    reviewed. The draft state and the
     head branch are never narrowable here: the PR author controls both,
     and a rule on either would let an author opt their own PR out of
     review. ``notes`` names the unusable lines, non-empty only when some

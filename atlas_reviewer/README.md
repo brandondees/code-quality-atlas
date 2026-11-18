@@ -104,18 +104,21 @@ of the three accepted event names.
 
 **`review_skip_events` is a coverage-reducing opt-out, and the repo owner
 is the one opting out.** A skipped event's deliveries produce no review,
-so what that event would have reviewed is gone with it and can land
-unreviewed — this key is an opt-out, not a safety feature, and the
+so the coverage that event alone would have provided is lost and can
+land unreviewed — this key is an opt-out, not a safety feature, and the
 consequence differs per event:
 
-- skipping `synchronize` means only the pull request's opening state is
-  ever reviewed; every later push — up to and including what merges —
-  lands unreviewed;
-- skipping `ready_for_review` means a pull request opened as a draft is
-  never reviewed at all: drafts are already outside the operator's
-  envelope, and the ready transition is the only trigger left;
-- skipping `opened` defers the first review to a later push (the
-  `synchronize` delivery reviews the whole diff, not just the delta);
+- skipping `synchronize` means the reviews that do run see the state at
+  `opened` — or, for a PR opened as a draft, at `ready_for_review`;
+  every push after that, up to and including what merges, lands
+  unreviewed;
+- skipping `ready_for_review` defers a draft-opened PR's first review to
+  its first push after becoming ready — that review covers the whole
+  diff, so the draft's work is still reviewed; a PR that becomes ready
+  and merges with no further push is never reviewed;
+- skipping `opened` defers a non-draft PR's first review to its first
+  push (that review covers the whole diff, not just the delta); a
+  draft-opened PR's first review lands at the ready transition;
 - skipping all three means the repository is never reviewed.
 
 The owner decides; the service records every skip with its reason so the
