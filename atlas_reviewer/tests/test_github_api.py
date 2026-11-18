@@ -269,3 +269,45 @@ def test_github_error_messages_do_not_carry_query_strings():
     with pytest.raises(BoundaryError) as info:
         github(Recorder(ok(status=500))).list_check_runs("o/r", HEAD)
     assert "per_page" not in str(info.value)
+
+
+def test_get_file_requests_the_raw_contents_bounded():
+    t = Recorder(ok(body=b"config text"))
+    gh = github(t)
+    body = gh.get_file("o/r", "release/1.0", "REVIEW.md", 64 * 1024)
+    assert body == b"config text"
+    method, url, headers, _sent, _timeout, max_bytes = t.requests[0]
+    assert method == "GET"
+    # A ref with a path separator is percent-encoded, and the file path
+    # with it, so neither can escape the contents path.
+    assert url == f"{API}/repos/o/r/contents/REVIEW.md?ref=release%2F1.0"
+    assert headers["Accept"] == "application/vnd.github.raw"
+    assert max_bytes == 64 * 1024
+
+
+def test_get_file_refuses_to_return_a_cut_parse():
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    class OverCap:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            raise ResponseTooLargeError(
+                f"response from {url} exceeded {max_bytes} bytes"
+            )
+
+    gh = github(OverCap())
+    with pytest.raises(ResponseTooLargeError):
+        gh.get_file("o/r", "main", "REVIEW.md", 64 * 1024)
+
+
+def test_get_file_404_is_a_not_found_error():
+    t = Recorder(ok(status=404))
+    gh = github(t)
+    with pytest.raises(NotFoundError):
+        gh.get_file("o/r", "main", "REVIEW.md", 64 * 1024)
+
+
+def test_get_repository_reads_the_repo_object():
+    t = Recorder(ok({"default_branch": "trunk"}))
+    gh = github(t)
+    assert gh.get_repository("o/r") == {"default_branch": "trunk"}
+    assert t.requests[0][1] == f"{API}/repos/o/r"
