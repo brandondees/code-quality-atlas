@@ -161,7 +161,7 @@ labeled `P1`, `P2`, ... — against the delta:
 
 A finding identical to a carried one (same location and text) is posted
 once, as the carried copy. The delta review's post cites the review it
-builds on (`Follows the review of `<sha>``) and shows the resolved and
+builds on — the post says "Follows the review of" the head — and shows the resolved and
 carried sections. The carry-forward call spends against the review's own
 derived limits and the dollar ceiling (D68) like every other call; its
 failure — a contract refusal, a transport error, a spent-out review —
