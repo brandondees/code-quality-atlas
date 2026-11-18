@@ -2211,7 +2211,7 @@ def render_draft(
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub)]
-    lines += _delta_lines(review)
+    lines += _delta_lines(review, scrub)
     if review.selection_note or review.not_picked:
         lines += ["", "## Lens selection"]
         if review.selection_note:
@@ -2521,7 +2521,7 @@ def _unread_clause(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     )
 
 
-def _delta_lines(review: AgenticReview) -> list[str]:
+def _delta_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
     """The delta review's citation line and its controller note (#702):
     which review this one builds on, and anything that fell back. Empty
     on a full review."""
@@ -2529,7 +2529,11 @@ def _delta_lines(review: AgenticReview) -> list[str]:
         return []
     lines = ["", f"Delta review: builds on the review of `{review.delta_from[:12]}`."]
     if review.delta_note:
-        lines.append(review.delta_note)
+        # Quoted like every other model-adjacent field (round-3 review
+        # of #748, a8): today's notes are controller text, but a future
+        # note composer must not become the one field that bypasses the
+        # discipline.
+        lines.append(quote_untrusted(review.delta_note, QUOTED_CHARS, scrub=scrub))
     return lines
 
 

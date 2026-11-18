@@ -3035,6 +3035,7 @@ def _round_log_with_prior(tmp_path, head: str = OLD, line: str = PRIOR_LINE):
 
 
 def _delta_scope(
+    delta_from=OLD,
     resolution_paths=frozenset({"calc.py", "config/keys.py"}),
     note="",
     gate_reason="",
@@ -3047,7 +3048,7 @@ def _delta_scope(
     from atlas_reviewer.delta import DeltaScope
 
     return DeltaScope(
-        OLD,
+        delta_from,
         "",
         frozenset(resolution_paths),
         note,
@@ -3418,11 +3419,14 @@ def test_the_evidence_pool_is_the_range_not_the_restricted_diff(tmp_path):
 
 
 def test_the_omission_count_rides_through_the_record_across_two_hops(tmp_path):
-    """The durable chain keeps the omission (round-2 Major B): a record
-    that could not store its findings passes the count into the delta
-    review's own record, and the next hop re-states it from there --
-    with a test that runs two hops. Mutant: the count written only into
-    the draft, which loses it from the chain after one hop."""
+    """The durable chain keeps the omission (round-2 Major B; round-3
+    a6 makes hop two read hop one's OWN record, not the seeded one): a
+    record that could not store its findings passes the count into the
+    delta review's record, and the next hop -- whose delta base is hop
+    one's head -- re-states the gap from THAT record. Mutant: the count
+    written only into the draft, which loses it from the chain after
+    one hop; or a second hop that re-reads the seeded record, which
+    proves nothing about the chain."""
     from atlas_reviewer.rounds import RECORD_CHARS, RoundLog, RoundRecord
 
     log = RoundLog(tmp_path / "rounds.jsonl")
@@ -3444,15 +3448,22 @@ def test_the_omission_count_rides_through_the_record_across_two_hops(tmp_path):
     assert record_one.findings_omitted == 3
     draft_one = render_draft(one, Redactor())
     assert "3 verified finding(s) from the review at" in draft_one
-    # The second hop builds on THIS review's record: the lens reuses its
-    # settled result (same head and body, no newer evidence), so the
-    # scripted model answers only the carry-forward turn, which reads the
-    # omission back from the record at its delta base.
+    # Hop two's delta base is hop one's HEAD: its scope re-reads hop
+    # one's record, not the seeded OLD one. The lens reuses its settled
+    # result (same head and body, no newer evidence), so the scripted
+    # model answers only the carry-forward turn.
     second = ScriptedLensModel([_carry_reply(())])
-    two, _s2 = _lenses(tmp_path, [LENS], second, round_log=log, delta=_delta_scope())
+    two, _s2 = _lenses(
+        tmp_path, [LENS], second, round_log=log, delta=_delta_scope(delta_from=HEAD)
+    )
     draft_two = render_draft(two, Redactor())
-    assert "3 verified finding(s) from the review at" in draft_two
+    # The sha in the note is hop two's own delta base: hop one's head,
+    # not the seeded OLD record's -- the assertion that dies when hop
+    # two re-reads the seeded record (round-3 a6's mutant).
+    assert f"3 verified finding(s) from the review at {HEAD[:12]}" in draft_two
+    assert f"from the review at {OLD[:12]}" not in draft_two
     record_two = [r for r in log.read().records if r.head_sha == HEAD][-1]
+    assert record_two is not record_one
     assert record_two.findings_omitted == 3
     # The cap constant the wording names is the record's own.
     assert RECORD_CHARS == 8_192
@@ -3500,3 +3511,31 @@ def test_a_delta_review_with_no_prior_findings_says_so(tmp_path):
     assert f"no findings are recorded for the review at {OLD[:12]}" in draft
     assert [f.id for f in result.findings] == ["L1-F1"]
     assert "## Carried, not re-verified" not in draft
+
+
+def test_a_carried_blocker_restated_as_a_nit_cannot_approve(tmp_path):
+    """Major C end to end through the coordinator (round 3): the
+    earlier review's Blocker is restated -- verified, re-anchored -- as
+    a nit, and the delta review's verdict stays BLOCK, because the
+    recorded severity stands. Mutant: the downgrade guard dropped --
+    the carried finding carries the nit and the review approves."""
+    blocker_line = "L1-F1 blocker calc.py:2 the rounding rounds per line"
+    log = _round_log_with_prior(tmp_path, line=blocker_line)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(),
+            _carry_reply(
+                (_restated(severity="nit", finding="the rounding rounds per line"),)
+            ),
+        ]
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    carried = [f for f in result.findings if f.carried]
+    assert [f.finding.severity for f in carried] == [Severity.BLOCKER]
+    assert result.verdict is not Verdict.APPROVE
+    assert result.verdict is Verdict.BLOCK
+    draft = render_draft(result, Redactor())
+    assert "proposed lowering" in draft

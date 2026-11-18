@@ -38,11 +38,14 @@ Three pieces live here; the coordinator wires them.
   established delta touched (`DeltaScope.resolution_paths` -- empty
   whenever the delta could not actually be established, so the gate
   fails closed); and evidence the new commits removed the cited code --
-  every quoted line among the delta diff's removed lines for that file.
-  Without any one of the three the finding stays carried, and the
-  refusal is named. Silence keeps the finding -- carried in its
-  original wording, re-offered to the next review -- so nothing is
-  silently dropped.
+  every quoted line among `DeltaScope.removed` (the range patches'
+  removed lines, the ones the turn's `range_diff` shows) for that file,
+  within the finding's cited span. Without any one of the three the
+  finding stays carried, and the refusal is named. A re-statement may
+  not lower the recorded severity or trade the defect-introduced shape
+  on model say-so (the D73 rule; round-3 Major C). Silence keeps the
+  finding -- carried in its original wording, re-offered to the next
+  review -- so nothing is silently dropped.
 
 The carry-forward call spends against the review's shared `Spend` (D68's
 derived limits and dollar ceiling) like every other call, and its reply
@@ -55,7 +58,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from atlas_reviewer.attestation import CheckedFinding
@@ -114,7 +117,10 @@ each against the delta:
   re-anchored to the current files, and a `reason` key stating what, if
   anything, moved. A re-statement is quote-checked against the current
   files exactly like an ordinary finding's quote; one that does not
-  verify is not carried as verified.
+  verify is not carried as verified. A re-statement cannot lower the
+  recorded severity, or move the finding off defect-introduced: the
+  controller keeps the recorded severity and shape, with your
+  re-anchored location and wording, and names what you proposed.
 - A prior finding the new commits fixed: name its label in `withdrawn`
   with a `reason` key stating what fixed it, and an `evidence` key
   quoting the line or lines of the prior finding's code that the
@@ -355,7 +361,7 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
             "accepted",
             "the delta's touched paths are not fully known",
         )
-    removed, range_diff = _range_removals(compare, names)
+    removed, range_diff = _range_removals(compare)
     return DeltaScope(
         event.delta_from,
         scope_text(pr_diff, paths),
@@ -366,7 +372,7 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
 
 
 def _range_removals(
-    compare: Json, names: Sequence[str]
+    compare: Json,
 ) -> tuple[Mapping[str, tuple[tuple[int, str], ...]], str]:
     """The range's own removed lines, from the comparison's per-file
     patches, and the patches rendered as one diff for the carry-forward
@@ -417,7 +423,19 @@ def _patch_removed(patch: str) -> tuple[tuple[int, str], ...]:
         if header is not None:
             old_side = int(header.group(1))
             continue
-        if old_side and line.startswith("-") and not line.startswith("---"):
+        if line.startswith("\\"):
+            # `\ No newline at end of file`: a marker about the
+            # neighboring line, not content on either side -- it moves
+            # no counter (round-3 review of #748, a7: without this, a
+            # trailing marker shifted every later number in the hunk).
+            continue
+        if old_side == 0 and (line == "---" or line.startswith("--- ")):
+            # A `---` FILE HEADER can only sit before the first hunk;
+            # past it, a `---`-shaped line is removed content -- a SQL
+            # or Lua comment -- and counts (round-3 review of #748,
+            # a7: the blanket exclusion ate those).
+            continue
+        if old_side and line.startswith("-"):
             removed.append((old_side, line[1:]))
             old_side += 1
         elif old_side and not line.startswith("+"):
@@ -663,7 +681,42 @@ def apply_carry(
     withdrawn_labels = {label for label, _reason, _evidence in withdrawn}
     for identifier, finding in prior:
         if identifier in restated:
-            carried.append((identifier, restated[identifier]))
+            replacement = restated[identifier]
+            if _weakens(replacement.finding, finding):
+                # A re-statement may re-anchor and revise wording, but it
+                # cannot lower the recorded severity, or trade the
+                # defect-introduced shape for one that leaves the
+                # verdict-setting set, on model say-so -- the D73
+                # re-assessment path's own rule (round-3 review of #748,
+                # Major C): the composed finding carries the recorded
+                # severity, valence and attribution with the re-anchored
+                # location, evidence and wording, and the proposed
+                # weakening is named. Mutant: the guard dropped -- a
+                # carried Blocker restated as a nit flips the verdict to
+                # approve.
+                composed = replace(
+                    replacement.finding,
+                    severity=finding.severity,
+                    valence=finding.valence,
+                    attribution=finding.attribution,
+                )
+                carried.append(
+                    (
+                        identifier,
+                        CheckedFinding(
+                            composed,
+                            replacement.source,
+                            drift=replacement.drift,
+                        ),
+                    )
+                )
+                notes.append(
+                    f"{identifier}: a re-statement proposed "
+                    f"{_weakened_as(finding, replacement.finding)}; the "
+                    "recorded severity and shape stand"
+                )
+            else:
+                carried.append((identifier, replacement))
             continue
         if identifier in withdrawn_labels:
             proposal = next(
@@ -733,6 +786,32 @@ def _in_span(number: int, location: Location, tolerance: int) -> bool:
     if isinstance(location, LineRange):
         return location.start - tolerance <= number <= location.end + tolerance
     return isinstance(location, WholeFile)
+
+
+def _weakens(replacement: Finding, prior: Finding) -> bool:
+    """Whether a re-statement would leave the verdict-setting set weaker
+    than the recorded finding: a lower severity, or a valence or
+    attribution moved off defect-introduced. A restatement may raise --
+    the conservative direction takes it -- and may revise wording,
+    location and evidence freely."""
+    if replacement.severity.rank > prior.severity.rank:
+        return True
+    return (
+        prior.valence is Valence.DEFECT and replacement.valence is not Valence.DEFECT
+    ) or (
+        prior.attribution is Attribution.INTRODUCED
+        and replacement.attribution is not Attribution.INTRODUCED
+    )
+
+
+def _weakened_as(prior: Finding, replacement: Finding) -> str:
+    """The weakening, named: the recorded value and the proposed one,
+    for the note the draft carries."""
+    if replacement.severity.rank > prior.severity.rank:
+        return f"lowering {prior.severity.value} to {replacement.severity.value}"
+    if prior.valence is not replacement.valence:
+        return f"making it {replacement.valence.value}"
+    return f"making it {replacement.attribution.value}"
 
 
 def _cited_path(location: Location) -> str | None:

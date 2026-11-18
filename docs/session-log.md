@@ -3504,7 +3504,7 @@ the README. Counts corrected: 22 service flows in
 `test_service_receive.py` (15 from the first push, 7 from this round),
 37 in `test_head_change.py`.
 
-## 2026-11-18 (same day) — #747 round 2: the recovery cannot interleave or post stale, and the docs catch up
+## 2026-11-18 (same day) — #747 round 2: the recovery cannot interleave or post stale, and the docs catch up to the code
 
 The round-2 protocol review (APPROVE) asked for the Minors and cheap
 Nits. The behavioral one is the recovery's two windows (R2-F4):
@@ -3591,3 +3591,36 @@ detail. Skipped with reasons, recorded in D79: n7 (the fabricated
 attestation, and un-fabricating it splits the judge for one caller) and
 n8 (the 16-parameter clump is the existing `review_lens`/`_review_one`
 convention; a delta-only context object would be a second convention).
+
+## 2026-11-18 (same day) — #748 round 3: a re-statement cannot lower the recorded severity
+
+The round-3 protocol review's Major C, fixed on the delta branch: a
+verified carry-forward re-statement replaced the recorded prior finding
+wholesale — severity, valence and attribution all from the model's reply
+— so a carried Blocker restated as a nit flipped the delta verdict to
+APPROVE; the round-1 M4 guard covered only the unanchored priors. The
+rule is now D73's own: a re-statement re-anchors location, evidence and
+wording, but a replacement that would leave the verdict-setting set
+weaker — a lower severity, or valence/attribution moved off
+defect-introduced — carries the RECORDED severity and shape with its
+re-anchored copy, and the proposal is named in the draft; a raise is
+taken (the conservative direction). Pinned by the delta-level tests
+(Blocker→nit keeps BLOCKER and names the proposal; a raise is taken;
+the valence trade refused the same way) and the coordinator-level probe
+(Blocker restated as a nit keeps the verdict at BLOCK). The Minors: the
+two-hop omission test's second hop now points its scope at hop one's
+own head and asserts the note's sha is hop one's — the assertion that
+dies when the hop re-reads the seeded record (a6); `_patch_removed`
+treats a `---`-shaped line as a header only before the first hunk (a
+SQL or Lua comment inside a hunk is content) and the
+`\ No newline at end of file` marker moves no counter (a7); the delta
+note goes through the quote discipline like every other model-adjacent
+field (a8); the D79 Update's parse-format sentence names the
+quoted-location form (a9); the #747-owned session-log heading restored
+to its own layer's text (a10). The Nits: the unused `names` parameter
+dropped from `_range_removals` (n9); the module docstring's acceptance
+sentence names `DeltaScope.removed` and the span bound (n10). Skipped
+with reason: n11 (the coordinator-level pool test injects its pool
+synthetically — the real `delta_scope`→`_carry_call` wiring is pinned
+at the delta.py level with a compare fixture; wiring the coordinator
+test through a fixture-backed reader would duplicate that pin).

@@ -768,3 +768,143 @@ def test_a_whole_file_finding_takes_any_removed_line_of_the_file():
         tolerance=3,
     )
     assert result.resolved == (("P1", "the file is gone", prior[0][1]),)
+
+
+# ----------------------------------------------------- round-3 fixes
+
+
+def test_a_blocker_restated_as_a_nit_keeps_the_recorded_severity():
+    """Major C (round 3): a verified re-statement cannot lower the
+    recorded severity on model say-so -- the D73 rule. The composed
+    carried finding keeps the recorded severity with the re-anchored
+    location and wording, and the proposal is named. Mutant: the guard
+    dropped -- a carried Blocker restated as a nit flips the verdict to
+    approve."""
+    prior_finding = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.BLOCKER,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "the rounding loses money",
+        "",
+    )
+    restated = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.NIT,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "the rounding loses money, restated",
+        "",
+    )
+    result = apply_carry(
+        [("P1", prior_finding)],
+        [_checked(restated)],
+        [(1, "P1", "the delta added a guard")],
+        (),
+        frozenset({"calc.py"}),
+        {},
+    )
+    # Mutant target: the composed severity the nit's.
+    assert result.carried[0][1].finding.severity is Severity.BLOCKER
+    assert result.carried[0][1].finding.location == LineRange("calc.py", 2, 2)
+    assert result.carried[0][1].finding.finding == "the rounding loses money, restated"
+    assert any("proposed lowering" in note for note in result.notes)
+
+
+def test_a_restatement_raising_severity_is_taken():
+    """The conservative direction takes a raise: a re-statement may make
+    a finding worse, and the composed finding carries the raised
+    severity."""
+    prior_finding = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.MINOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "drift",
+        "",
+    )
+    raised = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.BLOCKER,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "drift, worse",
+        "",
+    )
+    result = apply_carry(
+        [("P1", prior_finding)],
+        [_checked(raised)],
+        [(1, "P1", "the delta made it worse")],
+        (),
+        frozenset({"calc.py"}),
+        {},
+    )
+    assert result.carried[0][1].finding.severity is Severity.BLOCKER
+    assert result.notes == ()
+
+
+def test_a_restatement_trading_the_verdict_shape_is_refused_the_same_way():
+    """A re-statement that moves the finding off defect-introduced --
+    `valence: improvement` or `attribution: pre-existing` -- drops out
+    of the verdict-setting set the same way a lowering does, so the
+    recorded shape stands (round-3 Major C's second half)."""
+    prior_finding = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.MAJOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "drift",
+        "",
+    )
+    improved = Finding(
+        LineRange("calc.py", 2, 2),
+        Severity.MAJOR,
+        Valence.IMPROVEMENT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "drift, restated",
+        "",
+    )
+    result = apply_carry(
+        [("P1", prior_finding)],
+        [_checked(improved)],
+        [(1, "P1", "an opinion")],
+        (),
+        frozenset({"calc.py"}),
+        {},
+    )
+    assert result.carried[0][1].finding.valence is Valence.DEFECT
+    assert any("proposed making it improvement" in note for note in result.notes)
+
+
+def test_a_patch_parses_sql_comments_and_ignores_the_marker():
+    r"""The patch parser's two fixes (round-3 a7): a removed line shaped
+    like a `---` file header is content when it sits inside a hunk (a
+    SQL or Lua comment), and the `\ No newline` marker moves no
+    counter. Mutant: the blanket `---` exclusion ate the SQL line, and
+    the marker shifted every later number."""
+    patch = (
+        "@@ -3,5 +3,4 @@\n"
+        " keep\n"
+        "--- a sql comment\n"
+        "-- a lua comment\n"
+        "\\ No newline at end of file\n"
+        "-next real\n"
+    )
+    assert _patch_removed(patch) == (
+        (4, "-- a sql comment"),
+        (5, "- a lua comment"),
+        (6, "next real"),
+    )
+
+
+def test_a_header_shaped_line_before_the_first_hunk_is_still_skipped():
+    """A `--- ` line before any hunk is a file header, not content --
+    the one place the exclusion still applies."""
+    patch = "--- a/calc.py\n@@ -1,1 +1,1 @@\n-x\n"
+    assert _patch_removed(patch) == ((1, "x"),)
