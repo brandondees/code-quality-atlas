@@ -3692,3 +3692,24 @@ separation (documented deliberate over-inclusion), the quarantined-log
 note wording (the context omission already blocks approval), and the
 fixture withdrawal scenario (pinned at the delta and coordinator
 levels). Seventeen mutants applied by hand this round; all died.
+
+## 2026-11-18 (same day) — #748 round 6: the record catches up with its own justification
+
+The round-6 protocol review's verdict is APPROVE — all three round-5
+Majors and the LensKey scope fix verified, 17 mutants dead, the six
+skips' reasons each re-traced and held. Two residuals, both records:
+**b2** — the round-5 correction justified the one-shot CLI's delta
+narrowing with "no round log is read in that mode", which is false (the
+one-shot delta path reads the round log through `--round-log`, and the
+branch's own end-to-end dry run does exactly that); the clause is
+corrected in place in D79, and the justification now names what
+actually makes the exception safe — the delta's own coverage is held to
+the same `_lens_gap` gate every review runs, so unread files and
+unassessable priors still block a plain approval there. **b3** — the
+mint-side double-quote refusal makes findings on a double-quoted path
+unreportable (the finding fails the reply's contract, the lens retries
+into the same wall until its attempts exhaust, the lens ends failed and
+coverage incomplete, and the review lands COMMENT — never an approval
+over the gap); recorded in D79 as a known limitation with the
+record-format follow-up as its escape, not a behavior change. Docs
+only; no code touched.
