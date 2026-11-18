@@ -14,10 +14,13 @@ audit -- exactly what the corrected D78 promises against.
 Round-2 review of #746 found that reverting the group to the round-0
 ref-only form (mutant M4) passed the entire `tests/` suite, leaving that
 promise with zero CI signal. This is that guard, in the repo's established
-`test_ci_*` shape. It also pins `cancel-in-progress` to the PR-only
-expression, so the split (PR runs cancel; push/schedule never cancel in
+`test_ci_*` shape. It also pins `cancel-in-progress` to exactly the PR-only
+expression (whitespace-normalized exact match, per round 3 of #746 -- the
+round-2 substring check let the inverted split `!= 'pull_request'` pass as
+mutant M7), so the split (PR runs cancel; push/schedule never cancel in
 progress) can't silently flip either way: a bare `true` would let a push
-kill an in-progress audit, a bare `false` would stop superseding PR runs.
+kill an in-progress audit, a bare `false` would stop superseding PR runs,
+and any inverted or OR'd variant fails the exact match.
 """
 
 from pathlib import Path
@@ -62,9 +65,16 @@ def test_concurrency_group_carries_the_event_name():
 
 def test_cancel_in_progress_stays_pull_request_only():
     cip = _concurrency()["cancel-in-progress"]
-    assert isinstance(cip, str) and "${{" in cip and "pull_request" in cip, (
-        f"concurrency.cancel-in-progress is {cip!r} -- expected the "
-        "PR-only expression. A bare true would let a push cancel an "
-        "in-progress scheduled pip-audit (#379); a bare false would stop "
-        "superseding PR runs."
+    # Exact-expression pin, whitespace-normalized (round 3 of #746): the
+    # round-2 substring check let the inverted split
+    # `${{ github.event_name != 'pull_request' }}` pass (mutant M7), and it
+    # is the semantically worst survivor -- push runs would cancel an
+    # in-progress scheduled pip-audit, and PR runs would stop superseding.
+    normalized = "".join(cip.split()) if isinstance(cip, str) else cip
+    assert normalized == "${{github.event_name=='pull_request'}}", (
+        f"concurrency.cancel-in-progress is {cip!r} -- expected exactly the "
+        "PR-only expression `${{ github.event_name == 'pull_request' }}` "
+        "(whitespace-insensitive). An inverted or OR'd variant cancels "
+        "in-progress scheduled pip-audits (#379) and stops superseding PR "
+        "runs; a bare true or false does one of those two one-sided."
     )

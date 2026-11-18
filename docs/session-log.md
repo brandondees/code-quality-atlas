@@ -3061,6 +3061,13 @@ to the ref-only group) passed the whole suite — closed by
 `cancel-in-progress` to the PR-only expression (M4 now fails
 `test_concurrency_group_carries_the_event_name`; a bare-`true`
 cancel-in-progress fails `test_cancel_in_progress_stays_pull_request_only`).
+Round-3 review hardened the cancel-in-progress pin from a substring check to
+an exact whitespace-normalized match on
+`${{ github.event_name == 'pull_request' }}` — the substring version let the
+inverted split `!= 'pull_request'` pass (mutant M7, the semantically worst
+survivor: push would cancel an in-progress audit and PR runs would stop
+superseding); M7 now fails the exact-match assert, with M4 and the bare
+literals re-verified dying.
 Verification, all on the
 PR head: `pytest tests/` 880 passed / 14 skipped, coverage 95.20% (floor
 94%); `pytest atlas_reviewer/tests` 3,216 passed, 96.40%; ruff
