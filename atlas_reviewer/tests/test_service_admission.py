@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The repo-narrowed admission config: parsing the base-ref ``REVIEW.md``
-lines and the narrowing of an already-admitted delivery."""
+lines, the narrowing of an already-admitted delivery, and the retarget
+(``edited`` with ``changes.base``) re-admission."""
 
 import json
 
@@ -8,6 +9,9 @@ from atlas_reviewer.service_admit import (
     BASE_BRANCH_REASON,
     NO_NARROWING,
     SKIP_EVENT_REASON,
+    Admitted,
+    Ignored,
+    admit,
     narrow,
     parse_repo_admission,
 )
@@ -220,3 +224,109 @@ def test_the_default_branch_comes_from_the_repository_object():
     del payload["repository"]["default_branch"]
     assert default_branch(payload) == ""
     assert default_branch({}) == ""
+
+
+def _delivery(
+    action="opened",
+    *,
+    changes=None,
+    base_ref="main",
+    draft=False,
+    sha="a" * 40,
+):
+    pull = {
+        "number": 7,
+        "draft": draft,
+        "state": "open",
+        "updated_at": "2026-11-19T12:00:00Z",
+        "head": {"sha": sha},
+        "base": {"ref": base_ref, "repo": {"full_name": "o/r"}},
+    }
+    delivery = {
+        "action": action,
+        "pull_request": pull,
+        "repository": {"full_name": "o/r", "default_branch": "trunk"},
+    }
+    if changes is not None:
+        delivery["changes"] = changes
+    return delivery
+
+
+def test_a_base_change_edit_is_admitted():
+    retarget = _delivery("edited", changes={"base": {"ref": {"from": "old"}}})
+    decision = admit(retarget, frozenset({"o/r"}))
+    assert isinstance(decision, Admitted)
+
+
+def test_a_title_or_body_edit_is_ignored():
+    """The retarget widening is narrow: only a delivery whose ``changes``
+    carries a non-empty ``base`` object re-enters admission; a title or
+    body edit changes nothing the admission decision reads, so it stays
+    outside. GitHub's own payload always carries ``ref.from`` under
+    ``changes.base``, so a non-dict or empty ``changes.base`` is not a
+    retarget either and fails closed."""
+    for changes in (
+        {"title": {"from": "old"}},
+        {"body": {"from": "old"}},
+        {"title": {"from": "a"}, "body": {"from": "b"}},
+        {},
+        {"base": "main"},
+        {"base": 7},
+        {"base": {}},
+    ):
+        assert admit(_delivery("edited", changes=changes), frozenset({"o/r"})) == (
+            Ignored("action")
+        )
+    assert admit(_delivery("edited"), frozenset({"o/r"})) == Ignored("action")
+
+
+def test_a_base_change_edit_still_runs_the_rest_of_the_envelope():
+    draft = _delivery("edited", changes={"base": {"ref": {"from": "old"}}}, draft=True)
+    assert admit(draft, frozenset({"o/r"})) == Ignored("draft")
+    forked = _delivery("edited", changes={"base": {"ref": {"from": "old"}}})
+    forked["pull_request"]["base"]["repo"]["full_name"] = "other/r"
+    assert admit(forked, frozenset({"o/r"})) == Ignored("repository")
+
+
+def test_a_retarget_is_evaluated_against_the_new_base():
+    """The narrowing's match target stays the delivery's base branch,
+    which on a retarget payload is the branch the PR now targets -- the
+    new base, not the ``changes.base.from`` one it left."""
+    retarget = _delivery("edited", changes={"base": {"ref": {"from": "main"}}})
+    retarget["pull_request"]["base"]["ref"] = "release-1"
+    admission = parse_repo_admission("review_base_include: release*\n")
+    assert narrow(retarget, admission) is None
+    leaving = _delivery("edited", changes={"base": {"ref": {"from": "release-1"}}})
+    leaving["pull_request"]["base"]["ref"] = "main"
+    assert narrow(leaving, admission).reason == BASE_BRANCH_REASON
+
+
+def test_a_retarget_into_an_excluded_base_is_skipped_with_the_usual_reason():
+    retarget = _delivery("edited", changes={"base": {"ref": {"from": "main"}}})
+    retarget["pull_request"]["base"]["ref"] = "hotfix-2"
+    admission = parse_repo_admission("review_base_exclude: hotfix*\n")
+    assert narrow(retarget, admission).reason == BASE_BRANCH_REASON
+
+
+def test_a_retarget_is_a_skippable_event_and_the_opt_out_holds():
+    """``edited`` is a legal ``review_skip_events`` value, so the
+    documented invariant holds again: a repo that skips every skippable
+    event is never reviewed. Skipping ``edited`` suppresses the
+    retarget-triggered review only; a retarget under a skip set that
+    does not name it stays admitted through the narrowing."""
+    admission = parse_repo_admission("review_skip_events: edited\n")
+    assert admission.skip_events == frozenset({"edited"})
+    assert admission.notes == ()
+    retarget = _delivery("edited", changes={"base": {"ref": {"from": "main"}}})
+    assert narrow(retarget, admission).reason == SKIP_EVENT_REASON
+    other = parse_repo_admission("review_skip_events: synchronize\n")
+    assert narrow(retarget, other) is None
+
+
+def test_a_retarget_of_a_closed_pr_is_ignored():
+    """GitHub retargets only an open PR, so a closed-PR retarget is not
+    a documented delivery; the state guard is defense-in-depth, so an
+    anomalous one costs no review and posts no comment."""
+    closed = _delivery("edited", changes={"base": {"ref": {"from": "old"}}})
+    closed["pull_request"]["state"] = "closed"
+    assert admit(closed, frozenset({"o/r"})) == Ignored("state")
