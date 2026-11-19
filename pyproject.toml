@@ -70,19 +70,21 @@ max-complexity = 15
 "tests/*.py" = ["E402"]
 
 [tool.mypy]
-# Scoped to this repo's two fully type-annotated Python packages: tooling/
-# (every module opens with `from __future__ import annotations`) and
+# Scoped to this repo's fully type-annotated Python packages: tooling/
+# (every module opens with `from __future__ import annotations`),
 # atlas_reviewer/, the manual reviewer service
-# (docs/plans/2026-11-06-manual-reviewer-service.md). tests/ and
+# (docs/plans/2026-11-06-manual-reviewer-service.md), and
+# atlas_settings/, the BYOK settings page (config slice S10, part B1). tests/ and
 # atlas_reviewer/tests/ are intentionally out of scope: adding them would be
 # a second, separate decision (test doubles/fixtures are typically
 # looser-typed by convention, and this repo's tests aren't currently
 # annotated at all).
-files = ["tooling", "atlas_reviewer"]
+files = ["tooling", "atlas_reviewer", "atlas_settings"]
 # The tests and the sample-pr fixture's source trees (including a PR's own
 # sample modules, which can repeat a name across trees) are data, not the
-# annotated package.
-exclude = ["^atlas_reviewer/tests/", "^atlas_reviewer/fixtures/"]
+# annotated package: tests/, atlas_reviewer/tests/ and atlas_settings/tests/
+# are all out of scope by the exclude below.
+exclude = ["^atlas_reviewer/tests/", "^atlas_reviewer/fixtures/", "^atlas_settings/tests/"]
 python_version = "3.12"
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -94,7 +96,12 @@ branch = true
 # test modules would otherwise count toward their own coverage, and
 # __main__.py is only exercised through a subprocess, which coverage does
 # not follow.
-omit = ["atlas_reviewer/tests/*", "atlas_reviewer/__main__.py"]
+omit = [
+    "atlas_reviewer/tests/*",
+    "atlas_reviewer/__main__.py",
+    "atlas_settings/tests/*",
+    "atlas_settings/__main__.py",
+]
 
 [tool.coverage.report]
 # A ratchet, not a target: set below the coverage measured on tooling/ at the
