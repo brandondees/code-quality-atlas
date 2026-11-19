@@ -1504,3 +1504,208 @@ def test_an_unclassifiable_finding_is_kept_under_any_floor():
     findings = ("- a bullet this parse cannot read as a finding",)
     kept, held = apply_severity_floor(findings, S("blocker"))
     assert kept == findings and held == 0
+
+
+# ---------------------------------------- the tenant path (config slice S10)
+
+
+def _tenant_credentials():
+    from atlas_reviewer.installation_store import TenantCredentials
+
+    return TenantCredentials(
+        "https://models.example.invalid/api/v1",
+        "sk-tenant-fixture-not-a-real-key",
+        "openai/gpt-4o",
+    )
+
+
+def test_the_child_env_gains_the_tenant_variables_and_loses_the_operator_key():
+    parent = {
+        "ATLAS_OPENROUTER_API_KEY": "sk-operator-secret",
+        "ATLAS_SPRITES_TOKEN": "sprite",
+        "PATH": "/usr/bin",
+    }
+    env = child_env(parent, tenant=_tenant_credentials())
+    assert env["ATLAS_TENANT_MODEL_KEY"] == "sk-tenant-fixture-not-a-real-key"
+    assert env["ATLAS_TENANT_BASE_URL"] == "https://models.example.invalid/api/v1"
+    assert env["ATLAS_TENANT_MODEL"] == "openai/gpt-4o"
+    # The operator's key never rides a tenant review: the tenant child
+    # has no use for it, so the two paths never share a child env.
+    assert "ATLAS_OPENROUTER_API_KEY" not in env
+    assert "sk-operator-secret" not in env.values()
+    assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_the_child_env_without_a_tenant_run_carries_no_tenant_variables():
+    env = child_env({"ATLAS_OPENROUTER_API_KEY": "sk-or", "PATH": "/usr/bin"})
+    assert env["ATLAS_OPENROUTER_API_KEY"] == "sk-or"
+    assert "ATLAS_TENANT_MODEL_KEY" not in env
+    assert "ATLAS_TENANT_BASE_URL" not in env
+    assert "ATLAS_TENANT_MODEL" not in env
+
+
+def test_a_tenant_run_asks_for_the_tenant_provider_and_live_inference(tmp_path):
+    argv = review_argv(
+        RunConfig("openrouter", True, tmp_path),
+        tmp_path / "run",
+        PrEvent(REPO, 7, SHA),
+        tenant=_tenant_credentials(),
+    )
+    assert "--provider" in argv
+    assert argv[argv.index("--provider") + 1] == "tenant"
+    assert "--allow-live-inference" in argv
+    assert "--round-log" in argv
+
+
+def test_an_operator_run_asks_for_the_operator_provider(tmp_path):
+    argv = review_argv(
+        RunConfig("openrouter", True, tmp_path),
+        tmp_path / "run",
+        PrEvent(REPO, 7, SHA),
+    )
+    assert argv[argv.index("--provider") + 1] == "openrouter"
+    assert "--allow-live-inference" in argv
+
+
+def test_a_tenant_run_starts_the_child_with_the_credentials(tmp_path):
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["argv"] = list(argv)
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {"ATLAS_OPENROUTER_API_KEY": "sk-operator-secret"},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: _tenant_credentials(),
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False  # the child exited 3; the wiring is what is pinned
+    env = seen["env"]
+    assert env["ATLAS_TENANT_MODEL_KEY"] == "sk-tenant-fixture-not-a-real-key"
+    assert "ATLAS_OPENROUTER_API_KEY" not in env
+    argv = seen["argv"]
+    assert argv[argv.index("--provider") + 1] == "tenant"
+
+
+def test_a_tenant_source_without_credentials_runs_the_operator_path(tmp_path):
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["argv"] = list(argv)
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {"ATLAS_OPENROUTER_API_KEY": "sk-operator-secret"},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: None,
+    )
+    runner(PrEvent(REPO, 7, SHA), threading.Event())
+    env = seen["env"]
+    assert env["ATLAS_OPENROUTER_API_KEY"] == "sk-operator-secret"
+    assert "ATLAS_TENANT_MODEL_KEY" not in env
+    argv = seen["argv"]
+    assert argv[argv.index("--provider") + 1] == "openrouter"
+
+
+def test_an_unreadable_store_fails_the_run_named_and_never_starts_a_child(
+    tmp_path,
+):
+    from atlas_reviewer.installation_store import InstallationStoreError
+
+    def popen(*_args, **_kwargs):  # pragma: no cover - must never run
+        raise AssertionError("the child must not start on a broken store")
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: (_ for _ in ()).throw(
+            InstallationStoreError(
+                "the installation record did not decrypt under the store key"
+            )
+        ),
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert result.report is None
+    assert "the tenant path refused" in result.error
+    assert "did not decrypt" in result.error
+
+
+def test_an_unacknowledged_consent_fails_the_run_named(tmp_path):
+    from atlas_reviewer.installation_store import (
+        CONSENT_REQUIRED,
+        ConsentNotAcknowledgedError,
+    )
+
+    def popen(*_args, **_kwargs):  # pragma: no cover - must never run
+        raise AssertionError("the child must not start without consent")
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: (_ for _ in ()).throw(
+            ConsentNotAcknowledgedError(CONSENT_REQUIRED)
+        ),
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert "consent" in result.error
+
+
+def test_a_run_registers_the_tenant_key_for_the_parents_scrubber(tmp_path):
+    """The parent-side half of the key-leak defense (r1 review of #776,
+    Major 1): a run that resolved tenant credentials registers the key
+    with the holder the service log's and the poster's redactors read,
+    before the child starts -- the key is not in the parent env, so
+    `_child_secrets` cannot see it."""
+    from atlas_reviewer.service_run import RunSecrets
+
+    holder = RunSecrets()
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {"ATLAS_OPENROUTER_API_KEY": "sk-operator-secret"},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: _tenant_credentials(),
+        tenant_secrets=holder,
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert holder() == ("sk-tenant-fixture-not-a-real-key",)
+
+
+def test_a_tenant_source_store_failure_registers_nothing(tmp_path):
+    from atlas_reviewer.installation_store import InstallationStoreError
+    from atlas_reviewer.service_run import RunSecrets
+
+    holder = RunSecrets()
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {},
+        popen=lambda *args, **kwargs: _Proc(0),  # pragma: no cover - never runs
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: (_ for _ in ()).throw(
+            InstallationStoreError("the installation record did not decrypt")
+        ),
+        tenant_secrets=holder,
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert holder() == ()

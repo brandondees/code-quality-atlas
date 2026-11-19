@@ -30,9 +30,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from atlas_reviewer.budget import (
     DEFAULT_REPO_DAILY_BUDGET_USD,
-    SKIP_BUDGET_REASON,
     DailySpend,
     repo_daily_budget_usd,
+    skip_reason,
 )
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
@@ -52,6 +52,17 @@ from atlas_reviewer.head_change import (
     head_change_policy,
     last_run_progress,
     read_progress,
+)
+from atlas_reviewer.installation_store import (
+    CONSENT_REQUIRED,
+    DEFAULT_RETENTION_DAYS,
+    ENV_RETENTION_DAYS,
+    ENV_STORE_KEY,
+    ConsentNotAcknowledgedError,
+    InstallationStore,
+    InstallationStoreError,
+    TenantCredentials,
+    retention_days,
 )
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
@@ -93,6 +104,7 @@ from atlas_reviewer.service_run import (
     ReviewReport,
     ReviewRun,
     RunConfig,
+    RunSecrets,
     make_runner,
     review_cost,
     run_dir,
@@ -223,10 +235,16 @@ class ServiceConfig:
     # The per-tenant daily spend bound (config slice S9, D81): the
     # operator's per-repo daily budget, the decided $100 default. The
     # per-installation daily cap rides the same check through
-    # `DailySpend.cap_for`; the operator max per review
-    # (`ATLAS_REPO_CEILING_MAX_USD`) is the child's clamp and is validated
-    # here but read there from the environment.
+    # `DailySpend.cap_for` -- from S10's store, via
+    # `InstallationStore.installation_cap` -- and the operator max per
+    # review (`ATLAS_REPO_CEILING_MAX_USD`) is the child's clamp and is
+    # validated here but read there from the environment.
     repo_daily_budget_usd: Decimal = DEFAULT_REPO_DAILY_BUDGET_USD
+    # The retention sweep's window (config slice S10): how long an
+    # installation's stored state may sit unrefreshed before the boot
+    # sweep deletes it, catching a missed `installation.deleted`
+    # webhook.
+    installation_retention_days: int = DEFAULT_RETENTION_DAYS
 
     def __post_init__(self) -> None:
         if len(self.secret) < 16:
@@ -282,6 +300,15 @@ class ServiceConfig:
             or self.repo_daily_budget_usd <= 0
         ):
             raise ServiceError("the repo daily budget must be a positive dollar amount")
+        if (
+            isinstance(self.installation_retention_days, bool)
+            or not isinstance(self.installation_retention_days, int)
+            or self.installation_retention_days < 1
+        ):
+            raise ServiceError(
+                "the installation retention window must be a positive whole "
+                "number of days"
+            )
 
 
 @dataclass(frozen=True)
@@ -304,6 +331,7 @@ def handle_delivery(
     telemetry: Telemetry | None = None,
     admission_reader: AdmissionReader | None = None,
     spend: DailySpend | None = None,
+    installations: InstallationStore | None = None,
 ) -> HttpResult:
     """One HTTP request. A bad signature is refused. Everything else that
     is not a queued review is acknowledged so GitHub does not keep the
@@ -320,6 +348,15 @@ def handle_delivery(
     event_name = _header(headers, EVENT_HEADER)
     if event_name == "ping":
         return HttpResult(200, b"pong\n", "ping")
+    if event_name == "installation.deleted":
+        # The uninstall webhook (config slice S10, D81 §7 decision 8):
+        # the installation's stored state -- credentials, cap and
+        # consent -- is deleted here. The delivery was already
+        # signature-verified above.
+        payload = parse_delivery(body)
+        if payload is None:
+            return HttpResult(202, b"ignored\n", "ignored:body")
+        return _installation_deleted(payload, installations, telemetry)
     if event_name != "pull_request":
         return HttpResult(202, b"ignored\n", "ignored:event")
     payload = parse_delivery(body)
@@ -341,10 +378,10 @@ def handle_delivery(
                 _record(
                     telemetry,
                     "review skipped",
-                    {**_fields(decision.event), "reason": SKIP_BUDGET_REASON},
+                    {**_fields(decision.event), "reason": skip_reason(refusal)},
                     error=f"{refusal} ({gap})" if gap else refusal,
                 )
-                return HttpResult(202, b"ignored\n", f"ignored:{SKIP_BUDGET_REASON}")
+                return HttpResult(202, b"ignored\n", f"ignored:{skip_reason(refusal)}")
         # The handler's GitHub reads -- the admission read and, when a
         # review is running, the head-change classification -- share one
         # overall budget, so the two together cannot hold the handler
@@ -438,12 +475,64 @@ def _delivery_installation(payload: Mapping[str, Any]) -> str:
     daily cap is looked up by (config slice S9/S10), or the empty string
     when the payload's shape does not carry one. The id is read from the
     payload when GitHub sent it and never guessed; the cap's value is
-    S10's store, whose S9 provider answers None for every id."""
+    the store's record."""
     installation = payload.get("installation")
     ident = installation.get("id") if isinstance(installation, dict) else None
     if isinstance(ident, int) and not isinstance(ident, bool) and ident > 0:
         return str(ident)
     return ""
+
+
+def _installation_deleted(
+    payload: Mapping[str, Any],
+    installations: InstallationStore | None,
+    telemetry: Telemetry | None,
+) -> HttpResult:
+    """The `installation.deleted` webhook (config slice S10, D81 §7
+    decision 8): the installation's stored state -- credentials, daily
+    cap and consent -- is deleted now, and the retention sweep
+    (`ATLAS_INSTALLATION_RETENTION_DAYS`) catches a delivery this
+    handler never saw.
+
+    A delivery whose payload does not identify an installation is
+    acknowledged and ignored, with the gap recorded: nothing can be
+    deleted for an installation the delivery does not name. A store the
+    service cannot read right now is answered **500**, not 202 -- GitHub
+    re-delivers a webhook it did not receive an acceptance for, so the
+    deletion is retried instead of lost -- with the store's failure
+    named on the telemetry."""
+    ident = _delivery_installation(payload)
+    if not ident:
+        _record(
+            telemetry,
+            "installation deleted",
+            {"reason": "no-installation-id"},
+            error=(
+                "the delivery names no installation id; nothing could be "
+                "deleted, and the retention sweep is what will catch the "
+                "record"
+            ),
+        )
+        return HttpResult(202, b"ignored\n", "ignored:shape")
+    if installations is None or (
+        not installations.configured and not installations.broken_reason
+    ):
+        # The unconfigured store never stored anything: the deletion is
+        # already true.
+        _record(telemetry, "installation deleted", {"installation": ident})
+        return HttpResult(200, b"ok\n", "deleted:none-stored")
+    try:
+        installations.delete(ident)
+    except InstallationStoreError as exc:
+        _record(
+            telemetry,
+            "installation deleted",
+            {"installation": ident},
+            error=str(exc),
+        )
+        return HttpResult(500, b"store unavailable\n", "store unavailable")
+    _record(telemetry, "installation deleted", {"installation": ident})
+    return HttpResult(200, b"ok\n", "deleted")
 
 
 def _admit_to_queue(
@@ -916,7 +1005,7 @@ class Worker:
                 self._telemetry.record(
                     "service",
                     "review skipped",
-                    {**fields, "reason": SKIP_BUDGET_REASON},
+                    {**fields, "reason": skip_reason(refusal)},
                     status=ERROR,
                     error=f"{refusal} ({gap})" if gap else refusal,
                 )
@@ -1368,6 +1457,7 @@ class _Handler(BaseHTTPRequestHandler):
             telemetry=getattr(self.server, "telemetry", None),
             admission_reader=getattr(self.server, "admission_reader", None),
             spend=getattr(self.server, "spend", None),
+            installations=getattr(self.server, "installations", None),
         )
         self._send(result.status, result.body)
         route = self.path.split("?", 1)[0][:200]
@@ -1430,6 +1520,7 @@ class ReviewServer(ThreadingHTTPServer):
     telemetry: Telemetry | None = None
     admission_reader: AdmissionReader | None = None
     spend: DailySpend | None = None
+    installations: InstallationStore | None = None
 
     def __init__(
         self,
@@ -1490,6 +1581,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         policy = head_change_policy(env)
         fraction = cancel_fraction(env)
         budget = repo_daily_budget_usd(env)
+        retention = retention_days(env)
         # Validated here so a mistyped per-tenant bound stops the service
         # at boot, not the first review that reads it in the child.
         operator_repo_ceiling_max(env)
@@ -1509,6 +1601,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         head_change_policy=policy,
         cancel_fraction=fraction,
         repo_daily_budget_usd=budget,
+        installation_retention_days=retention,
     )
 
 
@@ -1516,11 +1609,82 @@ def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str
     """Values the service log must never write. The comment scrubber is
     separate and also covers the App key and minted tokens."""
     values = [config.secret]
-    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
+    for name in (
+        "ATLAS_SPRITES_TOKEN",
+        "ATLAS_OPENROUTER_API_KEY",
+        ENV_STORE_KEY,
+    ):
         value = env.get(name, "")
         if value:
             values.append(value)
     return tuple(values)
+
+
+def _retention_sweep(
+    store: InstallationStore, config: ServiceConfig, log: Callable[[str], None]
+) -> None:
+    """The boot-time retention sweep (config slice S10, D81 §7 decision
+    8): stored state unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS`
+    is deleted, catching an `installation.deleted` webhook the service
+    never saw. The sweep runs at boot -- the deployed service restarts
+    on every deploy -- and a record it cannot read is left where it is:
+    its age cannot be established, and it is already unusable. A sweep
+    that fails names the failure and leaves the service running; skipped
+    directory entries -- a crash's leftover `<id>.json.writing` temp, a
+    stray file -- are named with their count, not allowed to halt the
+    sweep (r1 review of #776, Minor 2)."""
+    try:
+        removed, skipped = store.sweep(
+            SystemClock().now(), config.installation_retention_days
+        )
+    except InstallationStoreError as exc:
+        log(f"atlas-reviewer: the installation retention sweep failed: {exc}")
+        return
+    if removed or skipped:
+        log(
+            "atlas-reviewer: the installation retention sweep deleted "
+            f"{removed} record(s) unrefreshed past the "
+            f"{config.installation_retention_days}-day window "
+            f"({ENV_RETENTION_DAYS})"
+            + (f" and skipped {skipped} non-record file(s)" if skipped else "")
+        )
+
+
+def _tenant_credentials_source(
+    store: InstallationStore, env: Mapping[str, str]
+) -> Callable[[], TenantCredentials | None]:
+    """The tenant-path resolver the runner calls at run time (config
+    slice S10): the configured installation's stored credentials, or
+    None for the operator path. The routing rule (D89): an allowlisted
+    repo whose installation has no stored credentials is reviewed on
+    the operator's key, as today; a repo whose installation has
+    credentials is reviewed on them; neither path falls back to the
+    other. A record with credentials but no consent acknowledgement
+    refuses the review (D81 §7 decision 3), and a store that cannot be
+    read raises -- the runner fails the review with the reason named,
+    never a fallback to the operator key."""
+    installation = env.get("ATLAS_GITHUB_INSTALLATION_ID", "")
+
+    def source() -> TenantCredentials | None:
+        if store.broken_reason:
+            raise InstallationStoreError(store.broken_reason)
+        if store.fernet is None:
+            # The unconfigured store holds no credentials for anyone, so
+            # every review is the operator path.
+            return None
+        if not installation:
+            raise InstallationStoreError(
+                "no App installation id is configured, so the "
+                "installation's stored credentials cannot be resolved"
+            )
+        record = store.load(installation)
+        if record is None or not record.has_credentials:
+            return None
+        if record.consent_acknowledged_at is None:
+            raise ConsentNotAcknowledgedError(CONSENT_REQUIRED)
+        return record.credentials()
+
+    return source
 
 
 def _state_is_writable(path: Path) -> bool:
@@ -1579,20 +1743,47 @@ def serve(
     spend: DailySpend | None = None,
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
+    run_secrets: RunSecrets | None = None,
 ) -> int:
     install_interrupts()
     if not _state_is_writable(config.state_dir):
         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
         return 2
+    # The installation store (config slice S10, part A): the encrypted
+    # per-installation records the tenant path and the daily cap read.
+    # An unconfigured store -- no key, no records -- changes nothing; a
+    # broken one fails closed, and the boot log names it.
+    store = InstallationStore.open(config.state_dir, env)
+    if store.broken_reason:
+        log(f"atlas-reviewer: the installation store is broken: {store.broken_reason}")
+    if store.configured:
+        _retention_sweep(store, config, log)
     if spend is None:
-        # The per-tenant daily bounds (config slice S9, D81): production
-        # wires the decided default budget and the S9 cap provider -- no
-        # installation has a cap until S10's store lands, so none applies.
-        # A test passes its own to pin the refusal and a cap double.
-        spend = DailySpend(config.state_dir, config.repo_daily_budget_usd)
+        # The per-tenant daily bounds (config slice S9/S10): production
+        # wires the decided default budget and the store-backed cap
+        # provider -- the installation admin's cap, when one is set, an
+        # unset cap meaning none applies (D86). A store the provider
+        # cannot read raises, and the refusal then fails closed with its
+        # own named text (D89). A test passes its own to pin the refusal
+        # and a cap double.
+        spend = DailySpend(
+            config.state_dir,
+            config.repo_daily_budget_usd,
+            cap_for=store.installation_cap(),
+        )
+    tenant_source = _tenant_credentials_source(store, env)
+    if run_secrets is None:
+        # The holder the runs register the tenant key into (config slice
+        # S10): the parent's scrubber reads it on every scrub, because
+        # the child's stderr tail lands in the telemetry and the
+        # parent's redaction does not assume the child's own scrubbing
+        # was complete (r1 review of #776, Major 1). main() passes the
+        # holder the poster's redactor shares.
+        run_secrets = RunSecrets()
     board = Board(config.state_dir / "queue.json")
     redactor = Redactor(
-        known_secrets=_service_secrets(config, env), sources=secret_sources
+        known_secrets=_service_secrets(config, env),
+        sources=(*secret_sources, run_secrets),
     )
     sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
     sink.__enter__()
@@ -1617,6 +1808,8 @@ def serve(
                 ),
                 env,
                 deadline_s=deadline,
+                tenant_source=tenant_source,
+                tenant_secrets=run_secrets,
             )
         posting_publisher = _post_config_publisher(
             publisher, post_config_fetcher, telemetry
@@ -1637,6 +1830,7 @@ def serve(
         server.telemetry = telemetry
         server.admission_reader = admission_reader
         server.spend = spend
+        server.installations = store
         # A pending head stranded by a crash or a failed save (round-1
         # review of #747, F7) is queued here at boot, before any worker
         # runs, and the same recovery runs on the worker's idle passes.
@@ -2010,12 +2204,17 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         from atlas_reviewer.http import UrllibTransport
         from atlas_reviewer.service_post import publisher_from_env
 
+        # The run-resolved tenant credentials (config slice S10): one
+        # holder shared by the runner (which registers) and both
+        # scrubbers (which read) -- the service log's and the poster's.
+        run_secrets = RunSecrets()
         publisher = publisher_from_env(
             env,
             config.allowlist,
             config.state_dir,
             transport=UrllibTransport(),
             clock=SystemClock(),
+            run_secrets=run_secrets,
         )
     except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
@@ -2038,6 +2237,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,
             ),
+            run_secrets=run_secrets,
         )
     except KeyboardInterrupt:
         return 0

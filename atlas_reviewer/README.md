@@ -575,7 +575,116 @@ per installation:
   S10's settings page, enforced alongside the per-repo budget with the
   stricter of the two governing each admission. When no cap is set, none
   applies and the per-repo budgets remain the bound. Its value is S10's
-  installation store; until that lands, no installation has a cap.
+  installation store (see the next section); the store-backed provider
+  replaces S9's always-none one wherever the store is configured, and a
+  store it cannot read refuses the check outright ("skipped: installation
+  store unavailable") instead of reading as an unset cap.
+
+## The installation store and the tenant-supplied endpoint (config slice S10, part A)
+
+A GitHub App installation (a user account or an org) can supply its own
+model API endpoint and key, and its reviews then run on them. Part A is
+the backend: the encrypted store, the tenant model-call path, the egress
+guard, the retention rules. The settings page the installation admin
+uses — the intake surface, rotation, revocation, consent acknowledgement,
+the cap dial — is part B, which calls the store's API; no page exists yet.
+
+**The store.** One encrypted record per installation at
+`<state dir>/installations/<installation id>.json`, encrypted at rest
+under the operator-held key `ATLAS_INSTALLATION_STORE_KEY` (a Fernet key;
+`cryptography`'s authenticated encryption — already in the lock for
+`PyJWT[crypto]` — not hand-rolled crypto). The record holds the tenant
+credentials (endpoint base URL, key, chosen model), the installation
+admin's daily cap, and the consent acknowledgement, with a private 0700
+directory, 0600 files, atomic writes, and a per-installation advisory
+`fcntl.flock` held across every read-modify-write, delete and sweep step —
+the service process and part B's settings-page process serialize on it,
+so a concurrent consent write cannot be lost under a rotation and a
+rotation cannot resurrect a record the `installation.deleted` webhook
+just deleted. Every read fails closed: a store that is unreadable,
+corrupt, or encrypted under the wrong key raises with the reason named,
+the review fails with that reason, and nothing falls back — no
+operator-key path opens for a record this service cannot read. A
+deployment that never set the store key and has no records on disk is not
+a failure: no installation has credentials, so no tenant path exists and
+no cap applies. A key that is gone while records remain on disk **is** a
+failure, because the records it cannot read may hold credentials. The
+retention sweep skips any directory entry that is not a valid record
+name — a crash's leftover `<id>.json.writing` temp, a stray file, or a
+record-shaped name that fails the store's own id validation (`0.json`,
+an over-long digit string) — naming the count instead of halting on it,
+and deletes only what it wrote: the skip is the id's whole validation,
+so no name the store did not write can stop the sweep or be removed by
+it.
+
+**The routing rule.** An allowlisted repo whose installation has no
+tenant credentials is reviewed on the operator's key, as today. A repo
+whose installation has tenant credentials is reviewed on them. A tenant
+review never falls back to the operator's key on any failure. The
+`ATLAS_REVIEW_REPOS` allowlist stays the invite-only gate; a
+non-allowlisted installation cannot review on the operator's key at all.
+
+**The tenant model-call path.** The review child receives the tenant
+credentials through three environment variables — `ATLAS_TENANT_MODEL_KEY`
+(the key; the one credential variable the child env allowlist gains, the
+way it holds `ATLAS_OPENROUTER_API_KEY`), and the settings
+`ATLAS_TENANT_BASE_URL` and `ATLAS_TENANT_MODEL` — and a tenant-path
+child **does not receive the operator's key**. The tenant client speaks
+an OpenAI-compatible chat completions shape at the installation's base
+URL, with no OpenRouter routing document and no key-credit preflight.
+`ATLAS_KEY_CEILING_USD` stays operator-key only. Pricing comes from the
+operator's price table — the OpenRouter public catalog entry for the
+chosen model, read without any credential: a model with no entry there is
+refused with the reason named; a zero-priced model is allowed, and the
+per-review call caps and walls bound it. The settle reads only reported
+token counts priced at that table; the tenant path never reads
+`usage.cost` or `cost_details.upstream_inference_cost`, so a
+tenant-reported figure can move only the tenant's own settled total,
+never a reservation and never an operator-protective bound. The existing
+OpenRouter-BYOK handling on the operator-key path (`usage.is_byok`,
+`ByokRefusedError`, D41) is untouched, and the two never share a code
+path. The draft's cost line, and the posted Cost section, record which
+endpoint class served the review — the operator's, or the installation's
+own.
+
+**The egress guard.** A user-supplied base URL is user-controlled egress.
+The tenant transport is HTTPS-only and refuses a URL with userinfo. At
+connect time every address the hostname resolves to is checked against
+the blocked set — the plan §4 list (the RFC 1918 ranges, `127.0.0.0/8`,
+`169.254.0.0/16`, `0.0.0.0/8`, `100.64.0.0/10`, ULA `fc00::/7`,
+link-local `fe80::/10`, `::1`, `::`, all IPv4-mapped IPv6
+`::ffff:0:0/96`) **and beyond it** (the round-1 call): the
+IPv4-embedding IPv6 forms an HTTPS model API has no business on —
+IPv4-compatible `::/96`, 6to4 `2002::/16`, NAT64 `64:ff9b::/96` and
+`64:ff9b:1::/48`, Teredo `2001::/32` — plus the discard-only `100::/64`,
+IPv6 multicast `ff00::/8`, and the IPv4 multicast, benchmarking and
+reserved ranges. The check runs over IPv4 and IPv6 alike, and any blocked
+address refuses the whole host — the connection never races a round-robin
+resolver — then the socket connects to the checked address itself while
+the TLS handshake still presents the original hostname, so a DNS
+rebinding double has nothing to rebind to, and a failed connect closes
+its socket before re-raising. Redirects are never followed and are
+refused by name. The existing timeouts and response caps apply, and the
+responses are untrusted model output.
+
+**Failure rule.** An auth error, quota error, endpoint down, egress
+refusal, unknown price, or store failure fails the review with the
+failure named plainly in fixed phrases — never a clean-looking
+"Findings: None" — and the key is never echoed in any of them.
+
+**Retention.** The `installation.deleted` webhook deletes the
+installation's stored state — credentials, cap and consent. A delivery
+the service cannot honor right now (a store it cannot read) is answered
+500, which GitHub re-delivers, so the deletion is retried rather than
+lost, with the gap named on the telemetry. A retention-window sweep at
+boot deletes records unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS`
+(default 30), catching a missed webhook.
+
+**Not yet set in any deployment.** `ATLAS_INSTALLATION_STORE_KEY`,
+`ATLAS_INSTALLATION_RETENTION_DAYS`, and the three `ATLAS_TENANT_*`
+variables are documented here and configured nowhere; no tenant
+credential exists on the deployed service, and the settings page that
+would set them is part B.
 
 **What is counted.** The committed spend is the review child's own
 accounting — reported token counts priced at the operator's price table —
@@ -995,8 +1104,13 @@ Environment variables (names only; never commit values):
 | `ATLAS_HEAD_CHANGE_POLICY` | webhook service | The keep-or-cancel policy for a push that lands mid-review (#702, D79): `keep` (the default) decides per push and queues a kept head as the settled review's follow-up; `cancel` restores the blanket supersede. An unknown value refuses to start |
 | `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` | webhook service | The "early" threshold the cancel branch compares the lenses-settled and budget-spent fractions against, 0.0 to 1.0 (default 0.5). A code push under it on both measures cancels the running review |
 | `ATLAS_REPO_DAILY_BUDGET_USD` | webhook service | The per-repo daily budget (config slice S9, D81; default $100 per repo per UTC day). Once a repo's day has spent this much committed model spend, further reviews are refused at admission and re-checked at preflight, and the record says plainly "skipped: daily budget reached" -- never a clean-looking review. The total is one append-only `<state dir>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per day; see the spend-bounds section below |
+| `ATLAS_INSTALLATION_STORE_KEY` | webhook service | The Fernet key the installation store's records are encrypted at rest under (config slice S10, part A; **not yet set in any deployment**). Unset with no records on disk is the unconfigured store: no tenant path, no caps. Unset with records on disk, or set to a value that is not a valid Fernet key, is the broken store: every read raises, reviews refuse, and the cap check refuses with "skipped: installation store unavailable". The key is a service secret and never reaches a child, a Sprite, or the log |
+| `ATLAS_INSTALLATION_RETENTION_DAYS` | webhook service | The retention sweep's window in days (config slice S10, part A; default 30; **not yet set in any deployment**). At boot, stored installation state unrefreshed past the window is deleted, catching a missed `installation.deleted` webhook |
+| `ATLAS_TENANT_MODEL_KEY` | tenant review child | The installation's own model API key (config slice S10, part A; **not yet set in any deployment**). The one credential variable the child env allowlist gains; it travels only on a tenant-path run, is scrubbed like the other secrets, and never reaches a Sprite |
+| `ATLAS_TENANT_BASE_URL` | tenant review child | The installation's own endpoint base URL (config slice S10, part A; **not yet set in any deployment**). HTTPS only; every connection's resolved addresses are checked against the egress blocklist and pinned (see the installation-store section) |
+| `ATLAS_TENANT_MODEL` | tenant review child | The model the installation chose, within what its own endpoint serves (config slice S10, part A; **not yet set in any deployment**). Priced from the operator's price table; a model with no entry there is refused, a zero-priced model is allowed |
 
-The six credential and state variables above the limit rows never reach a
+The credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
 uses it. The nineteen `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
@@ -1007,12 +1121,24 @@ path reads them; a dry run does not. The webhook review child receives
 those route variables, `ATLAS_KEY_CEILING_USD`,
 `ATLAS_REPO_CEILING_MAX_USD` (the per-tenant clamp, config slice S9), and
 the agentic limit
-variables (the one-shot command ignores those). It does not receive
+variables (the one-shot command ignores those). On a tenant-path run it
+instead receives the tenant trio -- `ATLAS_TENANT_MODEL_KEY`,
+`ATLAS_TENANT_BASE_URL`, `ATLAS_TENANT_MODEL` -- and **not** the
+operator's key. It does not receive
 the webhook secret or the App private key. The redactor also scrubs the exact
-value of the App key, the Sprites token, the OpenRouter key, and every
+value of the App key, the Sprites token, the OpenRouter key, the tenant
+model key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
-error message on stderr.
+error message on stderr. The tenant key's parent-side scrub does not come
+from the environment -- the key is not in it; it comes from the
+run-resolved credentials: the run registers the key with a shared holder
+before the child starts, and both the service log's redactor and the
+poster's redactor read that holder on every scrub, so a child stderr tail
+that reaches a telemetry record (or a report field that reaches a
+comment) loses the key even when the child's own scrubbing was incomplete
+(r1 review of #776, Major 1). Registered keys are never cleared: a key
+stays a value the log never prints after the run that used it.
 
 **GitHub App tokens.** `github_auth.py` signs an RS256 JWT with the App key
 (PyJWT with `cryptography`, the only non-stdlib runtime dependency, used by

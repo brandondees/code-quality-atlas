@@ -28,7 +28,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -59,7 +59,7 @@ from atlas_reviewer.service import (
     RateLimited,
     before_send,
 )
-from atlas_reviewer.service_run import ReviewReport, apply_severity_floor
+from atlas_reviewer.service_run import ReviewReport, RunSecrets, apply_severity_floor
 
 API_URL = "https://api.github.com"
 MAX_COMMENT_CHARS = 65_000
@@ -723,10 +723,16 @@ def publisher_from_env(
     *,
     transport: Transport,
     clock: Clock,
+    run_secrets: RunSecrets | None = None,
 ) -> ReviewPoster:
     """The poster for one installation. The private key and the minted
     token stay in this process and are not given to the review child. The
-    scrubber removes both from the comment."""
+    scrubber removes both from the comment, and -- when the caller hands
+    it the runs' holder (config slice S10) -- the tenant key a run
+    resolved from the installation store: the comment's report fields
+    come from the child-scrubbed draft, but the poster's redaction is
+    the layer that does not have to trust that (r1 review of #776,
+    Major 1)."""
     app_id = _env(env, "ATLAS_GITHUB_APP_ID")
     private_key = normalize_pem_key(_env(env, "ATLAS_GITHUB_APP_PRIVATE_KEY"))
     installation = _env(env, "ATLAS_GITHUB_INSTALLATION_ID")
@@ -755,7 +761,10 @@ def publisher_from_env(
         writable=POST_WRITABLE,
         repositories=repository_names(allowlist),
     )
-    redactor = Redactor(known_secrets=tuple(known), sources=(tokens.secrets,))
+    sources: tuple[Callable[[], Sequence[str]], ...] = (tokens.secrets,)
+    if run_secrets is not None:
+        sources = (*sources, run_secrets)
+    redactor = Redactor(known_secrets=tuple(known), sources=sources)
     return ReviewPoster(
         transport,
         tokens,

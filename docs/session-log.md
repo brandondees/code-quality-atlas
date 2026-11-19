@@ -5025,3 +5025,312 @@ D86 sits on main beside D87. D87's parenthetical is reworded in place to
 say so — its entry is still the current record — and this note is the
 log's append-only stand-in for the same fact; the S6 entry's "which open
 S9 PR #773 holds" wording above is the stale text the correction covers.
+
+## 2026-11-19 — Config slice S10, part A: the BYOK core — the encrypted installation store, the tenant endpoint's own code path, and the pinned-IP egress guard (issue #768)
+
+The user-configuration plan's S10 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S10, §7's nine decisions, §8 Q1/Q3/Q5), part A — the backend; part B,
+the operator-hosted settings page, is a later PR calling this store's API.
+The decisions this part had to make beyond the plan are **D89**. Offline
+only: the tests use fakes, temp files and the real `cryptography` Fernet
+with obviously fake keys; no live model, Sprite or GitHub call was made,
+no secret was read or set, and no deployed service setting, Fly config
+value or secret changed.
+
+**The store.** `installation_store.py`: one Fernet-encrypted record per
+App installation at `<state root>/installations/<id>.json` — the tenant
+credentials (endpoint base URL, key, chosen model), the installation
+admin's daily cap, the consent acknowledgement, an `updated_at` — 0700
+directory, 0600 files, atomic writes (temp file, fsync, rename, directory
+sync), the id validated digits-only so the record name cannot escape the
+directory. `cryptography` was chosen over hand-rolled crypto; it is
+already in the lock (`PyJWT[crypto]`, pinned 50.0.2), so the dependency
+evaluation adds no package and no lock change, only a direct import.
+Every read fails closed with the reason named and never falls back, with
+one distinction the boot log and the refusal records carry: no key **and
+no records on disk** is the unconfigured store — nothing stored for
+anyone, the tenant path absent, the cap None — while no key **with
+records on disk**, or an invalid key, is the broken store, because the
+records it cannot read may hold credentials the routing rule must not
+silently replace with the operator's key. The keys never appear in a
+repr (`key=<redacted>`), an exception message, or a log; the repr tests
+pin it and the corrupt-record test seeds a plaintext file containing the
+fixture key and asserts the refusal names the document, not its
+contents. Part B's surface is the six methods the brief names: store or
+rotate (`store_credentials`), revoke (`revoke_credentials`, keeping cap
+and consent), set or clear the cap (`set_cap`, a cap may exist without
+credentials), record consent (`record_consent`), delete everything
+(`delete`), read (`load`).
+
+**The routing rule.** An allowlisted repo whose installation has no
+stored credentials is reviewed on the operator's key, as today; a repo
+whose installation has credentials is reviewed on them; neither path
+falls back to the other. The tenant resolution runs at run time in the
+runner (`service_run.make_runner`'s `tenant_source`), fresh so a rotation
+between queueing and running lands, keyed by the configured installation
+id — the same id the token mint uses, and D86's preflight-cap resolution.
+A record with credentials but no consent acknowledgement refuses the
+review, naming the consent (D81 §7 decision 3's gate; the acknowledgement
+itself is part B's page).
+
+**The child env.** `_CHILD_ALLOWED` gains exactly one credential variable
+for the tenant key (`ATLAS_TENANT_MODEL_KEY`) plus two settings
+(`ATLAS_TENANT_BASE_URL`, `ATLAS_TENANT_MODEL`) — the key is the one
+credential the brief's "exactly one variable" names, and the endpoint and
+model ride as settings the way every other setting rides (D86's
+precedent). A tenant-path child **drops `ATLAS_OPENROUTER_API_KEY`**, so
+the two paths never share a child environment; the Sprite receives
+neither. A tenant run passes `--provider tenant` with
+`--allow-live-inference`; the CLI's `_select_provider` builds the tenant
+client from the three variables (a partial trio refuses, naming what is
+missing), and the agentic loop runs on `TenantLensModel` — the operator
+adapter's message serialization, per-call bounds, meter and cache
+bookkeeping, none of its BYOK handling. D41's `usage.is_byok` /
+`ByokRefusedError` path and `openrouter.py` are untouched;
+`tool_model.py` is not edited either (the tenant adapter lives in its own
+module and imports the pure helpers).
+
+**The tenant client's accounting.** The preflight is the operator's
+price table — the OpenRouter public catalog entry for the chosen model,
+read without any credential: no entry refuses with the reason named, a
+**zero-priced** model is allowed (D81's Q3 answer) and settles at $0
+(its `output_tokens_within` returns the resolved cap — no dollar rate to
+divide by — so the call caps and walls are its bound). The settle reads
+only reported token counts priced at that table; `usage.cost` and
+`cost_details.upstream_inference_cost` are never read, so a
+tenant-reported figure can move only the tenant's own settled total.
+Two tests pin the plan's demand directly: a hostile endpoint reporting
+`usage.cost: "0.00"` settles at the token-priced figure, and a deflated
+count (1 token in, 1 out) settles tiny while the reservation — computed
+before the endpoint answered, from the byte bound and the operator's
+caps — stays whole. A served-model id that is neither the configured id
+nor a dated revision of it is refused, because the accounting prices the
+configured id.
+
+**The egress guard.** `egress.py`: HTTPS only, no userinfo; at connect
+time every address `getaddrinfo` answers is validated against the
+blocked set — the plan's §4 list (RFC 1918, `127.0.0.0/8`,
+`169.254.0.0/16`, `0.0.0.0/8`, `100.64.0.0/10`, ULA `fc00::/7`, link-local
+`fe80::/10`, `::1`, `::`, all IPv4-mapped `::ffff:0:0/96`) plus IPv4
+multicast, benchmarking and reserved — over IPv4 and IPv6 alike; any
+blocked address refuses the **whole host**, so the connection never
+races a round-robin resolver against the check; the socket then connects
+to the checked address while the TLS handshake presents the original
+hostname (SNI and verification) — a rebinding double has nothing to
+rebind to. Redirects are refused, not re-checked: the transport never
+follows one, so there is no second hop; a 3xx reaches the provider and
+is refused by name. An explicit "IPv4-mapped" special case turned out to
+be redundant — `::ffff:0:0/96` membership already catches every mapped
+address, public ones included — so the check is the one mechanism, and
+the docstring says what it covers.
+
+**The failure rule and the endpoint class.** Every failure — auth
+(401/403), quota (402), endpoint down (5xx, transport), egress refusal,
+unknown price, store failure — is a `BoundaryError` with its fixed
+phrase; the review fails named and nothing reads as a clean "Findings:
+None", and the key is in no message (it travels in a header, never a
+URL). The agentic draft's cost line appends "Served by the operator's
+model endpoint." or "Served by the installation's own model endpoint."
+(`coordinator.synthesize`'s new `endpoint_class`, read from the
+provider's own name, so a new provider class cannot silently pass as
+either), and the posted Cost section carries the same line; the one-shot
+path's Model usage line names the tenant endpoint the same way; a dry-run
+draft gains no sentence. The service's cost regex reads the extended
+line unchanged.
+
+**The cap and the retention.** D86's `InstallationCap` interface is
+unchanged; production wires the store-backed provider wherever the store
+is configured, an unset cap means none applies, and a provider that
+cannot read the store raises — `DailySpend.refusal` catches it and
+returns a second fixed text, "skipped: installation store unavailable",
+with the store's reason as the gap and its own telemetry label
+(`installation-store`) beside S9's `daily-budget`: an unknown cap
+refuses instead of silently unbounding. The `installation.deleted`
+webhook deletes the record now; a deletion the service cannot honor is
+answered 500, which GitHub re-delivers, so it is retried rather than
+lost, with the gap on the telemetry; a boot-time sweep deletes records
+unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS` (default 30) and
+leaves a record it cannot read (its age cannot be established and it is
+already unusable). The sweep runs at boot — every deploy restarts the
+service — and a long-running deployment that never restarts sweeps only
+at its next boot; named, not claimed away.
+
+**Tests** (`test_installation_store.py`, `test_egress.py`,
+`test_tenant_provider.py` new — 36, 56 and 33 tests; `test_budget.py`,
+`test_service_run.py`, `test_service_receive.py`, `test_cli.py`,
+`test_coordinator.py` extended). Each behavior a test that fails when
+reverted. **Twenty-two mutants applied by hand, all killed**: the broken
+store's raise dropped (the broken-store test), the unconfigured store's
+None made a refusal (the unconfigured test), the wrong-key branch
+collapsed into the corrupt text (the wrong-key test), the atomic rename
+replaced by deleting the temp (the no-temp test), the cap positivity
+check dropped (the cap-validation test), `has_credentials`' three-field
+`and` loosened to `or` (the half-revoked-record test), the sweep
+horizon's comparison flipped (the sweep test), `delete`'s unlink made a
+no-op (the delete test), the whole-host refusal on a blocked address
+turned into a skip-and-continue (the rebinding-double test), the pinned
+socket connect replaced by a hostname connect (the pinned-connect
+socket test), HTTPS-only dropped to allow http (the URL-check tests),
+the tenant settle made to read `usage.cost` when present (the
+never-reads-usage-cost test), the auth-status set narrowed to 403 (the
+401 test), the tenant env resolver made to fall back to a placeholder
+key (the partial-trio test), `DailySpend.refusal`'s store failure turned
+into cap None (the fail-closed refusal test), the second telemetry label
+collapsed into `daily-budget` (the skip-reason test), the child env's
+operator-key drop removed (the drops-the-operator-key test), the tenant
+argv's `--provider tenant` removed (the argv test), the runner's
+store-failure turned into the operator path (the never-starts-a-child
+test), the webhook branch renamed away (the deletion test), the 500 made
+202 (the re-delivery test), the consent gate removed (the consent
+refusal test), and the cost line's endpoint sentence not appended (the
+cost-line tests). One mutant was **equivalent and removed with its code**
+instead: the explicit IPv4-mapped special case in `blocked_reason` is
+subsumed by `::ffff:0:0/96` membership, so removing it changes nothing
+the tests can see — the branch is gone and the network membership is the
+one mechanism.
+
+**Overlap.** The shared files were kept additive for the two open PRs:
+PR #774 (S6) touches `conversation.py`/`cli.py`/`github_fixture.py` and
+PR #775 (S7) touches `bridge*.py`/`repo_config.py`/`approval.py`/
+`coordinator.py`/`cli.py`/`ports.py`/`instrumented.py`. This branch's
+`cli.py` touches are `_select_provider`'s tenant branch, `_live_tenant`,
+`_live_lens_model`, `PROVIDER_CHOICES`, `SECRET_ENV`, the parser
+defaults and `main`'s factory parameter; its `coordinator.py` touches are
+`synthesize`'s defaulted parameter, the new `endpoint_class` helper, and
+the cost line's appended sentence — no signature changed on a function
+those PRs touch. The branch sits atop main `81d70ebb`.
+
+## 2026-11-19 (same day) — #776 round 1: the parent's scrubber learns the tenant key, the sweep survives a stray file, and the egress set goes beyond §4
+
+The round-1 review of #776 (head `02d54cbb`): one Major, two Minors
+adopted, three nits, all fixed on the branch; each fix names its test or
+its mutant. Offline only, same rules as the entries above.
+
+**M1 — the parent-side scrubber now knows the tenant key.** The child's
+stderr tail lands in the run's error string and on the `review failed`
+telemetry record, and the parent's redaction exists precisely to not
+depend on the child's own scrubbing being complete — but the tenant key
+is not in the parent env (the store resolves it at run time), so
+`_child_secrets` could not see it. `service_run.RunSecrets` is the fix: a
+thread-safe holder the run registers the resolved key into **before the
+child starts**, and which the service log's redactor (`serve`'s) and the
+poster's redactor (`publisher_from_env`, via one holder `main` passes to
+both) read as a source on every scrub. Registered keys are never cleared
+— a key stays a value the log never prints after the run that used it,
+and scrubbing a rotated-away key is harmless — with `_child_secrets`' own
+≥8-character filter so a short fixture string cannot scrub the log's own
+words. The end-to-end pin's fake child writes the key unscrubbed into
+stderr and the parent record shows it redacted; the runner-level
+registration test and the poster-level test pin their halves; the mutant
+that drops the registration is killed by all three. The other
+parent-side paths were checked: posts and retries carry report fields
+from the child-scrubbed draft (and the poster's redactor now covers the
+holder too); no other parent path records child stderr.
+
+**m2 — the sweep no longer halts on a stray file.** The
+`installation_id(path.stem)` parse moved inside the per-file handling: a
+directory entry that is not `<digits>.json` — a crash's leftover
+`<id>.json.writing` temp, a stray file — is skipped and named (`sweep`
+returns `(removed, skipped)`, the boot log names both counts), while
+every valid record is still swept. The decided call on stale `.writing`
+files: **named and skipped, not deleted** — this store deletes only what
+it wrote, and a temp file it never reads costs nothing to leave; the
+naming keeps it visible. Pinned by the store-level stray test (which
+asserts the stray survives and the stale record is still removed) and
+the boot-level log test; the mutant restoring the pre-loop parse is
+killed.
+
+**m3 — the blocked set goes beyond §4's list (the owner's call).** The
+IPv4-embedding IPv6 forms an HTTPS model API has no business on are
+blocked whole: IPv4-compatible `::/96` (subsuming `::/128`), 6to4
+`2002::/16`, NAT64 `64:ff9b::/96` and `64:ff9b:1::/48`, Teredo
+`2001::/32`, the discard-only `100::/64`, and IPv6 multicast
+`ff00::/8`; the IPv4 multicast/broadcast/reserved ranges were already
+covered. The review measured that none of these forms routes to the
+embedded IPv4 address on the deployment's own kernel, so this is
+defense-in-depth against a network that routes them (NAT64/6to4
+infrastructure), not a live bypass — and no HTTPS model API lives on any
+of them, so the false-positive cost is nil. Each form is pinned in the
+parametrized refusal test and the minimum-set test; a dropped range dies
+there.
+
+**The three nits.** The tenant span now records the parsed
+`finish_reason` the operator adapter records (`_tenant_turn` parses the
+choice before `_remember`; pinned by the span test).
+`PinnedHTTPSConnection.connect` closes the raw socket when the connect
+raises (pinned by the close test; the mutant removing the close is
+killed). The store's read-modify-write lock is now a per-installation
+`fcntl.flock` replacing the in-process `threading.Lock` — part B's
+settings page will be a second writer process on the same state volume,
+and two concurrent RMWs under only an in-process lock would lose an
+update (a consent write lost under a rotation) or resurrect a deleted
+record; `flock` excludes across processes and across one process's
+threads (separate open file descriptions), so it is the one
+serialization the store needs, taken across every RMW, delete, and
+per-record sweep step. Pinned by the lock-release test and the
+held-lock blocking test; the mutant removing the flock is killed by the
+blocking test.
+
+**Tests** (`test_service_run.py`, `test_service_receive.py`,
+`test_service_post.py`, `test_installation_store.py`,
+`test_egress.py`, `test_tenant_provider.py` extended). **Five fix-round
+mutants applied by hand, all killed**: the holder registration dropped
+(the three M1 tests), the sweep's stray skip removed — the parse back
+outside the loop (the stray test), a blocked range dropped (`::/96` and
+`2002::/16` each tried; the minimum-set test), the connect's close
+removed (the close test), the flock removed — the contextmanager yields
+without locking (the blocking test).
+
+**Overlap.** Unchanged from the round-1 body: `cli.py` and
+`coordinator.py` untouched this round; the round's edits are
+`service.py`, `service_run.py`, `service_post.py`,
+`installation_store.py`, `egress.py`, `tenant_provider.py`, their test
+files, and the three docs.
+
+## 2026-11-19 (same day) — #776 round 2: the sweep's skip becomes the id's whole validation, and the three nits are decided left with reasons
+
+The round-2 review of #776 (head `87c00b14`): **Approve**, with one
+Minor surviving — the residual of r1's sweep fix — and three nits. All
+fixed/decided on the branch in one commit. Offline only, same rules as
+the entries above.
+
+**m2' — the skip is now the id's whole validation.** The r1 fix's skip
+pre-checked only `stem.isascii() and stem.isdigit()`, and the
+`installation_id(stem)` call after it still sat outside any try: a digit
+stem that fails the id's other checks — `0.json` (a positive-integer
+failure) or an over-long digit string (over 64 digits) — still raised
+and still halted every future sweep, and the r1 wording ("the parse
+moved inside the per-file handling") overstated what the code did. The
+fix moves the whole validation into the skip: `installation_id` runs
+inside the per-entry `try`, and any entry that is not a valid record
+name is named and skipped, never halting the sweep and never deleted.
+Pinned by `test_the_sweep_skips_a_record_shaped_name_that_fails_the_ids_checks`
+(`0.json` and a 70-digit `<digits>.json` beside a live stale record:
+both survive, the sweep still removes the stale record, the count names
+both); the mutant moving the parse back out is killed. The README's
+sweep sentence is reworded to match the code exactly, and D89's r1
+Update is corrected by an appended dated Correction paragraph (the
+decisions log is append-only; the session log records the correction
+here the same way — the r1 entry above stands as written).
+
+**The three nits — all left as built, each with its reason.** (n-a) The
+per-installation lock file outlives its uninstall: deleting it inside
+`delete`'s locked section is the classic unlink-under-flock hazard — a
+second process blocked acquiring the lock can hold it on the unlinked
+inode while a later writer locks a fresh file at the same path, giving
+two writers locks on two different inodes; the clutter is harmless
+0-byte files bounded by the installations ever seen, and GitHub
+installation ids are never reused, so a stale lock is never wrongly
+contended. (n-b) The flock blocks without a timeout: accepted as
+designed — `flock` releases on process death, the critical sections are
+one read plus one small atomic write, and GitHub re-delivers an
+unanswered webhook; revisit with `LOCK_NB` + retry only if part B's page
+ever does long work under the lock. (n-c) Over-redaction is possible but
+bounded: a tenant key of ≥ 8 characters colliding with controller text
+redacts those words tenant-scoped — the child-side redactor has had the
+same exposure since the slice landed — and refusing colliding keys
+belongs to part B's intake validation, not to the store.
+
+**Tests** (`test_installation_store.py` extended by the m2' test).
+**One fix-round mutant applied by hand and killed:** the parse moved
+back outside the skip (the new record-shaped-name test).

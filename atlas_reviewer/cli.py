@@ -93,6 +93,7 @@ from atlas_reviewer.domain import (
     SourceKind,
 )
 from atlas_reviewer.draft import telemetry_section
+from atlas_reviewer.egress import TenantEndpointTransport
 from atlas_reviewer.eval_harness import EvalFormatError, load_directory
 from atlas_reviewer.evidence import PullInfo, Remark, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
@@ -105,7 +106,12 @@ from atlas_reviewer.github_auth import (
 )
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
-from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
+from atlas_reviewer.http import (
+    DEFAULT_MAX_BYTES,
+    UrllibStreamingTransport,
+    UrllibTransport,
+)
+from atlas_reviewer.installation_store import TenantCredentials
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.keepalive import SOCKET_PATH
@@ -180,6 +186,14 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.tenant_provider import (
+    ENV_TENANT_BASE_URL,
+    ENV_TENANT_MODEL,
+    ENV_TENANT_MODEL_KEY,
+    TenantEndpointProvider,
+    TenantLensModel,
+    tenant_environment,
+)
 from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.tracing import (
     acquire_shared,
@@ -202,8 +216,13 @@ ENV_SPRITES_TOKEN = "ATLAS_SPRITES_TOKEN"
 ENV_OPENROUTER_KEY = "ATLAS_OPENROUTER_API_KEY"
 ENV_STATE_DIR = "ATLAS_REVIEWER_STATE_DIR"
 DEFAULT_STATE_DIR = Path(".atlas-reviewer-state")
-PROVIDER_CHOICES = ("offline", "openrouter")
-SECRET_ENV = (ENV_APP_KEY, ENV_SPRITES_TOKEN, ENV_OPENROUTER_KEY)
+PROVIDER_CHOICES = ("offline", "openrouter", "tenant")
+SECRET_ENV = (
+    ENV_APP_KEY,
+    ENV_SPRITES_TOKEN,
+    ENV_OPENROUTER_KEY,
+    ENV_TENANT_MODEL_KEY,
+)
 
 EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY, EXIT_INCOMPLETE = 0, 2, 3, 4
 EXIT_CHANGES_REQUESTED = 5
@@ -288,11 +307,25 @@ def _select_provider(
     if args.provider == "offline":
         return OfflineProvider()
     if args.dry_run:
-        raise UsageError("--dry-run is offline-only; drop --provider openrouter")
+        raise UsageError(
+            "--dry-run is offline-only; drop --provider openrouter and --provider tenant"
+        )
     if not args.allow_live_inference:
         raise UsageError(
-            "live inference is off: pass --allow-live-inference with --provider openrouter"
+            "live inference is off: pass --allow-live-inference with "
+            "--provider openrouter or --provider tenant"
         )
+    if args.provider == "tenant":
+        route = tenant_environment(env)
+        if route is None:
+            raise UsageError(
+                "this command needs the "
+                f"{ENV_TENANT_MODEL_KEY}, {ENV_TENANT_BASE_URL} and "
+                f"{ENV_TENANT_MODEL} environment variables"
+            )
+        provider = args.tenant_factory(route, limits)
+        telemetry.span("model preflight", "price table", provider.preflight)
+        return provider
     provider = openrouter(_require_env(env, ENV_OPENROUTER_KEY), limits)
     if isinstance(provider, OpenRouterProvider):
         provider.key_ceiling = _key_ceiling(args, env)
@@ -311,6 +344,31 @@ def _select_provider(
 
 def _live_openrouter(key: str, limits: CallLimits) -> OpenRouterProvider:
     return OpenRouterProvider(UrllibTransport(), key, limits=limits, sleep=time.sleep)
+
+
+def _live_tenant(
+    credentials: TenantCredentials, limits: CallLimits
+) -> TenantEndpointProvider:
+    """The live tenant client: the egress-guarded transport, the
+    installation's own endpoint, key and model (config slice S10)."""
+    return TenantEndpointProvider(
+        TenantEndpointTransport(DEFAULT_MAX_BYTES),
+        credentials,
+        limits=limits,
+        sleep=time.sleep,
+    )
+
+
+def _live_lens_model(
+    provider: OpenRouterProvider | TenantEndpointProvider, limits: AgenticLimits
+) -> OpenRouterLensModel | TenantLensModel:
+    """The live adapter one agentic lens runs on: the operator path's
+    OpenRouter adapter, or the tenant path's own (config slice S10) --
+    the same loop, meter and bounds, a different endpoint, key and
+    accounting."""
+    if isinstance(provider, TenantEndpointProvider):
+        return TenantLensModel(provider, per_call=limits.resolve(cross_limits=False))
+    return model_for_lens(provider, limits)
 
 
 class _Credentials:
@@ -877,7 +935,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # Every live adapter the review creates, so the draft's
         # prompt-cache section covers each lens's own (#695). Dry-run and
         # scripted models record none.
-        live_models: list[OpenRouterLensModel] = []
+        live_models: list[OpenRouterLensModel | TenantLensModel] = []
         if args.dry_run:
             fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
             if not fixtures.is_dir():
@@ -904,10 +962,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             provider = _select_provider(
                 args, env, args.openrouter_factory, telemetry, _picker_limits(limits)
             )
-            if not isinstance(provider, OpenRouterProvider):
+            if not isinstance(provider, (OpenRouterProvider, TenantEndpointProvider)):
                 raise UsageError(
                     "agentic-review live mode needs --provider openrouter "
-                    "--allow-live-inference"
+                    "or --provider tenant, with --allow-live-inference"
                 )
             github = _live_github(args, env, event, run.credentials)
             sprites = args.sprites_factory(env)
@@ -915,7 +973,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             picker_provider = provider
 
             def live_model() -> LensModel:
-                adapter = model_for_lens(provider, limits)
+                adapter = _live_lens_model(provider, limits)
                 live_models.append(adapter)
                 return cast(LensModel, adapter)
 
@@ -1582,7 +1640,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"controller-local state (default: ${ENV_STATE_DIR} or {DEFAULT_STATE_DIR})",
     )
     parser.set_defaults(
-        sprites_factory=_live_sprites, openrouter_factory=_live_openrouter
+        sprites_factory=_live_sprites,
+        openrouter_factory=_live_openrouter,
+        tenant_factory=_live_tenant,
     )
     sub = parser.add_subparsers(dest="command", required=True)
     rev = sub.add_parser("review", help="review one PR event and write a draft")
@@ -1977,12 +2037,16 @@ def main(
     *,
     sprites_factory: Callable[[Mapping[str, str]], SpritesApi] | None = None,
     openrouter_factory: Callable[[str, CallLimits], OpenRouterProvider] | None = None,
+    tenant_factory: Callable[[TenantCredentials, CallLimits], TenantEndpointProvider]
+    | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     if sprites_factory is not None:
         args.sprites_factory = sprites_factory
     if openrouter_factory is not None:
         args.openrouter_factory = openrouter_factory
+    if tenant_factory is not None:
+        args.tenant_factory = tenant_factory
     env = os.environ if env is None else env
     try:
         validate_export(env)

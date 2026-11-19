@@ -340,6 +340,12 @@ class AgenticReview:
     worst case reserved for them (D82's tripwire, round-1 review of
     #757), carried into the draft's cost line: the observable signal
     that a provider billed past the priced worst case."""
+    endpoint_class: str = ""
+    """Which endpoint class served the review's calls (config slice S10):
+    `operator` for the operator's key, `tenant` for the installation's
+    own endpoint, empty when no live model ran (a dry run, an offline
+    provider). The draft's cost line names it, and the posted Cost
+    section carries the same line."""
     carried_unverified: tuple[tuple[str, Finding, str], ...] = ()
     """Prior findings the delta review carries without a re-anchored,
     verified quote (#702): each with its carry-forward label, the
@@ -534,6 +540,7 @@ def synthesize(
     other_pull_requests: int = 0,
     ceiling_note: str = "",
     rerank_note: str = "",
+    endpoint_class: str = "",
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -550,7 +557,32 @@ def synthesize(
         ceiling_note=ceiling_note,
         rerank_note=rerank_note,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
+        endpoint_class=endpoint_class,
     )
+
+
+_ENDPOINT_SERVED = {
+    "operator": "the operator's model endpoint",
+    "tenant": "the installation's own model endpoint",
+}
+
+
+def endpoint_class(model: LensModel) -> str:
+    """Which endpoint class the review's model calls run on (config
+    slice S10): `tenant` for the installation's own endpoint,
+    `operator` for the operator's key, empty when no live provider is
+    behind the model (a dry run's scripted model). Read from the
+    provider's own name, so a new provider class cannot silently pass
+    as either."""
+    provider = getattr(model, "provider", None)
+    name = getattr(provider, "name", "")
+    if not isinstance(name, str):
+        return ""
+    if name.startswith("tenant-endpoint:"):
+        return "tenant"
+    if name.startswith("openrouter:"):
+        return "operator"
+    return ""
 
 
 def _rerank_note(
@@ -677,6 +709,7 @@ def review_lens(
             ran.flagged,
             context_omissions=omissions,
             other_pull_requests=other_pull_requests,
+            endpoint_class=endpoint_class(model),
         )
         # The evidence digest is stored with the record (D73) whether the
         # review ran one lens or the whole plan: a later delta review's
@@ -998,6 +1031,7 @@ def _review_lenses(
         other_pull_requests=other_pull_requests,
         ceiling_note=derivation.ceiling_note,
         rerank_note=_rerank_note(files, path_ranks, redactor),
+        endpoint_class=endpoint_class(model),
     )
     if decisions:
         review = replace(review, lens_decisions=decisions)
@@ -3339,6 +3373,12 @@ def render_draft(
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    served = _ENDPOINT_SERVED.get(review.endpoint_class)
+    if served:
+        # Which endpoint class served the review (config slice S10),
+        # recorded on the cost line so the draft and the posted Cost
+        # section both carry it. Controller text: no PR data in it.
+        lines[-1] += f" Served by {served}."
     if review.settle_overruns:
         # D82's tripwire (round-1 review of #757): a settle that reported
         # above its own worst case. The line stays one `Model calls:` line

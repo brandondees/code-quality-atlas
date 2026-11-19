@@ -13,7 +13,13 @@ variables (``agentic_config.ENV``, D68's derived limits and the $10
 per-review ceiling included). The per-tenant bound the child clamps a
 repo-raised ceiling with, ``ATLAS_REPO_CEILING_MAX_USD`` (config slice
 S9), rides along too; the daily budget is the parent's own admission
-bound and is not passed. The agentic child also takes
+bound and is not passed. The tenant-supplied model credentials (config
+slice S10) ride as three variables -- the key ``ATLAS_TENANT_MODEL_KEY``
+(the one credential variable the allowlist gains), and the settings
+``ATLAS_TENANT_BASE_URL`` and ``ATLAS_TENANT_MODEL`` -- but only on a
+tenant-path run, where the parent also drops the operator's model key,
+so the operator-key path and the tenant path never share a child
+environment. The agentic child also takes
 ``--round-log`` naming the per-pull-request round log on the volume
 (D74), outside the per-head run directory, so a later head of the same
 pull request reads the earlier rounds; the one-shot command takes no
@@ -53,6 +59,7 @@ from typing import Any
 from atlas_reviewer.agentic_config import ENV as AGENTIC_LIMIT_ENV
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.lens_contract import Severity
 from atlas_reviewer.limit_stop import LimitHit
@@ -67,11 +74,21 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.picker import FLOOR_TIER
 from atlas_reviewer.review_wide import ENV_REPO_CEILING_MAX_USD
 from atlas_reviewer.runner import CLEANUP_BUDGET_S
+from atlas_reviewer.tenant_provider import (
+    ENV_TENANT_BASE_URL,
+    ENV_TENANT_MODEL,
+    ENV_TENANT_MODEL_KEY,
+    TenantCredentials,
+)
 from atlas_reviewer.verdict import parse_status
 
 WEBHOOK_SECRET_ENV = "ATLAS_GITHUB_WEBHOOK_SECRET"
 APP_KEY_ENV = "ATLAS_GITHUB_APP_PRIVATE_KEY"
 READ_TOKEN_ENV = "ATLAS_GITHUB_INSTALLATION_TOKEN"
+# The operator's model key. The child receives it on the operator path;
+# a tenant-path child does not (`child_env` drops it), because the
+# operator's key must never be available to a tenant review.
+MODEL_KEY_ENV = "ATLAS_OPENROUTER_API_KEY"
 # The child reviews with a read-only installation token. The App private
 # key stays in the parent, so the child cannot mint a write token.
 # Passed through to the child. Everything else the parent holds stays there.
@@ -93,7 +110,7 @@ _CHILD_ALLOWED = frozenset(
         "SSL_CERT_DIR",
         "REQUESTS_CA_BUNDLE",
         "CURL_CA_BUNDLE",
-        "ATLAS_OPENROUTER_API_KEY",
+        MODEL_KEY_ENV,
         "ATLAS_SPRITES_TOKEN",
         READ_TOKEN_ENV,
         ENV_MODEL,
@@ -104,6 +121,15 @@ _CHILD_ALLOWED = frozenset(
         # The per-tenant bound the child clamps a repo-raised ceiling with
         # (config slice S9): a setting, not a credential.
         ENV_REPO_CEILING_MAX_USD,
+        # The tenant-supplied model credentials (config slice S10): the
+        # key is the one credential variable the allowlist gains, the
+        # way the operator key above is held; the endpoint base URL and
+        # the chosen model are settings. The three travel together only
+        # on a tenant-path run, where `child_env` also drops the
+        # operator's key, so the two paths never share a child env.
+        ENV_TENANT_MODEL_KEY,
+        ENV_TENANT_BASE_URL,
+        ENV_TENANT_MODEL,
     }
     # The agentic limits (D68's per-lens knobs and the per-review dollar
     # ceiling included) ride along in both modes: the agentic child reads
@@ -144,6 +170,43 @@ _QUOTED = re.compile(r"`(\"(?:\\.|[^\"\\])*\")`")
 
 Popen = Callable[..., Any]
 Sleeper = Callable[[float], None]
+
+
+class RunSecrets:
+    """The credentials the review runs resolved from the installation
+    store (config slice S10), registered for the parent's scrubber.
+
+    The child's stderr tail lands in the run's error string and, from
+    there, on the `review failed` telemetry record. The child scrubs its
+    own writes, but the parent's redaction exists precisely to not
+    depend on that completeness -- an unhandled traceback, or a future
+    child write path that forgets the scrub -- and the tenant key is not
+    in the parent's environment (the store resolved it at run time), so
+    `_child_secrets` cannot see it. A run that resolved tenant
+    credentials registers the key here **before the child starts**, and
+    the service log's and the poster's redactors read it on every scrub
+    from then on. Registered values are never cleared: a key stays a
+    value the log must never print after the run that used it, whether
+    that run succeeded or failed, and scrubbing a rotated-away key is
+    harmless."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._values: dict[str, None] = {}
+
+    def register(self, *values: str) -> None:
+        """Add the run's resolved credentials. A value under eight
+        characters is ignored, the way `_child_secrets` filters: a short
+        string is more likely a test fixture than a key, and redacting a
+        short common string would scrub the log's own words."""
+        with self._lock:
+            for value in values:
+                if len(value) >= 8:
+                    self._values[value] = None
+
+    def __call__(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._values)
 
 
 @dataclass(frozen=True)
@@ -360,13 +423,21 @@ def round_log_path(root: Path, event: PrEvent) -> Path:
     return root / "rounds" / f"{repo}-{event.pr_number}.jsonl"
 
 
-def review_argv(config: RunConfig, directory: Path, event: PrEvent) -> list[str]:
+def review_argv(
+    config: RunConfig,
+    directory: Path,
+    event: PrEvent,
+    *,
+    tenant: TenantCredentials | None = None,
+) -> list[str]:
     """The child command the mode names: ``agentic-review`` by default,
     the one-shot ``review`` in oneshot mode. Both take the same
     ``--event``, ``--out``, ``--events`` and ``--provider`` wiring. The
     agentic child also takes the per-pull-request ``--round-log`` (D74):
     the child cannot derive it, because its ``--state-dir`` is the
-    per-head run directory's."""
+    per-head run directory's. A tenant-path run (config slice S10)
+    passes ``--provider tenant`` and implies live inference: the
+    installation's own endpoint is the live call, on its own key."""
     argv = [
         sys.executable,
         "-m",
@@ -381,18 +452,31 @@ def review_argv(config: RunConfig, directory: Path, event: PrEvent) -> list[str]
         "--events",
         str(directory / "events.jsonl"),
         "--provider",
-        config.provider,
+        "tenant" if tenant is not None else config.provider,
     ]
     if config.mode == MODE_AGENTIC:
         argv += ["--round-log", str(round_log_path(config.state_root, event))]
-    if config.provider == "openrouter" and config.allow_live_inference:
+    if (
+        tenant is not None
+        or config.provider == "openrouter"
+        and config.allow_live_inference
+    ):
         argv.append("--allow-live-inference")
     return argv
 
 
-def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
+def child_env(
+    env: Mapping[str, str],
+    *,
+    token: str = "",
+    tenant: TenantCredentials | None = None,
+) -> dict[str, str]:
     """The review process gets only ``_CHILD_ALLOWED``. ``token`` is a
-    read-only installation token, when the parent minted one."""
+    read-only installation token, when the parent minted one. A
+    tenant-path run (config slice S10) adds the installation's own
+    endpoint credentials and **drops the operator's key**: the tenant
+    child has no use for it, and the two paths never share a child
+    environment."""
     cleaned = {key: value for key, value in env.items() if key in _CHILD_ALLOWED}
     # The image starts as root, so HOME can still be /root after the
     # uid drop. The child must not inherit a home it cannot write.
@@ -400,6 +484,11 @@ def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
         cleaned["HOME"] = "/home/atlas"
     if token:
         cleaned[READ_TOKEN_ENV] = token
+    if tenant is not None:
+        cleaned[ENV_TENANT_MODEL_KEY] = tenant.key
+        cleaned[ENV_TENANT_BASE_URL] = tenant.base_url
+        cleaned[ENV_TENANT_MODEL] = tenant.model
+        cleaned.pop(MODEL_KEY_ENV, None)
     return cleaned
 
 
@@ -412,21 +501,44 @@ def make_runner(
     deadline_s: float = REVIEW_DEADLINE_S,
     clock: Callable[[], float] = time.monotonic,
     read_token: Callable[[Mapping[str, str], PrEvent], tuple[str, str]] | None = None,
+    tenant_source: Callable[[], TenantCredentials | None] | None = None,
+    tenant_secrets: RunSecrets | None = None,
 ) -> Callable[[PrEvent, threading.Event], ReviewRun]:
+    """``tenant_source`` (config slice S10) resolves the installation's
+    own endpoint credentials at run time -- fresh, so a rotation between
+    queueing and running lands. It returns None for the operator path
+    and raises `InstallationStoreError` for a store it cannot read or a
+    consent that is not acknowledged: either way the review fails with
+    the failure named and **never falls back to the operator key** --
+    a store this parent cannot read might hold credentials, and the
+    routing rule does not guess."""
     mint = read_token or _read_token
 
     def run(event: PrEvent, cancel: threading.Event) -> ReviewRun:
+        if tenant_source is not None:
+            try:
+                tenant = tenant_source()
+            except InstallationStoreError as exc:
+                return ReviewRun(False, error=f"the tenant path refused: {exc}")
+        else:
+            tenant = None
+        if tenant is not None and tenant_secrets is not None:
+            # Registered before the child starts, so the parent's
+            # scrubber knows the key from the first byte the child
+            # writes -- the child's own scrubbing is a defense the
+            # parent's does not assume (r1 review of #776, Major 1).
+            tenant_secrets.register(tenant.key)
         directory = run_dir(config.state_root, event)
         make_private_dirs(directory)
         _write_event(directory / "event.json", event)
         stderr_path = directory / "stderr.txt"
-        argv = review_argv(config, directory, event)
+        argv = review_argv(config, directory, event, tenant=tenant)
         token, mint_error = mint(env, event)
         if mint_error:
             return ReviewRun(False, error=mint_error)
         code = run_process(
             argv,
-            child_env(env, token=token),
+            child_env(env, token=token, tenant=tenant),
             cancel,
             stderr_path,
             popen=popen,

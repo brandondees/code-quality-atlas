@@ -3023,3 +3023,86 @@ def test_the_context_fit_is_measured_against_the_ranked_first_turn():
     assert plain - fit == len(
         first_turn(event, diff, (), _NONCE_PROBE, ranks=ranked)
     ) - len(first_turn(event, diff, (), _NONCE_PROBE))
+
+
+# --------------------------------- the tenant provider choice (S10, part A)
+
+_TENANT_ENV = {
+    "ATLAS_TENANT_MODEL_KEY": "sk-tenant-fixture-not-a-real-key",
+    "ATLAS_TENANT_BASE_URL": "https://models.example.invalid/api/v1",
+    "ATLAS_TENANT_MODEL": "openai/gpt-4o",
+}
+
+
+def _tenant_args(tmp_path):
+    from atlas_reviewer.telemetry import Telemetry
+
+    return cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "tenant",
+            "--allow-live-inference",
+        ]
+    ), Telemetry(FakeClock())
+
+
+def test_select_provider_builds_the_tenant_client_from_the_environment(tmp_path):
+    from atlas_reviewer.tenant_provider import TenantEndpointProvider
+
+    args, telemetry = _tenant_args(tmp_path)
+    provider = cli._select_provider(
+        args, _TENANT_ENV, args.openrouter_factory, telemetry, CallLimits(max_calls=3)
+    )
+    assert isinstance(provider, TenantEndpointProvider)
+    assert provider.name == "tenant-endpoint:openai/gpt-4o"
+    assert provider.model_id == "openai/gpt-4o"
+
+
+def test_select_provider_refuses_a_partial_tenant_environment(tmp_path):
+    args, telemetry = _tenant_args(tmp_path)
+    partial = {"ATLAS_TENANT_MODEL_KEY": "sk-tenant-fixture-not-a-real-key"}
+    with pytest.raises(BoundaryError, match="incomplete"):
+        cli._select_provider(
+            args, partial, args.openrouter_factory, telemetry, CallLimits(max_calls=3)
+        )
+
+
+def test_select_provider_refuses_a_missing_tenant_environment(tmp_path):
+    args, telemetry = _tenant_args(tmp_path)
+    with pytest.raises(cli.UsageError, match="ATLAS_TENANT_MODEL_KEY"):
+        cli._select_provider(
+            args, {}, args.openrouter_factory, telemetry, CallLimits(max_calls=3)
+        )
+
+
+def test_select_provider_refuses_tenant_without_live_inference(tmp_path):
+    from atlas_reviewer.telemetry import Telemetry
+
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "tenant",
+        ]
+    )
+    with pytest.raises(cli.UsageError, match="allow-live-inference"):
+        cli._select_provider(
+            args,
+            _TENANT_ENV,
+            args.openrouter_factory,
+            Telemetry(FakeClock()),
+            CallLimits(max_calls=3),
+        )
+
+
+def test_the_tenant_key_is_a_scrubbed_secret():
+    assert "ATLAS_TENANT_MODEL_KEY" in cli.SECRET_ENV
