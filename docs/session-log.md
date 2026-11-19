@@ -5198,3 +5198,90 @@ defaults and `main`'s factory parameter; its `coordinator.py` touches are
 `synthesize`'s defaulted parameter, the new `endpoint_class` helper, and
 the cost line's appended sentence — no signature changed on a function
 those PRs touch. The branch sits atop main `81d70ebb`.
+
+## 2026-11-19 (same day) — #776 round 1: the parent's scrubber learns the tenant key, the sweep survives a stray file, and the egress set goes beyond §4
+
+The round-1 review of #776 (head `02d54cbb`): one Major, two Minors
+adopted, three nits, all fixed on the branch; each fix names its test or
+its mutant. Offline only, same rules as the entries above.
+
+**M1 — the parent-side scrubber now knows the tenant key.** The child's
+stderr tail lands in the run's error string and on the `review failed`
+telemetry record, and the parent's redaction exists precisely to not
+depend on the child's own scrubbing being complete — but the tenant key
+is not in the parent env (the store resolves it at run time), so
+`_child_secrets` could not see it. `service_run.RunSecrets` is the fix: a
+thread-safe holder the run registers the resolved key into **before the
+child starts**, and which the service log's redactor (`serve`'s) and the
+poster's redactor (`publisher_from_env`, via one holder `main` passes to
+both) read as a source on every scrub. Registered keys are never cleared
+— a key stays a value the log never prints after the run that used it,
+and scrubbing a rotated-away key is harmless — with `_child_secrets`' own
+≥8-character filter so a short fixture string cannot scrub the log's own
+words. The end-to-end pin's fake child writes the key unscrubbed into
+stderr and the parent record shows it redacted; the runner-level
+registration test and the poster-level test pin their halves; the mutant
+that drops the registration is killed by all three. The other
+parent-side paths were checked: posts and retries carry report fields
+from the child-scrubbed draft (and the poster's redactor now covers the
+holder too); no other parent path records child stderr.
+
+**m2 — the sweep no longer halts on a stray file.** The
+`installation_id(path.stem)` parse moved inside the per-file handling: a
+directory entry that is not `<digits>.json` — a crash's leftover
+`<id>.json.writing` temp, a stray file — is skipped and named (`sweep`
+returns `(removed, skipped)`, the boot log names both counts), while
+every valid record is still swept. The decided call on stale `.writing`
+files: **named and skipped, not deleted** — this store deletes only what
+it wrote, and a temp file it never reads costs nothing to leave; the
+naming keeps it visible. Pinned by the store-level stray test (which
+asserts the stray survives and the stale record is still removed) and
+the boot-level log test; the mutant restoring the pre-loop parse is
+killed.
+
+**m3 — the blocked set goes beyond §4's list (the owner's call).** The
+IPv4-embedding IPv6 forms an HTTPS model API has no business on are
+blocked whole: IPv4-compatible `::/96` (subsuming `::/128`), 6to4
+`2002::/16`, NAT64 `64:ff9b::/96` and `64:ff9b:1::/48`, Teredo
+`2001::/32`, the discard-only `100::/64`, and IPv6 multicast
+`ff00::/8`; the IPv4 multicast/broadcast/reserved ranges were already
+covered. The review measured that none of these forms routes to the
+embedded IPv4 address on the deployment's own kernel, so this is
+defense-in-depth against a network that routes them (NAT64/6to4
+infrastructure), not a live bypass — and no HTTPS model API lives on any
+of them, so the false-positive cost is nil. Each form is pinned in the
+parametrized refusal test and the minimum-set test; a dropped range dies
+there.
+
+**The three nits.** The tenant span now records the parsed
+`finish_reason` the operator adapter records (`_tenant_turn` parses the
+choice before `_remember`; pinned by the span test).
+`PinnedHTTPSConnection.connect` closes the raw socket when the connect
+raises (pinned by the close test; the mutant removing the close is
+killed). The store's read-modify-write lock is now a per-installation
+`fcntl.flock` replacing the in-process `threading.Lock` — part B's
+settings page will be a second writer process on the same state volume,
+and two concurrent RMWs under only an in-process lock would lose an
+update (a consent write lost under a rotation) or resurrect a deleted
+record; `flock` excludes across processes and across one process's
+threads (separate open file descriptions), so it is the one
+serialization the store needs, taken across every RMW, delete, and
+per-record sweep step. Pinned by the lock-release test and the
+held-lock blocking test; the mutant removing the flock is killed by the
+blocking test.
+
+**Tests** (`test_service_run.py`, `test_service_receive.py`,
+`test_service_post.py`, `test_installation_store.py`,
+`test_egress.py`, `test_tenant_provider.py` extended). **Five fix-round
+mutants applied by hand, all killed**: the holder registration dropped
+(the three M1 tests), the sweep's stray skip removed — the parse back
+outside the loop (the stray test), a blocked range dropped (`::/96` and
+`2002::/16` each tried; the minimum-set test), the connect's close
+removed (the close test), the flock removed — the contextmanager yields
+without locking (the blocking test).
+
+**Overlap.** Unchanged from the round-1 body: `cli.py` and
+`coordinator.py` untouched this round; the round's edits are
+`service.py`, `service_run.py`, `service_post.py`,
+`installation_store.py`, `egress.py`, `tenant_provider.py`, their test
+files, and the three docs.

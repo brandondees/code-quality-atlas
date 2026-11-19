@@ -569,7 +569,6 @@ def _tenant_turn(
         ) from None
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
-    _remember(data, usage_obj, data.get("model"), None)
     actual, _summary = _tenant_actual_cost(usage_obj, terms)
     cost = actual if actual is not None else UNPRICED
     served = data.get("model")
@@ -582,6 +581,7 @@ def _tenant_turn(
         raise BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}")
     choice = _choice(data)
     finish = choice.get("finish_reason")
+    _remember(data, usage_obj, served, finish)
     if finish == "length":
         raise LimitRefused(
             hit("max_output_tokens", bounds.max_output_tokens, "finish_reason=length")

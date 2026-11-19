@@ -60,16 +60,26 @@ def test_every_blocked_ipv4_range_is_refused_by_name(address):
     [
         "::",
         "::1",
+        "::7f00:1",
+        "::127.0.0.1",
         "::ffff:127.0.0.1",
         "::ffff:169.254.169.254",
         # The whole IPv4-mapped range is blocked, public mapped
         # addresses included: the resolver that answers v4 as v6-mapped
         # does not get around the v4 checks.
         "::ffff:8.8.8.8",
+        "64:ff9b::7f00:1",
+        "64:ff9b:1::1",
+        "100::1",
+        "2001:0:7f00:1::",
+        "2001::1",
+        "2002:7f00:1::",
         "fc00::1",
         "fd00::1",
         "fe80::1",
         "febf::1",
+        "ff01::1",
+        "ff0e::1",
     ],
 )
 def test_every_blocked_ipv6_range_is_refused_by_name(address):
@@ -84,12 +94,12 @@ def test_a_public_address_is_allowed(address):
 
 
 def test_the_blocked_set_names_the_plans_required_ranges():
-    """The plan §4 list is the minimum: assert the exact networks are
-    present, so trimming the set cannot happen silently. The networks
-    are compared parsed, not as strings -- some Pythons print an
-    IPv4-mapped network as `::ffff:0.0.0.0/96` and some as
-    `::ffff:0:0/96`, and the set's membership is what the guard runs
-    on."""
+    """The plan §4 list is the minimum, and the round-1 additions are
+    the decided beyond-it set: assert the exact networks are present, so
+    trimming the set cannot happen silently. The networks are compared
+    parsed, not as strings -- some Pythons print an IPv4-mapped network
+    as `::ffff:0.0.0.0/96` and some as `::ffff:0:0/96`, and the set's
+    membership is what the guard runs on."""
     blocked = (*BLOCKED_V4, *BLOCKED_V6)
     for required in (
         "10.0.0.0/8",
@@ -99,11 +109,22 @@ def test_the_blocked_set_names_the_plans_required_ranges():
         "169.254.0.0/16",
         "0.0.0.0/8",
         "100.64.0.0/10",
+        "224.0.0.0/4",
+        "240.0.0.0/4",
+        # The plan §4 list, then the round-1 additions: the
+        # IPv4-embedding IPv6 forms an HTTPS model API has no business
+        # on, the discard-only range, and IPv6 multicast.
+        "::/96",
+        "::1/128",
+        "::ffff:0:0/96",
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+        "100::/64",
+        "2001::/32",
+        "2002::/16",
         "fc00::/7",
         "fe80::/10",
-        "::1/128",
-        "::/128",
-        "::ffff:0:0/96",
+        "ff00::/8",
     ):
         wanted = ipaddress.ip_network(required)
         assert any(network == wanted for network in blocked), (
@@ -336,6 +357,42 @@ def test_a_three_digit_redirect_status_reaches_the_caller_unfollowed(
     assert result.status == 302
     # One request, no follow-up: the provider refuses the redirect.
     assert conn.calls == [("POST", "/v1")]
+
+
+def test_the_pinned_connection_closes_the_socket_when_the_connect_fails(
+    monkeypatch,
+):
+    """A connect that raises closes the raw socket before re-raising:
+    the caller's close sees no `self.sock` yet, so the one-shot leak
+    would otherwise sit until the process ended."""
+    closed: list[bool] = []
+
+    class _FailingSocket:
+        family = socket.AF_INET
+
+        def settimeout(self, seconds):
+            pass
+
+        def connect(self, sockaddr):
+            raise OSError("connection refused")
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(
+        "atlas_reviewer.egress.socket.socket",
+        lambda family, kind: _FailingSocket(),
+    )
+    conn = PinnedHTTPSConnection(
+        "api.example.invalid",
+        443,
+        5.0,
+        Pinned(socket.AF_INET, ("8.8.8.8", 443)),
+        context=None,
+    )
+    with pytest.raises(OSError):
+        conn.connect()
+    assert closed == [True]
 
 
 def test_the_pinned_connection_dials_the_checked_address_and_presents_the_host(

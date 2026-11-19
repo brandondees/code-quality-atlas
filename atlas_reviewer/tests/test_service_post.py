@@ -1910,3 +1910,65 @@ def test_the_cut_and_the_hold_compose_and_both_are_named():
     assert "[all 2 findings cut to fit the post limit]" in findings
     assert "The repo's severity floor also held 2 below-floor finding(s)" in findings
     assert findings.strip() != "None."
+
+
+def test_the_tenant_key_does_not_reach_the_comment(tmp_path, monkeypatch):
+    """The poster's half of the Major-1 fix (r1 review of #776): the
+    poster's redactor reads the runs' holder, so a report field that
+    somehow carries the tenant key the run resolved is redacted from the
+    comment too -- the poster's redaction is the layer that does not
+    have to trust the child's own scrubbing."""
+    minted = "ghs_minted_value"
+    tenant_key = "sk-tenant-fixture-not-a-real-key"
+
+    class Minted:
+        def __init__(self, *args, **kwargs):
+            self._values: list[str] = []
+
+        def token(self) -> str:
+            self._values.append(minted)
+            return minted
+
+        def secrets(self) -> tuple[str, ...]:
+            return tuple(self._values)
+
+        def limit_timeout(self, seconds: float) -> None:
+            return None
+
+    monkeypatch.setattr("atlas_reviewer.service_post.AppInstallationTokens", Minted)
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.service_post import publisher_from_env
+    from atlas_reviewer.service_run import RunSecrets
+
+    holder = RunSecrets()
+    holder.register(tenant_key)
+    github = GitHub()
+    poster = publisher_from_env(
+        {
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_APP_PRIVATE_KEY": "pem-secret-value",
+            "ATLAS_GITHUB_INSTALLATION_ID": "1",
+            "ATLAS_GITHUB_APP_SLUG": "code-quality-atlas",
+            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SPRITES_TOKEN": "org/1/sprites-secret-value",
+            "ATLAS_OPENROUTER_API_KEY": "sk-or-v1-secret-value",
+        },
+        frozenset({REPO}),
+        tmp_path,
+        transport=github,
+        clock=SystemClock(),
+        run_secrets=holder,
+    )
+    report = ReviewReport(
+        (f"the tenant endpoint served '{tenant_key}'",),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+    )
+    poster.post(EVENT, report)
+    body = _posted_body(github)["body"]
+    assert tenant_key not in body
+    assert "[REDACTED" in body

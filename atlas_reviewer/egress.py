@@ -18,10 +18,14 @@ The blocked set is the plan's §4 list -- the RFC 1918 ranges,
 `127.0.0.0/8`, `169.254.0.0/16` (link-local and the cloud metadata
 service on it), `0.0.0.0/8`, the carrier-grade `100.64.0.0/10`, the
 ULA `fc00::/7`, link-local `fe80::/10`, `::1`, the unspecified `::`,
-and all IPv4-mapped IPv6 `::ffff:0:0/96` -- plus the IPv4 multicast,
-benchmarking and reserved ranges, which no HTTPS model API can live on.
-Redirects are refused rather than re-checked: the transport never
-follows one, and the tenant provider refuses a 3xx answer by name.
+and all IPv4-mapped IPv6 `::ffff:0:0/96` -- and goes beyond it, on the
+owner's round-1 call: the IPv4-embedding IPv6 forms an HTTPS endpoint
+has no business on -- IPv4-compatible `::/96`, 6to4 `2002::/16`, NAT64
+`64:ff9b::/96` and `64:ff9b:1::/48`, Teredo `2001::/32` -- plus the
+discard-only `100::/64`, IPv6 multicast `ff00::/8`, and the IPv4
+multicast, benchmarking and reserved ranges. Redirects are refused
+rather than re-checked: the transport never follows one, and the tenant
+provider refuses a 3xx answer by name.
 
 Responses are model replies: untrusted under the existing pipeline, and
 bounded by the same byte cap and timeouts every other request runs
@@ -55,11 +59,20 @@ BLOCKED_V4 = (
     ipaddress.ip_network("240.0.0.0/4"),
 )
 BLOCKED_V6 = (
-    ipaddress.ip_network("::/128"),
+    # ::/96 is the IPv4-compatible form's whole range, subsuming the
+    # unspecified address ::/128; ::1 keeps its own entry because it has
+    # bits beyond the /96 prefix.
+    ipaddress.ip_network("::/96"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("::ffff:0:0/96"),
+    ipaddress.ip_network("64:ff9b:1::/48"),
+    ipaddress.ip_network("64:ff9b::/96"),
+    ipaddress.ip_network("100::/64"),
+    ipaddress.ip_network("2001::/32"),
+    ipaddress.ip_network("2002::/16"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("ff00::/8"),
 )
 
 
@@ -165,7 +178,14 @@ class PinnedHTTPSConnection(http.client.HTTPSConnection):
         sock = socket.socket(self._pinned.family, socket.SOCK_STREAM)
         if self.timeout is not None and self.timeout > 0:
             sock.settimeout(self.timeout)
-        sock.connect(self._pinned.sockaddr)
+        try:
+            sock.connect(self._pinned.sockaddr)
+        except BaseException:
+            # The connect failed before the TLS wrap set self.sock, so
+            # the caller's close sees no socket to close: close the raw
+            # one here.
+            sock.close()
+            raise
         try:
             self.sock = self._tls.wrap_socket(sock, server_hostname=self.host)
         except (OSError, ValueError):

@@ -9,7 +9,10 @@ Every record is encrypted at rest under an operator-held key read from
 authenticated encryption -- already locked for `PyJWT[crypto]`; nothing
 hand-rolled), and lives on the state volume at
 `<state root>/installations/<installation id>.json`. Writes are atomic
-(temp file, fsync, rename) and private (0700 directory, 0600 file).
+(temp file, fsync, rename) and private (0700 directory, 0600 file), and
+every read-modify-write, delete, and sweep step takes a per-installation
+`fcntl.flock`, so the service process and part B's settings-page process
+cannot lose an update under each other.
 
 Every read **fails closed**: a store that is unreadable, corrupt, or
 encrypted under the wrong key raises `InstallationStoreError` naming the
@@ -40,10 +43,11 @@ event.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
-import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -209,7 +213,33 @@ class InstallationStore:
     fernet: Fernet | None = None
     broken_reason: str = ""
     clock: Callable[[], datetime] = field(default_factory=lambda: _utc_now)
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @contextmanager
+    def _process_lock(self, ident: str) -> Iterator[None]:
+        """One advisory `fcntl.flock` per installation, held across every
+        read-modify-write, delete, and sweep step that touches one
+        record: the service process and part B's settings page are
+        separate processes on the same state volume, and two concurrent
+        read-modify-writes under only an in-process lock would lose an
+        update -- a consent write lost under a rotation, or a rotation
+        resurrecting a record the `installation.deleted` webhook just
+        deleted. `flock` excludes across processes and across threads of
+        one process (separate open file descriptions), so it is the one
+        serialization this store needs."""
+        make_private_dirs(self.root / "locks")
+        fd = os.open(
+            self.root / "locks" / f"{ident}.lock",
+            os.O_WRONLY | os.O_CREAT,
+            0o600,
+        )
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
     @classmethod
     def open(cls, state_dir: Path, env: Mapping[str, str]) -> InstallationStore:
@@ -274,7 +304,7 @@ class InstallationStore:
         if self.fernet is None:
             return None
         ident = installation_id(installation)
-        with self._lock:
+        with self._process_lock(ident):
             return self._read(ident)
 
     def store_credentials(
@@ -386,7 +416,7 @@ class InstallationStore:
         if self.fernet is None:
             return
         path = self._path(ident)
-        with self._lock:
+        with self._process_lock(ident):
             try:
                 path.unlink()
             except FileNotFoundError:
@@ -397,24 +427,37 @@ class InstallationStore:
                 ) from exc
             _sync_dir(path.parent)
 
-    def sweep(self, now: datetime, retention_days: int) -> int:
+    def sweep(self, now: datetime, retention_days: int) -> tuple[int, int]:
         """Delete every record whose state went unrefreshed more than
         the retention window ago: the sweep that catches a missed
         `installation.deleted` webhook (D81 §7 decision 8). Reviews
         refresh nothing -- the window measures the record's own
         `updated_at`, so an installation that keeps being configured
-        stays and a silent uninstall ages out. A record that cannot be
-        read is left alone: its age cannot be established, and it is
-        already unusable. Returns the number of records deleted."""
+        stays and a silent uninstall ages out. Returns `(removed,
+        skipped)`: the records deleted, and the directory entries that
+        are not one of this store's records -- a leftover
+        `<id>.json.writing` temp from a crash mid-write, or any stray
+        file -- which are skipped and named rather than allowed to halt
+        the sweep: a sweep that dies on one stray file would stop
+        catching missed webhooks every boot after it. A skipped entry is
+        never deleted here: this store deletes only what it wrote, and
+        the boot log names the count. A record that cannot be read is
+        left alone too: its age cannot be established, and it is already
+        unusable."""
         if retention_days < 1:
             raise ValueError("the retention window must be at least one day")
         if not self.configured:
-            return 0
+            return 0, 0
         horizon = now - timedelta(days=retention_days)
         removed = 0
-        with self._lock:
-            for path in self._record_paths():
-                ident = installation_id(path.stem)
+        skipped = 0
+        for path in self._record_paths():
+            stem = path.stem
+            if not stem.isascii() or not stem.isdigit():
+                skipped += 1
+                continue
+            ident = installation_id(stem)
+            with self._process_lock(ident):
                 try:
                     record = self._read(ident)
                 except InstallationStoreError:
@@ -431,7 +474,7 @@ class InstallationStore:
                             f"during the retention sweep: {exc}"
                         ) from exc
                     removed += 1
-        return removed
+        return removed, skipped
 
     def _record_paths(self) -> tuple[Path, ...]:
         try:
@@ -497,19 +540,18 @@ class InstallationStore:
         ident: str,
         compose: Callable[[InstallationRecord | None], InstallationRecord],
     ) -> InstallationRecord:
-        """Read-modify-write one record under the store's lock: the
-        composed record replaces the stored one atomically. The
-        read-modify-write is not serialized against another process, but
-        every writer of this store is this process (the settings surface
-        and the service share the state volume through this module), so
-        the in-process lock is the whole story for part A. A store that
+        """Read-modify-write one record under its per-installation
+        `fcntl.flock`: the composed record replaces the stored one
+        atomically, and two writers -- the service process and, from
+        part B on, the settings page's process -- cannot lose an update
+        or resurrect a deleted record under each other. A store that
         cannot encrypt -- unconfigured or broken -- refuses the write
         with the named reason."""
         if self.broken_reason:
             raise InstallationStoreError(self.broken_reason)
         if self.fernet is None:
             raise InstallationStoreError(STORE_BROKEN)
-        with self._lock:
+        with self._process_lock(ident):
             current = self._read(ident)
             record = compose(current)
             path = self._path(ident)

@@ -596,15 +596,22 @@ under the operator-held key `ATLAS_INSTALLATION_STORE_KEY` (a Fernet key;
 `PyJWT[crypto]` — not hand-rolled crypto). The record holds the tenant
 credentials (endpoint base URL, key, chosen model), the installation
 admin's daily cap, and the consent acknowledgement, with a private 0700
-directory, 0600 files, and atomic writes. Every read fails closed: a
-store that is unreadable, corrupt, or encrypted under the wrong key
-raises with the reason named, the review fails with that reason, and
-nothing falls back — no operator-key path opens for a record this service
-cannot read. A deployment that never set the store key and has no records
-on disk is not a failure: no installation has credentials, so no tenant
-path exists and no cap applies. A key that is gone while records remain
-on disk **is** a failure, because the records it cannot read may hold
-credentials.
+directory, 0600 files, atomic writes, and a per-installation advisory
+`fcntl.flock` held across every read-modify-write, delete and sweep step —
+the service process and part B's settings-page process serialize on it,
+so a concurrent consent write cannot be lost under a rotation and a
+rotation cannot resurrect a record the `installation.deleted` webhook
+just deleted. Every read fails closed: a store that is unreadable,
+corrupt, or encrypted under the wrong key raises with the reason named,
+the review fails with that reason, and nothing falls back — no
+operator-key path opens for a record this service cannot read. A
+deployment that never set the store key and has no records on disk is not
+a failure: no installation has credentials, so no tenant path exists and
+no cap applies. A key that is gone while records remain on disk **is** a
+failure, because the records it cannot read may hold credentials. The
+retention sweep skips a directory entry that is not one of its records —
+a crash's leftover `<id>.json.writing` temp, a stray file — naming the
+count instead of halting on it, and deletes only what it wrote.
 
 **The routing rule.** An allowlisted repo whose installation has no
 tenant credentials is reviewed on the operator's key, as today. A repo
@@ -639,17 +646,22 @@ own.
 **The egress guard.** A user-supplied base URL is user-controlled egress.
 The tenant transport is HTTPS-only and refuses a URL with userinfo. At
 connect time every address the hostname resolves to is checked against
-the blocked set — the RFC 1918 ranges, `127.0.0.0/8`,
+the blocked set — the plan §4 list (the RFC 1918 ranges, `127.0.0.0/8`,
 `169.254.0.0/16`, `0.0.0.0/8`, `100.64.0.0/10`, ULA `fc00::/7`,
 link-local `fe80::/10`, `::1`, `::`, all IPv4-mapped IPv6
-`::ffff:0:0/96`, plus the IPv4 multicast, benchmarking and reserved
-ranges — over IPv4 and IPv6 alike, and the socket connects to the
-checked address itself while the TLS handshake still presents the
-original hostname, so a DNS rebinding double has nothing to rebind to.
-A hostname that resolves to any blocked address is refused whole.
-Redirects are never followed and are refused by name. The existing
-timeouts and response caps apply, and the responses are untrusted model
-output.
+`::ffff:0:0/96`) **and beyond it** (the round-1 call): the
+IPv4-embedding IPv6 forms an HTTPS model API has no business on —
+IPv4-compatible `::/96`, 6to4 `2002::/16`, NAT64 `64:ff9b::/96` and
+`64:ff9b:1::/48`, Teredo `2001::/32` — plus the discard-only `100::/64`,
+IPv6 multicast `ff00::/8`, and the IPv4 multicast, benchmarking and
+reserved ranges. The check runs over IPv4 and IPv6 alike, and any blocked
+address refuses the whole host — the connection never races a round-robin
+resolver — then the socket connects to the checked address itself while
+the TLS handshake still presents the original hostname, so a DNS
+rebinding double has nothing to rebind to, and a failed connect closes
+its socket before re-raising. Redirects are never followed and are
+refused by name. The existing timeouts and response caps apply, and the
+responses are untrusted model output.
 
 **Failure rule.** An auth error, quota error, endpoint down, egress
 refusal, unknown price, or store failure fails the review with the
@@ -1114,7 +1126,15 @@ value of the App key, the Sprites token, the OpenRouter key, the tenant
 model key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
-error message on stderr.
+error message on stderr. The tenant key's parent-side scrub does not come
+from the environment -- the key is not in it; it comes from the
+run-resolved credentials: the run registers the key with a shared holder
+before the child starts, and both the service log's redactor and the
+poster's redactor read that holder on every scrub, so a child stderr tail
+that reaches a telemetry record (or a report field that reaches a
+comment) loses the key even when the child's own scrubbing was incomplete
+(r1 review of #776, Major 1). Registered keys are never cleared: a key
+stays a value the log never prints after the run that used it.
 
 **GitHub App tokens.** `github_auth.py` signs an RS256 JWT with the App key
 (PyJWT with `cryptography`, the only non-stdlib runtime dependency, used by

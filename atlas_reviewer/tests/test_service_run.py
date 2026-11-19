@@ -1661,3 +1661,51 @@ def test_an_unacknowledged_consent_fails_the_run_named(tmp_path):
     result = runner(PrEvent(REPO, 7, SHA), threading.Event())
     assert result.ok is False
     assert "consent" in result.error
+
+
+def test_a_run_registers_the_tenant_key_for_the_parents_scrubber(tmp_path):
+    """The parent-side half of the key-leak defense (r1 review of #776,
+    Major 1): a run that resolved tenant credentials registers the key
+    with the holder the service log's and the poster's redactors read,
+    before the child starts -- the key is not in the parent env, so
+    `_child_secrets` cannot see it."""
+    from atlas_reviewer.service_run import RunSecrets
+
+    holder = RunSecrets()
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {"ATLAS_OPENROUTER_API_KEY": "sk-operator-secret"},
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: _tenant_credentials(),
+        tenant_secrets=holder,
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert holder() == ("sk-tenant-fixture-not-a-real-key",)
+
+
+def test_a_tenant_source_store_failure_registers_nothing(tmp_path):
+    from atlas_reviewer.installation_store import InstallationStoreError
+    from atlas_reviewer.service_run import RunSecrets
+
+    holder = RunSecrets()
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        {},
+        popen=lambda *args, **kwargs: _Proc(0),  # pragma: no cover - never runs
+        read_token=lambda _env, _event: ("", ""),
+        tenant_source=lambda: (_ for _ in ()).throw(
+            InstallationStoreError("the installation record did not decrypt")
+        ),
+        tenant_secrets=holder,
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert holder() == ()

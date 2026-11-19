@@ -17,6 +17,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 
 from atlas_reviewer.budget import DailySpend, no_installation_cap, spend_file
 from atlas_reviewer.clock import SystemClock
@@ -5352,36 +5353,6 @@ def test_a_broken_store_refuses_a_delivery_at_admission(tmp_path):
     assert result.detail == "ignored:installation-store"
 
 
-def test_the_retention_sweep_runs_at_boot_and_names_what_it_removed(tmp_path):
-    from atlas_reviewer.installation_store import InstallationRecord
-    from atlas_reviewer.service import _retention_sweep
-
-    store = _installation_store(tmp_path)
-    record = store.store_credentials(
-        str(_INSTALLATION),
-        "https://models.example.invalid/api/v1",
-        _TENANT_KEY,
-        "openai/gpt-4o",
-    )
-    # Age the record past the window, the way a missed webhook's
-    # installation looks after the window has passed.
-    stale = InstallationRecord(
-        record.installation_id,
-        record.base_url,
-        record.key,
-        record.model,
-        None,
-        None,
-        record.updated_at - timedelta(days=31),
-    )
-    store._write_record(str(_INSTALLATION), lambda _current: stale)
-    config = dataclass_replace(_config(tmp_path), installation_retention_days=30)
-    lines: list[str] = []
-    removed = _retention_sweep(store, config, lines.append)
-    assert removed == 1
-    assert store.load(str(_INSTALLATION)) is None
-
-
 def test_the_serve_log_scrubs_the_store_key(tmp_path):
     """The store key is a service secret: it is in the parent env only,
     and the log scrubber covers it like the other credentials."""
@@ -5394,3 +5365,131 @@ def test_the_serve_log_scrubs_the_store_key(tmp_path):
         _config(tmp_path), {"ATLAS_INSTALLATION_STORE_KEY": key}
     )
     assert key in scrubbed
+
+
+def test_the_parent_record_loses_a_child_stderr_tenant_key(tmp_path, monkeypatch):
+    """The Major-1 pin (r1 review of #776): the child's stderr tail lands
+    in the `review failed` record, and the parent's redaction must lose
+    the tenant key from it even though the key is not in the parent
+    env -- the run registers it with the shared holder before the child
+    starts, and the fake child here writes the key unscrubbed."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.installation_store import InstallationStore
+    from atlas_reviewer.service_run import RunConfig, RunSecrets, make_runner
+
+    tenant_key = "sk-tenant-fixture-not-a-real-key"
+    env = {
+        "ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION),
+        "ATLAS_INSTALLATION_STORE_KEY": Fernet.generate_key().decode("ascii"),
+        "PATH": "/usr/bin",
+    }
+    store = InstallationStore.open(tmp_path, env)
+    store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        tenant_key,
+        "openai/gpt-4o",
+    )
+    store.record_consent(str(_INSTALLATION))
+
+    class _Proc:
+        def __init__(self) -> None:
+            self._polls = 0
+
+        def poll(self):
+            self._polls += 1
+            if self._polls > 1:
+                return 3
+            return None
+
+        def send_signal(self, _sig):
+            return None
+
+        def wait(self, timeout=None):
+            return 3
+
+        def kill(self):
+            return None
+
+    def fake_popen(argv, env, stdout, stderr):
+        stderr.write(
+            "Traceback (most recent call last): the tenant endpoint served "
+            f"'{tenant_key}', not 'openai/gpt-4o'\n".encode()
+        )
+        stderr.flush()
+        return _Proc()
+
+    holder = RunSecrets()
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        env,
+        popen=fake_popen,
+        read_token=lambda _env, _event: ("ghs_readonly", ""),
+        tenant_source=service_mod._tenant_credentials_source(store, env),
+        tenant_secrets=holder,
+    )
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+
+    def serve_forever(self, poll_interval=0.5):
+        path = tmp_path / "service.jsonl"
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if path.is_file() and "review failed" in path.read_text(encoding="utf-8"):
+                return
+            time.sleep(0.02)
+
+    monkeypatch.setattr(service_mod.ReviewServer, "serve_forever", serve_forever)
+    config = ServiceConfig(
+        secret=SECRET,
+        allowlist=frozenset({REPO}),
+        state_dir=tmp_path,
+        host="127.0.0.1",
+        port=0,
+    )
+    assert (
+        serve(config, env, runner=runner, log=lambda line: None, run_secrets=holder)
+        == 0
+    )
+    text = (tmp_path / "service.jsonl").read_text(encoding="utf-8")
+    assert "review failed" in text
+    assert tenant_key not in text
+    assert "[REDACTED" in text
+
+
+def test_the_sweep_boot_log_names_the_skipped_strays(tmp_path):
+    """The Minor-2 pin at the boot level: the sweep's log names both the
+    records it deleted and the non-record entries it skipped, and the
+    sweep still runs past them."""
+    from atlas_reviewer.installation_store import InstallationRecord, store_root
+    from atlas_reviewer.service import _retention_sweep
+
+    store = _installation_store(tmp_path)
+    record = store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        _TENANT_KEY,
+        "openai/gpt-4o",
+    )
+
+    store._write_record(
+        str(_INSTALLATION),
+        lambda _current: InstallationRecord(
+            record.installation_id,
+            record.base_url,
+            record.key,
+            record.model,
+            None,
+            None,
+            record.updated_at - timedelta(days=31),
+        ),
+    )
+    (store_root(tmp_path) / f"{_INSTALLATION}.json.writing").write_text(
+        "{torn", encoding="utf-8"
+    )
+    config = dataclass_replace(_config(tmp_path), installation_retention_days=30)
+    lines: list[str] = []
+    _retention_sweep(store, config, lines.append)
+    assert any("deleted 1 record(s)" in line for line in lines)
+    assert any("skipped 1 non-record file(s)" in line for line in lines)
+    assert store.load(str(_INSTALLATION)) is None

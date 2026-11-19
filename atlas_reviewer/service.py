@@ -104,6 +104,7 @@ from atlas_reviewer.service_run import (
     ReviewReport,
     ReviewRun,
     RunConfig,
+    RunSecrets,
     make_runner,
     review_cost,
     run_dir,
@@ -1621,19 +1622,32 @@ def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str
 
 def _retention_sweep(
     store: InstallationStore, config: ServiceConfig, log: Callable[[str], None]
-) -> int:
+) -> None:
     """The boot-time retention sweep (config slice S10, D81 §7 decision
     8): stored state unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS`
     is deleted, catching an `installation.deleted` webhook the service
     never saw. The sweep runs at boot -- the deployed service restarts
     on every deploy -- and a record it cannot read is left where it is:
     its age cannot be established, and it is already unusable. A sweep
-    that fails names the failure and leaves the service running."""
+    that fails names the failure and leaves the service running; skipped
+    directory entries -- a crash's leftover `<id>.json.writing` temp, a
+    stray file -- are named with their count, not allowed to halt the
+    sweep (r1 review of #776, Minor 2)."""
     try:
-        return store.sweep(SystemClock().now(), config.installation_retention_days)
+        removed, skipped = store.sweep(
+            SystemClock().now(), config.installation_retention_days
+        )
     except InstallationStoreError as exc:
         log(f"atlas-reviewer: the installation retention sweep failed: {exc}")
-        return 0
+        return
+    if removed or skipped:
+        log(
+            "atlas-reviewer: the installation retention sweep deleted "
+            f"{removed} record(s) unrefreshed past the "
+            f"{config.installation_retention_days}-day window "
+            f"({ENV_RETENTION_DAYS})"
+            + (f" and skipped {skipped} non-record file(s)" if skipped else "")
+        )
 
 
 def _tenant_credentials_source(
@@ -1729,6 +1743,7 @@ def serve(
     spend: DailySpend | None = None,
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
+    run_secrets: RunSecrets | None = None,
 ) -> int:
     install_interrupts()
     if not _state_is_writable(config.state_dir):
@@ -1742,14 +1757,7 @@ def serve(
     if store.broken_reason:
         log(f"atlas-reviewer: the installation store is broken: {store.broken_reason}")
     if store.configured:
-        removed = _retention_sweep(store, config, log)
-        if removed:
-            log(
-                "atlas-reviewer: the installation retention sweep deleted "
-                f"{removed} record(s) unrefreshed past the "
-                f"{config.installation_retention_days}-day window "
-                f"({ENV_RETENTION_DAYS})"
-            )
+        _retention_sweep(store, config, log)
     if spend is None:
         # The per-tenant daily bounds (config slice S9/S10): production
         # wires the decided default budget and the store-backed cap
@@ -1764,9 +1772,18 @@ def serve(
             cap_for=store.installation_cap(),
         )
     tenant_source = _tenant_credentials_source(store, env)
+    if run_secrets is None:
+        # The holder the runs register the tenant key into (config slice
+        # S10): the parent's scrubber reads it on every scrub, because
+        # the child's stderr tail lands in the telemetry and the
+        # parent's redaction does not assume the child's own scrubbing
+        # was complete (r1 review of #776, Major 1). main() passes the
+        # holder the poster's redactor shares.
+        run_secrets = RunSecrets()
     board = Board(config.state_dir / "queue.json")
     redactor = Redactor(
-        known_secrets=_service_secrets(config, env), sources=secret_sources
+        known_secrets=_service_secrets(config, env),
+        sources=(*secret_sources, run_secrets),
     )
     sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
     sink.__enter__()
@@ -1792,6 +1809,7 @@ def serve(
                 env,
                 deadline_s=deadline,
                 tenant_source=tenant_source,
+                tenant_secrets=run_secrets,
             )
         posting_publisher = _post_config_publisher(
             publisher, post_config_fetcher, telemetry
@@ -2186,12 +2204,17 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         from atlas_reviewer.http import UrllibTransport
         from atlas_reviewer.service_post import publisher_from_env
 
+        # The run-resolved tenant credentials (config slice S10): one
+        # holder shared by the runner (which registers) and both
+        # scrubbers (which read) -- the service log's and the poster's.
+        run_secrets = RunSecrets()
         publisher = publisher_from_env(
             env,
             config.allowlist,
             config.state_dir,
             transport=UrllibTransport(),
             clock=SystemClock(),
+            run_secrets=run_secrets,
         )
     except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
@@ -2214,6 +2237,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,
             ),
+            run_secrets=run_secrets,
         )
     except KeyboardInterrupt:
         return 0

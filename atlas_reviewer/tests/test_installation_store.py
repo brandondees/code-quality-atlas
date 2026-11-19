@@ -7,6 +7,7 @@ and the retention sweep. Offline: temp files and the real `cryptography`
 Fernet with obviously fake keys."""
 
 import json
+import os
 import stat
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -293,7 +294,9 @@ def test_written_records_are_private_and_leave_no_temporary_behind(tmp_path):
     assert (stat.S_IMODE(root.stat().st_mode)) == 0o700
     record_path = root / "12345.json"
     assert (stat.S_IMODE(record_path.stat().st_mode)) == 0o600
-    assert [p.name for p in root.iterdir()] == ["12345.json"]
+    # The lock directory is the store's own; no `.writing` temp survives
+    # a completed write.
+    assert sorted(p.name for p in root.iterdir()) == ["12345.json", "locks"]
 
 
 # ----------------------------------------------------- keys never surface
@@ -345,6 +348,75 @@ def test_a_half_revoked_record_is_not_credentials(tmp_path):
     assert not record.has_credentials
     with pytest.raises(InstallationStoreError):
         record.credentials()
+
+
+# ---------------------------------------------------- the process lock
+
+
+def test_a_record_write_takes_and_releases_a_per_installation_file_lock(
+    tmp_path,
+):
+    """The cross-process serialization (r1 review of #776, Nit 6): the
+    read-modify-write holds an advisory `fcntl.flock` on the
+    installation's lock file and releases it, so part B's settings-page
+    process serializes against the service's instead of losing an
+    update. After a completed write the lock is free."""
+    import fcntl
+
+    store = _store(tmp_path)
+    _credentials_record(store)
+    lock_path = store_root(tmp_path) / "locks" / "12345.lock"
+    assert lock_path.exists()
+    # A second exclusive acquisition succeeds only because the store
+    # released the lock when the write returned.
+    fd = os.open(lock_path, os.O_WRONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def test_a_write_waits_for_a_held_file_lock_and_then_lands(tmp_path):
+    """Two writers serialize: while another holder keeps the
+    installation's flock, the store's read-modify-write blocks, and it
+    completes -- with its own update intact -- once the holder
+    releases."""
+    import fcntl
+    import threading
+
+    store = _store(tmp_path)
+    lock_path = store_root(tmp_path) / "locks"
+    from atlas_reviewer.ledger import make_private_dirs
+
+    make_private_dirs(lock_path)
+    held = os.open(lock_path / "12345.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)
+    try:
+        done = threading.Event()
+
+        def write():
+            store.store_credentials(
+                "12345",
+                "https://models.example.invalid/api/v1",
+                TENANT_KEY,
+                "openai/gpt-4o",
+            )
+            done.set()
+
+        worker = threading.Thread(target=write)
+        worker.start()
+        # Generous margins: the writer is still blocked well past a fast
+        # unsynchronized write would take, and lands once released.
+        assert not done.wait(0.3)
+        fcntl.flock(held, fcntl.LOCK_UN)
+        assert done.wait(5.0)
+        worker.join(5.0)
+        record = store.load("12345")
+        assert record is not None
+        assert record.credentials().key == TENANT_KEY
+    finally:
+        os.close(held)
 
 
 # ------------------------------------------------------- credential checks
@@ -471,17 +543,49 @@ def test_the_sweep_deletes_records_past_the_window_and_keeps_fresh_ones(
         ),
     )
     assert fresh.updated_at == NOW
-    removed = store.sweep(NOW, DEFAULT_RETENTION_DAYS)
-    assert removed == 1
+    removed, skipped = store.sweep(NOW, DEFAULT_RETENTION_DAYS)
+    assert (removed, skipped) == (1, 0)
     assert store.load("11111") is None
     assert store.load("22222") is not None
+
+
+def test_the_sweep_skips_a_stray_or_temporary_file_and_still_sweeps(tmp_path):
+    """A crash mid-write leaves `<id>.json.writing`; a stray file can be
+    anything. Neither halts the sweep -- a sweep that died on one stray
+    file would stop catching missed webhooks every boot after it -- and
+    neither is deleted: this store removes only what it wrote. Both are
+    named in the returned count."""
+    store = _store(tmp_path)
+    stale = store.store_credentials(
+        "11111", "https://stale.example.invalid", TENANT_KEY, "openai/gpt-4o"
+    )
+    store._write_record(
+        "11111",
+        lambda _current: InstallationRecord(
+            "11111",
+            stale.base_url,
+            stale.key,
+            stale.model,
+            None,
+            None,
+            NOW - timedelta(days=DEFAULT_RETENTION_DAYS + 1),
+        ),
+    )
+    root = store_root(tmp_path)
+    (root / "11111.json.writing").write_text("{torn", encoding="utf-8")
+    (root / "stray").write_text("anything", encoding="utf-8")
+    removed, skipped = store.sweep(NOW, DEFAULT_RETENTION_DAYS)
+    assert (removed, skipped) == (1, 2)
+    assert store.load("11111") is None
+    assert (root / "11111.json.writing").exists()
+    assert (root / "stray").exists()
 
 
 def test_the_sweep_leaves_a_record_it_cannot_read(tmp_path):
     store = _store(tmp_path)
     _credentials_record(store)
     (store_root(tmp_path) / "12345.json").write_text("junk", encoding="utf-8")
-    assert store.sweep(NOW, DEFAULT_RETENTION_DAYS) == 0
+    assert store.sweep(NOW, DEFAULT_RETENTION_DAYS) == (0, 0)
 
 
 def test_the_sweep_needs_a_window_of_at_least_one_day(tmp_path):

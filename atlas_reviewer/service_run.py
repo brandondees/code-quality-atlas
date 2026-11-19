@@ -172,6 +172,43 @@ Popen = Callable[..., Any]
 Sleeper = Callable[[float], None]
 
 
+class RunSecrets:
+    """The credentials the review runs resolved from the installation
+    store (config slice S10), registered for the parent's scrubber.
+
+    The child's stderr tail lands in the run's error string and, from
+    there, on the `review failed` telemetry record. The child scrubs its
+    own writes, but the parent's redaction exists precisely to not
+    depend on that completeness -- an unhandled traceback, or a future
+    child write path that forgets the scrub -- and the tenant key is not
+    in the parent's environment (the store resolved it at run time), so
+    `_child_secrets` cannot see it. A run that resolved tenant
+    credentials registers the key here **before the child starts**, and
+    the service log's and the poster's redactors read it on every scrub
+    from then on. Registered values are never cleared: a key stays a
+    value the log must never print after the run that used it, whether
+    that run succeeded or failed, and scrubbing a rotated-away key is
+    harmless."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._values: dict[str, None] = {}
+
+    def register(self, *values: str) -> None:
+        """Add the run's resolved credentials. A value under eight
+        characters is ignored, the way `_child_secrets` filters: a short
+        string is more likely a test fixture than a key, and redacting a
+        short common string would scrub the log's own words."""
+        with self._lock:
+            for value in values:
+                if len(value) >= 8:
+                    self._values[value] = None
+
+    def __call__(self) -> tuple[str, ...]:
+        with self._lock:
+            return tuple(self._values)
+
+
 @dataclass(frozen=True)
 class RunConfig:
     provider: str
@@ -465,6 +502,7 @@ def make_runner(
     clock: Callable[[], float] = time.monotonic,
     read_token: Callable[[Mapping[str, str], PrEvent], tuple[str, str]] | None = None,
     tenant_source: Callable[[], TenantCredentials | None] | None = None,
+    tenant_secrets: RunSecrets | None = None,
 ) -> Callable[[PrEvent, threading.Event], ReviewRun]:
     """``tenant_source`` (config slice S10) resolves the installation's
     own endpoint credentials at run time -- fresh, so a rotation between
@@ -484,6 +522,12 @@ def make_runner(
                 return ReviewRun(False, error=f"the tenant path refused: {exc}")
         else:
             tenant = None
+        if tenant is not None and tenant_secrets is not None:
+            # Registered before the child starts, so the parent's
+            # scrubber knows the key from the first byte the child
+            # writes -- the child's own scrubbing is a defense the
+            # parent's does not assume (r1 review of #776, Major 1).
+            tenant_secrets.register(tenant.key)
         directory = run_dir(config.state_root, event)
         make_private_dirs(directory)
         _write_event(directory / "event.json", event)

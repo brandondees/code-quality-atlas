@@ -586,3 +586,23 @@ def test_the_adapter_usage_lines_name_the_tenant_endpoint():
         "model `openai/gpt-4o` via the installation's own endpoint (tenant-supplied)"
     )
     assert CREDENTIALS.key not in " ".join(lines)
+
+
+def test_the_adapter_span_records_the_finish_reason():
+    """The operator adapter records the parsed `finish_reason` on the
+    call's span facts; the tenant adapter does the same, so the span
+    keeps the output-limit-stop label the trace reads (r1 review of
+    #776, Nit 4)."""
+    from atlas_reviewer.call_facts import take_call
+
+    provider, _transport = _provider(
+        [(200, _completion_body(prompt_tokens=10, completion_tokens=5))]
+    )
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    model.turn(_request(UserText("go")))
+    facts = take_call()
+    assert facts is not None
+    assert facts.finish_reason == "stop"
+    assert facts.prompt_tokens == 10
+    assert facts.completion_tokens == 5
