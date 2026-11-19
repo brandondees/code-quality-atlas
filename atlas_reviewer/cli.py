@@ -1311,8 +1311,12 @@ def _run_proposals(
     of the `REVIEW.md` on the repo's **default branch** -- the D84 read
     source, never the PR head and never the merge-base, because a
     proposal a same-repo or stacked PR could carry would name commands
-    into its own review's execution surface. A proposal is a request the
-    operator approves within the run, never a grant, so the read fails
+    into its own review's execution surface. A proposal is a request,
+    never a grant, and the decided channel is **pre-approval** (D88's
+    update): installation admins pre-approve a repo's extra commands on
+    the S10 settings page (part B), the run reads that pre-approved set
+    once at run start, and there is no live approval during a review --
+    so the read fails
     open to deny in every direction that matters: no file reads as the
     ordinary unconfigured repo, silently; a default branch that cannot
     be resolved, a fetch that failed, or a file over the read bound

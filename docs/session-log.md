@@ -5508,3 +5508,59 @@ recorded unobservable (the token-quoting drop is the other).
 section of `atlas_reviewer/README.md`, D88, the live open-questions list,
 and the test file — none of them files #774 (S6) edits except the README,
 whose S6 changes are in other sections; nothing to reconcile.
+
+## 2026-11-19 (same day) — #775 rebased onto main (#774 merged), and the approval channel decided: installation admins pre-approve on the S10 settings page, no live approval
+
+Two things landed on the S7 branch in one round: the rebase onto main
+`0004fee0` (#774/S6 merged), and the owner's decision on the question the
+slice had flagged open.
+
+**The decision.** Brandon, 2026-11-19 at 12:05 PM CT: **"installation
+admins pre-approve a repo's extra commands on the S10 settings page (part
+B), and there is no live approval during a review."** Recorded as a dated
+update on D88 (edited in place on this branch — D88 is not on main's
+append-only log yet). The shape: the channel's backing data is a
+**pre-approved, installation-scoped set** read once at run start; a
+proposal the run's allow-list does not carry pre-approved is denied and
+named as an unapproved gap; nothing asks a live operator mid-run. The
+`ApprovalChannel` port and its `NeverApproved` production default stay as
+the seam — until part B's store and settings page land, nothing is
+pre-approved, so the deployed service grants nothing — and the bounded ask
+(the daemon-thread join, the wall/dollar checks) stays as the fail-safe
+that keeps any channel implementation bounded; with the decided shape
+nothing waits on a live operator, so the bound is pure fail-safety. No
+rename: `ApprovalChannel`/`NeverApproved`/`RunApprovals` keep their names
+(`NeverApproved` reads exactly as "nothing pre-approved yet"), and
+renaming would churn the tests for no clarity. What part B still owes: the
+encrypted installation store (S10's, already in scope for the
+credentials), the settings-page surface where the admin grants a repo's
+commands, and the run-start read that populates the gate's approved set —
+none of it built here. Every surface that promised in-run or live approval
+is reworded to the decided shape: the `approval.py` module and class
+docstrings, the bridge's refusal path docstring, the `repo_config` key
+descriptions, the CLI fetch's docstring, the coordinator's entry-point
+docstrings and gate comment, the tool schema's `command` description, the
+README's S7 section, and Q27 — decided with it, its section marked
+DECIDED with the answer and the bullet removed from the live
+"Genuinely still open" list. The session log's earlier S7 entries keep
+their original wording as history, this log being append-only.
+
+**No behavior change, so no new mutant.** The port, the production
+default, the gate's mechanics and every test assertion are unchanged; the
+round is wording and records.
+
+**The rebase.** Three conflicts, each resolved by keeping both sides:
+`docs/open-questions.md` (main's D87 slotting in before this branch's D88
+— the first commit's resolution placed them in order and the second
+commit's round-1 rewording of D88 landed on the survivor, deduplicated),
+`docs/session-log.md` (S6's entry and correction, then S7's, both whole,
+append-only preserved), and `atlas_reviewer/github_fixture.py` (the two
+slices' `get_repository` docstrings merged, and `get_file` merged so one
+method serves a default-branch path by name from the fixture root —
+`AGENTS.md` from `agents-md.txt`, S6's mapping, kept; a fixture-root
+`REVIEW.md` by its own name, S7's read; any other absent path a 404).
+`cli.py` and the README auto-merged: the two default-branch fetches (S6's
+guidelines block, S7's proposals read) coexist as separate one-lookup
+reads, and the README's S6 and S7 sections sit beside each other. The
+overlap D88 predicted held: nothing in S6's changes forced an S7 behavior
+change.

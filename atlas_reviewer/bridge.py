@@ -494,7 +494,7 @@ class BridgeResult:
     outcome: MutantOutcome | None = None
     outcome_reason: str = ""
     head_sha: str = ""
-    # The proposed command an operator-approved addition ran (S7, D88):
+    # The proposed command a pre-approved addition ran (S7, D88):
     # the proposal's validated name, empty for every other result. The
     # name may be shown because it is schema-validated config (the
     # parse's own grammar), not model text.
@@ -904,7 +904,7 @@ def run_test_script(
     and the copy removed again -- whatever the tests wrote dies with it,
     and nothing it wrote or replaced reaches a later call.
 
-    `argv`, when given, is the bridge-built argv of an operator-approved
+    `argv`, when given, is the bridge-built argv of a pre-approved
     proposed command (S7, D88): the declared command replaces the pytest
     invocation -- the proposal's own tokens, each quoted, run from the
     same disposable copy under the same `timeout`, output cap and
@@ -1711,10 +1711,12 @@ class Bridge:
         exact-match lookup against the run's allow-list: a name no
         proposal carries is a rejected call -- a fixed code, no echo --
         because the model cannot mint a command; a proposed one routes
-        through the run-scoped gate, where only an explicit operator
-        approval grants and every other outcome -- denial, no answer, an
-        error, the run's wall or dollar limit reached while the request
-        waited -- is the unapproved gap, named with the counts."""
+        through the run-scoped gate, where only a **pre-approved**
+        addition grants -- installation admins pre-approve a repo's extra
+        commands on the S10 settings page (part B, D88's update), there
+        is no live approval during a review, and until part B the
+        production channel approves nothing -- and every other outcome is
+        the unapproved gap, named with the counts."""
         if self.approvals is None:
             return (
                 Status.REJECTED,
@@ -2249,7 +2251,7 @@ def render(result: BridgeResult) -> str:
     if result.head_sha:
         head += f"; head {result.head_sha}"
     if result.approved:
-        head += f"; {result.approved} ran with operator approval for this run"
+        head += f"; {result.approved} ran as a pre-approved addition for this run"
     head += _run_lines(result)
     error = f"\nerror: {result.error.text}" if result.error else ""
     return f"{head}{error}\n{result.content.text}"

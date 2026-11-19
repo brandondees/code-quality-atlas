@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """The operator-approval gate behind the #734 execution-tool allow-list
-(config slice S7, D88).
+(config slice S7, D88, updated 2026-11-19 12:05 PM CT).
 
 A repo's requested additions to the allow-list -- the declared test
 commands its default-branch `REVIEW.md` proposes for `run_tests` -- are
@@ -12,20 +12,28 @@ being reached while the request waits; waiting counts against the run's
 wall clock, because the wait is the calling lens's own elapsed time and
 the gate bounds the wait by the wall that remains.
 
-The port is deliberately left open: the plan does not specify the
-operator-approval channel or who the operator is for a non-allowlisted
-installation, and nothing here invents one. The production default is
-`NeverApproved`, a channel that never approves -- so on a deployed
-service every blocked command is denied and named as an unapproved gap,
-and no proposal is ever granted. A real channel joins by implementing
-`ApprovalChannel`; it should answer by the deadline it is given (on the
-caller's clock scale), and any exception it raises denies fail-closed.
-The gate does not trust the channel to honor that deadline: the request
-runs on a daemon helper thread the gate joins for at most the bounded
-wait, so a channel that never returns is denied at the bound and its
-eventual answer, if it ever produces one, is never read (the residual --
-that one parked daemon thread, ended only when the process does -- is
-named in D88).
+The channel is the seam, and the decided shape behind it is
+**pre-approval**: the owner's 12:05 PM CT decision (D88's update) has
+installation admins pre-approve a repo's extra commands on the S10
+settings page (part B), the run reads that pre-approved, installation-
+scoped set once at run start, and **there is no live approval during a
+review** -- every proposal the run's allow-list does not carry
+pre-approved is denied and named as an unapproved gap, and nothing asks a
+live operator mid-run. Until part B lands, nothing is pre-approved, so
+the production default stays `NeverApproved`, a channel that never
+approves: on a deployed service every blocked command is denied and named
+as an unapproved gap, and no proposal is ever granted. The port stays as
+the seam part B backs with that set; a channel implementation should
+answer by the deadline it is given (on the caller's clock scale), and any
+exception it raises denies fail-closed. The gate does not trust the
+channel to honor that deadline: the request runs on a daemon helper
+thread the gate joins for at most the bounded wait, so a channel that
+never returns is denied at the bound and its eventual answer, if it ever
+produces one, is never read (the residual -- that one parked daemon
+thread, ended only when the process does -- is named in D88; with the
+decided shape the channel answers from the run-start snapshot, so the
+bound is the fail-safe that keeps any channel implementation bounded,
+not a wait a live operator sits behind).
 
 An approved addition lives in run-scoped state that dies with the run:
 `RunApprovals` is built per lens run, its approvals never persist, are
@@ -92,13 +100,16 @@ class CommandProposal:
 
 
 class ApprovalChannel(Protocol):
-    """The operator-approval channel, left open (D88): the plan does not
-    specify the channel or who the operator is for a non-allowlisted
-    installation. `request` asks one proposal and answers by `deadline`
-    (absolute, on the caller's clock scale) with one outcome; only
-    `APPROVED` grants. A channel that raises, answers late, or answers
-    with anything else is denied by the gate, never retried within the
-    run."""
+    """The operator-approval channel -- the seam the decided shape backs
+    with pre-approval (D88's update): installation admins pre-approve a
+    repo's extra commands on the S10 settings page (part B), the run
+    reads that pre-approved set once at run start, and there is no live
+    approval during a review, so a real channel answers from that
+    run-start snapshot. `request` asks one proposal and answers by
+    `deadline` (absolute, on the caller's clock scale) with one outcome;
+    only `APPROVED` grants. A channel that raises, answers late, or
+    answers with anything else is denied by the gate, never retried
+    within the run."""
 
     def request(
         self, proposal: CommandProposal, deadline: float
@@ -108,7 +119,8 @@ class ApprovalChannel(Protocol):
 class NeverApproved:
     """The production default channel: it never approves. Every blocked
     command is denied and named as an unapproved gap, so a deployed
-    service grants nothing until a real channel exists (D88)."""
+    service grants nothing until part B's pre-approved set lands (D88's
+    update) -- until then nothing is pre-approved."""
 
     def request(self, proposal: CommandProposal, deadline: float) -> ApprovalOutcome:
         return ApprovalOutcome.NO_ANSWER
@@ -149,14 +161,20 @@ _DOLLAR_SPENT_WAITING = (
 @dataclass
 class RunApprovals:
     """The run-scoped gate between a proposed command and the runner:
-    `admit` turns a blocked command into one operator-approval request
-    and denies everything that is not an explicit `APPROVED` -- a denial
-    or a no-answer, an error the channel raised, the wait's own wall and
-    dollar bounds, and the wall or dollar limit reaching the run while
-    the request waited. Outcomes are sticky for the run: a proposal
-    denied once is never re-requested, so a lens cannot spend its session
-    re-asking, and an approved one stays approved for the run. The state
-    dies with the lens run's bridge; nothing here persists.
+    `admit` turns a blocked command into one approval request on the
+    channel and denies everything that is not an explicit `APPROVED` --
+    a denial or a no-answer, an error the channel raised, the wait's own
+    wall and dollar bounds, and the wall or dollar limit reaching the run
+    while the request waited. The decided shape behind the channel is
+    pre-approval (D88's update): installation admins pre-approve a repo's
+    extra commands on the S10 settings page (part B), the run reads that
+    set once at start, and there is no live approval during a review --
+    until part B lands the default channel approves nothing, so every
+    proposal is denied and named as an unapproved gap. Outcomes are
+    sticky for the run: a proposal denied once is never re-requested, so
+    a lens cannot spend its session re-asking, and an approved one stays
+    approved for the run. The state dies with the lens run's bridge;
+    nothing here persists.
 
     `wall_left` is the seconds remaining on the run's wall clock and
     `budget_ok` whether the run's dollar bound still has room; both are

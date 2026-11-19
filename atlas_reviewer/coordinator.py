@@ -678,8 +678,11 @@ def review_lens(
     D73's evidence-snapshot digest: when given, a reused settled lens is
     checked for newer evidence and re-assessed when it has some.
     `run_proposals` and `approval_channel` are the S7 allow-list
-    proposals (config slice S7, D88) and the operator-approval channel
-    they become requests on; the production default approves nothing."""
+    proposals (config slice S7, D88) and the approval channel they become
+    requests on; the decided channel is pre-approval (D88's update:
+    installation admins pre-approve on the S10 settings page, part B --
+    no live approval during a review), and the production default
+    approves nothing until part B lands."""
     resolved = limits.resolve()
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
@@ -784,12 +787,16 @@ def review_lenses(
     Config slice S7 (D88): `run_proposals` are the reviewed repo's
     proposed additions to the #734 execution-tool allow-list, read from
     the default-branch `REVIEW.md` before this entry point is called;
-    `approval_channel` is the operator-approval channel they become
-    requests on (the production default approves nothing). A proposal is
-    never auto-granted: a blocked `run_tests` command routes to the
-    channel, every outcome other than an explicit approval denies, and
-    an approved addition lives in run-scoped state that dies with the
-    lens run's own runner.
+    `approval_channel` is the approval channel they become requests on.
+    The decided channel is pre-approval (D88's update): installation
+    admins pre-approve a repo's extra commands on the S10 settings page
+    (part B), the run reads that pre-approved set once at start, and
+    there is no live approval during a review -- the production default
+    approves nothing until part B lands. A proposal is never
+    auto-granted: a blocked `run_tests` command routes to the channel,
+    every outcome other than an explicit approval denies, and an
+    approved addition lives in run-scoped state that dies with the lens
+    run's own runner.
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
@@ -1404,8 +1411,11 @@ def _review_one(
     )
     # The run-scoped operator-approval gate (config slice S7, D88), built
     # per lens run: the proposals the repo's default-branch config named,
-    # the channel they become requests on (the production default
-    # approves nothing), and the run's own wall and dollar bounds as the
+    # the channel they become requests on (the decided channel is
+    # pre-approval -- installation admins pre-approve on the S10 settings
+    # page, part B; no live approval during a review -- and the production
+    # default approves nothing until it lands), and the run's own wall and
+    # dollar bounds as the
     # wait's limits. The gate and its approved set live and die with this
     # lens run's runner -- an approval is never carried to another lens's
     # runner, another run, or any state on the volume.

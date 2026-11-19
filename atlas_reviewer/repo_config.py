@@ -75,9 +75,14 @@ Today's keys:
 - `review_test_commands:` (config slice S7, D88) -- the repo's
   **proposed additions** to the #734 execution-tool allow-list: declared
   test commands a `run_tests` call may name. A proposal is a **request,
-  never a grant** (the #734 decision, D80): the command runs only when
-  the run's operator-approval channel explicitly approves it, the
-  approval lives in run-scoped state that dies with the run, and the
+  never a grant** (the #734 decision, D80; the channel decided in D88's
+  update): the command runs only when the run's allow-list carries it
+  **pre-approved** -- installation admins pre-approve a repo's extra
+  commands on the S10 settings page (part B), the run reads that set once
+  at run start, and there is no live approval during a review, so until
+  part B the channel approves nothing and every proposal is denied and
+  named as an unapproved gap -- the approval lives in run-scoped state
+  that dies with the run, and the
   argv the command runs is built by the bridge from the proposal's own
   tokens -- the model names the proposal, never a shell string. Parsed
   by `parse_run_proposals` from the **default branch** (the D84 read
@@ -343,7 +348,10 @@ class RunProposalsRead:
     """What the reviewed repo's **default-branch** `REVIEW.md` proposed
     for the #734 execution-tool allow-list (config slice S7, D88):
     `proposals` are the parsed, validated additions -- each becomes only
-    an operator-approval request, never a grant; `notes` is controller
+    an approval request on the run's channel, never a grant, and the
+    decided channel is pre-approval (D88's update: installation admins
+    pre-approve on the S10 settings page, part B; no live approval during
+    a review); `notes` is controller
     text, non-empty only when a line was seen and ignored, so "line
     present but unusable" can be told apart from "no line". The note
     counts the ignored lines and never echoes the rejected text."""

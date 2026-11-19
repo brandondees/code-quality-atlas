@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Config slice S7 (D88): the #734 execution-tool allow-list's proposals
-and the in-run operator approval. The parse (`repo_config`'s
+and the operator-approval gate. The parse (`repo_config`'s
 `review_test_commands:` line, read from the default branch), the
 run-scoped gate (`approval.RunApprovals`), the bridge's `run_tests`
 `command` surface -- run for real through `LocalSprites` where the
@@ -576,7 +576,7 @@ def test_an_approved_command_runs_the_proposals_own_argv(tmp_path):
     # run-scoped approval, not a second one.
     assert len(channel.requests) == 1
     assert second.status is Status.OK
-    assert "operator approval for this run" in render(second)
+    assert "ran as a pre-approved addition for this run" in render(second)
     # A declared command carries no pytest summary to parse.
     assert first.runs[0].summary is None
 
