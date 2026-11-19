@@ -11,7 +11,7 @@ import sys
 import threading
 import time
 from dataclasses import replace as dataclass_replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from http.client import HTTPConnection
 from pathlib import Path
@@ -121,6 +121,7 @@ def _deliver(
     telemetry=None,
     admission_reader=None,
     spend=None,
+    installations=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
@@ -139,6 +140,7 @@ def _deliver(
         telemetry=telemetry,
         admission_reader=admission_reader,
         spend=spend,
+        installations=installations,
     )
 
 
@@ -5134,3 +5136,261 @@ def test_a_retry_s_identical_looking_progress_is_still_its_own(tmp_path):
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("4.40")
+
+
+# ------------------------------- the installation store path (S10, part A)
+
+_TENANT_KEY = "sk-tenant-fixture-not-a-real-key"
+_INSTALLATION = 12345
+
+
+def _installation_store(tmp_path: Path):
+    from cryptography.fernet import Fernet
+
+    from atlas_reviewer.installation_store import InstallationStore
+
+    env = {"ATLAS_INSTALLATION_STORE_KEY": Fernet.generate_key().decode("ascii")}
+    return InstallationStore.open(tmp_path, env)
+
+
+def _installation_body(action="installation.deleted", installation=_INSTALLATION):
+    return json.dumps({"action": action, "installation": {"id": installation}}).encode()
+
+
+def test_an_installation_deleted_delivery_deletes_the_stored_state(tmp_path):
+    """The uninstall rule (D81 §7 decision 8): the webhook deletes the
+    installation's stored state -- credentials, cap and consent."""
+
+    store = _installation_store(tmp_path)
+    store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        _TENANT_KEY,
+        "openai/gpt-4o",
+    )
+    store.set_cap(str(_INSTALLATION), Decimal("8.00"))
+    store.record_consent(str(_INSTALLATION))
+    result = _deliver(
+        _config(tmp_path),
+        Board(tmp_path / "queue.json"),
+        _installation_body(),
+        event="installation.deleted",
+        installations=store,
+    )
+    assert result.status == 200
+    assert store.load(str(_INSTALLATION)) is None
+
+
+def test_an_installation_deleted_delivery_without_an_id_is_ignored_and_named(
+    tmp_path,
+):
+    from atlas_reviewer.telemetry import Telemetry
+
+    store = _installation_store(tmp_path)
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        _config(tmp_path),
+        Board(tmp_path / "queue.json"),
+        _installation_body(installation=None),
+        event="installation.deleted",
+        telemetry=telemetry,
+        installations=store,
+    )
+    assert result.status == 202
+    assert result.detail == "ignored:shape"
+    events = [e for e in telemetry.events if e.step == "installation deleted"]
+    assert events and events[0].fields.get("reason") == "no-installation-id"
+
+
+def test_an_installation_deleted_delivery_on_a_broken_store_answers_500(
+    tmp_path,
+):
+    """A store the service cannot read right now must not swallow the
+    deletion: the 500 makes GitHub re-deliver, so the deletion is
+    retried instead of lost, and the gap is on the telemetry."""
+    # A record on disk with no key configured: the broken store.
+    from atlas_reviewer.installation_store import InstallationStore, store_root
+    from atlas_reviewer.ledger import make_private_dirs
+    from atlas_reviewer.telemetry import Telemetry
+
+    make_private_dirs(store_root(tmp_path))
+    (store_root(tmp_path) / f"{_INSTALLATION}.json").write_text("{}", encoding="utf-8")
+    store = InstallationStore.open(tmp_path, {})
+    assert store.broken_reason
+    telemetry = Telemetry(SystemClock())
+    result = _deliver(
+        _config(tmp_path),
+        Board(tmp_path / "queue.json"),
+        _installation_body(),
+        event="installation.deleted",
+        telemetry=telemetry,
+        installations=store,
+    )
+    assert result.status == 500
+    events = [e for e in telemetry.events if e.step == "installation deleted"]
+    assert events and events[0].status == "error"
+
+
+def test_an_installation_deleted_delivery_on_an_unconfigured_store_answers_ok(
+    tmp_path,
+):
+    """The unconfigured store never stored anything, so the deletion is
+    already true and the answer is 200."""
+    from atlas_reviewer.installation_store import InstallationStore
+
+    store = InstallationStore.open(tmp_path, {})
+    result = _deliver(
+        _config(tmp_path),
+        Board(tmp_path / "queue.json"),
+        _installation_body(),
+        event="installation.deleted",
+        installations=store,
+    )
+    assert result.status == 200
+    assert result.detail == "deleted:none-stored"
+
+
+def test_a_pull_request_delivery_is_unaffected_by_the_store(tmp_path):
+    store = _installation_store(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    result = _deliver(_config(tmp_path), board, _body(), installations=store)
+    assert result.status == 202
+    assert result.detail == "queued"
+
+
+def test_the_tenant_resolver_answers_none_without_credentials(tmp_path):
+    from atlas_reviewer.service import _tenant_credentials_source
+
+    store = _installation_store(tmp_path)
+    source = _tenant_credentials_source(
+        store, {"ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION)}
+    )
+    assert source() is None
+
+
+def test_the_tenant_resolver_answers_the_stored_credentials_with_consent(tmp_path):
+    from atlas_reviewer.service import _tenant_credentials_source
+
+    store = _installation_store(tmp_path)
+    store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        _TENANT_KEY,
+        "openai/gpt-4o",
+    )
+    store.record_consent(str(_INSTALLATION))
+    source = _tenant_credentials_source(
+        store, {"ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION)}
+    )
+    credentials = source()
+    assert credentials is not None
+    assert credentials.key == _TENANT_KEY
+    assert credentials.model == "openai/gpt-4o"
+
+
+def test_the_tenant_resolver_refuses_credentials_without_consent(tmp_path):
+    from atlas_reviewer.installation_store import ConsentNotAcknowledgedError
+    from atlas_reviewer.service import _tenant_credentials_source
+
+    store = _installation_store(tmp_path)
+    store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        _TENANT_KEY,
+        "openai/gpt-4o",
+    )
+    source = _tenant_credentials_source(
+        store, {"ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION)}
+    )
+    with pytest.raises(ConsentNotAcknowledgedError) as exc:
+        source()
+    assert "consent" in str(exc.value)
+
+
+def test_the_tenant_resolver_fails_closed_on_a_broken_store(tmp_path):
+    from atlas_reviewer.installation_store import (
+        InstallationStore,
+        InstallationStoreError,
+        store_root,
+    )
+    from atlas_reviewer.ledger import make_private_dirs
+    from atlas_reviewer.service import _tenant_credentials_source
+
+    make_private_dirs(store_root(tmp_path))
+    (store_root(tmp_path) / f"{_INSTALLATION}.json").write_text("{}", encoding="utf-8")
+    store = InstallationStore.open(tmp_path, {})
+    source = _tenant_credentials_source(
+        store, {"ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION)}
+    )
+    with pytest.raises(InstallationStoreError):
+        source()
+
+
+def test_a_broken_store_refuses_a_delivery_at_admission(tmp_path):
+    """The cap check rides the admission: a store that cannot be read is
+    an unknown cap, so the delivery is refused there, with the store's
+    own label, and nothing reads like a clean review."""
+    from atlas_reviewer.budget import DailySpend
+    from atlas_reviewer.installation_store import (
+        InstallationStore,
+        store_root,
+    )
+    from atlas_reviewer.ledger import make_private_dirs
+
+    make_private_dirs(store_root(tmp_path))
+    (store_root(tmp_path) / f"{_INSTALLATION}.json").write_text("{}", encoding="utf-8")
+    store = InstallationStore.open(tmp_path, {})
+    assert store.broken_reason
+    spend = DailySpend(tmp_path, Decimal("100.00"), cap_for=store.installation_cap())
+    result = _deliver(
+        _config(tmp_path),
+        Board(tmp_path / "queue.json"),
+        _body(),
+        spend=spend,
+    )
+    assert result.status == 202
+    assert result.detail == "ignored:installation-store"
+
+
+def test_the_retention_sweep_runs_at_boot_and_names_what_it_removed(tmp_path):
+    from atlas_reviewer.installation_store import InstallationRecord
+    from atlas_reviewer.service import _retention_sweep
+
+    store = _installation_store(tmp_path)
+    record = store.store_credentials(
+        str(_INSTALLATION),
+        "https://models.example.invalid/api/v1",
+        _TENANT_KEY,
+        "openai/gpt-4o",
+    )
+    # Age the record past the window, the way a missed webhook's
+    # installation looks after the window has passed.
+    stale = InstallationRecord(
+        record.installation_id,
+        record.base_url,
+        record.key,
+        record.model,
+        None,
+        None,
+        record.updated_at - timedelta(days=31),
+    )
+    store._write_record(str(_INSTALLATION), lambda _current: stale)
+    config = dataclass_replace(_config(tmp_path), installation_retention_days=30)
+    lines: list[str] = []
+    removed = _retention_sweep(store, config, lines.append)
+    assert removed == 1
+    assert store.load(str(_INSTALLATION)) is None
+
+
+def test_the_serve_log_scrubs_the_store_key(tmp_path):
+    """The store key is a service secret: it is in the parent env only,
+    and the log scrubber covers it like the other credentials."""
+    from cryptography.fernet import Fernet
+
+    import atlas_reviewer.service as service_mod
+
+    key = Fernet.generate_key().decode("ascii")
+    scrubbed = service_mod._service_secrets(
+        _config(tmp_path), {"ATLAS_INSTALLATION_STORE_KEY": key}
+    )
+    assert key in scrubbed

@@ -5025,3 +5025,176 @@ D86 sits on main beside D87. D87's parenthetical is reworded in place to
 say so — its entry is still the current record — and this note is the
 log's append-only stand-in for the same fact; the S6 entry's "which open
 S9 PR #773 holds" wording above is the stale text the correction covers.
+## 2026-11-19 — Config slice S10, part A: the BYOK core — the encrypted installation store, the tenant endpoint's own code path, and the pinned-IP egress guard (issue #768)
+
+The user-configuration plan's S10 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S10, §7's nine decisions, §8 Q1/Q3/Q5), part A — the backend; part B,
+the operator-hosted settings page, is a later PR calling this store's API.
+The decisions this part had to make beyond the plan are **D89**. Offline
+only: the tests use fakes, temp files and the real `cryptography` Fernet
+with obviously fake keys; no live model, Sprite or GitHub call was made,
+no secret was read or set, and no deployed service setting, Fly config
+value or secret changed.
+
+**The store.** `installation_store.py`: one Fernet-encrypted record per
+App installation at `<state root>/installations/<id>.json` — the tenant
+credentials (endpoint base URL, key, chosen model), the installation
+admin's daily cap, the consent acknowledgement, an `updated_at` — 0700
+directory, 0600 files, atomic writes (temp file, fsync, rename, directory
+sync), the id validated digits-only so the record name cannot escape the
+directory. `cryptography` was chosen over hand-rolled crypto; it is
+already in the lock (`PyJWT[crypto]`, pinned 50.0.2), so the dependency
+evaluation adds no package and no lock change, only a direct import.
+Every read fails closed with the reason named and never falls back, with
+one distinction the boot log and the refusal records carry: no key **and
+no records on disk** is the unconfigured store — nothing stored for
+anyone, the tenant path absent, the cap None — while no key **with
+records on disk**, or an invalid key, is the broken store, because the
+records it cannot read may hold credentials the routing rule must not
+silently replace with the operator's key. The keys never appear in a
+repr (`key=<redacted>`), an exception message, or a log; the repr tests
+pin it and the corrupt-record test seeds a plaintext file containing the
+fixture key and asserts the refusal names the document, not its
+contents. Part B's surface is the six methods the brief names: store or
+rotate (`store_credentials`), revoke (`revoke_credentials`, keeping cap
+and consent), set or clear the cap (`set_cap`, a cap may exist without
+credentials), record consent (`record_consent`), delete everything
+(`delete`), read (`load`).
+
+**The routing rule.** An allowlisted repo whose installation has no
+stored credentials is reviewed on the operator's key, as today; a repo
+whose installation has credentials is reviewed on them; neither path
+falls back to the other. The tenant resolution runs at run time in the
+runner (`service_run.make_runner`'s `tenant_source`), fresh so a rotation
+between queueing and running lands, keyed by the configured installation
+id — the same id the token mint uses, and D86's preflight-cap resolution.
+A record with credentials but no consent acknowledgement refuses the
+review, naming the consent (D81 §7 decision 3's gate; the acknowledgement
+itself is part B's page).
+
+**The child env.** `_CHILD_ALLOWED` gains exactly one credential variable
+for the tenant key (`ATLAS_TENANT_MODEL_KEY`) plus two settings
+(`ATLAS_TENANT_BASE_URL`, `ATLAS_TENANT_MODEL`) — the key is the one
+credential the brief's "exactly one variable" names, and the endpoint and
+model ride as settings the way every other setting rides (D86's
+precedent). A tenant-path child **drops `ATLAS_OPENROUTER_API_KEY`**, so
+the two paths never share a child environment; the Sprite receives
+neither. A tenant run passes `--provider tenant` with
+`--allow-live-inference`; the CLI's `_select_provider` builds the tenant
+client from the three variables (a partial trio refuses, naming what is
+missing), and the agentic loop runs on `TenantLensModel` — the operator
+adapter's message serialization, per-call bounds, meter and cache
+bookkeeping, none of its BYOK handling. D41's `usage.is_byok` /
+`ByokRefusedError` path and `openrouter.py` are untouched;
+`tool_model.py` is not edited either (the tenant adapter lives in its own
+module and imports the pure helpers).
+
+**The tenant client's accounting.** The preflight is the operator's
+price table — the OpenRouter public catalog entry for the chosen model,
+read without any credential: no entry refuses with the reason named, a
+**zero-priced** model is allowed (D81's Q3 answer) and settles at $0
+(its `output_tokens_within` returns the resolved cap — no dollar rate to
+divide by — so the call caps and walls are its bound). The settle reads
+only reported token counts priced at that table; `usage.cost` and
+`cost_details.upstream_inference_cost` are never read, so a
+tenant-reported figure can move only the tenant's own settled total.
+Two tests pin the plan's demand directly: a hostile endpoint reporting
+`usage.cost: "0.00"` settles at the token-priced figure, and a deflated
+count (1 token in, 1 out) settles tiny while the reservation — computed
+before the endpoint answered, from the byte bound and the operator's
+caps — stays whole. A served-model id that is neither the configured id
+nor a dated revision of it is refused, because the accounting prices the
+configured id.
+
+**The egress guard.** `egress.py`: HTTPS only, no userinfo; at connect
+time every address `getaddrinfo` answers is validated against the
+blocked set — the plan's §4 list (RFC 1918, `127.0.0.0/8`,
+`169.254.0.0/16`, `0.0.0.0/8`, `100.64.0.0/10`, ULA `fc00::/7`, link-local
+`fe80::/10`, `::1`, `::`, all IPv4-mapped `::ffff:0:0/96`) plus IPv4
+multicast, benchmarking and reserved — over IPv4 and IPv6 alike; any
+blocked address refuses the **whole host**, so the connection never
+races a round-robin resolver against the check; the socket then connects
+to the checked address while the TLS handshake presents the original
+hostname (SNI and verification) — a rebinding double has nothing to
+rebind to. Redirects are refused, not re-checked: the transport never
+follows one, so there is no second hop; a 3xx reaches the provider and
+is refused by name. An explicit "IPv4-mapped" special case turned out to
+be redundant — `::ffff:0:0/96` membership already catches every mapped
+address, public ones included — so the check is the one mechanism, and
+the docstring says what it covers.
+
+**The failure rule and the endpoint class.** Every failure — auth
+(401/403), quota (402), endpoint down (5xx, transport), egress refusal,
+unknown price, store failure — is a `BoundaryError` with its fixed
+phrase; the review fails named and nothing reads as a clean "Findings:
+None", and the key is in no message (it travels in a header, never a
+URL). The agentic draft's cost line appends "Served by the operator's
+model endpoint." or "Served by the installation's own model endpoint."
+(`coordinator.synthesize`'s new `endpoint_class`, read from the
+provider's own name, so a new provider class cannot silently pass as
+either), and the posted Cost section carries the same line; the one-shot
+path's Model usage line names the tenant endpoint the same way; a dry-run
+draft gains no sentence. The service's cost regex reads the extended
+line unchanged.
+
+**The cap and the retention.** D86's `InstallationCap` interface is
+unchanged; production wires the store-backed provider wherever the store
+is configured, an unset cap means none applies, and a provider that
+cannot read the store raises — `DailySpend.refusal` catches it and
+returns a second fixed text, "skipped: installation store unavailable",
+with the store's reason as the gap and its own telemetry label
+(`installation-store`) beside S9's `daily-budget`: an unknown cap
+refuses instead of silently unbounding. The `installation.deleted`
+webhook deletes the record now; a deletion the service cannot honor is
+answered 500, which GitHub re-delivers, so it is retried rather than
+lost, with the gap on the telemetry; a boot-time sweep deletes records
+unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS` (default 30) and
+leaves a record it cannot read (its age cannot be established and it is
+already unusable). The sweep runs at boot — every deploy restarts the
+service — and a long-running deployment that never restarts sweeps only
+at its next boot; named, not claimed away.
+
+**Tests** (`test_installation_store.py`, `test_egress.py`,
+`test_tenant_provider.py` new — 36, 56 and 33 tests; `test_budget.py`,
+`test_service_run.py`, `test_service_receive.py`, `test_cli.py`,
+`test_coordinator.py` extended). Each behavior a test that fails when
+reverted. **Twenty-two mutants applied by hand, all killed**: the broken
+store's raise dropped (the broken-store test), the unconfigured store's
+None made a refusal (the unconfigured test), the wrong-key branch
+collapsed into the corrupt text (the wrong-key test), the atomic rename
+replaced by deleting the temp (the no-temp test), the cap positivity
+check dropped (the cap-validation test), `has_credentials`' three-field
+`and` loosened to `or` (the half-revoked-record test), the sweep
+horizon's comparison flipped (the sweep test), `delete`'s unlink made a
+no-op (the delete test), the whole-host refusal on a blocked address
+turned into a skip-and-continue (the rebinding-double test), the pinned
+socket connect replaced by a hostname connect (the pinned-connect
+socket test), HTTPS-only dropped to allow http (the URL-check tests),
+the tenant settle made to read `usage.cost` when present (the
+never-reads-usage-cost test), the auth-status set narrowed to 403 (the
+401 test), the tenant env resolver made to fall back to a placeholder
+key (the partial-trio test), `DailySpend.refusal`'s store failure turned
+into cap None (the fail-closed refusal test), the second telemetry label
+collapsed into `daily-budget` (the skip-reason test), the child env's
+operator-key drop removed (the drops-the-operator-key test), the tenant
+argv's `--provider tenant` removed (the argv test), the runner's
+store-failure turned into the operator path (the never-starts-a-child
+test), the webhook branch renamed away (the deletion test), the 500 made
+202 (the re-delivery test), the consent gate removed (the consent
+refusal test), and the cost line's endpoint sentence not appended (the
+cost-line tests). One mutant was **equivalent and removed with its code**
+instead: the explicit IPv4-mapped special case in `blocked_reason` is
+subsumed by `::ffff:0:0/96` membership, so removing it changes nothing
+the tests can see — the branch is gone and the network membership is the
+one mechanism.
+
+**Overlap.** The shared files were kept additive for the two open PRs:
+PR #774 (S6) touches `conversation.py`/`cli.py`/`github_fixture.py` and
+PR #775 (S7) touches `bridge*.py`/`repo_config.py`/`approval.py`/
+`coordinator.py`/`cli.py`/`ports.py`/`instrumented.py`. This branch's
+`cli.py` touches are `_select_provider`'s tenant branch, `_live_tenant`,
+`_live_lens_model`, `PROVIDER_CHOICES`, `SECRET_ENV`, the parser
+defaults and `main`'s factory parameter; its `coordinator.py` touches are
+`synthesize`'s defaulted parameter, the new `endpoint_class` helper, and
+the cost line's appended sentence — no signature changed on a function
+those PRs touch. The branch sits atop main `81d70ebb`.

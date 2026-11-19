@@ -33,6 +33,7 @@ from atlas_reviewer.coordinator import (
     Verdict,
     _scope_digest,
     _still_unread,
+    endpoint_class,
     render_draft,
     review_lens,
     review_lenses,
@@ -5122,3 +5123,64 @@ def test_review_lenses_ranks_the_first_turn_by_the_repos_path_config(tmp_path):
     assert "the reviewed repo's REVIEW.md path ranking" in text
     assert text.rindex("config/keys.py") > text.rindex("calc.py")
     assert "no file was dropped from review" in result.rerank_note
+
+
+# ----------------------------- the endpoint class on the cost line (S10)
+
+
+def test_the_cost_line_names_the_operators_endpoint():
+    draft = render_draft(
+        synthesize([lens_result(clean())], endpoint_class="operator"), Redactor()
+    )
+    line = next(line for line in draft.splitlines() if line.startswith("Model calls:"))
+    assert line.endswith("Served by the operator's model endpoint.")
+
+
+def test_the_cost_line_names_the_installations_endpoint_for_a_tenant_review():
+    draft = render_draft(
+        synthesize([lens_result(clean())], endpoint_class="tenant"), Redactor()
+    )
+    line = next(line for line in draft.splitlines() if line.startswith("Model calls:"))
+    assert line.endswith("Served by the installation's own model endpoint.")
+
+
+def test_a_dry_run_drafts_cost_line_gains_no_endpoint_sentence():
+    draft = render_draft(synthesize([lens_result(clean())]), Redactor())
+    line = next(line for line in draft.splitlines() if line.startswith("Model calls:"))
+    assert "Served by" not in line
+
+
+def test_the_endpoint_class_is_read_from_the_providers_name():
+    class _Provider:
+        def __init__(self, name):
+            self.name = name
+
+    class _Model:
+        def __init__(self, name):
+            self.provider = _Provider(name)
+
+    assert endpoint_class(_Model("tenant-endpoint:openai/gpt-4o")) == "tenant"
+    assert (
+        endpoint_class(_Model("openrouter:anthropic/claude-sonnet-5.5")) == "operator"
+    )
+    assert endpoint_class(_Model("offline")) == ""
+    assert endpoint_class(object()) == ""
+
+
+def test_the_cost_line_still_parses_for_the_service_cost_event():
+    """The endpoint sentence rides the same line, so the service's cost
+    regex still reads the calls and the committed dollars off it."""
+    from atlas_reviewer.service_run import ReviewReport, review_cost
+
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        (),
+        (
+            "Model calls: 12; committed: $0.34. Served by the installation's own model endpoint.",
+        ),
+        "COMMENT",
+    )
+    assert review_cost(report) == (12, "0.34")

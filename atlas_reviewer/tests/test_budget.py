@@ -16,9 +16,11 @@ from atlas_reviewer.budget import (
     DEFAULT_REPO_DAILY_BUDGET_USD,
     ENV_REPO_DAILY_BUDGET_USD,
     SKIP_BUDGET_REASON,
+    STORE_UNAVAILABLE,
     DailySpend,
     no_installation_cap,
     repo_daily_budget_usd,
+    skip_reason,
     spend_file,
     spend_segment,
 )
@@ -327,6 +329,25 @@ def test_the_same_bound_holds_past_an_installations_cap(tmp_path):
 
 def test_the_fixed_reason_label_is_the_skips_one():
     assert SKIP_BUDGET_REASON == "daily-budget"
+
+
+def test_a_cap_provider_that_cannot_read_the_store_refuses_fail_closed(tmp_path):
+    """The S10 store-backed cap provider raises `InstallationStoreError`
+    when it cannot read the record; the refusal is its own fixed text
+    with the store's reason as the gap -- an unreadable store is an
+    unknown cap, and an unknown cap never opens the budget."""
+    from atlas_reviewer.installation_store import InstallationStoreError
+
+    def broken(_installation):
+        raise InstallationStoreError(
+            "the installation record did not decrypt under the store key"
+        )
+
+    spend = _spend(tmp_path, cap=broken)
+    message, gap = spend.refusal("o/r", "1234")
+    assert message == STORE_UNAVAILABLE
+    assert "did not decrypt" in gap
+    assert skip_reason(message) == "installation-store"
     assert no_installation_cap("anything") is None
 
 

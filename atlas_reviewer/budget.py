@@ -72,6 +72,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
 
+from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import ModelTerms
@@ -411,20 +412,39 @@ DEFAULT_REPO_DAILY_BUDGET_USD = Decimal("100.00")
 # reads as a clean review.
 BUDGET_REACHED = "skipped: daily budget reached"
 CAP_REACHED = "skipped: installation daily cap reached"
-# The fixed telemetry reason label, the way S4's skips carry theirs.
+# The store-backed cap provider (config slice S10) raises on a store it
+# cannot read; the refusal that follows is its own fixed text, because an
+# unreadable store is not a spent cap -- it is an unknown one, and an
+# unknown cap refuses (nothing falls back).
+STORE_UNAVAILABLE = "skipped: installation store unavailable"
+# The fixed telemetry reason labels, the way S4's skips carry theirs.
 SKIP_BUDGET_REASON = "daily-budget"
+SKIP_STORE_REASON = "installation-store"
+
+
+def skip_reason(refusal: str) -> str:
+    """The fixed reason label for one refusal text: the budget and the
+    cap share the daily-budget label (the same bound, the same ledger),
+    and a store failure carries its own, so the two kinds of refusal are
+    told apart on the telemetry."""
+    return SKIP_STORE_REASON if refusal == STORE_UNAVAILABLE else SKIP_BUDGET_REASON
+
 
 InstallationCap = Callable[[str], "Decimal | None"]
 """The installation's daily cap (config slice S9/S10): an installation id
 in, the cap in dollars, or None when no cap is set -- and no cap set means
 none applies, the per-repo daily budgets remaining the bound. The store
-side is S10's installation store; until it lands, production wires
-`no_installation_cap`."""
+side is S10's installation store, whose provider answers from the
+installation's own record; a store it cannot read raises
+`InstallationStoreError`, which `refusal` turns into the fixed
+fail-closed refusal, never a None that would silently unbound."""
 
 
 def no_installation_cap(installation: str) -> Decimal | None:
-    """The S9 production cap provider: until S10's installation store
-    lands, no installation has a cap, so none applies."""
+    """The cap provider for a deployment whose installation store is
+    unconfigured: no installation has a cap, so none applies. The
+    store-backed provider (`installation_store.InstallationStore`)
+    replaces this in production when the store is configured."""
     del installation
     return None
 
@@ -668,7 +688,12 @@ class DailySpend:
             return BUDGET_REACHED, gap
         if total >= self.daily_budget_usd:
             return BUDGET_REACHED, ""
-        cap = self.cap_for(installation)
+        try:
+            cap = self.cap_for(installation)
+        except InstallationStoreError as exc:
+            return STORE_UNAVAILABLE, (
+                f"the installation store could not be read: {exc}"
+            )
         if cap is not None and total >= cap:
             return CAP_REACHED, ""
         return "", ""
