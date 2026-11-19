@@ -239,20 +239,22 @@ reviewing session doesn't have it, the reviewer says so and falls back to
 ## Per-review ceiling
 
 Beside the prose policy, this file carries one machine setting the reviewer
-service parses (see `atlas_reviewer/repo_config.py`): a `review_ceiling_usd:`
-line sets the repo's per-review dollar ceiling for the agentic review,
-overriding the deployment's `$10` default in either direction, up to the
-operator's max per review (`ATLAS_REPO_CEILING_MAX_USD`). Like everything
-else here, the line is read from the **base ref**, so a PR cannot raise its
-own ceiling.
+service parses: a `review_ceiling_usd:` line sets the repo's per-review
+dollar ceiling for the agentic review, overriding the deployment's `$10`
+default in either direction, up to the operator's max per review
+(`ATLAS_REPO_CEILING_MAX_USD`). Like everything else here, the line is read
+from the **merge base** — the tree a pull request branched from, not the
+base-ref tip and never the PR head — so a PR cannot raise its own ceiling,
+and a change to the line takes effect for pull requests branched after it.
 
-The value below is **this repo's own setting** (decided 2026-11-19), not a
-recommended default for copies: this repo's recent live reviews stopped at
-the default with coverage marked incomplete, so this repo raises its own
-ceiling to $25. A repo copying this file should set its own value or delete
-the line to take the deployment's default.
+A repo copying this file should set its own value on a `review_ceiling_usd:`
+line, or carry none and take the deployment's default; the value in
+code-quality-atlas's own copy of this file is that repo's own setting, not
+a recommended default for copies.
 
-review_ceiling_usd: 25   # this repo's own setting; not a default for copies
+```text
+# review_ceiling_usd: 25   # example — uncomment and set your repo's own value, or delete to take the deployment's default
+```
 
 ## Scope discipline
 
