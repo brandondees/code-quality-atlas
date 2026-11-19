@@ -420,7 +420,9 @@ def _lens_names(raw: str | None) -> list[str] | None:
 # outside the grammar -- fnmatch would honor them, but their content is
 # the one place a pattern could carry markup or a `[!...]` surprise, and
 # `*` and `?` cover the shapes repos actually write (`src/**`,
-# `*.min.js`, `dist/`). A pattern never reaches a model: only its effect
+# `*.min.js`, `dist/**` -- a pattern with no wildcard must match the
+# whole path exactly, so a bare directory prefix matches nothing). A
+# pattern never reaches a model: only its effect
 # on the order does, so this bound is the whole trust boundary the
 # pattern carries.
 _PATH_PATTERN = re.compile(r"[A-Za-z0-9/_.\- *?]{1,200}")

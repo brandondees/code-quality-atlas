@@ -611,6 +611,8 @@ def test_the_post_keys_are_schema_keys_the_scan_knows():
 
     assert "review_severity_floor" in _KNOWN_KEYS
     assert "review_post_verbosity" in _KNOWN_KEYS
+
+
 # ------------------------------------------------------------- path ranks
 
 

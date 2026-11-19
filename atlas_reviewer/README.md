@@ -1206,7 +1206,15 @@ every lens's first turn presents -- include-matched paths first, then
 the rest, then the paths the exclude patterns and the generated-file
 setting deprioritize, risk order within each group -- and every changed
 file is still listed, still held to every lens, and still counts for
-coverage exactly as before. The generated-file heuristic is path-shaped
+coverage exactly as before. The ranking can still cost effective
+coverage, and that cost is stated the way `review_skip_events`' is: on
+the paged path a lens chooses its own reading order and the ranked
+listing nudges it, so under a lens budget that cannot read everything
+the deprioritized files are the first candidates to be left unread --
+which surfaces as the loud, non-approvable incomplete-coverage state
+(D36), never as a silent drop. A repo deprioritizing its riskiest paths
+should expect more incomplete reviews, not quieter ones. The
+generated-file heuristic is path-shaped
 only (build and tool-output directories, vendored and dependency trees,
 lockfiles, and common generated-code suffixes such as `*.min.js`,
 `*.map`, `*.pb.go`, `*_pb2.py`, `*.generated.*`, `*.snap`); a repo's own
@@ -1215,7 +1223,9 @@ heuristic, an exclude match wins over an include). Patterns are
 glob-lite: `*` and `?` over letters, digits, `/`, `_`, `.`, `-` and
 space, matched case-insensitively like the risk tiers, with `*` crossing
 `/` (fnmatch's semantics, so `src/**` and `src/*` name the same set);
-bracket classes are outside the grammar. A pattern itself never reaches
+bracket classes are outside the grammar, and a pattern with no wildcard
+must match the whole path exactly -- write `dist/**`, not `dist/`. A
+pattern itself never reaches
 a model -- only the order it produces does -- and a note in the draft
 records the re-ranking, naming what each setting deprioritized (the
 paths quoted as data, at most 25 named and the rest counted) and that no

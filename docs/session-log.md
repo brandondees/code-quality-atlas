@@ -4594,3 +4594,59 @@ known keys), so the rebase against it stays mechanical, and no
 `service_*` file is touched. #752/#753 (D80) touch the bridge files,
 not these. Q25 stays open and untouched; the plan document was not
 edited.
+
+## 2026-11-19 (same day) — #772 round 1: the note tells the truth about an exclude-overridden include, and D85 records the S5 decisions
+
+The r1 review's verdict was APPROVE with three Minors and one Nit; the
+rebase onto `cc96c26c` (S3's #770 merged after this branch's first push)
+came first. All five conflicts were mechanical, resolved keep-both: the
+`repo_config.py` import block (`PathRanks` beside `Severity`) and its
+`_KNOWN_KEYS` set (the three S5 keys beside S3's two post keys, the list
+still in key order), the README's admission key-list paragraph and
+`repo_config.py` module-table row (both now carrying S3's post-window
+sentence and S5's key list), and the session-log and
+`test_repo_config.py` appends (S3's post-keys tests, then S5's
+path-ranks section — the decisions list stays append-only in number
+order, D85 appended after D84's correction).
+
+**Minor 1 — the note's include sentence is now true under overlap.**
+When `review_path_include:` and `review_path_exclude:` name the same
+paths, exclude wins (D69's rule carried to paths), the front group is
+empty, and the note used to say "ranked nothing: none of this diff's
+file(s) match its patterns" — false, and a false record next to a
+correct exclude sentence breaks the summary-agrees rule. The note now
+distinguishes the two ways a front group can be empty: no pattern
+matched (the old sentence, unchanged and pinned for that case), or
+patterns matched and the exclude rule took the matches — "ranked nothing
+ahead: its N matching file(s) were deprioritized by
+review_path_exclude". `test_the_rerank_note_is_true_when_exclude_took_
+the_includes_matches` pins the overlap case, and the no-match case is
+pinned beside it so the two wordings cannot drift into each other.
+
+**Minor 2 — the README states the coverage cost.** The path-ranking
+section now says what deprioritizing actually costs, the way
+`review_skip_events`' cost is stated: on the paged path a lens chooses
+its own reading order and the ranked listing nudges it, so under a lens
+budget that cannot read everything the deprioritized files are the first
+candidates to be left unread — surfacing as the loud, non-approvable
+incomplete-coverage state (D36), never a silent drop — and a repo
+deprioritizing its riskiest paths should expect more incomplete reviews,
+not quieter ones.
+
+**Minor 3 — D85.** The S5 implementation decisions the plan left open
+are recorded as D85 in `open-questions.md`, after D84's correction
+(S3's precedent for exactly this class): the key names, the glob-lite
+grammar and its caps (32 × 200, the charset, bracket classes outside),
+the exclude-over-include and include-over-heuristic precedence with
+risk-ordered groups, the path-shaped generated heuristic, the merge-base
+read source, and the one-shot command's config-free state.
+
+**Nit — the grammar example now matches.** The comment's `dist/` became
+`dist/**` (a no-wildcard pattern must match the whole path exactly, so a
+bare directory prefix matches nothing), and the README's grammar
+sentence says the same.
+
+Offline only, same rules as the entries above; the full gate re-run on
+the rebased tree (both suites with the coverage floors, ruff, mypy,
+drift, markdownlint), and the r1 mutant set re-run plus the new
+overlap-wording mutant, all killed.

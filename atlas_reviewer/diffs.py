@@ -393,16 +393,31 @@ def rerank_note(
     unconfigured review's draft reads exactly as it did."""
     if not ranks.applies:
         return ""
+    files = tuple(files)
     front, middle, back = _rank_groups(files, ranks)
     total = len(front) + len(middle) + len(back)
     back_keys_set = bool(ranks.exclude or ranks.generated)
     sentences = []
     if ranks.include:
         if not front:
-            sentences.append(
-                f"review_path_include: ranked nothing: none of this diff's "
-                f"{total} file(s) match its patterns"
-            )
+            # The front group is empty for two different reasons, and the
+            # note must not mistake one for the other: no pattern matched,
+            # or patterns matched and `review_path_exclude:` took the
+            # matches (exclude wins on every path, D69's rule carried to
+            # paths). A false "none match" would record a wrong reason
+            # next to a correct exclude sentence.
+            matched = sum(1 for f in files if _matches(f.path, ranks.include))
+            if matched:
+                sentences.append(
+                    f"review_path_include: ranked nothing ahead: its "
+                    f"{matched} matching file(s) were deprioritized by "
+                    "review_path_exclude"
+                )
+            else:
+                sentences.append(
+                    f"review_path_include: ranked nothing: none of this diff's "
+                    f"{total} file(s) match its patterns"
+                )
         elif not (middle or back):
             sentences.append(
                 f"review_path_include: ranked all {total} file(s) first; "

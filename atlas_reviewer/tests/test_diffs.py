@@ -549,6 +549,13 @@ def test_the_rerank_note_records_a_key_that_matched_nothing():
     assert "ranked nothing" in note
     assert "no file was dropped from review" in note
 
+    # The include line's own no-match wording, so the exclude-overrode
+    # wording cannot drift into covering this case too.
+    include = rerank_note(
+        split_files(RANK_DIFF), PathRanks(include=("nomatch/**",)), scrub=scrub
+    )
+    assert "none of this diff's 4 file(s) match its patterns" in include
+
 
 def test_the_rerank_note_is_bounded_and_never_carries_a_raw_pattern():
     scrub = lambda text: text
@@ -574,3 +581,20 @@ def test_the_rerank_note_never_carries_a_pattern_only_paths():
     )
     assert "docs/*" not in note
     assert "*.min.js" not in note
+
+
+def test_the_rerank_note_is_true_when_exclude_took_the_includes_matches():
+    """Minor 1 (r1 review of #772): with overlapping include and exclude
+    patterns, exclude wins (D69's rule carried to paths), so the front
+    group is empty while files *did* match -- the note must not record
+    the false "none ... match"; it names that the exclude rule
+    deprioritized the include's matches."""
+    scrub = lambda text: text
+    note = rerank_note(
+        split_files(RANK_DIFF),
+        PathRanks(include=("src/*",), exclude=("src/*",)),
+        scrub=scrub,
+    )
+    assert "none of this diff's" not in note
+    assert "review_path_include: ranked nothing ahead" in note
+    assert "deprioritized by review_path_exclude" in note
