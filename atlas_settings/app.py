@@ -29,7 +29,11 @@ from atlas_reviewer.installation_store import (
 from atlas_reviewer.tenant_provider import PricingUnknownError
 from atlas_settings import checks, pages
 from atlas_settings.audit import AuditLog
-from atlas_settings.config import SettingsConfig
+from atlas_settings.config import (
+    CapRejectedError,
+    SettingsConfig,
+    parse_daily_cap,
+)
 from atlas_settings.github import (
     GitHubClient,
     GitHubRefused,
@@ -42,6 +46,8 @@ from atlas_settings.phrases import (
     CONSENT_REFUSED,
     CONSENT_UNCHECKED,
     CSRF_REFUSED,
+    DELETE_CONFIRM_WORD,
+    DELETE_MISMATCH,
     ENDPOINT_REFUSED_PREFIX,
     GATE_REFUSED,
     GITHUB_CHECK_FAILED,
@@ -57,6 +63,7 @@ from atlas_settings.sessions import (
     Session,
     SessionError,
     SessionStore,
+    cleared_cookie_header,
     cookie_header,
 )
 
@@ -193,6 +200,9 @@ class SettingsApp:
         builtins: dict[str, Callable[[Session, dict[str, str], int], Response]] = {
             "consent": self._post_consent,
             "credentials": self._post_credentials,
+            "revoke": self._post_revoke,
+            "cap": self._post_cap,
+            "delete": self._post_delete,
         }
         return builtins.get(action, self.write_actions.get(action))
 
@@ -297,6 +307,42 @@ class SettingsApp:
         except AuthorizationRefused as refused:
             return refused.response
         return self._redirect("/settings")
+
+    def _post_revoke(self, session: Session, form: dict[str, str]) -> Response:
+        del form
+        self._write(
+            session,
+            "revoke-credentials",
+            lambda: self.store.revoke_credentials(self.config.installation_id),
+        )
+        return self._redirect("/settings")
+
+    def _post_cap(self, session: Session, form: dict[str, str]) -> Response:
+        try:
+            cap = parse_daily_cap(form.get("cap_usd", ""))
+        except CapRejectedError as exc:
+            return self._settings_render(session, str(exc), 400)
+        self._write(
+            session,
+            "set-cap",
+            lambda: self.store.set_cap(self.config.installation_id, cap),
+        )
+        return self._redirect("/settings")
+
+    def _post_delete(self, session: Session, form: dict[str, str]) -> Response:
+        confirm = form.get("confirm", "").strip()
+        if not hmac.compare_digest(confirm, DELETE_CONFIRM_WORD):
+            return self._settings_render(session, DELETE_MISMATCH, 400)
+        self._write(
+            session,
+            "delete-installation",
+            lambda: self.store.delete(self.config.installation_id),
+        )
+        # The record is gone; the session ends with the delete too.
+        self.sessions.destroy(session)
+        return self._redirect("/", set_cookie=cleared_cookie_header())
+
+    # ---- shared write plumbing -------------------------------------
 
     def _write(
         self,
