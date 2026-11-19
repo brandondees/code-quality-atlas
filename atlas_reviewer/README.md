@@ -550,6 +550,66 @@ is the explicit no-model setting. The deploy shape is a second Fly app,
 The one-off `fly.toml` above is unchanged. Commands:
 [`deploy-service.md`](deploy-service.md). D53.
 
+## The per-tenant spend bounds (config slice S9, D81)
+
+Two operator-set bounds sit outside repo control, and a third joins them
+per installation:
+
+- **The operator max per review** — `ATLAS_REPO_CEILING_MAX_USD`, default
+  $25. D81 Q2 keeps D68's semantics: a repo's `review_ceiling_usd:` line
+  may raise or lower its per-review ceiling. A raise is clamped to the
+  operator max — a repo-raised ceiling cannot pass it — and the clamp is
+  named in the draft's ceiling note beside the ceiling itself, the way
+  D68 names the ceiling the review ran under. The operator's own
+  configured ceiling (`ATLAS_REVIEW_CEILING_USD`) and the default are the
+  operator's own choices and are never clamped by this variable.
+- **The per-repo daily budget** — `ATLAS_REPO_DAILY_BUDGET_USD`, default
+  $100 per repo per UTC day. Once a repo's day has spent that much
+  committed model spend, further reviews are refused at admission and
+  re-checked at preflight (a delivery admitted while the day had room is
+  refused in the worker before its review starts). The refusal is
+  recorded with the fixed reason `daily-budget` and the plain text
+  "skipped: daily budget reached" — never a clean-looking review; nothing
+  is posted for it.
+- **The per-installation daily cap** — set by the installation admin on
+  S10's settings page, enforced alongside the per-repo budget with the
+  stricter of the two governing each admission. When no cap is set, none
+  applies and the per-repo budgets remain the bound. Its value is S10's
+  installation store; until that lands, no installation has a cap.
+
+**What is counted.** The committed spend is the review child's own
+accounting — reported token counts priced at the operator's price table —
+taken from the finished draft's cost line, or from the last progress
+record when a review did not finish; a review with no figure in either
+records nothing and the gap stays on the cost telemetry, because the
+amount is never guessed. No tenant-reported dollar figure is ever
+consumed.
+
+**Where the total lives.** One append-only
+`<state dir>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per
+UTC day, where the owner and repo segments are percent-encoded with every
+byte outside `[A-Za-z0-9]` escaped — so `a-b/c` and `a/b-c` are distinct
+files, and the joining `-` is unambiguous because a literal `-` inside a
+segment always reads `%2D`. The date in the file name makes the UTC reset
+structural, and a lost file loses only that day's total. A file the
+service cannot parse holds the budget (the total reads unknown and the
+refusal stands) until it is repaired, with the gap named on the record —
+a ledger the service cannot read never opens the budget.
+
+**The race is named and bounded, not locked.** Two concurrent deliveries
+for one repo can both pass admission (and preflight) before either
+commits spend — the queue's one-active-job rule is per pull request, not
+per repo. The refusal applies to the next admission after the total is
+committed, and the overshoot past the day's budget is at most the
+in-flight reviews times each one's per-review ceiling: at the decided
+values, 32 in-flight reviews × the $25 operator max = $800 past a $100
+budget, bounded by `ATLAS_REVIEW_CONCURRENCY` (1-32), and past the
+installation's cap by the same bound. The overshoot is visible in the
+same telemetry the total comes from. A per-repo lock would eliminate the
+overshoot at the cost of serializing a repo's reviews; D81 accepts the
+bound instead. `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the
+shared key's total credit limit, not a per-repo bound.
+
 ## Run it offline (no credentials)
 
 From the repo root:
@@ -892,6 +952,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_PER_LENS_CALLS` | `agentic-review` | Per-lens model-call budget the review-wide call cap derives from (D68; default 50) |
 | `ATLAS_PER_LENS_USD` | `agentic-review` | Per-lens dollar budget the review-wide reservation derives from (D68; default 5) |
 | `ATLAS_REVIEW_CEILING_USD` | `agentic-review` | The absolute per-review dollar ceiling the derived reservation clamps to (D68; default 10). The reviewed repo's merge-base `REVIEW.md` may override it with a `review_ceiling_usd:` line |
+| `ATLAS_REPO_CEILING_MAX_USD` | `agentic-review` | The operator max per review (config slice S9, D81; default 25): the most a repo's own `review_ceiling_usd:` line may raise the ceiling to. A raise past it is clamped to this value and the clamp is named in the draft's ceiling note. The operator's own configured ceiling and the default are never clamped by it |
 | `ATLAS_NO_PROGRESS_TURNS` | agentic lens entry | Consecutive turns that bring a lens nothing new -- no successful tool call the attempt has not made before, no new verified finding -- before one finalize nudge is injected, on the paged and the shared-prefix path alike (D58, D66; default 6) |
 | `ATLAS_DUPLICATE_CALLS` | agentic lens entry | Identical tool calls that inject the same finalize nudge at any coverage (D58; default 3) |
 | `ATLAS_QUOTE_REPAIRS` | agentic lens entry | Quote-repair turns a failed quote earns per lens attempt, 0 to 3 (D64; default 1) |
@@ -912,6 +973,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 | `ATLAS_HEAD_CHANGE_POLICY` | webhook service | The keep-or-cancel policy for a push that lands mid-review (#702, D79): `keep` (the default) decides per push and queues a kept head as the settled review's follow-up; `cancel` restores the blanket supersede. An unknown value refuses to start |
 | `ATLAS_HEAD_CHANGE_CANCEL_FRACTION` | webhook service | The "early" threshold the cancel branch compares the lenses-settled and budget-spent fractions against, 0.0 to 1.0 (default 0.5). A code push under it on both measures cancels the running review |
+| `ATLAS_REPO_DAILY_BUDGET_USD` | webhook service | The per-repo daily budget (config slice S9, D81; default $100 per repo per UTC day). Once a repo's day has spent this much committed model spend, further reviews are refused at admission and re-checked at preflight, and the record says plainly "skipped: daily budget reached" -- never a clean-looking review. The total is one append-only `<state dir>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per day; see the spend-bounds section below |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
@@ -921,7 +983,9 @@ accept the matching flags and does not read the variables. `ATLAS_MODEL`,
 `ATLAS_PROVIDERS`, `ATLAS_ALLOW_SAFETY_RETENTION`, and
 `ATLAS_REQUIRE_ZDR` are not credentials either. The live OpenRouter
 path reads them; a dry run does not. The webhook review child receives
-those route variables, `ATLAS_KEY_CEILING_USD`, and the agentic limit
+those route variables, `ATLAS_KEY_CEILING_USD`,
+`ATLAS_REPO_CEILING_MAX_USD` (the per-tenant clamp, config slice S9), and
+the agentic limit
 variables (the one-shot command ignores those). It does not receive
 the webhook secret or the App private key. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every

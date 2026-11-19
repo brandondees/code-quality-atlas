@@ -8,6 +8,20 @@ reserved worst cases where the actual is unknown, plus this reservation)
 past `budget_usd`. A failed or unparseable attempt keeps its full
 reservation as spent, since it may still have been billed.
 
+The per-tenant daily spend bounds (config slice S9, D81) live here too:
+the day's committed-spend ledger and the refusal the bounds produce. The
+ledger is one append-only `<state root>/spend/<owner>-<repo>-<UTC
+date>.jsonl` file per repo per UTC day -- the same append-only pattern
+D74's per-PR round logs use -- where the owner and repo segments are
+percent-encoded with every byte outside `[A-Za-z0-9]` escaped, so two
+distinct owner/repo pairs never share a file (`a-b/c` and `a/b-c` are
+distinct, and the joining `-` is unambiguous because a literal `-` inside
+a segment always reads `%2D`). The date in the file name makes the UTC
+reset structural, and a lost file loses only the day's total. The counted
+spend is what the review child's own accounting committed -- reported
+token counts priced at the operator's price table -- never a
+tenant-reported dollar figure.
+
 `InputTokenMeter` bounds a growing agentic conversation's next prompt from
 the last response's reported `prompt_tokens` plus the bytes of the
 messages added since at one token per byte, instead of the
@@ -48,10 +62,17 @@ sent.
 
 from __future__ import annotations
 
+import json
+import os
+import string
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Protocol
 
+from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import ModelTerms
 
@@ -378,3 +399,221 @@ class ReviewBudget:
             f"{len(self.calls)} of {self.limits.max_calls} calls used"
         )
         return tuple(lines)
+
+
+# --- The per-tenant daily spend bounds (config slice S9, D81) -------------
+
+ENV_REPO_DAILY_BUDGET_USD = "ATLAS_REPO_DAILY_BUDGET_USD"
+# The decided value (2026-11-18, 5:13 PM CT): $100 per repo per UTC day.
+DEFAULT_REPO_DAILY_BUDGET_USD = Decimal("100.00")
+# The fixed refusal texts. Plain, controller-made, and carrying nothing
+# from the payload or the config: the record says what happened and never
+# reads as a clean review.
+BUDGET_REACHED = "skipped: daily budget reached"
+CAP_REACHED = "skipped: installation daily cap reached"
+# The fixed telemetry reason label, the way S4's skips carry theirs.
+SKIP_BUDGET_REASON = "daily-budget"
+
+InstallationCap = Callable[[str], "Decimal | None"]
+"""The installation's daily cap (config slice S9/S10): an installation id
+in, the cap in dollars, or None when no cap is set -- and no cap set means
+none applies, the per-repo daily budgets remaining the bound. The store
+side is S10's installation store; until it lands, production wires
+`no_installation_cap`."""
+
+
+def no_installation_cap(installation: str) -> Decimal | None:
+    """The S9 production cap provider: until S10's installation store
+    lands, no installation has a cap, so none applies."""
+    del installation
+    return None
+
+
+def repo_daily_budget_usd(env: Mapping[str, str]) -> Decimal:
+    """The operator's per-repo daily budget, `ATLAS_REPO_DAILY_BUDGET_USD`
+    (S9): the decided $100 default when unset, and a `ValueError` naming
+    the variable when a set value is not a positive dollar amount -- an
+    operator setting that is unusable stops the deployment, the way the
+    other operator variables' loaders do, instead of silently unbounding
+    or zeroing every repo's day."""
+    raw = env.get(ENV_REPO_DAILY_BUDGET_USD)
+    if raw is None or raw == "":
+        return DEFAULT_REPO_DAILY_BUDGET_USD
+    try:
+        value = Decimal(raw)
+    except ArithmeticError:
+        raise ValueError(
+            f"{ENV_REPO_DAILY_BUDGET_USD} must be a positive dollar amount, not {raw!r}"
+        ) from None
+    if not value.is_finite() or value <= 0:
+        raise ValueError(
+            f"{ENV_REPO_DAILY_BUDGET_USD} must be a positive dollar amount, not {raw!r}"
+        )
+    return value
+
+
+_ALLOWED_SEGMENT_BYTES = frozenset(
+    (string.ascii_letters + string.digits).encode("ascii")
+)
+
+
+def spend_segment(raw: str) -> str:
+    """One owner or repo name flattened into a file-name segment: every
+    byte outside `[A-Za-z0-9]` percent-encoded, uppercase hex. A literal
+    `-` inside a segment always reads `%2D`, so the single `-` that joins
+    the owner, repo and date parts is unambiguous and two distinct
+    owner/repo pairs can never share a file (`a-b/c` and `a/b-c` are
+    distinct files; `%` itself reads `%25`, so the encoding is injective)."""
+    return "".join(
+        chr(byte) if byte in _ALLOWED_SEGMENT_BYTES else f"%{byte:02X}"
+        for byte in raw.encode("utf-8")
+    )
+
+
+def spend_file(state_root: Path, repo: str, day: date) -> Path:
+    """The day's spend file for one repository:
+    `<state root>/spend/<owner>-<repo>-<UTC date>.jsonl`, append-only, one
+    file per repo per UTC day -- the date in the name makes the UTC reset
+    structural, and a lost file loses only that day's total."""
+    owner, _, name = repo.partition("/")
+    stem = f"{spend_segment(owner)}-{spend_segment(name)}-{day.isoformat()}"
+    return state_root / "spend" / f"{stem}.jsonl"
+
+
+def _utc_today() -> date:
+    return datetime.now(UTC).date()
+
+
+@dataclass(frozen=True)
+class DailySpend:
+    """The day's committed-spend ledger and the per-tenant bounds read
+    against it (config slice S9, D81).
+
+    The ledger is the state volume's append-only per-repo-per-day JSONL
+    file (`spend_file`); each record is one settled review's committed
+    spend, the figure the review child's own accounting committed --
+    reported token counts priced at the operator's price table -- never a
+    tenant-reported dollar figure. `committed` reads the day's total; an
+    unreadable record returns an unknown total with the gap that says so,
+    and an unknown total refuses: a spend file this service cannot read
+    must never open the budget. `refusal` applies the two bounds -- the
+    per-repo daily budget and, when one is set, the installation's daily
+    cap; the stricter of the two wins each check, and an unset cap means
+    none applies. The check-then-act race between `refusal` and the next
+    `record` is named and bounded (D81): two concurrent deliveries for
+    one repo can both pass before either commits, so the overshoot past
+    the day's budget is at most the in-flight reviews times each one's
+    per-review ceiling -- at the decided values 32 in-flight reviews x the
+    $25 operator max = $800 past a $100 budget -- and no per-repo lock is
+    taken."""
+
+    state_root: Path
+    daily_budget_usd: Decimal = DEFAULT_REPO_DAILY_BUDGET_USD
+    cap_for: InstallationCap = no_installation_cap
+    today: Callable[[], date] = field(default_factory=lambda: _utc_today)
+
+    def __post_init__(self) -> None:
+        if self.daily_budget_usd <= 0:
+            raise ValueError("the daily budget must be positive")
+
+    def file(self, repo: str) -> Path:
+        return spend_file(self.state_root, repo, self.today())
+
+    def committed(self, repo: str) -> tuple[Decimal | None, str]:
+        """The day's committed spend for one repository, as
+        `(total, gap)`. No file reads as zero -- a lost file loses only
+        the day's total (D81's stated degradation). A file this module
+        cannot parse returns `(None, gap)`: the caller refuses, so a
+        ledger this service cannot read never opens the budget."""
+        try:
+            text = self.file(repo).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return Decimal(0), ""
+        except OSError as exc:
+            return None, f"the day's spend file could not be read: {exc}"
+        total = Decimal(0)
+        for number, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            amount = _record_amount(line)
+            if amount is None:
+                return None, (
+                    "the day's spend file has an unreadable record (line "
+                    f"{number}), so the day's total is unknown and the "
+                    "budget holds until the file is repaired"
+                )
+            total += amount
+        return total, ""
+
+    def record(
+        self,
+        repo: str,
+        amount_usd: Decimal,
+        calls: int,
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Append one settled review's committed spend to the day's file.
+        One `os.write` of one line under `O_APPEND` is the append; a
+        write that raises leaves the file as it was and the caller names
+        the gap."""
+        if amount_usd < 0:
+            raise ValueError("a settled spend cannot be negative")
+        if calls < 0:
+            raise ValueError("a call count cannot be negative")
+        record = {
+            "recorded_at": (at if at is not None else datetime.now(UTC)).isoformat(),
+            "calls": calls,
+            "committed_usd": str(amount_usd),
+        }
+        path = self.file(repo)
+        make_private_dirs(path.parent)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(record) + "\n").encode("utf-8"))
+        finally:
+            os.close(fd)
+
+    def refusal(self, repo: str, installation: str) -> tuple[str, str]:
+        """The bounds' refusal for one admission, as `(message, gap)`.
+
+        An empty message means the delivery may proceed. The message is
+        the plain refusal text -- `BUDGET_REACHED` or `CAP_REACHED` --
+        never payload or config text; the gap, non-empty when the day's
+        total was unreadable, names the ledger failure behind a
+        fail-closed refusal. The per-repo daily budget and the
+        installation's daily cap are each spent when the day's committed
+        total has reached them, and the stricter of the two governs: a
+        refusal on either refuses, and an unset cap (`cap_for` returns
+        None) means none applies."""
+        total, gap = self.committed(repo)
+        if total is None:
+            return BUDGET_REACHED, gap
+        if total >= self.daily_budget_usd:
+            return BUDGET_REACHED, ""
+        cap = self.cap_for(installation)
+        if cap is not None and total >= cap:
+            return CAP_REACHED, ""
+        return "", ""
+
+
+def _record_amount(line: str) -> Decimal | None:
+    """The `committed_usd` figure of one ledger line, or None when the
+    line is not a record this module wrote: not JSON, not an object, the
+    field missing or not a non-negative decimal string."""
+    try:
+        data = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("committed_usd")
+    if not isinstance(raw, str):
+        return None
+    try:
+        amount = Decimal(raw)
+    except ArithmeticError:
+        return None
+    if not amount.is_finite() or amount < 0:
+        return None
+    return amount

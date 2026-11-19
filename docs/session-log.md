@@ -4650,3 +4650,103 @@ Offline only, same rules as the entries above; the full gate re-run on
 the rebased tree (both suites with the coverage floors, ruff, mypy,
 drift, markdownlint), and the r1 mutant set re-run plus the new
 overlap-wording mutant, all killed.
+## 2026-11-19 — Config slice S9: the per-tenant spend bounds — the operator max per review, the per-repo daily budget, and the per-installation daily cap (issue #767)
+
+The user-configuration plan's S9 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S9; the decisions are D81's 3:39, 5:13 and 5:51 PM CT updates, §8 Q1 and
+Q5, §7 decision 4). Offline only: the tests use fakes, temp files and the
+real CLI's dry run; no live model, Sprite or GitHub call was made, no
+secret was read, and no deployed service setting, Fly config value or
+secret changed.
+
+**The operator max per review clamps a repo raise, and the clamp is
+named.** `review_wide.clamp_repo_ceiling` sits beside D68's
+`resolve_ceiling` and uses the seam the resolution already documents: a
+repo's `review_ceiling_usd:` may still raise or lower its ceiling (D81
+Q2 keeps D68's semantics), but the value the review actually runs under
+cannot pass `ATLAS_REPO_CEILING_MAX_USD` (default $25, the decided
+5:13 PM CT value). Only a **repo-set** ceiling runs through the clamp --
+the operator's own configured ceiling and the default are the operator's
+own choices -- and the clamp is named in D68's ceiling note, with both
+figures schema-validated numbers. The variable rides the child env
+allowlist (`service_run._CHILD_ALLOWED`), is validated at service boot
+(`config_from_env`) and again where the child reads it (`cli`), and the
+coordinator composes the clamp into the derivation so the derived
+reservation cannot sit above the max either.
+
+**The daily budget refuses at admission and again at preflight.**
+`budget.DailySpend` is the day's committed-spend ledger and the bounds
+read against it: one append-only
+`<state root>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per
+UTC day, the owner and repo segments percent-encoded with every byte
+outside `[A-Za-z0-9]` escaped (so `a-b/c` and `a/b-c` are distinct files
+and the joining `-` is unambiguous), the date in the name making the UTC
+reset structural, a lost file losing only that day's total. The counted
+spend is the child's own committed accounting -- reported token counts
+priced at the operator's price table, from the finished draft's cost
+line, or from the last progress record when a review did not finish;
+a review with no figure in either records nothing and the gap stays on
+the cost telemetry -- never a tenant-reported dollar figure. A repo over
+its budget is refused in `handle_delivery` before any GitHub read, and
+re-checked in the worker before its review starts; the record carries the
+fixed reason label `daily-budget` and the plain text "skipped: daily
+budget reached", recorded as an error so it cannot read as a clean
+review. A spend file the service cannot parse holds the budget (the
+total reads unknown and the refusal stands) until repaired, with the gap
+named -- a ledger this service cannot read never opens the budget.
+
+**The per-installation daily cap is enforced against a narrow interface.**
+`budget.InstallationCap` is a function from installation id to cap-or-None;
+production wires `no_installation_cap` (always None) until S10's store
+lands, so until then the cap is unset and none applies. The id is
+resolved from the delivery payload at admission and from the configured
+`ATLAS_GITHUB_INSTALLATION_ID` at preflight; a test double pins the
+stricter-of-the-two rule (a refusal on either bound refuses), the unset
+cap meaning none applies, and the refusal's own plain text ("skipped:
+installation daily cap reached"). The race is accepted, not locked, as
+D81 names it: the bound is pinned by tests at the decided values -- 32
+in-flight admissions that all read an unspent total, then 32 x $25
+committed, land at $899.99 against the $100 + 32 x $25 = $900 bound, and
+the next admission after the spend is committed is the one refused, past
+the cap by the same bound.
+
+**Tests** (`atlas_reviewer/tests/test_budget.py` new; `test_review_wide.py`,
+`test_service_receive.py`, `test_service_run.py`, `test_cli.py`; each
+behavior a test that fails when reverted, each mutant applied by hand and
+killed): the encoding and file distinctness, the ledger's read-record-
+restart-reset cycle, the fail-closed unreadable ledger, the budget
+refusals and the plain records, the cap's stricter-wins and unset-means-
+none, the bounded race at the decided values, the clamp's scoping and
+note (unit, scripted-bridge draft, and the CLI dry run end to end), the
+child-allowlist ride-along, the boot and CLI validation of both operator
+variables, the preflight refusal, and the settle-time spend recording
+(final draft figure over a stale progress record, the failed review's
+partial figure, and the no-figure records-nothing rule). Twenty-seven
+mutants applied by hand, all killed: the segment escaping dropped, the
+unreadable-record fail-closed dropped, the at-the-budget boundary
+loosened (`>=` to `>`), the cap check dropped, an unset cap treated as a
+zero cap, a missing file treated as unknown, the budget variable
+ignored, the ledger's clock replaced with the wall clock, the recorded
+amount zeroed, the negative-amount refusal dropped, the clamp dropped,
+the operator default changed, the nonpositive refusal dropped, the clamp
+boundary loosened (`<=` to `<`), the clamp's env name dropped from the
+note, the coordinator's clamp composition dropped, the CLI's
+`operator_ceiling_max` wiring dropped, the admission check dropped, the
+installation-id resolution dropped, the preflight re-check dropped, the
+spend recording dropped, the recording's final-over-partial precedence
+swapped, the check-before-read ordering moved after the admission read,
+the boot validation dropped, the preflight's settle state changed, the
+unknown-total fail-closed dropped, and the child-allowlist ride-along
+dropped.
+
+**Overlap.** The shared files were kept additive for exactly this
+rebase: #752/#753 (D80) merged first and this branch rebased onto their
+main, composing with their coordinator and lens-loop changes with no
+conflict outside this log; #772 (S5) remains open and touches
+`repo_config.py`'s `_KNOWN_KEYS`, `diffs.py` and the README, none of
+which this slice edits beyond the two new variable rows' neighbors. The
+decisions the plan left open are recorded as **D86** in
+`docs/open-questions.md`: the clamp's scoping, the budget always-on
+default, the fail-closed unreadable ledger, the refusal records' shape
+and the preflight location, the spend-recording sources, and the cap
+interface's id resolution.

@@ -2361,6 +2361,47 @@ def test_a_dry_run_names_an_unsupported_config_key_without_its_value(
     assert _status(out)["lenses"]["clean"] == 5
 
 
+def test_a_dry_run_clamps_a_repo_ceiling_to_the_operator_max(tmp_path):
+    """S9 end to end: a merge-base `review_ceiling_usd:` above the
+    operator's max per review runs the review under the max, and the
+    draft names the clamp the way D68's ceiling note names the ceiling.
+    The clamp rides the operator variable the child allowlist carries."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_ceiling_usd: 50\n",
+        encoding="utf-8",
+    )
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+        env={"ATLAS_REPO_CEILING_MAX_USD": "25"},
+    )
+    assert code == cli.EXIT_OK, err
+    assert "clamped" in out
+    assert "$25.00" in out
+    assert "ATLAS_REPO_CEILING_MAX_USD" in out
+    # The repo's raised value is named too -- a schema-validated number.
+    assert "$50.00" in out
+
+
+def test_an_agentic_review_refuses_an_unusable_operator_max(tmp_path):
+    """The operator's own setting is validated where the limits are: an
+    unusable `ATLAS_REPO_CEILING_MAX_USD` is a clean usage error before
+    anything runs, not a mid-review failure."""
+    fixtures = _fixture_copy(tmp_path)
+    code, _out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+        env={"ATLAS_REPO_CEILING_MAX_USD": "abc"},
+    )
+    assert code == cli.EXIT_USAGE, err
+    assert "ATLAS_REPO_CEILING_MAX_USD" in err
+
+
 def test_a_dry_run_states_the_shape_facts_the_picker_is_given(tmp_path, monkeypatch):
     """Round-1 F4, end to end: the controller computes the guideline's
     auto-include shapes from the changed paths it already holds, states
@@ -2422,10 +2463,11 @@ def _fixture_copy(tmp_path, **pull_changes):
     return fixtures
 
 
-def _agentic_on(tmp_path, fixtures, *extra):
+def _agentic_on(tmp_path, fixtures, *extra, env=None):
     return run_cli(
         "--state-dir", str(tmp_path / "state"), "agentic-review", "--dry-run",
         "--event", EVENT, "--fixtures", str(fixtures), "--pool-size", "1", *extra,
+        env=env,
     )  # fmt: skip
 
 

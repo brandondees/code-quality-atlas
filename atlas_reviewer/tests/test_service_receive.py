@@ -11,12 +11,14 @@ import sys
 import threading
 import time
 from dataclasses import replace as dataclass_replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
 
+from atlas_reviewer.budget import DailySpend, no_installation_cap, spend_file
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.redact import Redactor
@@ -118,6 +120,7 @@ def _deliver(
     classifier=None,
     telemetry=None,
     admission_reader=None,
+    spend=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
@@ -135,16 +138,18 @@ def _deliver(
         classifier=classifier,
         telemetry=telemetry,
         admission_reader=admission_reader,
+        spend=spend,
     )
 
 
-def _worker(board, runner, publisher=None, root=None, telemetry=None):
+def _worker(board, runner, publisher=None, root=None, telemetry=None, spend=None):
     return Worker(
         board,
         runner,
         telemetry or Telemetry(SystemClock()),
         publisher,
         state_root=root,
+        spend=spend,
     )
 
 
@@ -4568,3 +4573,305 @@ def test_the_wrapped_publisher_hands_the_poster_a_post_config_read():
     assert wrapped is not None
     wrapped(PrEvent(REPO, 7, SHA_A), REPORT)
     assert seen == [PostConfigRead(None, "brief", ())]
+
+
+# -------------------------------- the per-tenant daily bounds (S9, issue 767)
+
+
+_BUDGET_DAY = date(2026, 11, 19)
+
+
+def _spend(tmp_path, *, budget=Decimal("100.00"), cap=None):
+    """`cap` is an installation-id-keyed dict, the test double for S10's
+    installation store; None is the S9 production provider (no cap)."""
+    caps = cap or {}
+    return DailySpend(
+        tmp_path,
+        budget,
+        cap_for=(lambda installation: caps.get(installation))
+        if cap is not None
+        else no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+
+
+def test_a_repo_over_its_daily_budget_is_refused_at_admission(tmp_path):
+    """The done-when: a repo over its daily budget is refused with the
+    plain record -- the fixed reason label, the plain refusal text -- and
+    the delivery is acknowledged and ignored, never queued."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("100.0000"), 4)
+    result = _deliver(config, board, _body(), telemetry=telemetry, spend=spend)
+    assert result.status == 202
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert skips and skips[0].fields["reason"] == "daily-budget"
+    assert "skipped: daily budget reached" in skips[0].error
+
+
+def test_a_repo_under_its_daily_budget_is_queued(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("99.9900"), 4)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+
+
+def test_the_budget_check_runs_before_the_admission_read(tmp_path):
+    """A repo over its budget costs no GitHub read: the delivery is
+    refused before the default-branch REVIEW.md is fetched."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    reads = []
+
+    def reader(repo, branch):
+        reads.append(repo)
+
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("100.0000"), 4)
+    _deliver(config, board, _body(), admission_reader=reader, spend=spend)
+    assert reads == []
+
+
+def test_an_installation_over_its_daily_cap_is_refused_the_same_way(tmp_path):
+    """The cap double (S10's store stands in): an installation over its
+    admin's cap is refused with the cap's own plain record, and an
+    installation with no cap is not refused by one that has one."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path, cap={"1234": Decimal("50.00")})
+    spend.record(REPO, Decimal("50.0000"), 2)
+    body = json.dumps(
+        {
+            "action": "opened",
+            "installation": {"id": 1234},
+            "repository": {"full_name": REPO},
+            "pull_request": {
+                "number": 7,
+                "draft": False,
+                "updated_at": "2026-11-12T20:00:00Z",
+                "head": {"sha": SHA_A},
+                "base": {"repo": {"full_name": REPO}},
+            },
+        }
+    ).encode()
+    result = _deliver(config, board, body, telemetry=telemetry, spend=spend)
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert "skipped: installation daily cap reached" in skips[0].error
+    # A different installation with no cap set: none applies.
+    body_other = json.loads(body)
+    body_other["installation"] = {"id": 5678}
+    assert (
+        _deliver(
+            config,
+            board,
+            json.dumps(body_other).encode(),
+            spend=spend,
+        ).body
+        == b"queued\n"
+    )
+
+
+def test_an_unset_cap_leaves_the_budget_the_only_bound(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("99.0000"), 1)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+
+
+def test_an_unreadable_spend_file_refuses_and_names_the_gap(tmp_path):
+    """Fail closed: a spend file the service cannot parse holds the
+    budget until it is repaired, and the record names the ledger gap
+    beside the plain refusal."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    path = spend_file(tmp_path, REPO, _BUDGET_DAY)
+    path.parent.mkdir(parents=True)
+    path.write_text("not a record\n", encoding="utf-8")
+    result = _deliver(
+        config, board, _body(), telemetry=telemetry, spend=_spend(tmp_path)
+    )
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert "skipped: daily budget reached" in skips[0].error
+    assert "unreadable record" in skips[0].error
+
+
+def test_a_queued_review_is_refused_again_at_preflight(tmp_path):
+    """The re-check: a delivery admitted while the day had room is
+    refused in the worker before the review starts, when the day's total
+    was spent in between. The runner never runs, nothing is posted, and
+    the record says plainly what refused it."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+    spend.record(REPO, Decimal("100.0000"), 4)
+    ran = []
+
+    def runner(event, cancel):
+        ran.append(event.head_sha)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    assert worker.run_one() is True
+    assert ran == []
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert skips and skips[0].fields["reason"] == "daily-budget"
+    assert "skipped: daily budget reached" in skips[0].error
+    published = [e for e in telemetry.events if e.step == "review finished"]
+    assert published == []
+
+
+def test_a_settled_review_records_its_committed_spend_on_the_days_ledger(tmp_path):
+    """The counting: the finished review's committed spend -- the child's
+    own token-counts-times-price-table figure from the draft's cost line
+    -- is appended to the day's file, and the next admission sees it. The
+    finished draft's figure is the one recorded, not a stale progress
+    record's partial."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 3,
+                    "settled_usd": "1.10",
+                    "committed_usd": "2.20",
+                    "reservation_usd": "10",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return ReviewRun(True, REPORT_COST)
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    _deliver(config, board, _body(), spend=spend)
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("3.40")
+    # The committed spend governs the next admission: enough reviews at
+    # the ceiling spend the day.
+    spend.record(REPO, Decimal("99.9900"), 1)
+    assert _deliver(config, board, _body(sha=SHA_B), spend=spend).detail == (
+        "ignored:daily-budget"
+    )
+
+
+def test_a_failed_review_records_the_spend_its_progress_recorded(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 3,
+                    "settled_usd": "1.10",
+                    "committed_usd": "2.20",
+                    "reservation_usd": "10",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("2.20")
+
+
+def test_a_review_with_no_cost_figure_records_nothing(tmp_path):
+    """The amount is never guessed: a review whose cost is in neither the
+    draft nor a progress record records nothing, and the gap the cost
+    event carries is where the miss stays visible."""
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal(0), "")
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    assert costs and costs[0].fields["measured"] == "unknown"
+
+
+def test_the_spend_records_survive_a_service_restart(tmp_path):
+    """The total lives on the state volume: a DailySpend built fresh over
+    the same state root -- what a restarted service constructs -- reads
+    the spend the previous process recorded."""
+    _spend(tmp_path).record(REPO, Decimal("40.0000"), 2)
+    spend = DailySpend(
+        tmp_path,
+        Decimal("100.00"),
+        today=lambda: _BUDGET_DAY,
+    )
+    assert spend.committed(REPO) == (Decimal("40.0000"), "")
+    assert spend.refusal(REPO, "") == ("", "")
+    spend.record(REPO, Decimal("60.0000"), 2)
+    assert spend.refusal(REPO, "") == ("skipped: daily budget reached", "")
+
+
+def test_config_from_env_parses_the_per_tenant_bounds(tmp_path):
+    env = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        "ATLAS_SERVICE_PROVIDER": "offline",
+    }
+    config = config_from_env(env)
+    assert config.repo_daily_budget_usd == Decimal("100.00")
+    custom = {**env, "ATLAS_REPO_DAILY_BUDGET_USD": "40"}
+    assert config_from_env(custom).repo_daily_budget_usd == Decimal(40)
+    for bad in ("abc", "0", "-5"):
+        with pytest.raises(ServiceError, match="ATLAS_REPO_DAILY_BUDGET_USD"):
+            config_from_env({**env, "ATLAS_REPO_DAILY_BUDGET_USD": bad})
+    # The child's clamp variable is validated at boot too.
+    with pytest.raises(ServiceError, match="ATLAS_REPO_CEILING_MAX_USD"):
+        config_from_env({**env, "ATLAS_REPO_CEILING_MAX_USD": "abc"})
+    ok = config_from_env({**env, "ATLAS_REPO_CEILING_MAX_USD": "30"})
+    assert ok.repo_daily_budget_usd == Decimal("100.00")
