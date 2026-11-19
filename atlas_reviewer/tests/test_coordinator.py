@@ -5002,6 +5002,7 @@ def test_a_carry_calls_overrun_reaches_the_drafts_tripwire_line(tmp_path):
     assert "committed: $0.16." in line
     assert "## Carried, not re-verified" in draft
 
+
 def test_a_byok_refusal_records_the_executions_already_made(tmp_path):
     """D80 (round-1 Nit): the ledger line a Byok refusal finishes carries
     the counts the loop had reached, beside the turns and tools the
