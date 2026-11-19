@@ -107,7 +107,25 @@ def test_this_repos_own_review_md_parses_to_the_decided_25():
     assert read.note == ""
 
 
-# -------------------------------------------------------- lens preferences
+def test_the_shipped_template_carries_no_live_ceiling():
+    """The template ships its ceiling line commented out (round-1 review
+    of #778, M1): a repo that copies `templates/REVIEW.md` wholesale takes
+    the deployment's default, not this repo's $25. The commented line is
+    inert by the parser's own anchors — `CEILING_LINE` matches only at the
+    line start, and the unsupported-key scan's `^review_` anchor does not
+    match a `#`-prefixed line — so the copy parses to no ceiling, with no
+    note and no unsupported-line note, rather than silently configuring
+    anything."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "templates" / "REVIEW.md").read_text(encoding="utf-8")
+    read = read_repo_config(
+        source_tarball({"REVIEW.md": text.encode("utf-8")}, top="code-quality-atlas")
+    )
+    assert read.ceiling.value is None
+    assert read.ceiling.note == ""
+    assert read.unsupported_notes == ()
+
+
 # -------------------------------------------------------- lens preferences
 
 

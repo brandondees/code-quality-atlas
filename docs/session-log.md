@@ -5682,3 +5682,32 @@ whitespace stripped — is the already-pinned
 **Gates.** Both suites with their coverage floors, ruff check, ruff format
 --check, mypy and the drift check run before the push; the only new test is
 the pin above, and no product behavior changed.
+
+**Update (2026-11-19, fix round 1 of #778).** The round-1 review's Major
+made the template's copy of the line inert: `templates/REVIEW.md` now ships
+`# review_ceiling_usd: 25   # example — uncomment and set your repo's own
+value, or delete to take the deployment's default` — commented, so a
+wholesale `cp` of the template parses to no ceiling and takes the
+deployment default (the anchored `CEILING_LINE` regex cannot match a
+`#`-prefixed line, and the unsupported-key scan's `^review_` anchor draws
+no note on it either), while the live `review_ceiling_usd: 25` stays only
+in the root copy. `tests/test_review_template_sync.py` is relaxed to
+normalize exactly that one line before comparing — every other byte stays
+guarded — with a new guard holding each copy to exactly one
+ceiling-shaped line. The section's prose is reworded template-neutral (the
+decision story and the #769–#776 evidence live in D91 and the session log),
+the dangling `atlas_reviewer/repo_config.py` reference a consumer copy
+cannot resolve is dropped, and the section says "merge base" where it said
+"base ref" (n2). The D91 entry moved to the end of the `## Decisions made`
+list (m1 — it had landed two sections down, inside the open-questions
+preamble) and carries the Correction; the duplicated lens-preferences
+divider in `test_repo_config.py` is gone (n1). New pins:
+`test_the_shipped_template_carries_no_live_ceiling` (template → no value,
+no note, no unsupported notes) and
+`test_each_copy_carries_exactly_one_ceiling_line`; the root pin still
+asserts exactly `Decimal("25")` with an empty note.
+
+**Gates (fix round 1).** The targeted suites (`test_repo_config.py`,
+`test_review_template_sync.py`, `test_decision_updates_are_appended.py`),
+both full suites with their coverage floors, ruff, ruff format --check,
+mypy and the drift check run before the push.
