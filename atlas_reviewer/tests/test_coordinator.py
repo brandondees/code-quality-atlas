@@ -5046,3 +5046,79 @@ def test_a_byok_refusal_records_the_executions_already_made(tmp_path):
     assert attempt.outcome.test_runs == 1
     assert attempt.outcome.mutants_survived == 0
     assert attempt.outcome.turns == 1
+
+
+# --------------------------------------------- the repo's path ranking (S5)
+
+
+def test_the_first_turn_keeps_the_risk_order_without_a_ranking():
+    from atlas_reviewer.coordinator import first_turn
+
+    full = first_turn(EVENT, DIFF, (), "f00dfeedf00dfeed")
+    assert "2 changed file(s), highest risk first:" in full
+    # config/keys.py ranks security by its path, ahead of calc.py.
+    assert full.rindex("config/keys.py") < full.rindex("calc.py")
+
+
+def test_the_first_turn_follows_the_repos_path_ranking_when_it_carries_one():
+    """S5 (D81 Q6): the merge-base REVIEW.md path ranking re-orders the
+    changed-file listing the lens reads in -- ordering only, never
+    exclusion: every changed file stays listed."""
+    from atlas_reviewer.coordinator import first_turn
+    from atlas_reviewer.diffs import PathRanks
+
+    ranked = first_turn(
+        EVENT,
+        DIFF,
+        (),
+        "f00dfeedf00dfeed",
+        ranks=PathRanks(exclude=("config/*",)),
+    )
+    assert "2 changed file(s), the reviewed repo's REVIEW.md path ranking" in ranked
+    assert "calc.py (+1 -1)" in ranked and "config/keys.py (+1 -0)" in ranked
+    assert ranked.rindex("config/keys.py") > ranked.rindex("calc.py")
+
+    # A ranking that sets nothing re-ranks nothing: the first turn is
+    # byte-identical to the unconfigured one.
+    assert first_turn(
+        EVENT, DIFF, (), "f00dfeedf00dfeed", ranks=PathRanks()
+    ) == first_turn(EVENT, DIFF, (), "f00dfeedf00dfeed")
+
+
+def test_the_draft_records_the_repos_path_rerank(tmp_path):
+    """S5's done-when: the re-ranking is recorded in the draft, naming
+    what the config deprioritized and that no file was dropped."""
+    from atlas_reviewer.diffs import PathRanks, rerank_note, split_files
+
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final()])
+    note = rerank_note(
+        split_files(DIFF),
+        PathRanks(exclude=("config/*",)),
+        scrub=lambda text: text,
+    )
+    draft = render_draft(replace(result, rerank_note=note), Redactor())
+    assert "review_path_exclude:" in draft
+    assert "no file was dropped from review" in draft
+    assert '"config/keys.py"' in draft
+    assert "## Lens coverage (attestation ledger)" in draft
+
+
+def test_a_draft_without_a_ranking_carries_no_rerank_note(tmp_path):
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final()])
+    assert "re-ranked" not in render_draft(result, Redactor())
+
+
+def test_review_lenses_ranks_the_first_turn_by_the_repos_path_config(tmp_path):
+    """S5 wired through: the multi-lens entry point carries the repo's
+    path ranking into every lens job's first turn -- ordering only, never
+    exclusion -- and records the note on the review."""
+    from atlas_reviewer.diffs import PathRanks
+
+    model = ScriptedLensModel([READ_ALL, final()])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, path_ranks=PathRanks(exclude=("config/*",))
+    )
+    text = model.requests[0].messages[0].text
+    assert "the reviewed repo's REVIEW.md path ranking" in text
+    assert text.rindex("config/keys.py") > text.rindex("calc.py")
+    assert "no file was dropped from review" in result.rerank_note

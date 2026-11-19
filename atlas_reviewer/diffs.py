@@ -15,6 +15,16 @@ Only `diff --git` sections are split out. A combined diff (`diff --cc` or
 text stays in the preceding file's section, or in the unparsed pseudo-file
 when it comes first, so it is still sent and counted, but under that name
 and tier rather than its own.
+
+The reviewed repo's merge-base `REVIEW.md` can re-rank this order
+(config slice S5, D81 Q6): `rank_files` applies the parse module's
+`PathRanks` -- include patterns rank their matches ahead of the rest,
+exclude patterns and the `review_generated_files: deprioritize` setting
+rank their matches last -- and `rerank_note` is the note the draft
+carries. Ordering and depth only, never exclusion: no pattern removes a
+file from the set, every file stays accounted for (sent, cut, or named
+unseen exactly as before), and whether anything may be excluded from
+review at all stays Q25's undecided question.
 """
 
 from __future__ import annotations
@@ -23,6 +33,7 @@ import math
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
+from fnmatch import fnmatchcase
 from functools import reduce
 
 from atlas_reviewer.notes import quote_untrusted
@@ -262,6 +273,200 @@ def _file(path: str, text: str, source: str | None = None) -> FileDiff:
 def by_risk(files: tuple[FileDiff, ...]) -> tuple[FileDiff, ...]:
     """Highest risk first; diff order within a tier."""
     return tuple(sorted(files, key=lambda f: f.tier.rank))
+
+
+@dataclass(frozen=True)
+class PathRanks:
+    """The reviewed repo's path-ranking settings (config slice S5, D81
+    Q6), parsed by `repo_config` and applied here. Ordering only, never
+    exclusion (Q25's undecided question, untouched): `include` patterns
+    rank their matches ahead of the rest, `exclude` patterns rank their
+    matches last, and `generated` deprioritizes the paths that look
+    machine-generated. Exclude wins over include and an explicit include
+    wins over the generated heuristic -- the repo named it -- so every
+    file lands in exactly one group."""
+
+    include: tuple[str, ...] = ()
+    exclude: tuple[str, ...] = ()
+    generated: bool = False
+
+    @property
+    def applies(self) -> bool:
+        """Whether any key is set: an absent or all-default read re-ranks
+        nothing and is recorded nowhere."""
+        return bool(self.include or self.exclude or self.generated)
+
+
+# The path shapes the `review_generated_files: deprioritize` setting ranks
+# last (S5): build and tool output, vendored and dependency trees,
+# lockfiles, and the common machine-generated-code suffixes. A heuristic
+# over paths only -- nothing in a file's content is read -- so it is
+# cheap, deterministic, and wrong about at least one repo; the repo's own
+# include and exclude patterns override it (an include match wins), and a
+# repo that dislikes a shape it names can exclude it explicitly.
+_GENERATED_SHAPES = (
+    (
+        r"(^|/)(?:dist|build|coverage|vendor|node_modules|bower_components"
+        r"|__pycache__|__snapshots__|\.venv|venv|\.tox|target)/"
+    ),
+    r"\.(?:min\.(?:js|css)|(?:js|css)\.map)$",
+    (
+        r"(^|/)(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml"
+        r"|yarn\.lock|bun\.lockb?|poetry\.lock|pdm\.lock|uv\.lock"
+        r"|Pipfile\.lock|Cargo\.lock|go\.sum|go\.work\.sum|composer\.lock"
+        r"|Gemfile\.lock|packages\.lock\.json|project\.assets\.json)$"
+    ),
+    r"\.pb\.(?:go|py|h|cc|ts)$",
+    r"[\w]*_pb2(?:_grpc)?\.py$",
+    r"\.generated\.(?:ts|js|mjs|cjs|dart|java|kt|cs|go|py|swift)$",
+    r"\.snap$",
+)
+_GENERATED_RE = re.compile("|".join(_GENERATED_SHAPES), re.IGNORECASE)
+
+
+def is_generated(path: str) -> bool:
+    """Whether the path looks machine-generated (S5's heuristic above):
+    path-shaped only, case-insensitive like the tier match."""
+    return _GENERATED_RE.search(path) is not None
+
+
+def _matches(path: str, patterns: tuple[str, ...]) -> bool:
+    """fnmatch globs, case-insensitively like the tier match. fnmatch's
+    `*` crosses `/`, so `src/**` and `src/*` name the same set; the parse
+    module validates the pattern shape, and a pattern never reaches a
+    model -- only its effect on the order does."""
+    lowered = path.lower()
+    return any(fnmatchcase(lowered, pattern.lower()) for pattern in patterns)
+
+
+def _rank_groups(
+    files: Iterable[FileDiff], ranks: PathRanks
+) -> tuple[list[FileDiff], list[FileDiff], list[FileDiff]]:
+    """The files split into S5's three groups, each in risk order:
+    include-matched first, then everything the config did not move, then
+    the deprioritized (exclude-matched, or generated under the
+    `deprioritize` setting)."""
+    ordered = by_risk(tuple(files))
+    front: list[FileDiff] = []
+    middle: list[FileDiff] = []
+    back: list[FileDiff] = []
+    for f in ordered:
+        if _matches(f.path, ranks.exclude):
+            back.append(f)
+        elif _matches(f.path, ranks.include):
+            front.append(f)
+        elif ranks.generated and is_generated(f.path):
+            back.append(f)
+        else:
+            middle.append(f)
+    return front, middle, back
+
+
+def rank_files(files: Iterable[FileDiff], ranks: PathRanks) -> tuple[FileDiff, ...]:
+    """The files in the review order the repo's path settings ask for:
+    include-matched, then the unranked rest, then the deprioritized, each
+    group in risk order. The output is a permutation of the input -- the
+    same files, never fewer: user config re-ranks, it never drops (Q25)."""
+    front, middle, back = _rank_groups(files, ranks)
+    return (*front, *middle, *back)
+
+
+_RERANK_NAMED = 25
+"""The deprioritized paths one rerank note names; the remainder is
+counted, so the note is bounded controller text no matter how many files
+a config moves."""
+
+
+def _named_group(files: list[FileDiff], *, scrub: Callable[[str], str]) -> str:
+    return describe_by_risk(tuple(files), _RERANK_NAMED, scrub=scrub)
+
+
+def rerank_note(
+    files: Iterable[FileDiff], ranks: PathRanks, *, scrub: Callable[[str], str]
+) -> str:
+    """The draft note recording the repo's path re-ranking (S5's
+    done-when: the re-ranking is recorded in the draft, and the config is
+    named for what it deprioritized). Every path is quoted as data
+    (`describe_by_risk`); the patterns themselves are never echoed -- they
+    are author-controlled text and only their validated effect on the
+    order is reported. Empty when the settings rank nothing, so an
+    unconfigured review's draft reads exactly as it did."""
+    if not ranks.applies:
+        return ""
+    files = tuple(files)
+    front, middle, back = _rank_groups(files, ranks)
+    total = len(front) + len(middle) + len(back)
+    back_keys_set = bool(ranks.exclude or ranks.generated)
+    sentences = []
+    if ranks.include:
+        if not front:
+            # The front group is empty for two different reasons, and the
+            # note must not mistake one for the other: no pattern matched,
+            # or patterns matched and `review_path_exclude:` took the
+            # matches (exclude wins on every path, D69's rule carried to
+            # paths). A false "none match" would record a wrong reason
+            # next to a correct exclude sentence.
+            matched = sum(1 for f in files if _matches(f.path, ranks.include))
+            if matched:
+                sentences.append(
+                    f"review_path_include: ranked nothing ahead: its "
+                    f"{matched} matching file(s) were deprioritized by "
+                    "review_path_exclude"
+                )
+            else:
+                sentences.append(
+                    f"review_path_include: ranked nothing: none of this diff's "
+                    f"{total} file(s) match its patterns"
+                )
+        elif not (middle or back):
+            sentences.append(
+                f"review_path_include: ranked all {total} file(s) first; "
+                "nothing ranks behind them"
+            )
+        elif not back_keys_set:
+            # Include alone: everything not matching is the set it
+            # deprioritized, and the note names it.
+            sentences.append(
+                f"review_path_include: ranked {len(front)} matching file(s) "
+                f"ahead of the other {len(middle)}, listed highest risk "
+                f"first: {_named_group(middle, scrub=scrub)}"
+            )
+        else:
+            # Combined with a deprioritizing key: the back group is named
+            # by that key's sentence below, so this one names only the
+            # middle and counts the rest.
+            behind = (
+                f", listed highest risk first: {_named_group(middle, scrub=scrub)}"
+                if middle
+                else ""
+            )
+            sentences.append(
+                f"review_path_include: ranked {len(front)} matching file(s) "
+                f"ahead of the other {len(middle or back)} file(s) ranking "
+                f"behind them{behind}"
+            )
+    if back_keys_set:
+        keys = "review_path_exclude:" if ranks.exclude else ""
+        if ranks.exclude and ranks.generated:
+            keys += " and the "
+        elif ranks.generated:
+            keys += "the "
+        if ranks.generated:
+            keys += "review_generated_files: deprioritize setting"
+        if not back:
+            sentences.append(
+                f"{keys} ranked nothing: none of this diff's {total} file(s) match"
+            )
+        else:
+            sentences.append(
+                f"{keys} ranked {len(back)} file(s) last, listed highest "
+                f"risk first: {_named_group(back, scrub=scrub)}"
+            )
+    return (
+        "The reviewed repo's merge-base REVIEW.md re-ranked this review's "
+        "changed files (ordering only: no file was dropped from review): "
+        + " ".join(sentence + "." for sentence in sentences)
+    )
 
 
 @dataclass(frozen=True)

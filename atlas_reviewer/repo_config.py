@@ -61,6 +61,17 @@ Today's keys:
   are read from) through `parse_post_config`, whose read this module
   shares; the merge-base reads below neither honor nor name these two.
 
+- `review_path_include:` / `review_path_exclude:` /
+  `review_generated_files:` (config slice S5, D81 Q6) -- the path
+  re-ranking the diff's files are ordered by. **Ordering and depth only,
+  never exclusion**: no pattern drops a file from review; every file
+  stays accounted for (sent, cut, or named unseen exactly as before),
+  and whether anything may be excluded from review at all is Q25's
+  undecided question, untouched. The values parse into
+  `diffs.PathRanks`, applied by `diffs.rank_files` and recorded in the
+  draft through `diffs.rerank_note`; the patterns themselves never
+  reach a model -- only their effect on the order does.
+
 The admission-class keys (`review_base_include:` /
 `review_base_exclude:` / `review_skip_events:`, #756 and #761) are
 `service_admit.py`'s -- read from the repo's default branch, a different
@@ -83,6 +94,7 @@ import tarfile
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from atlas_reviewer.diffs import PathRanks
 from atlas_reviewer.lens_contract import Severity
 from atlas_reviewer.picker import LENS_NAME, LensPreferences
 from atlas_reviewer.quotes import refused_archive
@@ -108,6 +120,21 @@ LENS_INCLUDE_LINE = re.compile(
 LENS_EXCLUDE_LINE = re.compile(
     r"^review_lens_exclude:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
 )
+# The `REVIEW.md` lines that re-rank the diff's paths (config slice S5,
+# D81 Q6): each value is a comma-separated list of path patterns, same
+# value grammar as the lens lines', and the generated-file line's value is
+# one of two words. Ordering only, never exclusion -- no pattern drops a
+# file from review, and whether anything may be excluded from review at
+# all is Q25's undecided question, untouched here.
+PATH_INCLUDE_LINE = re.compile(
+    r"^review_path_include:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
+PATH_EXCLUDE_LINE = re.compile(
+    r"^review_path_exclude:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
+GENERATED_FILES_LINE = re.compile(
+    r"^review_generated_files:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
 # What a seen-but-unusable ceiling line says (round-1 review of #717,
 # m-5): the fail-open fallback is not silent.
 _UNUSABLE_NOTE = (
@@ -123,6 +150,13 @@ _UNUSABLE_LENSES_NOTE = (
     "comma-separated list of lens names; it is ignored and the picker's "
     "guideline stands"
 )
+# What a seen-but-unusable path-ranking line says (S5): the note names the
+# key, the condition, and the default that stands -- the risk order -- and
+# never echoes the rejected value. Built per offending key because the
+# three keys' conditions differ; every part is controller-authored
+# constant text.
+_PATH_PATTERN_CONDITION = "a comma-separated list of path patterns"
+_GENERATED_VALUE_CONDITION = "deprioritize or normal"
 # Bound the file the ceiling line is read from, as `quotes` bounds the
 # files it checks.
 MAX_CHECKED_BYTES = 64 * 1024
@@ -381,6 +415,120 @@ def _lens_names(raw: str | None) -> list[str] | None:
     return names
 
 
+# The shape of one path pattern (S5): glob-lite, the characters a repo
+# path plausibly holds plus fnmatch's `*` and `?`. Bracket classes are
+# outside the grammar -- fnmatch would honor them, but their content is
+# the one place a pattern could carry markup or a `[!...]` surprise, and
+# `*` and `?` cover the shapes repos actually write (`src/**`,
+# `*.min.js`, `dist/**` -- a pattern with no wildcard must match the
+# whole path exactly, so a bare directory prefix matches nothing). A
+# pattern never reaches a model: only its effect
+# on the order does, so this bound is the whole trust boundary the
+# pattern carries.
+_PATH_PATTERN = re.compile(r"[A-Za-z0-9/_.\- *?]{1,200}")
+# How many distinct patterns one line may carry; a longer list is
+# unusable, fail-open, rather than silently truncated.
+_MAX_PATH_PATTERNS = 32
+
+
+def _path_patterns(raw: str | None) -> list[str] | None:
+    """A comma-separated list of path patterns, deduplicated in file
+    order, or None when the value is empty, any pattern is outside the
+    grammar above, or there are more than `_MAX_PATH_PATTERNS`. Whitespace
+    around a pattern is the list's separator at work, not part of one."""
+    if raw is None or not raw.strip():
+        return None
+    patterns: list[str] = []
+    for piece in raw.split(","):
+        pattern = piece.strip()
+        if not _PATH_PATTERN.fullmatch(pattern):
+            return None
+        if pattern not in patterns:
+            patterns.append(pattern)
+    if len(patterns) > _MAX_PATH_PATTERNS:
+        return None
+    return patterns
+
+
+def _path_ranks(text: str) -> PathRanksRead:
+    """The `review_path_include:`, `review_path_exclude:` and
+    `review_generated_files:` lines' values (S5, D81 Q6). One line per
+    key; no line for a key reads as absent. Any line that is present but
+    unusable -- a value outside its key's grammar, or a key that appears
+    twice -- makes the whole read unusable: the risk order stands,
+    fail-open, with the note that names each offending key, its condition
+    and the default, never the rejected value. Fence-blind by design:
+    this is the known keys' line-based parser, so a fenced known key is
+    still live config, exactly as the ceiling's and the lens lines' own
+    parsers read."""
+    patterns: dict[str, list[str]] = {}
+    generated: bool | None = None
+    bad: list[tuple[str, str]] = []
+    for regex, key in (
+        (PATH_INCLUDE_LINE, "review_path_include"),
+        (PATH_EXCLUDE_LINE, "review_path_exclude"),
+    ):
+        for line in text.splitlines():
+            match = regex.match(line)
+            if match is None:
+                continue
+            if key in patterns:
+                bad.append((key, _PATH_PATTERN_CONDITION))
+                continue
+            parsed = _path_patterns(match.group(1))
+            if parsed is None:
+                bad.append((key, _PATH_PATTERN_CONDITION))
+                continue
+            patterns[key] = parsed
+    for line in text.splitlines():
+        match = GENERATED_FILES_LINE.match(line)
+        if match is None:
+            continue
+        if generated is not None:
+            bad.append(("review_generated_files", _GENERATED_VALUE_CONDITION))
+            continue
+        raw = match.group(1)
+        value = raw.strip() if raw is not None else ""
+        if value == "deprioritize":
+            generated = True
+        elif value == "normal":
+            generated = False
+        else:
+            bad.append(("review_generated_files", _GENERATED_VALUE_CONDITION))
+    if bad:
+        return PathRanksRead(None, _unusable_ranks_note(bad))
+    if not patterns and generated is None:
+        return PathRanksRead(None, "")
+    return PathRanksRead(
+        PathRanks(
+            include=tuple(patterns.get("review_path_include", ())),
+            exclude=tuple(patterns.get("review_path_exclude", ())),
+            generated=bool(generated),
+        ),
+        "",
+    )
+
+
+def _unusable_ranks_note(bad: list[tuple[str, str]]) -> str:
+    """The note for the offending path-ranking keys: each key named with
+    its own condition, the default that stands, and no rejected value."""
+    parts = [
+        f"a {key}: line that is not {condition}"
+        for key, condition in dict.fromkeys(bad)
+    ]
+    if len(parts) == 1:
+        named = parts[0]
+        return (
+            f"the reviewed repo's merge-base {REVIEW_MD} carries {named}; "
+            "it is ignored and the risk order stands"
+        )
+    named = ", ".join(parts[:-1]) + " and " + parts[-1]
+    return (
+        f"the reviewed repo's merge-base {REVIEW_MD} carries {named}; "
+        "they are ignored and the risk order stands"
+    )
+
+
 # A config attempt the schema does not carry: a line in the `review_`
 # key namespace, the namespace every setting line in this file lives in.
 # The key a note names is bounded and markup-free by the same regex, so
@@ -406,6 +554,9 @@ _KNOWN_KEYS = frozenset(
         "review_ceiling_usd",
         "review_lens_include",
         "review_lens_exclude",
+        "review_path_include",
+        "review_path_exclude",
+        "review_generated_files",
         "review_severity_floor",
         "review_post_verbosity",
         "review_base_include",
@@ -493,46 +644,73 @@ def _unsupported_notes(text: str) -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class PathRanksRead:
+    """What the reviewed repo's merge-base `REVIEW.md` said about path
+    ranking (config slice S5, D81 Q6): `ranks` is the ordering-only
+    override, None when there is none; `note` is controller text,
+    non-empty only when a ranking line was seen and ignored, so "lines
+    present but unusable" can be told apart from "no lines". The value
+    the note never carries is the rejected one: the risk order stands."""
+
+    ranks: PathRanks | None
+    note: str
+
+
+@dataclass(frozen=True)
 class RepoConfig:
     """The whole parse of the reviewed repo's **merge-base** `REVIEW.md`:
-    `ceiling` and `lenses` are the D68/D69 reads, and `unsupported_notes`
-    name the keys the schema does not carry, empty when there are none --
-    a plain policy file reads exactly as it did before this module."""
+    `ceiling`, `lenses` and `ranks` are the D68/D69/S5 reads, and
+    `unsupported_notes` name the keys the schema does not carry, empty
+    when there are none -- a plain policy file reads exactly as it did
+    before this module."""
 
     ceiling: CeilingRead
     lenses: LensPreferencesRead
+    ranks: PathRanksRead = PathRanksRead(None, "")
     unsupported_notes: tuple[str, ...] = ()
 
 
 def read_repo_config(base_tarball: bytes) -> RepoConfig:
     """The reviewed repo's merge-base `REVIEW.md`, parsed once against the
-    closed schema: the D68/D69 lines and the unsupported keys' named
-    notes. A tarball that fails the fail-closed archive check or no file
-    at all reads as an empty config, silently; a file over the read bound
-    is not parsed cut and names the bound on both reads."""
+    closed schema: the D68/D69 lines, the S5 path-ranking lines, and the
+    unsupported keys' named notes. A tarball that fails the fail-closed
+    archive check or no file at all reads as an empty config, silently; a
+    file over the read bound is not parsed cut and names the bound on
+    every read."""
     text = _review_md_text(base_tarball)
     if isinstance(text, _OverBound):
+        bound = (
+            f"the reviewed repo's merge-base {REVIEW_MD} is over the "
+            f"{MAX_CHECKED_BYTES}-byte read bound, so its "
+        )
         return RepoConfig(
             CeilingRead(
                 None,
-                f"the reviewed repo's merge-base {REVIEW_MD} is over the "
-                f"{MAX_CHECKED_BYTES}-byte read bound, so its "
-                "review_ceiling_usd: line, if any, was not read; the "
+                bound + "review_ceiling_usd: line, if any, was not read; the "
                 "configured ceiling (default $10) stands",
             ),
             LensPreferencesRead(
                 None,
-                f"the reviewed repo's merge-base {REVIEW_MD} is over the "
-                f"{MAX_CHECKED_BYTES}-byte read bound, so its "
-                "review_lens_include: and review_lens_exclude: lines, if "
+                bound + "review_lens_include: and review_lens_exclude: lines, if "
                 "any, were not read; the picker's guideline stands",
+            ),
+            PathRanksRead(
+                None,
+                bound + "review_path_include:, review_path_exclude: and "
+                "review_generated_files: lines, if any, were not read; the "
+                "risk order stands",
             ),
         )
     if text is None:
-        return RepoConfig(CeilingRead(None, ""), LensPreferencesRead(None, ""))
+        return RepoConfig(
+            CeilingRead(None, ""),
+            LensPreferencesRead(None, ""),
+            PathRanksRead(None, ""),
+        )
     return RepoConfig(
         _ceiling_value(text),
         _lens_preferences(text),
+        _path_ranks(text),
         _unsupported_notes(text),
     )
 
@@ -566,3 +744,18 @@ def review_md_lens_preferences(base_tarball: bytes) -> LensPreferencesRead:
     shows up as its own NOT RUN line and an exclude as the recorded
     override, never silently guessed or dropped."""
     return read_repo_config(base_tarball).lenses
+
+
+def review_md_path_ranks(base_tarball: bytes) -> PathRanksRead:
+    """The reviewed repo's path-ranking lines in its **merge-base**
+    `REVIEW.md` (config slice S5, D81 Q6) -- the same tree the ceiling and
+    the lens preference are read from, so a PR cannot move its own
+    ranking either. No line reads as `PathRanksRead(None, "")`: the risk
+    order stands, exactly as no setting at all. A line that is present
+    but outside its key's grammar, a key repeated, or a file over the
+    read bound reads as `PathRanksRead(None, note)`: the risk order still
+    stands, fail-open, and the note names the key, the condition and the
+    default -- never the rejected value. Ordering only, never exclusion:
+    whatever the parsed `PathRanks` carries, `diffs.rank_files` only
+    re-orders, and no file ever leaves the review (Q25 untouched)."""
+    return read_repo_config(base_tarball).ranks
