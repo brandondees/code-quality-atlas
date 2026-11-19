@@ -1092,9 +1092,16 @@ list of lens names, or a key that appears twice, is ignored fail-open
 with a note in the draft, exactly like an unusable ceiling line; a name
 that matches no bundle lens is not silently dropped -- its include shows
 up as a NOT RUN line. Any other `review_`-namespaced line in the file --
-a key the parse schema does not carry -- is also ignored fail-open and
-named: the note says the key, that this build does not support it, and
-that the default stands, and never quotes the rejected value (S1). The
+a key the build's two reads (this parse and the admission read) do not
+carry -- is also ignored fail-open and named: the note says the key,
+that this build does not support it, and that the default stands, and
+never quotes the rejected value (S1); the scan knows the
+admission-class keys by name (`review_base_include:`,
+`review_base_exclude:`, `review_skip_events:` -- honored by the service
+from the default branch), so a repo that narrows its admission draws no
+false note, and it skips fenced code blocks, so a policy file's
+documented example of a future key is not read as an attempt to
+configure it. The
 override is recorded in the Lens selection
 note whenever it is present, "nothing needed changing" when the picks
 already satisfy it, so an operator can tell applied-and-satisfied from

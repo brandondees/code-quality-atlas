@@ -12,11 +12,14 @@ touch.
 The schema is a **closed set, not a pass-through** (the plan's §4): the
 parse yields a dollar amount, lens names, and controller notes, and
 nothing else -- no config key can widen network, secret, or Sprite
-access, because no key reaches any of that. Keys this build does not
+access, because no key reaches any of that. Keys the build does not
 carry parse as **unsupported with named notes**: a line in the `review_`
 key namespace -- the namespace every setting line in this file lives in
--- that the schema does not know is ignored fail-open and named, the
-generalization of D68's unusable-line note. Every note names the key,
+-- that neither this module's schema nor the admission read
+(`service_admit.py`, the default branch, #756/#761) carries is ignored
+fail-open and named, the generalization of D68's unusable-line note.
+Lines inside a fenced code block are examples, not configuration
+attempts, and are skipped. Every note names the key,
 the condition, and the default that stands, and **never echoes the raw
 rejected value**: the value is unvalidated author-controlled input
 (merge-base `REVIEW.md` is author-controllable in same-repo and stacked
@@ -45,6 +48,12 @@ Today's keys:
   preference that overrides the picker's guideline, applied by
   `picker`, whose protection set is the manifest's whole `tier: floor`
   (D69's 5:13 PM CT update), not the critical tier alone.
+
+The admission-class keys (`review_base_include:` /
+`review_base_exclude:` / `review_skip_events:`, #756 and #761) are
+`service_admit.py`'s -- read from the repo's default branch, a different
+window on the same file -- and the scan knows them by name so it never
+calls them unsupported.
 
 The reads are pure functions of the merge-base tarball. `read_repo_config`
 parses the whole file once; the per-line reads are the consumers'
@@ -248,10 +257,25 @@ def _lens_names(raw: str | None) -> list[str] | None:
 # variant -- are not config attempts in this grammar and stay unremarked,
 # exactly as they read today.
 _UNSUPPORTED_KEY_LINE = re.compile(r"^review_([a-z0-9_]{1,80}):")
-# The keys the schema carries; they match the unsupported scan's shape,
-# so the scan excludes them by name.
+# The keys the build carries. The first three are this module's own
+# schema; the last three are the admission-class keys `service_admit.py`
+# reads and honors from the repo's default branch (#756, #761) -- the
+# same file serves both windows, so a key the admission read carries is
+# supported by the build, and naming it "unsupported" here would be the
+# false note the named-note pattern exists to prevent. They are checked
+# against `service_admit._ADMISSION_KEYS` by a test, so a key added
+# there without this set fails rather than drawing a false note. All of
+# them match the unsupported scan's shape, so the scan excludes them by
+# name.
 _KNOWN_KEYS = frozenset(
-    {"review_ceiling_usd", "review_lens_include", "review_lens_exclude"}
+    {
+        "review_ceiling_usd",
+        "review_lens_include",
+        "review_lens_exclude",
+        "review_base_include",
+        "review_base_exclude",
+        "review_skip_events",
+    }
 )
 # How many distinct unsupported keys one note names; the remainder is
 # counted, never listed, so the note is bounded controller text no
@@ -265,9 +289,22 @@ def _unsupported_notes(text: str) -> tuple[str, ...]:
     `_UNSUPPORTED_KEYS_NAMED` of them, the remainder counted), the
     condition, and the default that stands -- never any rejected value.
     The key names are validated markup-free by the scan's regex, so the
-    note carries no author-controlled text past validation."""
+    note carries no author-controlled text past validation. Lines inside
+    a fenced code block are skipped: a repo's policy file may document a
+    future key in an example, and an example is not a configuration
+    attempt. The fence walk is the same line-level toggle for every
+    fence marker, so an unbalanced fence flips the state for the rest of
+    the file -- a missed or an extra note, either way fail-open and
+    bounded, never a wrong value: the known keys' own parsers are
+    line-based and unchanged."""
     seen: list[str] = []
+    fenced = False
     for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
         match = _UNSUPPORTED_KEY_LINE.match(line)
         if match is None:
             continue

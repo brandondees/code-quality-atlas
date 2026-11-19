@@ -324,3 +324,64 @@ def test_unsupported_notes_compose_with_the_unusable_notes():
     assert config.ceiling.value is None
     assert "review_ceiling_usd" in config.ceiling.note
     assert any("review_severity_floor:" in n for n in config.unsupported_notes)
+
+
+def test_the_admission_class_keys_draw_no_unsupported_note():
+    """Major-1 fix (r1 review of #769): the S4 admission keys --
+    `review_base_include:`, `review_base_exclude:`, `review_skip_events:`
+    -- are carried by the build, honored by `service_admit.py` from the
+    default branch, and the same file serves both windows; naming them
+    "unsupported" and "ignored" here would be false on every review of a
+    repo that narrows its admission. The known set is checked against
+    `service_admit`'s own set, so a key added there without this one
+    fails here instead of drawing a false note."""
+    from atlas_reviewer.repo_config import _KNOWN_KEYS
+    from atlas_reviewer.service_admit import _ADMISSION_KEYS
+
+    assert set(_ADMISSION_KEYS) <= set(_KNOWN_KEYS)
+    config = read_repo_config(
+        _tarball(
+            {
+                "REVIEW.md": (
+                    b"review_base_include: main\n"
+                    b"review_base_exclude: experiment-*\n"
+                    b"review_skip_events: synchronize\n"
+                )
+            }
+        )
+    )
+    assert config.unsupported_notes == ()
+    assert config.ceiling.value is None and config.ceiling.note == ""
+
+
+def test_a_markup_bearing_key_is_never_named():
+    """The key a note names is validated markup-free at parse -- the same
+    trust boundary D69's lens-shaped validation draws (r1 review of
+    #769, Minor 1): a key outside the `[a-z0-9_]` shape is ignored
+    silently, like prose, so no note can carry markup into controller
+    text. Kills the loosened-charset mutant."""
+    for raw in (
+        b"review_<img src=x>: 1\n",
+        b"review_a`b: 1\n",
+        b"review_a|b: 1\n",
+        b"review_a b: 1\n",
+    ):
+        config = read_repo_config(_tarball({"REVIEW.md": raw}))
+        assert config.unsupported_notes == (), raw
+
+
+def test_a_fenced_example_key_draws_no_unsupported_note():
+    """A fenced code block is a repo documenting a key, not attempting to
+    configure one (r1 review of #769, Nit 3): lines inside a fence are
+    skipped, and the fence state toggles back off, so a key after the
+    fence is still named. Kills the fence-walk-removed mutant."""
+    files = (
+        b"# policy\n\n"
+        b"```\n"
+        b"review_severity_floor: important   # a future key, documented\n"
+        b"```\n"
+        b"review_real_but_unknown: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": files})).unsupported_notes[0]
+    assert "review_real_but_unknown:" in note
+    assert "review_severity_floor:" not in note

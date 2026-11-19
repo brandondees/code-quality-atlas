@@ -3991,3 +3991,47 @@ only by its import line (the ceiling read now comes from
 default-branch read keeps S4's own narrow parse (its README sentence now
 points at the shared parser's review-side naming); unifying the two
 reads on one module is a candidate follow-up, not this slice.
+
+## 2026-11-19 (same day) — #769 round 1: the scan learns the admission keys, and the trust boundary gets its pin
+
+The r1 protocol review's fixes, applied on the branch and rebased onto
+main (`66a33b31`; #760's delta redesign and #761's retarget admission
+merged under this PR's base — `coordinator.py`'s conflict resolved by
+taking #760's import simplification beside the moved
+`review_md_ceiling` import, `docs/session-log.md`'s by keeping both
+sides' entries in date order).
+
+**Major 1 — the false unsupported note on the S4 admission keys.** The
+scan's known set carried only the three review-side keys, so a repo
+whose `REVIEW.md` carries `review_base_include:`, `review_base_exclude:`
+or `review_skip_events:` — honored by `service_admit.py` from the
+default branch since #756/#761 — drew a draft note falsely saying the
+build does not support the key and ignores it, on every review. The
+known set now carries all six keys (the scan stays silent about a key
+the build supports, which is also main's behavior for every key), and a
+test checks the set against `service_admit._ADMISSION_KEYS`, so a key
+added to the admission read without this set fails the suite instead of
+drawing a false note (`test_the_admission_class_keys_draw_no_unsupported_note`;
+killed by the admission keys removed from the known set).
+
+**Minor 1 — the markup-free-key boundary is now pinned.** The claim that
+a note's key is validated markup-free at parse had no failing-when-
+reverted test — the reviewer's loosened-charset mutant survived the
+whole suite. `test_a_markup_bearing_key_is_never_named` pins that a key
+outside the `[a-z0-9_]` shape (`review_<img src=x>:`, backtick, pipe,
+space) draws no note, and the loosened-charset mutant dies on it.
+
+**Nit 3 — fenced examples are not configuration attempts.** The scan now
+skips lines inside a fenced code block and toggles the fence state back
+off, so a policy file documenting a future key in an example draws no
+note while a real unknown key after the fence still does
+(`test_a_fenced_example_key_draws_no_unsupported_note`; killed by the
+fence walk removed). The known keys' own parsers stay line-based and
+unchanged — main's behavior — so an unbalanced fence can only shift
+which unsupported notes appear, never a parsed value.
+
+**Nit 1** — `_preferenced_fallback`'s docstring says "non-floor" where it
+said "non-critical"; the protection set changed under it. **Nit 2**
+(session-log rotation) is pre-existing debt, left alone as the fix brief
+directs. Full local gate re-run on the rebased tree; three new mutants
+applied by hand, all killed.

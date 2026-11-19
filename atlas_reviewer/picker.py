@@ -631,7 +631,7 @@ def _preferenced_fallback(
 ) -> LensSelection:
     """A fallback selection with the controller's shape facts and the
     repo's preference applied (D69; round-1 F2/F4/F6/F7): an exclude
-    drops its non-critical choices here too -- on the fallback paths the
+    drops its non-floor choices here too -- on the fallback paths the
     only excludable choice is the controller-added hygiene lens -- and an
     include is appended even when the picker fell back or made no call,
     with exclude winning over include. The note records the override
