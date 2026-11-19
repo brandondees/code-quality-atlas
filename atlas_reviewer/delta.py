@@ -620,6 +620,12 @@ class LensDecision:
     reassessed: bool = False
     reassess_note: str = ""
     withdrawn: tuple[Withdrawn, ...] = ()
+    gained_findings: bool = False
+    """True when the reused lens's D73 re-assessment ADDED findings this
+    round (round-2 review of #760): its settled result changed, so it is
+    not recorded in the round record's `clean_lenses` and the next delta
+    re-runs it. A reused lens the re-assessment left unchanged stays
+    recorded, and the reuse chain does not decay."""
 
 
 def decision_system(nonce: str) -> str:

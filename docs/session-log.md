@@ -3810,3 +3810,33 @@ kill. Twelve new hand-applied mutants, all dead on their named tests
 legs, the flag computation, the cap, the empty-offer skip, the
 fit-record order, the uncertainty sentence, the clean-set read, the
 turn's evidence blocks, and the concern line).
+
+## 2026-11-19 — #760 round 2: the digest's write side, and the reuse chain stops decaying
+
+The round-2 review's Major was the same failure shape as D74's round-1
+Major: a mechanism built and claimed but unreachable in the deployed
+path. `_record_round` had taken the `evidence_digest` parameter since
+r1, but neither call site passed it — every record stored `""`, every
+`_prior_digest` read "cannot be shown to be current", and every delta
+review re-assessed every reused lens once per head unconditionally,
+recurring against the ceiling D68 exists to enforce. Fixed at both call
+sites and pinned end to end through the real `_record_round`: three
+chained rounds (full review at the delta base → delta round on an
+unchanged snapshot digest → no re-assessment call, digest persisted;
+same chain with a moved digest → exactly one bounded call), plus the
+single-lens call site's own pin. Brandon decided the reuse chain's
+decay: a lens reused this round whose composed outcome is still clean
+(the re-assessment added nothing — `LensDecision.gained_findings`) is
+recorded in `clean_lenses` and stays reuse-eligible next round; a
+reused lens that gained findings is not, because its settled result
+changed. Both pinned by the chained test; the stale comments corrected
+(the lens list is the ran-or-reused record; `clean_lenses` gates the
+offer). The recomputed verdict got its pin: a re-assessment-added
+verified Blocker flips the verdict to REQUEST CHANGES, and the
+stale-verdict mutant dies. Nits: the unused `review` parameter dropped
+from `_reassess_reused_lens`; a legacy record's unattributed line
+attributes to nothing instead of storing the comma-joined lens list as
+if it were one lens (pinned through the carry-forward into the new
+record's `attributions`); `concern()`'s docstring now says the concern
+line travels bare (trusted bundle prose), not "quoted". Six mutants
+applied by hand; all died on their named tests.

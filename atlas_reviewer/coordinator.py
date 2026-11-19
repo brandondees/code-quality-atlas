@@ -641,7 +641,10 @@ def review_lens(
             context_omissions=omissions,
             other_pull_requests=other_pull_requests,
         )
-        return _record_round(round_log, event, single, redactor)
+        # The evidence digest is stored with the record (D73) whether the
+        # review ran one lens or the whole plan: a later delta review's
+        # trigger reads it.
+        return _record_round(round_log, event, single, redactor, evidence_digest)
 
     return _traced_review(event, trace, redactor, one)
 
@@ -1002,6 +1005,11 @@ def _review_lenses(
             lens_decisions=decisions,
         ),
         redactor,
+        # The digest is stored with the record (D73, round-2 review of
+        # #760): a later delta review's trigger reads it, and a record
+        # that stores none reads as evidence that cannot be shown to be
+        # current, which re-earns the bounded call every round.
+        evidence_digest,
     )
 
 
@@ -2079,10 +2087,12 @@ def _with_carryforward(
                 # the reply's `revises`/`withdrawn` entries resolve
                 # against; the record's own stored id stays in the record,
                 # and the lens the line is attributed to travels with it
-                # -- the per-lens re-assessment's (D73) input.
-                prior.append(
-                    (f"P{len(prior) + 1}", found[1], attribution or record.lens)
-                )
+                # -- the per-lens re-assessment's (D73) input. When no
+                # rule can pin the line, the attribution stays empty:
+                # a legacy record's whole comma-joined lens list is
+                # never stored as if it were one lens (round-2 review of
+                # #760, Nit 2).
+                prior.append((f"P{len(prior) + 1}", found[1], attribution))
     omitted = sum(record.findings_omitted for record in records)
     if not prior and not raw_lines and not omitted:
         # An unreadable log is not "no findings recorded" -- nothing is
@@ -2385,7 +2395,6 @@ def _compose_carry(
 
 
 def _reassess_reused_lens(
-    review: AgenticReview,
     event: PrEvent,
     decision: LensDecision,
     findings: list[MintedFinding],
@@ -2413,7 +2422,9 @@ def _reassess_reused_lens(
     composition -- the reply's revisions swapped into the review's
     findings in place (returned as `(index, minted)` swaps), its
     additions returned to append, its annotations carried on the
-    decision. A reused lens with no attributed, verified standing
+    decision. The composition's input is the `findings` list the caller
+    is building, not the review object (round-2 review of #760, Nit 1).
+    A reused lens with no attributed, verified standing
     finding, no body in the bundle, or a review that gathered no
     snapshot is left exactly as the carry-forward left it."""
     carried = [f for f in findings if f.carried and f.lens == decision.lens]
@@ -2542,6 +2553,7 @@ def _reassess_reused_lens(
             reassessed=reassessed,
             reassess_note=note,
             withdrawn=withdrawn,
+            gained_findings=bool(additions),
         ),
         swaps,
         additions,
@@ -2629,7 +2641,6 @@ def _with_reused_reassessment(
             continue
         reassessed_count += 1
         outcome = _reassess_reused_lens(
-            review,
             event,
             decision,
             findings,
@@ -2881,10 +2892,11 @@ def _record_round(
         dict.fromkeys(
             (
                 *(result.lens for result in review.lenses),
-                # A reused lens (D83) ran no entry, but the next delta
-                # review must be able to reuse its settled result again:
-                # the record's lens list is the reuse-eligible set the
-                # next review reads.
+                # A reused lens (D83) ran no entry, but it belongs on the
+                # record's lens list all the same: the list is what a
+                # later round reads to know which lenses the earlier
+                # reviews of this pull request actually ran or reused,
+                # while `clean_lenses` is what gates the offer.
                 *(
                     decision.lens
                     for decision in review.lens_decisions
@@ -2947,10 +2959,22 @@ def _round_record(
         )
         + ("",) * len(review.carried_raw)
     )
-    # The lenses of this round that settled clean (D76's rule: some entry
-    # of the lens ran clean), in the lens list's own order, so a later
-    # delta review offers a reuse only for a settled result.
+    # The lenses of this round that settled clean, in the lens list's own
+    # order, so a later delta review offers a reuse only for a settled
+    # result. Two rules put a name here: D76's clean-run rule (some entry
+    # of the lens ran clean) for the lenses that ran, and -- round-2
+    # review of #760 -- the reuse chain's carried-result rule for the
+    # lenses that were reused: a reused lens whose composed outcome is
+    # still clean (this round's re-assessment added nothing to it) has a
+    # settled result this round stood behind, and stays reuse-eligible; a
+    # reused lens that GAINED findings is not recorded, because its
+    # settled result changed this round and the next one re-runs it.
     clean = {result.lens for result in review.lenses if result.state is LensState.CLEAN}
+    clean |= {
+        decision.lens
+        for decision in review.lens_decisions
+        if decision.reuse and not decision.gained_findings
+    }
     stop = _first_limit_stop(review)
     record = fit_record(
         RoundRecord(

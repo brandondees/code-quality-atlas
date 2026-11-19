@@ -1865,6 +1865,7 @@ def _acknowledge(request):
 def _lenses(
     tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
     clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None, redactor=None,
+    event=None,
     **kw,
 ):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
@@ -1881,7 +1882,7 @@ def _lenses(
 
     try:
         result = review_lenses(
-            EVENT,
+            event or EVENT,
             names,
             DIFF if diff is None else diff,
             trees(),
@@ -4004,10 +4005,12 @@ def test_coverage_counts_reused_files(tmp_path):
     assert not [call for call in sprites.calls if call[0] == "create"]
     status = parse_status(render_draft(result, Redactor()))
     assert status["reused"] == 1
-    # The record's lens list names the reused lens too, so the NEXT delta
-    # review can reuse its settled result again instead of silently
-    # forcing the re-run the reuse was meant to avoid.
-    assert log.read().records[-1].lens == LENS
+    # The record's lens list names the reused lens, and — the rule that
+    # actually gates the next offer — so does `clean_lenses` (round-2
+    # review of #760): the reuse chain does not decay.
+    record = log.read().records[-1]
+    assert record.lens == LENS
+    assert record.clean_lenses == (LENS,)
 
 
 def test_the_payload_carries_the_incremental_diff_not_the_full_diff(tmp_path):
@@ -4633,3 +4636,203 @@ def test_the_record_attribution_field_outranks_the_fallbacks():
         ("lens-b",),
     )
     assert _prior_attribution(record, 0, record.findings[0]) == "lens-b"
+
+
+def test_chained_delta_rounds_persist_and_honor_the_evidence_digest(tmp_path):
+    """Major 1 (round-2 review of #760), end to end through the real
+    `_record_round`: a review stores the digest it settled under on its
+    OWN record, and the next delta round's trigger reads it -- unchanged
+    evidence across heads makes no re-assessment call, moved evidence
+    makes exactly one. The hand-built-record test pins the trigger's
+    unit; this one pins its write side, which production alone exercises.
+    Mutant: the digest dropped from the `_record_round` call, which
+    stores `""` on every record and re-earns the bounded call every
+    round whether or not the evidence moved."""
+    from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX as REASSESS_PREFIX
+    from atlas_reviewer.rounds import RoundLog
+
+    log_path = tmp_path / "rounds.jsonl"
+    first_event = PrEvent(EVENT.repo, EVENT.pr_number, OLD)
+    delta_event = PrEvent(EVENT.repo, EVENT.pr_number, HEAD, delta_from=OLD)
+    unchanged = "a" * 64
+    moved = "b" * 64
+
+    # Round A: the full review at the delta base. Its record -- written
+    # by the real `_record_round` -- carries its digest, its lens list,
+    # the lens it settled clean, and the finding's attribution.
+    model_a = ScriptedLensModel([READ_ALL, final(finding())])
+    result_a, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model_a,
+        event=first_event,
+        round_log=RoundLog(log_path),
+        evidence_digest=unchanged,
+    )
+    assert result_a.coverage_complete
+    record_a = RoundLog(log_path).read().records[-1]
+    assert record_a.evidence_digest == unchanged
+    assert record_a.clean_lenses == (LENS,)
+    assert record_a.attributions[-1] == LENS
+
+    # Round B: a delta review whose snapshot digest equals the stored
+    # one -- the reused result is shown to be current, and no
+    # re-assessment call is made.
+    model_b = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    _result_b, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model_b,
+        event=delta_event,
+        round_log=RoundLog(log_path),
+        delta=_delta_scope(),
+        evidence_digest=unchanged,
+    )
+    turns_b = [request.messages[0].text for request in model_b.requests]
+    assert len(model_b.requests) == 2
+    assert not any(t.startswith(REASSESS_PREFIX) for t in turns_b)
+    record_b = RoundLog(log_path).read().records[-1]
+    # The digest persists through the reuse round too, and the reused
+    # lens stays recorded: the chain does not decay (round-2 Minor).
+    assert record_b.evidence_digest == unchanged
+    assert record_b.clean_lenses == (LENS,)
+
+    # Round C: the same chain, with the snapshot moved -- exactly one
+    # bounded re-assessment call, and the reused lens that GAINED a
+    # finding is no longer recorded clean.
+    model_c = ScriptedLensModel(
+        [
+            _carry_reply((_restated(),)),
+            _reassess_reply(finding(finding="the rounding drops the carry bit")),
+        ],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result_c, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model_c,
+        event=delta_event,
+        round_log=RoundLog(log_path),
+        delta=_delta_scope(),
+        evidence_digest=moved,
+    )
+    reassess_turns = [
+        request
+        for request in model_c.requests
+        if request.messages[0].text.startswith(REASSESS_PREFIX)
+    ]
+    assert len(reassess_turns) == 1
+    assert [f.id for f in result_c.findings if f.id.startswith("R")] == [("R1-F1")]
+    record_c = RoundLog(log_path).read().records[-1]
+    assert record_c.evidence_digest == moved
+    assert record_c.clean_lenses == ()
+
+
+def test_a_reused_lens_reassessment_adding_a_blocker_flips_the_verdict(tmp_path):
+    """Minor 3 (round-2 review of #760): the recomputed verdict is what
+    the review posts. A reused lens's re-assessment that adds a verified
+    Blocker flips the verdict to REQUEST CHANGES; a stale verdict would
+    post the carry-forward's COMMENT over a newly introduced Blocker.
+    Mutant: the recompute replaced with the stale verdict."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            _carry_reply((_restated(),)),
+            _reassess_reply(
+                finding(
+                    severity="blocker", finding="the delta removes the bounds check"
+                )
+            ),
+        ],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        evidence_digest="b" * 64,
+    )
+    assert any(
+        f.verified and f.finding.severity is Severity.BLOCKER for f in result.findings
+    )
+    assert result.verdict is Verdict.BLOCK
+    assert result.proposed_event is ReviewEvent.REQUEST_CHANGES
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+
+
+def test_a_legacy_multi_lens_record_never_stores_the_joined_list_as_a_lens():
+    """Nit 2 (round-2 review of #760): a legacy record's unattributed
+    line -- an `L<n>` id past the lens list, or a carried `P` line in a
+    multi-lens record -- attributes to nothing, and the whole
+    comma-joined lens list is never stored as if it were one lens."""
+    from atlas_reviewer.coordinator import _prior_attribution
+    from atlas_reviewer.rounds import RoundRecord
+
+    record = RoundRecord(
+        EVENT.repo,
+        EVENT.pr_number,
+        OLD,
+        "lens-a, lens-b",
+        "COMMENT",
+        ('L9-F1 major "calc.py:2" rounds drift',),
+        False,
+    )
+    assert _prior_attribution(record, 0, record.findings[0]) == ""
+
+
+def test_a_single_lens_review_stores_its_digest_on_the_record(tmp_path):
+    """The digest is stored at BOTH `_record_round` call sites (round-2
+    review of #760, Major 1): the single-lens `review_lens` path writes
+    it too, so a later delta review's trigger reads what this round
+    settled under. Mutant: the call site's digest dropped, which stores
+    `""` and re-earns the bounded call every round."""
+    from atlas_reviewer.rounds import RoundLog
+
+    path = tmp_path / "state" / "rounds.jsonl"
+    path.parent.mkdir(parents=True)
+    result, _model, _ = review(
+        tmp_path,
+        [READ_ALL, final(finding())],
+        round_log=RoundLog(path),
+        evidence_digest="d" * 64,
+    )
+    assert result.coverage_complete
+    record = RoundLog(path).read().records[-1]
+    assert record.evidence_digest == "d" * 64
+    assert record.lens == LENS
+
+
+def test_a_legacy_records_unattributed_line_carries_no_lens_through_the_carry(tmp_path):
+    """Nit 2 (round-2 review of #760), through the carry-forward: a
+    legacy multi-lens record's unattributed finding line is carried with
+    an empty lens, and the whole comma-joined lens list never lands in
+    the new record's `attributions` as if it were one lens."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            "lens-a, lens-b",
+            "COMMENT",
+            (f'L9-F1 major "calc.py:2" {PRIOR_TEXT}',),
+            False,
+        )
+    )
+    model = ScriptedLensModel([READ_ALL, final(), _carry_reply(())])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=RoundLog(path), delta=_delta_scope()
+    )
+    # The silent carry leaves the prior standing as recorded, with an
+    # empty lens attribution.
+    assert [lens for _identifier, _finding, lens in result.carried_unverified] == [""]
+    record = RoundLog(path).read().records[-1]
+    # The carried line's slot in the new record's attributions is empty.
+    assert record.attributions[-1] == ""

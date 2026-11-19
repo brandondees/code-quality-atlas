@@ -114,11 +114,11 @@ class LensLibrary:
     def concern(self, name: str) -> str | None:
         """The lens body's one-line concern summary -- the first
         non-heading line under the body's `# <name>` heading -- or None
-        when the body has none. The delta review's decision turn carries
-        it next to the lens name, so the coordinator weighs the concern
-        and not the name alone (D83, round-1 review of #760). Bounded by
-        the caller: the line is prose the bundle generated, quoted like
-        the rest of the turn's controller-side listing."""
+        when the body has none. The delta review's decision turn
+        interpolates it bare next to the lens name: the line is trusted
+        bundle prose, the same trust level as the turn's instructions,
+        so unlike the turn's PR-derived blocks it travels outside the
+        fence (round-2 review of #760, Nit 3)."""
         body = self.body(name)
         if body is None:
             return None
