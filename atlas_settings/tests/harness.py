@@ -74,4 +74,6 @@ def default_resolve(host: str, port: int) -> Pinned:
     """The tests' default resolver: any host passes, shaped exactly like
     the real guard's answer — so the hostile-endpoint tests that pass
     the *real* resolver are the ones proving refusals."""
-    return Pinned(2, (f"93.0.{port % 250}.{port % 250}", port))
+    import socket
+
+    return Pinned(socket.AF_INET, (f"93.0.{port % 250}.{port % 250}", port))
