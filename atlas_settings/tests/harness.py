@@ -84,9 +84,6 @@ def default_resolve(host: str, port: int) -> Pinned:
     return Pinned(socket.AF_INET, (f"93.0.{port % 250}.{port % 250}", port))
 
 
-    return Pinned(2, (f"93.0.{port % 250}.{port % 250}", port))
-
-
 @dataclass
 class Recorded:
     method: str
