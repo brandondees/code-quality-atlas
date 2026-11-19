@@ -51,6 +51,7 @@ from atlas_reviewer.agentic_config import ENV as AGENTIC_LIMIT_ENV
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.lens_contract import Severity
 from atlas_reviewer.limit_stop import LimitHit
 from atlas_reviewer.notes import RECOVERED_NOTE_PATTERN
 from atlas_reviewer.openrouter import (
@@ -60,6 +61,7 @@ from atlas_reviewer.openrouter import (
     ENV_PROVIDERS,
     ENV_REQUIRE_ZDR,
 )
+from atlas_reviewer.picker import FLOOR_TIER
 from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.verdict import parse_status
 
@@ -667,6 +669,82 @@ def _findings(draft: str) -> tuple[str, ...]:
     and a marker miss degrades to an empty Findings section, never a
     crash."""
     return tuple(_bullets(section(draft, "Findings (verified quotes only)")))
+
+
+# The controller-rendered finding line (`coordinator._finding_line`): the
+# minted id, the controller-made tags bracket -- whose first tag is the
+# finding's severity, after the carried tag's own word when the finding
+# was carried forward (#702) -- the location as one inert code span, and
+# the lens that raised the finding in the parenthesis that names it,
+# before the finding text's own code span begins. The leading `- ` is
+# the draft's own bullet; `summarize_draft` strips it from the report's
+# findings, so the parse reads both shapes. Every field the tags bracket
+# and the lens parenthesis name is controller-made (`Severity`'s own
+# spellings, the lens name), not model text, so the match carries no
+# untrusted text anywhere; the location span's content is skipped whole,
+# and a code span never carries a raw backtick (`quote_untrusted` escapes
+# them), so the span boundary is unambiguous.
+_FINDING_LINE = re.compile(
+    r"^(?:- )?\*\*[^*]+\*\* "
+    r"\[(?P<tags>[^\]]*)\] "
+    r"`(?P<location>[^`]*)` "
+    r"\((?P<lens>`?[a-z0-9]+(?:-[a-z0-9]+)*`?)\): "
+)
+
+
+def finding_class(line: str) -> tuple[Severity | None, str]:
+    """The (severity, lens) one controller-rendered finding line carries,
+    or ``(None, lens-or-"")`` when the line does not parse as one: the
+    severity is the tags bracket's first tag, or the tag after the
+    carried tag's own word (#702), and the lens is the parenthesis
+    between the location span and the finding text. The severity floor
+    keeps what this cannot classify -- dropping an unclassifiable
+    finding would be the silent suppression the floor exists to bound --
+    so the parse's miss is the safe direction, and the round-trip
+    invariant (findings reach `ReviewReport` only through
+    `summarize_draft`, from a draft the coordinator rendered) is what
+    makes the parse's shape the ordinary one."""
+    match = _FINDING_LINE.match(line)
+    if match is None:
+        return None, ""
+    lens = match.group("lens").strip("`")
+    tags = match.group("tags").split(", ")
+    if not tags:
+        return None, lens
+    name = tags[1] if tags[0] == "carried" else tags[0]
+    try:
+        return Severity(name), lens
+    except ValueError:
+        return None, lens
+
+
+def apply_severity_floor(
+    findings: tuple[str, ...], floor: Severity | None
+) -> tuple[tuple[str, ...], int]:
+    """The findings the post keeps under the repo's severity floor (D84,
+    config slice S3), as ``(kept, held)``.
+
+    A finding at or above the floor -- a severity whose rank is at or
+    below the floor's; a lower rank is more severe -- is posted. A
+    finding below it from a preference-tier lens is held in the draft,
+    named by the post's count, never silently: the floor suppresses the
+    post's noise, not the record. A finding from one of the manifest's
+    floor-tier lenses (`picker.FLOOR_TIER`, D69's 5:13 PM CT update) is
+    never held whatever its severity -- the tier rule carries over
+    unchanged (D81 Q3) -- and neither is a line the parse cannot
+    classify. The default floor (``None``, the repo raised nothing)
+    keeps every finding."""
+    if floor is None:
+        return findings, 0
+    kept: list[str] = []
+    held = 0
+    for line in findings:
+        severity, lens = finding_class(line)
+        if severity is None or lens in FLOOR_TIER or severity.rank <= floor.rank:
+            kept.append(line)
+        else:
+            held += 1
+    return tuple(kept), held
 
 
 def _agentic_selection_skips(draft: str) -> list[tuple[str, str]]:

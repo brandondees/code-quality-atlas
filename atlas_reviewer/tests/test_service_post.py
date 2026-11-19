@@ -3,6 +3,7 @@
 post a second review."""
 
 import contextvars
+import dataclasses
 import inspect
 import json
 import threading
@@ -21,6 +22,7 @@ from atlas_reviewer.github_auth import (
 )
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.repo_config import PostConfigRead
 from atlas_reviewer.service import (
     PostAuthError,
     PostNotCurrent,
@@ -1538,3 +1540,182 @@ def report_event(old: str, new: str):
     from atlas_reviewer.domain import PrEvent
 
     return PrEvent("example-org/example-app", 42, new, delta_from=old)
+
+
+# --------------------------------------------- the repo's post settings (S3)
+
+
+def _findings_report(findings: tuple[str, ...]) -> ReviewReport:
+    return dataclasses.replace(REPORT, findings=findings)
+
+
+def _floor(**overrides: object) -> PostConfigRead:
+
+    fields: dict[str, object] = {
+        "floor": None,
+        "verbosity": "full",
+        "notes": (),
+        **overrides,
+    }
+    return PostConfigRead(**fields)  # type: ignore[arg-type]
+
+
+_BLOCKER = (
+    "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
+    "(reviewing-api-contract-safety): breaks callers"
+)
+_MAJOR = (
+    "**L1-F2** [major, defect, route: eng, introduced] `a.py:2` "
+    "(checking-restraint): overbuilt"
+)
+_MINOR = (
+    "**L1-F3** [minor, defect, route: eng, introduced] `a.py:3` "
+    "(checking-restraint): naming"
+)
+_NIT = (
+    "**L1-F4** [nit, defect, route: eng, introduced] `a.py:4` "
+    "(checking-restraint): wording"
+)
+_FLOOR_TIER_NIT = (
+    "**L1-F5** [nit, defect, route: eng, introduced] `a.py:5` "
+    "(hunting-silent-failures): the swallowed OSError hides the refusal"
+)
+
+
+def test_a_post_without_the_post_config_is_the_unchanged_body():
+    """None and the parsed default render the body the service has always
+    sent: the floor's default posts everything and the full body stands."""
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG
+
+    body = render_comment(REPORT, "k", lambda text: text)
+    assert (render_comment(REPORT, "k", lambda text: text, post=None) == body) and (
+        render_comment(REPORT, "k", lambda text: text, post=DEFAULT_POST_CONFIG) == body
+    )
+
+
+def test_the_floor_holds_below_floor_findings_and_names_the_key():
+    """The repo's floor took effect and the post says so: the key and the
+    level in the head, the held count in the Findings section."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_BLOCKER, _MAJOR, _MINOR, _NIT))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("major"))
+    )
+    assert "`review_severity_floor: major`" in body
+    assert "held in the draft, not this post" in body
+    assert _BLOCKER in body and _MAJOR in body
+    assert _MINOR not in body and _NIT not in body
+    assert "[2 below-floor finding(s) from preference-tier lenses" in body
+
+
+def test_an_emptied_findings_section_cannot_read_clean():
+    """A floor above every finding leaves no bullet -- and no plain
+    `None.`: the section names the hold, the way the cut is named."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_MINOR, _NIT))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert "no finding at or above the repo's severity floor" in findings
+    assert "2 below-floor finding(s)" in findings
+
+
+def test_a_floor_tier_lens_finding_survives_any_floor_in_the_post():
+    """The tier rule carries over unchanged (D81 Q3): the post never
+    holds a floor-tier lens's finding, whatever the repo raised its
+    floor to."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_FLOOR_TIER_NIT, _MINOR))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    assert _FLOOR_TIER_NIT in body
+    assert _MINOR not in body
+
+
+def test_a_fail_open_post_line_is_named_and_never_echoes_the_value():
+    """An unusable floor line took nothing down with it -- the default
+    stands, every finding posts -- and the post names the condition
+    without echoing the rejected value."""
+    report = _findings_report((_MINOR,))
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        post=_floor(
+            notes=(
+                (
+                    "the reviewed repo's default-branch REVIEW.md carries a "
+                    "review_severity_floor: line that is not one of the "
+                    "severity names; it is ignored and the default "
+                    "(post every finding) stands"
+                ),
+            )
+        ),
+    )
+    assert "review_severity_floor:" in body
+    assert "ignored and the default" in body
+    assert _MINOR in body
+
+
+def test_the_brief_post_drops_the_bookkeeping_and_keeps_the_protected():
+    """The verbosity dial's one lower position: the lens bookkeeping and
+    the cost lines go; the Findings section, the coverage note, the
+    limit stops and the delta's carried record stay."""
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    body = render_comment(
+        REPORT, "k", lambda text: text, post=_floor(verbosity=POST_VERBOSITY_BRIEF)
+    )
+    assert "## Lenses run" not in body
+    assert "## Lenses not run" not in body
+    assert "## Cost" not in body
+    for kept in ("## Findings", "## Files read", "## Limit stops"):
+        assert kept in body, kept
+    assert REPORT.files_note in body
+    assert "`review_post_verbosity: brief`" in body
+
+
+def test_the_brief_post_keeps_the_delta_sections_and_decisions_go():
+    """A delta review's resolved and carried sections are finding-bearing
+    and stay in the brief body; the per-lens decisions are bookkeeping
+    and go."""
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = dataclasses.replace(
+        REPORT,
+        resolved=("**L1-F1** [major, defect] resolved by the new commit",),
+        carried_unverified=("**L1-F2** [carried, minor] not re-verified",),
+        lens_decisions=("reused L1: the delta touched none of its paths",),
+    )
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        delta_from="a" * 40,
+        post=_floor(verbosity=POST_VERBOSITY_BRIEF),
+    )
+    assert "## Resolved by the new commits" in body
+    assert "## Carried, not re-verified" in body
+    assert "## Lens decisions" not in body
+
+
+def test_the_floor_and_the_brief_dial_compose():
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = _findings_report((_MAJOR, _MINOR, _NIT))
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        post=_floor(floor=Severity("major"), verbosity=POST_VERBOSITY_BRIEF),
+    )
+    assert "`review_severity_floor: major`" in body
+    assert "`review_post_verbosity: brief`" in body
+    assert _MAJOR in body and _MINOR not in body
+    assert "## Cost" not in body and "## Limit stops" in body

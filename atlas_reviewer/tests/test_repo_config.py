@@ -232,13 +232,13 @@ def test_an_unknown_review_key_is_a_named_unsupported_note():
     names the key, the condition, and the default that stands, and the
     known keys' own values are untouched."""
     tarball = _tarball(
-        {"REVIEW.md": b"review_severity_floor: important\nreview_ceiling_usd: 15\n"}
+        {"REVIEW.md": b"review_round_cap: important\nreview_ceiling_usd: 15\n"}
     )
     config = read_repo_config(tarball)
     assert config.ceiling.value == Decimal(15)
     assert len(config.unsupported_notes) == 1
     note = config.unsupported_notes[0]
-    assert "review_severity_floor:" in note
+    assert "review_round_cap:" in note
     assert "does not support" in note
     assert "ignored" in note
     assert "default" in note
@@ -286,14 +286,18 @@ def test_unsupported_keys_are_deduplicated_and_bounded():
 
 
 def test_the_known_keys_never_read_as_unsupported():
-    """The three known keys are the schema, not unsupported keys -- a
-    usable, an unusable, and a repeated known line alike name no
-    unsupported key."""
+    """The known keys are the schema, not unsupported keys -- a usable,
+    an unusable, and a repeated known line alike name no unsupported
+    key. The S3 post keys sit in the same set: the merge-base read does
+    not honor them, and it does not name them either."""
     files = (
         b"review_ceiling_usd: 15\n"
         b"review_lens_include: checking-restraint\n"
         b"review_lens_exclude:\n"
         b"review_lens_exclude: also-nothing\n"
+        b"review_severity_floor: major\n"
+        b"review_post_verbosity: not-a-dial\n"
+        b"review_post_verbosity: also-not\n"
     )
     config = read_repo_config(_tarball({"REVIEW.md": files}))
     assert config.ceiling.value == Decimal(15)
@@ -319,11 +323,11 @@ def test_prose_outside_the_review_key_namespace_is_not_a_config_attempt():
 def test_unsupported_notes_compose_with_the_unusable_notes():
     """A file can carry both: the known key's unusable line keeps its own
     note and the unknown key keeps its unsupported one, independently."""
-    files = b"review_ceiling_usd: later\nreview_severity_floor: important\n"
+    files = b"review_ceiling_usd: later\nreview_round_cap: important\n"
     config = read_repo_config(_tarball({"REVIEW.md": files}))
     assert config.ceiling.value is None
     assert "review_ceiling_usd" in config.ceiling.note
-    assert any("review_severity_floor:" in n for n in config.unsupported_notes)
+    assert any("review_round_cap:" in n for n in config.unsupported_notes)
 
 
 def test_the_admission_class_keys_draw_no_unsupported_note():
@@ -378,13 +382,13 @@ def test_a_fenced_example_key_draws_no_unsupported_note():
     files = (
         b"# policy\n\n"
         b"```\n"
-        b"review_severity_floor: important   # a future key, documented\n"
+        b"review_round_cap: important   # a future key, documented\n"
         b"```\n"
         b"review_real_but_unknown: 1\n"
     )
     note = read_repo_config(_tarball({"REVIEW.md": files})).unsupported_notes[0]
     assert "review_real_but_unknown:" in note
-    assert "review_severity_floor:" not in note
+    assert "review_round_cap:" not in note
 
 
 def test_the_fence_walk_follows_the_commonmark_subset():
@@ -476,3 +480,132 @@ def test_the_fence_walk_follows_the_commonmark_subset():
     assert "review_after_info_fence:" in note
     assert "review_inside_info_fence:" not in note
     assert "review_still_inside_info:" not in note
+
+
+# ------------------------------------------------- the service's post keys
+
+
+def test_no_post_config_text_or_no_lines_reads_as_the_defaults():
+    """No file, prose only, or no post line: the default stands on both
+    keys, silently, exactly as no override at all."""
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG, parse_post_config
+
+    for text in (None, "", "# policy\n\nNo post setting here.\n"):
+        assert parse_post_config(text) == DEFAULT_POST_CONFIG, text
+
+
+def test_every_severity_name_is_an_accepted_floor():
+    """The floor's closed set is the atlas severity vocabulary itself,
+    lowercase -- the enum's own spelling."""
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import parse_post_config
+
+    for name in ("blocker", "major", "minor", "nit"):
+        read = parse_post_config(f"review_severity_floor: {name}\n")
+        assert read.floor is Severity(name), name
+        assert read.notes == (), name
+
+
+def test_a_commented_floor_and_verbosity_line_is_honored():
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import (
+        POST_VERBOSITY_BRIEF,
+        parse_post_config,
+    )
+
+    read = parse_post_config(
+        "review_severity_floor: major  # quieter posts\n"
+        "review_post_verbosity: brief  # findings and coverage only\n"
+    )
+    assert read.floor is Severity.MAJOR
+    assert read.verbosity == POST_VERBOSITY_BRIEF
+    assert read.notes == ()
+
+
+def test_an_explicit_full_verbosity_is_the_default_made_plain():
+    from atlas_reviewer.repo_config import (
+        DEFAULT_POST_CONFIG,
+        POST_VERBOSITY_FULL,
+        parse_post_config,
+    )
+
+    read = parse_post_config("review_post_verbosity: full\n")
+    assert read.verbosity == POST_VERBOSITY_FULL
+    assert read == DEFAULT_POST_CONFIG
+
+
+def test_an_unusable_floor_line_fails_open_and_is_named():
+    """A floor value outside the closed set -- an unknown severity, a
+    protocol-style capitalized name, no value at all -- leaves the
+    default standing and is named: the key, the condition, the default
+    that stands, and never the rejected value."""
+    from atlas_reviewer.repo_config import parse_post_config
+
+    for raw in (
+        "review_severity_floor: important\n",
+        "review_severity_floor: Major\n",
+        "review_severity_floor:\n",
+        "review_severity_floor:   \n",
+        "review_severity_floor: blocker\nreview_severity_floor: major\n",
+    ):
+        read = parse_post_config(raw)
+        assert read.floor is None, raw
+        assert len(read.notes) == 1, raw
+        assert "review_severity_floor:" in read.notes[0], raw
+        assert "ignored" in read.notes[0], raw
+        assert "post every finding" in read.notes[0], raw
+        assert "important" not in read.notes[0], raw
+        assert "Major" not in read.notes[0], raw
+
+
+def test_an_unusable_verbosity_line_fails_open_and_is_named():
+    from atlas_reviewer.repo_config import parse_post_config
+
+    for raw in (
+        "review_post_verbosity: terse\n",
+        "review_post_verbosity:\n",
+        "review_post_verbosity: brief\nreview_post_verbosity: full\n",
+    ):
+        read = parse_post_config(raw)
+        assert read.verbosity == "full", raw
+        assert len(read.notes) == 1, raw
+        assert "review_post_verbosity:" in read.notes[0], raw
+        assert "ignored" in read.notes[0], raw
+        assert "full post" in read.notes[0], raw
+        assert "terse" not in read.notes[0], raw
+
+
+def test_the_two_post_keys_fail_open_independently():
+    """A bad floor line does not take the verbosity down with it, and
+    the other way round: the keys are independent settings, each with
+    its own default and its own note."""
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import (
+        POST_VERBOSITY_BRIEF,
+        parse_post_config,
+    )
+
+    read = parse_post_config(
+        "review_severity_floor: later\nreview_post_verbosity: brief\n"
+    )
+    assert read.floor is None
+    assert read.verbosity == POST_VERBOSITY_BRIEF
+    assert len(read.notes) == 1 and "review_severity_floor:" in read.notes[0]
+
+    read = parse_post_config(
+        "review_severity_floor: minor\nreview_post_verbosity: nope\n"
+    )
+    assert read.floor is Severity.MINOR
+    assert read.verbosity == "full"
+    assert len(read.notes) == 1 and "review_post_verbosity:" in read.notes[0]
+
+
+def test_the_post_keys_are_schema_keys_the_scan_knows():
+    """A key `parse_post_config` carries is a key the unsupported scan
+    knows by name (the same cohesion the admission keys' cross-check
+    pins): a repo whose `REVIEW.md` sets its floor or its verbosity
+    draws no false unsupported note from the merge-base read."""
+    from atlas_reviewer.repo_config import _KNOWN_KEYS
+
+    assert "review_severity_floor" in _KNOWN_KEYS
+    assert "review_post_verbosity" in _KNOWN_KEYS

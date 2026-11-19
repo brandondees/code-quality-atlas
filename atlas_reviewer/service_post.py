@@ -11,6 +11,15 @@ the review, and it is also the HTML marker at the end of the body. A retry
 lists reviews first and does not post again when that marker is already
 there, including when the process died after GitHub accepted the review
 and before the local record was written.
+
+The repo's own post configuration (config slice S3, D84) arrives as an
+optional ``PostConfigRead`` from the caller -- the ``REVIEW.md`` lines the
+service reads from the repository's **default branch**, never from a
+surface the PR controls. It lowers only: a severity floor that holds
+below-floor preference-tier findings out of the Findings section (a
+floor-tier lens's finding is never held), and a verbosity dial whose one
+lower position is the brief body. Nothing in it can raise the post past
+the body this module already sends.
 """
 
 from __future__ import annotations
@@ -37,6 +46,11 @@ from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.pagination import DEFAULT_MAX_PAGES, next_link
 from atlas_reviewer.ports import BoundaryError, Clock, TokenSource
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.repo_config import (
+    DEFAULT_POST_CONFIG,
+    POST_VERBOSITY_BRIEF,
+    PostConfigRead,
+)
 from atlas_reviewer.service import (
     PostAuthError,
     PostHookMissing,
@@ -45,7 +59,7 @@ from atlas_reviewer.service import (
     RateLimited,
     before_send,
 )
-from atlas_reviewer.service_run import ReviewReport
+from atlas_reviewer.service_run import ReviewReport, apply_severity_floor
 
 API_URL = "https://api.github.com"
 MAX_COMMENT_CHARS = 65_000
@@ -120,7 +134,43 @@ def render_comment(
     key: str,
     scrub: Callable[[str], str],
     delta_from: str = "",
+    post: PostConfigRead | None = None,
 ) -> str:
+    """The posted body: the banner, the recommended line, the findings and
+    the record sections, cut to fit.
+
+    `post` is the repo's own post configuration (config slice S3, D84) --
+    the `REVIEW.md` lines the service reads from the repository's
+    **default branch** and parses through `repo_config.parse_post_config`;
+    None is the default, every finding posted in the full body. The
+    severity floor holds the below-floor findings of preference-tier
+    lenses out of the Findings section -- named by the count the section
+    carries, never silently -- and never holds a floor-tier lens's
+    finding (`apply_severity_floor`). The verbosity dial may only lower
+    the post: the brief body drops the lens bookkeeping and the cost
+    lines and keeps the Findings section, the coverage note, the limit
+    stops and the delta's carried record -- and on an incomplete review
+    it keeps "Lenses not run" too, because the banner and the Findings
+    note point the reader there by name. When a floor or a brief dial
+    took effect -- or a line failed open -- the post names the key that
+    did it; every value a line of the post names is schema-validated."""
+    config = post or DEFAULT_POST_CONFIG
+    kept, held = apply_severity_floor(report.findings, config.floor)
+    settings: list[str] = [*config.notes]
+    if config.floor is not None:
+        settings.append(
+            f"The repo's `review_severity_floor: {config.floor.value}` line is "
+            f"in effect: findings below {config.floor.value} from "
+            "preference-tier lenses are held in the draft, not this post; "
+            "findings from floor-tier lenses are posted at any severity."
+        )
+    if config.verbosity == POST_VERBOSITY_BRIEF:
+        settings.append(
+            "The repo's `review_post_verbosity: brief` line is in effect: "
+            "this post is the brief form -- the findings, the coverage note, "
+            "the limit stops and the carry record -- without the lens "
+            "bookkeeping and the cost lines."
+        )
     recommended = report.recommended_event
     if recommended not in _EVENTS:
         recommended = "unreported"
@@ -150,15 +200,30 @@ def render_comment(
             head += (
                 f"Follows the review of `{delta_from[:12]}`; the findings it reported are carried forward below.",
             )
+    head += tuple(settings)
+    brief = config.verbosity == POST_VERBOSITY_BRIEF
     tail = (
-        _section("Lenses run", report.lenses_run, scrub),
-        _section("Lenses not run", report.lenses_not_run, scrub),
+        *(
+            ()
+            if brief
+            else (_section("Lenses run", report.lenses_run, scrub),)
+        ),
+        # The brief dial drops "Lenses not run" as bookkeeping -- except
+        # on an incomplete review, where #757's banner and its Findings
+        # note point the reader at that section by name, so it joins the
+        # protected set for that post (the fix brief's call, recorded in
+        # D84's Correction): the pointer must resolve, not dangle.
+        *(
+            ()
+            if brief and not incomplete
+            else (_section("Lenses not run", report.lenses_not_run, scrub),)
+        ),
         # A delta review's per-lens decisions (D83); a full review's post
         # carries no empty decisions section.
         *(
-            (_section("Lens decisions", report.lens_decisions, scrub),)
-            if report.lens_decisions
-            else ()
+            ()
+            if brief or not report.lens_decisions
+            else (_section("Lens decisions", report.lens_decisions, scrub),)
         ),
         _FILES + "\n\n" + _section("Files read", files, scrub),
         # A delta review's resolved and carried sections (#702); a full
@@ -178,20 +243,20 @@ def render_comment(
             else ()
         ),
         _section("Limit stops", report.limit_stops, scrub),
-        _section("Cost", report.cost_lines, scrub),
+        *(() if brief else (_section("Cost", report.cost_lines, scrub),)),
     )
     mark = marker_for(key)
     ending = f"\n\n[comment cut to fit the post limit]\n\n{mark}"
 
     def assemble(items: tuple[str, ...], dropped: int) -> str:
         return "\n\n".join(
-            (*head, _findings_section(items, scrub, dropped, incomplete), *tail)
+            (*head, _findings_section(items, scrub, dropped, held, incomplete), *tail)
         )
 
     def fits(b: str) -> bool:
         return len(b) + 2 + len(mark) <= MAX_COMMENT_CHARS
 
-    findings = list(report.findings)
+    findings = list(kept)
     body = assemble(tuple(findings), 0)
     if fits(body):
         return f"{body}\n\n{mark}"
@@ -244,10 +309,32 @@ def _carried_section(
     return f"## {title}\n\n{listed}"
 
 
+def held_note(held: int) -> str:
+    """The Findings section's hold note, when the hold is the note: what
+    the repo's severity floor kept out of this post, named the way the
+    cut note names its count, so an emptied list cannot read as clean."""
+    return (
+        f"[no finding at or above the repo's severity floor; {held} "
+        "below-floor finding(s) from preference-tier lenses held in "
+        "the draft]"
+    )
+
+
+def held_clause(held: int) -> str:
+    """The hold folded into a stronger note's sentence (the incomplete
+    review's, or the cut's): the count stays named, the stronger claim
+    stays the note's own."""
+    return (
+        f" The repo's severity floor also held {held} below-floor "
+        "finding(s) from preference-tier lenses in the draft."
+    )
+
+
 def _findings_section(
     items: tuple[str, ...],
     scrub: Callable[[str], str],
     dropped: int = 0,
+    held: int = 0,
     incomplete: bool = False,
 ) -> str:
     """The Findings section, rendered unlike every other section.
@@ -276,8 +363,17 @@ def _findings_section(
 
     `incomplete` is the review's coverage, read fail-closed by
     `render_comment`: an empty section on an incomplete review cannot read
-    as a clean bill (issue #750), so its none names the incompleteness and
-    points at the sections that record the stop."""
+    as a clean bill (issue #750). Incompleteness is never hidden (the fix
+    brief's call on the #757 composition): on an incomplete review the
+    incomplete note wins the empty section, and the cut and held counts
+    fold into whichever note wins, so no combination of the three leaves
+    the section reading as a plain `None.`.
+
+    `held` is the count of below-floor findings the repo's severity floor
+    (config slice S3, D84) keeps out of this post -- preference-tier
+    lenses' findings below the floor, carried in the draft. The section
+    names the hold the way it names the cut, so a floor that emptied the
+    list cannot read as a clean review."""
     if items:
         listed = "\n".join(f"- {scrub(item)}" for item in items)
         if dropped:
@@ -285,13 +381,29 @@ def _findings_section(
                 f"\n[{dropped} of {dropped + len(items)} findings"
                 " cut to fit the post limit]"
             )
-    elif dropped:
-        listed = f"[all {dropped} findings cut to fit the post limit]"
+        if held:
+            listed += (
+                f"\n[{held} below-floor finding(s) from preference-tier lenses"
+                " held in the draft by the repo's severity floor]"
+            )
     elif incomplete:
+        # Incompleteness wins the empty section (the fix brief's call on
+        # the #757 composition): the stronger claim is never hidden, and
+        # the cut and held counts fold into its note so neither is lost.
         listed = (
             "None -- the review is incomplete, so this is not a clean bill; "
             "see Lenses not run and Limit stops."
         )
+        if dropped:
+            listed += f" All {dropped} findings were cut to fit the post limit."
+        if held:
+            listed += held_clause(held)
+    elif dropped:
+        listed = f"[all {dropped} findings cut to fit the post limit]"
+        if held:
+            listed += held_clause(held)
+    elif held:
+        listed = held_note(held)
     else:
         listed = "None."
     return f"## Findings\n\n{listed}"
@@ -377,8 +489,19 @@ class ReviewPoster:
         service log scrubber."""
         return self._secrets()
 
-    def post(self, event: PrEvent, report: ReviewReport) -> bool:
-        """True when this commit was already posted and nothing new was created."""
+    def post(
+        self,
+        event: PrEvent,
+        report: ReviewReport,
+        post_config: Callable[[], PostConfigRead] | None = None,
+    ) -> bool:
+        """True when this commit was already posted and nothing new was created.
+
+        `post_config` is the repo's own post configuration (config slice
+        S3, D84) as a lazy source the caller resolved from the
+        `REVIEW.md` on the repo's default branch; it is read after this
+        method's own dedupe checks, so an already-posted head spends no
+        read. None is the default post."""
         key = post_key(event)
         if self._ledger.seen(key) is not None:
             return True
@@ -398,7 +521,13 @@ class ReviewPoster:
                 raise PostNotCurrent(
                     "the head moved or the post was stopped before the review was sent"
                 )
-            body = render_comment(report, key, self._scrub, delta_from=event.delta_from)
+            body = render_comment(
+                report,
+                key,
+                self._scrub,
+                delta_from=event.delta_from,
+                post=post_config() if post_config is not None else None,
+            )
             review_id = self._create(event, comment_payload(event.head_sha, body))
             self._ledger.record(key, review_id)
         finally:

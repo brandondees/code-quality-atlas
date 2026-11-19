@@ -45,7 +45,9 @@ from atlas_reviewer.service_run import (
     RunConfig,
     _read_token,
     _stop,
+    apply_severity_floor,
     child_env,
+    finding_class,
     make_runner,
     review_argv,
     round_log_path,
@@ -1311,3 +1313,187 @@ def test_a_full_review_draft_has_no_delta_sections():
     assert report.findings == (
         '**L1-F1** [minor] `"calc.py:2"` (`"lens"`): "rounds early"',
     )
+
+
+# ------------------------------------------------ the severity floor (S3)
+
+
+def _lens_finding_draft(lens: str, findings: tuple) -> str:
+    """A draft from the real `coordinator.render_draft` whose one lens --
+    named, so a floor-tier lens's own findings can be tested against the
+    preference tier's -- ran clean with the given verified findings, each
+    (severity, problem, fix)."""
+    from atlas_reviewer.redact import Redactor
+
+    def checked(severity: Severity, problem: str, fix: str) -> CheckedFinding:
+        return CheckedFinding(
+            Finding(
+                LineRange("calc.py", 2, 3),
+                severity,
+                Valence.DEFECT,
+                Route.ENG,
+                Attribution.INTRODUCED,
+                problem,
+                fix,
+                "return sum(round(x, 2) for x in xs)",
+            ),
+            QuoteSource.HEAD,
+        )
+
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        findings=tuple(checked(*f) for f in findings),
+        changed_files=1,
+    )
+    review = synthesize([LensResult(lens, 1, "ab12", outcome)])
+    return render_draft(review, Redactor())
+
+
+def test_finding_class_reads_the_controller_tags_and_lens():
+    """The severity is the tags bracket's first tag and the lens is the
+    parenthesis that names it -- on a line the real `render_draft` wrote,
+    so the parse's shape is the controller's own."""
+    draft = _lens_finding_draft(
+        "checking-restraint", ((Severity.MINOR, "rounds before summing", "sum first"),)
+    )
+    line = summarize_draft(draft, expect=MODE_AGENTIC).findings[0]
+    assert line.startswith("**L1-F1** [minor, defect, route: eng, introduced]")
+    assert finding_class(line) == (Severity.MINOR, "checking-restraint")
+
+
+def test_finding_class_reads_a_carried_lines_severity_from_its_second_tag():
+    """A carried finding's tags bracket opens with the carried tag's own
+    word (#702); the severity is the tag after it, and the lens arrives
+    quoted."""
+    line = (
+        '- **L1-F1** [carried, blocker] `"calc.py:2-3"` '
+        "(`tracing-correctness-and-invariants`): "
+        "`the refund path rounds before summing`"
+    )
+    assert finding_class(line) == (
+        Severity.BLOCKER,
+        "tracing-correctness-and-invariants",
+    )
+
+
+def test_finding_class_keeps_an_unparseable_line_unclassified():
+    """A line that is not a controller-rendered finding classifies as
+    (None, ""): the floor keeps what it cannot see, never silently
+    drops it."""
+    assert finding_class("- a plain bullet that is not a finding") == (None, "")
+    assert finding_class("") == (None, "")
+
+
+def test_finding_class_is_not_confused_by_decoy_anchors_in_quoted_text():
+    """The location span and the finding text are data: a `(word): `
+    sequence inside either must not move the lens the parse reads. The
+    anchor's position -- one span, then the lens parenthesis -- is fixed
+    by the line's controller-rendered prefix."""
+    draft = _lens_finding_draft(
+        "checking-restraint",
+        (
+            (
+                Severity.MINOR,
+                "the helper at (sum): rounds twice (fix): wrongly",
+                "sum first",
+            ),
+        ),
+    )
+    line = summarize_draft(draft, expect=MODE_AGENTIC).findings[0]
+    assert finding_class(line) == (Severity.MINOR, "checking-restraint")
+
+
+def test_finding_class_names_an_unknown_severity_tag_unclassified():
+    """A tags bracket whose first tag is not a severity name -- a draft
+    this coordinator did not write -- classifies as unclassified, with
+    the lens it could still read."""
+    line = "**L1-F1** [urgent, defect] `calc.py:2-3` (checking-restraint): text"
+    assert finding_class(line) == (None, "checking-restraint")
+
+
+def test_the_default_floor_keeps_every_finding():
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG
+
+    findings = (
+        (
+            "**L1-F1** [minor, defect, route: eng, introduced] `calc.py:2-3` "
+            "(checking-restraint): rounds before summing"
+        ),
+        (
+            "**L1-F2** [nit, defect, route: eng, introduced] `calc.py:2-3` "
+            "(checking-restraint): a magic constant"
+        ),
+    )
+    kept, held = apply_severity_floor(findings, DEFAULT_POST_CONFIG.floor)
+    assert kept == findings
+    assert held == 0
+
+
+def test_the_floor_holds_below_floor_preference_findings_and_counts_them():
+    """The repo's floor holds the preference-tier findings below it from
+    the post -- named by the count the post carries, never silent --
+    and keeps everything at or above it."""
+    from atlas_reviewer.lens_contract import Severity as S
+
+    findings = (
+        (
+            "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
+            "(reviewing-api-contract-safety): breaks callers"
+        ),
+        (
+            "**L1-F2** [major, defect, route: eng, introduced] `a.py:2` "
+            "(checking-restraint): overbuilt"
+        ),
+        (
+            "**L1-F3** [minor, defect, route: eng, introduced] `a.py:3` "
+            "(checking-restraint): naming"
+        ),
+        (
+            "**L1-F4** [nit, defect, route: eng, introduced] `a.py:4` "
+            "(checking-restraint): wording"
+        ),
+    )
+    kept, held = apply_severity_floor(findings, S("major"))
+    assert kept == findings[:2]
+    assert held == 2
+
+
+def test_a_finding_exactly_at_the_floor_is_kept():
+    """At the floor means posted: `major` keeps a Major. Kills the
+    strict-comparison mutant, which dropped the floor's own tier."""
+    from atlas_reviewer.lens_contract import Severity as S
+
+    findings = (
+        (
+            "**L1-F1** [major, defect, route: eng, introduced] `a.py:2` "
+            "(checking-restraint): overbuilt"
+        ),
+    )
+    kept, held = apply_severity_floor(findings, S("major"))
+    assert kept == findings and held == 0
+
+
+def test_a_floor_tier_lens_finding_is_never_held_whatever_its_severity():
+    """The tier rule carries over unchanged (D81 Q3): a finding from one
+    of the manifest's floor-tier lenses is posted at any severity, under
+    any floor the repo raised. Kills the tier-exemption-removed mutant."""
+    from atlas_reviewer.lens_contract import Severity as S
+
+    findings = (
+        (
+            "**L1-F1** [nit, defect, route: eng, introduced] `a.py:4` "
+            "(hunting-silent-failures): the swallowed OSError hides the refusal"
+        ),
+    )
+    kept, held = apply_severity_floor(findings, S("blocker"))
+    assert kept == findings and held == 0
+
+
+def test_an_unclassifiable_finding_is_kept_under_any_floor():
+    """A line the parse cannot classify is kept: the floor suppresses
+    only what it can see. Kills the unclassifiable-dropped mutant."""
+    from atlas_reviewer.lens_contract import Severity as S
+
+    findings = ("- a bullet this parse cannot read as a finding",)
+    kept, held = apply_severity_floor(findings, S("blocker"))
+    assert kept == findings and held == 0

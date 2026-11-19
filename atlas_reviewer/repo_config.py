@@ -51,12 +51,24 @@ Today's keys:
   preference that overrides the picker's guideline, applied by
   `picker`, whose protection set is the manifest's whole `tier: floor`
   (D69's 5:13 PM CT update), not the critical tier alone.
+- `review_severity_floor:` / `review_post_verbosity:` (config slice S3,
+  D84) -- the service's own post settings, parsed by this module's
+  schema but **not read from the merge-base**: the floor decides which
+  findings reach the post, and the verbosity decides which sections it
+  carries, so a PR that could move either would suppress or quiet its
+  own review. The service reads them from the repo's **default branch**
+  at post time (the same default-branch window the admission-class keys
+  are read from) through `parse_post_config`, whose read this module
+  shares; the merge-base reads below neither honor nor name these two.
 
 The admission-class keys (`review_base_include:` /
 `review_base_exclude:` / `review_skip_events:`, #756 and #761) are
 `service_admit.py`'s -- read from the repo's default branch, a different
 window on the same file -- and the scan knows them by name so it never
-calls them unsupported.
+calls them unsupported. The S3 post keys are in that same class from the
+schema's side: the scan knows them by name too, so a repo whose
+`REVIEW.md` sets its floor or its verbosity draws no false unsupported
+note in the merge-base read either.
 
 The reads are pure functions of the merge-base tarball. `read_repo_config`
 parses the whole file once; the per-line reads are the consumers'
@@ -71,6 +83,7 @@ import tarfile
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from atlas_reviewer.lens_contract import Severity
 from atlas_reviewer.picker import LENS_NAME, LensPreferences
 from atlas_reviewer.quotes import refused_archive
 
@@ -113,6 +126,120 @@ _UNUSABLE_LENSES_NOTE = (
 # Bound the file the ceiling line is read from, as `quotes` bounds the
 # files it checks.
 MAX_CHECKED_BYTES = 64 * 1024
+
+
+# The service's two post-window lines (config slice S3, D84): the value
+# grammar is the file's -- one line per key, running to a `#` comment or
+# the end of the line, the separator after the colon optional.
+SEVERITY_FLOOR_LINE = re.compile(
+    r"^review_severity_floor:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
+POST_VERBOSITY_LINE = re.compile(
+    r"^review_post_verbosity:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
+# The verbosity dial's closed set (D84): the current post body is the
+# ceiling of verbosity, so the dial is lowering-only by construction --
+# `brief` is the one value below it, and every other value fails open to
+# the default rather than inventing a second dial position.
+POST_VERBOSITIES = ("full", "brief")
+POST_VERBOSITY_FULL = "full"
+POST_VERBOSITY_BRIEF = "brief"
+# The severity names the floor line accepts: the atlas severity
+# vocabulary itself (`lens_contract.Severity`), lowercase, the same
+# lowercase-strict convention the lens-name grammar uses. The protocol's
+# prose capitalizes the names ("Major"); the setting takes the enum's
+# own spelling.
+_SEVERITY_NAMES = tuple(severity.value for severity in Severity)
+# What a seen-but-unusable floor line says: the fail-open fallback is
+# not silent, and the note never echoes the rejected value -- the
+# accepted names are the schema's own, not the author's text.
+_FLOOR_UNUSABLE_NOTE = (
+    f"the reviewed repo's default-branch {REVIEW_MD} carries a "
+    "review_severity_floor: line that is not one of the severity names "
+    f"({', '.join(_SEVERITY_NAMES)}); it is ignored and the default "
+    "(post every finding) stands"
+)
+_VERBOSITY_UNUSABLE_NOTE = (
+    f"the reviewed repo's default-branch {REVIEW_MD} carries a "
+    "review_post_verbosity: line that is not brief or full; it is "
+    "ignored and the default (the full post) stands"
+)
+
+
+@dataclass(frozen=True)
+class PostConfigRead:
+    """The service's two post-window settings, parsed from the
+    `REVIEW.md` on the repo's **default branch** (config slice S3, D84).
+
+    `floor` is the severity floor a repo raised, None when the default
+    stands -- post everything. `verbosity` is the post's dial, `full` by
+    default and `brief` when the repo lowered it; there is no value
+    above `full`, so the dial cannot raise the post past the body the
+    service already sends. `notes` is controller text, non-empty only
+    when a line was seen and ignored, so "line present but unusable" can
+    be told apart from "no line"; each note names the key, the condition
+    and the default that stands, and never the rejected value."""
+
+    floor: Severity | None
+    verbosity: str
+    notes: tuple[str, ...]
+
+
+DEFAULT_POST_CONFIG = PostConfigRead(None, POST_VERBOSITY_FULL, ())
+
+
+def parse_post_config(text: str | None) -> PostConfigRead:
+    """The service's two post-window lines, parsed from one `REVIEW.md`
+    **text** -- the default-branch file the service fetches, never the
+    merge-base tarball and never the PR head (D84: a PR that could move
+    its own floor would suppress its own findings from the only surface
+    a human reads). No file, or no line for a key, reads as that key's
+    default, silently, exactly as no override at all; a line that is
+    present but unusable -- a value outside the key's closed set, or a
+    key that appears twice -- fails open to that key's default and is
+    named, the keys independent the way the admission read's are."""
+    if text is None:
+        return DEFAULT_POST_CONFIG
+
+    def value(raw: str | None) -> str:
+        return raw.strip() if raw else ""
+
+    floor: Severity | None = None
+    verbosity: str = POST_VERBOSITY_FULL
+    floor_seen = verbosity_seen = False
+    floor_bad = verbosity_bad = False
+    for line in text.splitlines():
+        match = SEVERITY_FLOOR_LINE.match(line)
+        if match is not None:
+            if floor_seen:
+                floor_bad = True
+                floor = None
+            else:
+                floor_seen = True
+                name = value(match.group(1))
+                if name in _SEVERITY_NAMES:
+                    floor = Severity(name)
+                else:
+                    floor_bad = True
+            continue
+        match = POST_VERBOSITY_LINE.match(line)
+        if match is not None:
+            if verbosity_seen:
+                verbosity_bad = True
+                verbosity = POST_VERBOSITY_FULL
+            else:
+                verbosity_seen = True
+                name = value(match.group(1))
+                if name in POST_VERBOSITIES:
+                    verbosity = name
+                else:
+                    verbosity_bad = True
+    notes: list[str] = []
+    if floor_bad:
+        notes.append(_FLOOR_UNUSABLE_NOTE)
+    if verbosity_bad:
+        notes.append(_VERBOSITY_UNUSABLE_NOTE)
+    return PostConfigRead(floor, verbosity, tuple(notes))
 
 
 @dataclass(frozen=True)
@@ -262,21 +389,25 @@ def _lens_names(raw: str | None) -> list[str] | None:
 # variant -- are not config attempts in this grammar and stay unremarked,
 # exactly as they read today.
 _UNSUPPORTED_KEY_LINE = re.compile(r"^review_([a-z0-9_]{1,80}):")
-# The keys the build carries. The first three are this module's own
-# schema; the last three are the admission-class keys `service_admit.py`
-# reads and honors from the repo's default branch (#756, #761) -- the
-# same file serves both windows, so a key the admission read carries is
-# supported by the build, and naming it "unsupported" here would be the
-# false note the named-note pattern exists to prevent. They are checked
-# against `service_admit._ADMISSION_KEYS` by a test, so a key added
-# there without this set fails rather than drawing a false note. All of
-# them match the unsupported scan's shape, so the scan excludes them by
-# name.
+# The keys the build carries. The first five are this module's own
+# schema -- the merge-base reads' three, plus the service's two
+# post-window keys (S3), parsed by `parse_post_config` from the
+# default-branch file -- and the last three are the admission-class keys
+# `service_admit.py` reads and honors from the repo's default branch
+# (#756, #761) -- the same file serves both windows, so a key the
+# admission read carries is supported by the build, and naming it
+# "unsupported" here would be the false note the named-note pattern
+# exists to prevent. They are checked against `service_admit`
+# `_ADMISSION_KEYS` by a test, so a key added there without this set
+# fails rather than drawing a false note. All of them match the
+# unsupported scan's shape, so the scan excludes them by name.
 _KNOWN_KEYS = frozenset(
     {
         "review_ceiling_usd",
         "review_lens_include",
         "review_lens_exclude",
+        "review_severity_floor",
+        "review_post_verbosity",
         "review_base_include",
         "review_base_exclude",
         "review_skip_events",

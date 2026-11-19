@@ -4256,3 +4256,180 @@ def test_a_settled_review_is_not_re_run_by_a_retarget(tmp_path):
         assert posted == [SHA_A]
     finally:
         worker.stop()
+
+
+# ------------------------------- the repo's own post settings (S3, D84)
+
+
+def test_the_post_config_fetcher_needs_the_app_credentials(tmp_path):
+    import atlas_reviewer.service as service_module
+
+    config = _config(tmp_path)
+    fetcher, reason = service_module._post_config_fetcher(config, {})
+    assert fetcher is None
+    assert "ATLAS_GITHUB_APP_ID" in reason
+
+
+def test_the_post_config_fetcher_recovers_the_default_branch_then_reads_the_file(
+    tmp_path, monkeypatch
+):
+    """At post time no payload carries the default branch, so the fetch
+    recovers it with one read-only lookup and then reads the file under
+    the same 64 KiB bound the admission read uses. A missing file is the
+    ordinary unconfigured repo (None); the lookup's own 404 propagates
+    as the gap."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.ports import NotFoundError
+    from atlas_reviewer.service_admit import MAX_ADMISSION_BYTES, REVIEW_MD
+
+    calls: list[tuple[object, ...]] = []
+
+    class _Client:
+        def __init__(self, repo_json, file_result=b"config"):
+            self.repo_json = repo_json
+            self.file_result = file_result
+
+        def get_repository(self, repo):
+            calls.append(("repo", repo))
+            if self.repo_json is None:
+                raise NotFoundError("GitHub 404")
+            return self.repo_json
+
+        def get_file(self, repo, ref, path, max_bytes):
+            calls.append(("file", repo, ref, path, max_bytes))
+            if self.file_result is None:
+                raise NotFoundError("GitHub 404")
+            return self.file_result
+
+    found = _Client({"default_branch": "trunk"})
+    monkeypatch.setattr(service_module, "_read_client", lambda config, env: (found, ""))
+    fetcher, reason = service_module._post_config_fetcher(_config(tmp_path), {})
+    assert reason == ""
+    assert fetcher("o/r") == b"config"
+    assert calls == [
+        ("repo", "o/r"),
+        ("file", "o/r", "trunk", REVIEW_MD, MAX_ADMISSION_BYTES),
+    ]
+
+    # No file on the default branch: None, not an error.
+    unconfigured = _Client({"default_branch": "trunk"}, None)
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (unconfigured, "")
+    )
+    fetcher, _ = service_module._post_config_fetcher(_config(tmp_path), {})
+    assert fetcher("o/r") is None
+
+    # A lookup that 404s propagates: the caller records it as the gap.
+    missing = _Client(None)
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (missing, "")
+    )
+    fetcher, _ = service_module._post_config_fetcher(_config(tmp_path), {})
+    with pytest.raises(NotFoundError):
+        fetcher("o/r")
+
+
+def test_the_post_config_source_fails_open_to_the_default_and_records_the_gap():
+    """A fetch that fails or times out leaves the default standing -- the
+    protective direction: a lost read can only make the post more
+    complete, never less -- and the gap is on the telemetry. A no-file
+    repo is the ordinary unconfigured case: the default, silently."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG
+    from atlas_reviewer.telemetry import Telemetry
+
+    telemetry = Telemetry(SystemClock())
+    event = PrEvent("o/r", 7, "a" * 40)
+
+    def broken(repo: str) -> bytes:
+        raise RuntimeError("the fetch blew up")
+
+    source = service_module._post_config_source(broken, event, telemetry)
+    assert source() == DEFAULT_POST_CONFIG
+    gaps = [event for event in telemetry.events if event.step == "post config"]
+    assert len(gaps) == 1 and "RuntimeError" in gaps[0].error
+
+    def no_file(repo: str) -> bytes | None:
+        return None
+
+    source = service_module._post_config_source(no_file, event, telemetry)
+    assert source() == DEFAULT_POST_CONFIG
+    assert len([e for e in telemetry.events if e.step == "post config"]) == 1
+
+
+def test_the_post_config_source_parses_and_records_unusable_lines():
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.telemetry import Telemetry
+
+    telemetry = Telemetry(SystemClock())
+    event = PrEvent("o/r", 7, "a" * 40)
+
+    def configured(repo: str) -> bytes | None:
+        return b"review_severity_floor: major\nreview_post_verbosity: terse\n"
+
+    source = service_module._post_config_source(configured, event, telemetry)
+    config = source()
+    assert config.floor is Severity("major")
+    # The unusable dial line fails open on its own key; the floor stands.
+    assert config.verbosity == "full"
+    assert len(config.notes) == 1 and "review_post_verbosity:" in config.notes[0]
+    named = [event for event in telemetry.events if event.step == "post config"]
+    assert len(named) == 1 and "review_post_verbosity:" in named[0].error
+
+
+def test_the_post_config_source_survives_a_timeout(monkeypatch):
+    """A read past its budget is the recorded gap and the default, and
+    the source never raises into the post path."""
+    import threading
+
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG
+    from atlas_reviewer.telemetry import Telemetry
+
+    monkeypatch.setattr(service_module, "_READ_BUDGET_S", 0.2)
+    telemetry = Telemetry(SystemClock())
+    event = PrEvent("o/r", 7, "a" * 40)
+    release = threading.Event()
+
+    def slow(repo: str) -> bytes | None:
+        release.wait(5)
+        return b"review_severity_floor: major\n"
+
+    source = service_module._post_config_source(slow, event, telemetry)
+    assert source() == DEFAULT_POST_CONFIG
+    release.set()
+    gaps = [event for event in telemetry.events if event.step == "post config"]
+    assert len(gaps) == 1 and "budget" in gaps[0].error
+
+
+def test_the_wrapped_publisher_resolves_the_config_and_hands_the_source():
+    """`_post_config_publisher` wraps the publisher so each post resolves
+    the repo's post configuration lazily -- the source the poster reads
+    after its own dedupe checks -- and passes everything through when
+    there is no publisher or no fetcher."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import PostConfigRead
+
+    seen: list[tuple[object, ...]] = []
+
+    def publisher(event, report, source):
+        seen.append((event, report, source))
+
+    def fetcher(repo: str) -> bytes | None:
+        return b"review_severity_floor: minor\n"
+
+    wrapped = service_module._post_config_publisher(publisher, fetcher, None)
+    assert wrapped is not None
+    event = PrEvent("o/r", 7, "a" * 40)
+    report = ReviewReport((), (), "", (), (), (), "COMMENT")
+    wrapped(event, report)
+    assert len(seen) == 1
+    source = seen[0][2]
+    config = source()
+    assert config == PostConfigRead(Severity("minor"), "full", ())
+
+    # No publisher, or no fetcher: pass-through, the same object.
+    assert service_module._post_config_publisher(None, fetcher, None) is None
+    assert service_module._post_config_publisher(publisher, None, None) is publisher
