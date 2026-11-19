@@ -3915,6 +3915,7 @@ the two open tool PRs. **N3** — `Spend._reserve`'s genuine-stop
 pre-check stays: the review's own mutant showed it behaviorally
 equivalent to the wait's re-check, it is pre-existing defense-in-depth
 in money code, and the review requested no change; left as is.
+
 ## 2026-11-19 — Config slice S1: the merge-base `REVIEW.md` parse moves onto `repo_config.py`, and the lens preference protects the whole floor tier
 
 The user-configuration plan's first slice (`docs/plans/2026-11-18-user-configuration.md`
