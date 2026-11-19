@@ -1,0 +1,59 @@
+/* The settings page's stylesheet: self-hosted, no third-party fetch.
+   The CSP allows styles from this origin only. */
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0 auto;
+  max-width: 42rem;
+  padding: 0 1rem 2rem;
+  color: #1a1a1a;
+  background: #fafafa;
+}
+header {
+  border-bottom: 1px solid #ccc;
+  margin-bottom: 1rem;
+}
+section {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: #fff;
+}
+label {
+  display: block;
+  margin: 0.5rem 0;
+}
+input[type="text"],
+input[type="url"],
+input[type="password"] {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.35rem;
+  width: 100%;
+  box-sizing: border-box;
+}
+button {
+  margin-top: 0.5rem;
+  padding: 0.35rem 0.9rem;
+}
+table {
+  border-collapse: collapse;
+}
+th,
+td {
+  border: 1px solid #ddd;
+  padding: 0.25rem 0.6rem;
+  text-align: left;
+}
+.flash {
+  border: 1px solid #a00;
+  background: #fee;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+}
+.note {
+  color: #555;
+}
+code {
+  word-break: break-all;
+}

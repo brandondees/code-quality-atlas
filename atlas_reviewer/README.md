@@ -684,7 +684,7 @@ boot deletes records unrefreshed past `ATLAS_INSTALLATION_RETENTION_DAYS`
 `ATLAS_INSTALLATION_RETENTION_DAYS`, and the three `ATLAS_TENANT_*`
 variables are documented here and configured nowhere; no tenant
 credential exists on the deployed service, and the settings page that
-would set them is part B.
+would set them is part B (below).
 
 **What is counted.** The committed spend is the review child's own
 accounting — reported token counts priced at the operator's price table —
@@ -818,6 +818,137 @@ proposes. Each lens run's gate records the proposals count on the
 telemetry (`run approvals` / `configured`), so a run that proposed nothing
 and a run whose proposals never reached the coordinator can be told
 apart.
+
+## The BYOK settings page (config slice S10, part B1)
+
+Part B1 is the intake surface: a GitHub App installation's admin signs
+in with GitHub and manages that installation's tenant-supplied
+credentials, consent acknowledgement, and daily cap through part A's
+store API. It is the new top-level package `atlas_settings/` — outside
+`atlas_reviewer` — running as its own process beside the review
+service on the same state volume; every write goes through the store
+API, so the per-installation `fcntl.flock` serializes the two
+processes. The page is stdlib `http.server` with server-rendered HTML:
+no web framework was added, no client-side JavaScript ships, and no
+third-party script, font, or CDN is referenced. Run it with
+`python -m atlas_settings --host 127.0.0.1 --port 8090`; deployment is
+out of scope here.
+
+**Sign-in.** The GitHub App's user-authorization web flow: the page
+sends the browser to GitHub with the App's client id, its own redirect
+URI, a random `state`, and a PKCE S256 `code_challenge` (GitHub has
+supported PKCE for the App user-authorization flow since its
+2025-07-14 changelog; only S256 is accepted). State and verifier are
+bound to a short-lived pre-login session. The code is exchanged
+server-side for a user access token, the token identifies the user
+with exactly one read (`GET /user`), and it is then discarded — never
+stored, logged, or kept in the session.
+
+**Who counts as the installation admin** (the issue's rule; GitHub has
+no separate role):
+
+- a user-account installation: the signed-in user's id equals the
+  installation account's id;
+- an organization installation: the user's membership in that org is
+  `admin` and `active`, checked with the App's installation token
+  minted for exactly one permission — Organization **"Members:
+  read"** (`members: read`).
+
+The admin check is re-verified on **every** write (and every settings
+page read), not only at login, and it fails closed: any API error,
+timeout, or unexpected shape refuses the request. **Operator setup
+step, not done:** if the App does not carry Organization "Members:
+read" today, the org-admin check refuses — the mint fails, the page
+refuses, and nothing works around the missing permission. Granting
+the permission is an App-settings change the operator makes in
+GitHub's UI; this slice does not make it. Until then, org
+installations cannot use the page, and user-account installations are
+unaffected.
+
+**The invite-only gate.** The page reads the installation's
+repositories and refuses — with one fixed phrase — when the
+installation covers no repository on `ATLAS_REVIEW_REPOS`, checked at
+sign-in and again on every write; never widened or bypassed here. The
+coverage read stops at ten pages of one hundred repositories and
+treats an exhausted bound as unproven, so the bound can only refuse,
+never satisfy, the gate.
+
+**Sessions and request safety.** Server-side sessions behind a signed
+cookie (`HttpOnly`, `Secure`, `SameSite=Strict`) keyed by
+`ATLAS_SETTINGS_SESSION_KEY`: the cookie carries a random session id
+and an HMAC-SHA256 signature; every other session fact — identity,
+CSRF token, the OAuth bindings — stays in the page process. A
+signed-in session's TTL is 30 minutes of idle time with a 12-hour
+absolute cap; a pre-login session lives 10 minutes. Every
+state-changing POST carries the session's CSRF token, only POST
+changes state, request bodies are bounded at 8 KiB, and sign-in and
+writes are rate limited (per IP on sign-in, per session and per IP on
+writes). Every response carries `Content-Security-Policy: default-src
+'none'` (plus `style-src 'self'`, `form-action 'self'`,
+`frame-ancestors 'none'`), `X-Frame-Options: DENY`, HSTS,
+`Referrer-Policy: no-referrer`, and `Cache-Control: no-store`; the
+handler never logs a query string, so the OAuth code and state are in
+no log.
+
+**The key is write-only.** The page shows that a key is stored, when
+it was last saved (from the page's own audit log), the endpoint, and
+the chosen model — never the key, not even partly, after it is saved.
+Saving credentials validates the endpoint with part A's rules (HTTPS
+only, no userinfo, and the host must pass the egress guard's
+resolution check) and the model against the operator's price table
+(the same public-catalog read part A's provider runs; no entry
+refuses, a zero-priced model is allowed) — and makes **no test model
+call**, which would spend the installation's money. Rotation is the
+same form again; revocation removes the key (the cap and the consent
+survive); deleting everything removes credentials, cap, and consent
+together behind a typed confirmation.
+
+**Consent before use.** The settings page shows the plan §7 decision 3
+statement — "The PR diff is sent to the installation's own endpoint." —
+and records the admin's explicit acknowledgement through the store API.
+Saving credentials without the acknowledgement stores nothing and says
+why.
+
+**The daily cap.** The installation admin sets or clears it. The value
+is a positive dollar amount of at most two decimal places up to
+$10,000 (D90's sane upper bound); anything else is refused with one
+fixed phrase that never echoes the value. An unset cap means no
+installation cap applies, and the page says plainly that S9's
+stricter-wins combination and the operator's max per review remain the
+outer bounds either way.
+
+**Audit.** Each accepted write appends one JSONL line to
+`<state dir>/settings-audit.jsonl` — the action, the installation id,
+the GitHub user id, and the UTC time — and never a value: the
+append-only record takes none of them as parameters. The page reads it
+back only for the credentials' last-saved time.
+
+**Run it.** The page refuses to start unless every variable it needs
+is set, naming the missing ones:
+
+| Variable | New here | Purpose |
+| --- | --- | --- |
+| `ATLAS_SETTINGS_GITHUB_CLIENT_ID` | yes | The App's OAuth client id (the "Client ID" on the App settings page, not the App id) |
+| `ATLAS_SETTINGS_GITHUB_CLIENT_SECRET` | yes | The App's client secret, for the server-side code exchange |
+| `ATLAS_SETTINGS_SESSION_KEY` | yes | The HMAC key the session cookie is signed under (generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`) |
+| `ATLAS_SETTINGS_BASE_URL` | yes | The page's own base URL; `redirect_uri` is `<base>/callback`. Must be https (a loopback http URL is accepted for local testing) |
+| `ATLAS_GITHUB_APP_ID` | no (part A) | The App's numeric id, for the App JWT the admin check reads with |
+| `ATLAS_GITHUB_APP_PRIVATE_KEY` | no (part A) | The App's PEM private key, for the App JWT and the installation-token mints |
+| `ATLAS_GITHUB_INSTALLATION_ID` | no (part A) | The installation this deployment reviews for — the page manages exactly it |
+| `ATLAS_INSTALLATION_STORE_KEY` | no (part A) | The store's Fernet key; the page refuses to start without it |
+| `ATLAS_REVIEW_REPOS` | no (part A) | The allowlist behind the invite-only gate (default `brandondees/code-quality-atlas`) |
+
+All of the above are documented here and set in no deployment yet.
+`--host` (default `127.0.0.1`) and `--port` (default 8090) are CLI
+arguments, not environment variables.
+
+**The split.** The per-repo pre-approved command list Brandon decided
+for S7 (D88's 12:05 PM CT update) is part B2, a later PR, because it
+extends S7's code — the `review_test_commands:` read and the approval
+port are S7's, and B2 backs the port with this store. B1 leaves the
+seam: the page's write-action dispatch is a table the B2 actions join
+beside these, on the same session, admin-check, gate, CSRF, and audit
+machinery.
 
 ## Run it offline (no credentials)
 
