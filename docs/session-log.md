@@ -5787,3 +5787,60 @@ halts_the_spend_with_the_cause`).
 **Gates.** Both suites with their coverage floors, ruff check, ruff
 format, mypy, drift and the generated-tree sync run before the push; the
 eight mutants above are the round's only new ones.
+
+## 2026-11-19 (same day) — #782/#783 fix round 1: the sites the first cut missed, the partial rule, the marker, and the waiter race
+
+The round-1 reviews on both PRs (the round-2 record on #782 names the two
+Majors its first pass posted plus the two it re-measured; #783's round-4
+record names one new Major and re-raises its round-1 pair). Every Major
+and Minor is fixed in the layer that owns it; the Nits rode along. Offline
+only throughout: fakes, recorded HTTP and scripted models; no live model
+call, network call or secret read; no deployed service setting, Fly config
+value or secret changed.
+
+**#782 — the classification covers every model-call site, and the partial
+rule.** The one-shot controller's narration treated a refused key as an
+ordinary part failure (`NarrativeFailure`), walked past it into later
+parts, and posted an ordinary review. `_narrate_part` now re-raises the
+refusal beside the BYOK one; `_narrate_parts` collects the parts narrated
+before the refusal and returns the refusal with them; `run_review` catches
+the picker's refusal the same way (an empty plan, no part narrated) and
+puts the fixed cause on the one-shot draft's new `review_error` field,
+which `verdict.status_line` carries and the service's summarizer reads.
+The lens picker's refusal is no longer the critical-tier fallback on
+either mode (`_pick` re-raises beside BYOK). The delta decision call and
+the carry-forward call halt the spend with the fixed cause; the decision
+fallback re-runs lenses on a halted spend (every one NOT RUN), and
+`_review_lenses` re-reads the spend's halt cause after every composition
+step, so a refusal on a post-synthesis call — carry or re-assessment —
+reaches the finalized review. **The partial rule:** `render_draft` keeps
+the verified findings of lenses that ran clean before the halt; the
+headline is `REVIEW PARTIAL -- not a clean review`, naming the cause and
+what did not run to its end — it never claims the review never ran — and
+`render_comment` renders the same partial banner over the standing
+findings; only a review nothing ran on posts the bare error body. **The
+marker:** error and partial posts carry `atlas-service-post: <key> error`
+and record under their own ledger key, so the head is reviewable again
+once the key is served; an error retry still dedupes against itself.
+**The typed field:** the summarizer reads only the two fixed causes and
+raises `DraftParseError` on anything else, the way a mismatched mode does.
+**Mutants, each applied by hand and killed** (bytecode cache deleted
+first): the one-shot refusal swallowed into the boundary handler as a
+`NarrativeFailure` (`test_a_refused_key_after_a_served_part_is_partial_
+and_keeps_the_narrative`, which also pins the status-line field); the
+picker's refusal falling back to the critical tier (the one-shot
+`test_a_refused_key_on_the_one_shot_picker_is_the_error_not_a_fallback`
+and the agentic CLI's test of the same behavior); the carry refusal
+re-raised without the cause (`test_a_refused_carry_call_keeps_the_
+findings_and_names_the_partial_stop`); the findings-section gate dropping
+every finding on any halt (the same coordinator test and
+`test_a_partial_refusal_post_keeps_the_findings_and_names_the_stop`);
+the error post recorded under the head's own key and marker
+(`test_an_error_post_does_not_block_a_later_review_of_the_same_head`);
+the count-of-zero partial banner (`test_a_refusal_after_the_lenses_ran_
+names_no_not_run_lens`); and the typed field accepting any string
+(`test_an_unrecognized_review_error_is_a_parse_failure`, with both fixed
+causes pinned by the parametrized parse test).
+
+**#783 — the waiter race, the priced-response settle, and the booking
+reversal** are recorded in that layer's own entry below.

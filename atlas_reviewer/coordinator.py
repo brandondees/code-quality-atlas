@@ -1143,6 +1143,13 @@ def _review_lenses(
             if delta is not None
             else frozenset(),
             lens_decisions=decisions,
+            # The refused-key cause is read from the spend one last time,
+            # after every composition step (D92's fix round): a carry or a
+            # re-assessment call can be the call the key refused, and both
+            # run after `synthesize` captured the halt -- the finalized
+            # review carries the cause, or a refused-key review would post
+            # as an ordinary one.
+            review_error=spend.halted_cause or review.review_error,
         ),
         redactor,
         # The digest is stored with the record (D73, round-2 review of
@@ -2193,6 +2200,14 @@ def _decision_call(
         )
     try:
         reply = traced_model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause, and the decision fallback then
+        # re-runs lenses on a halted spend -- every one NOT RUN -- so the
+        # review renders and posts as the error the cause names.
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
@@ -2444,6 +2459,15 @@ def _carry_call(
         )
     try:
         reply = traced_model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause; the carry fallback composes the
+        # priors as recorded, and the finalized review carries the cause
+        # as its review error -- the posted result is the error or the
+        # partial record it names, never an ordinary review.
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
@@ -3425,7 +3449,7 @@ def render_draft(
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub)]
-    if review.review_error:
+    if review.review_error and not review.verified and not _clean_runs(review.lenses):
         # An error report, not a review (D92): the draft carries the
         # ledger and the cost, never a Findings section an empty one
         # could read as a clean bill.
@@ -3585,9 +3609,29 @@ def _selection_and_rank_lines(
 
 def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     if review.review_error:
-        # A refused key's draft is an error report, not a review (D92):
-        # the headline names the fixed cause, and the draft carries no
-        # Findings section to mistake for a clean bill.
+        # A refused key's draft leads with the cause (D92). Lenses that ran
+        # clean before the halt stand: the review is partial, the verified
+        # findings are kept, and the banner names what did not run -- it
+        # never claims the review never ran.
+        clean = _clean_runs(review.lenses)
+        short = [
+            r
+            for r in review.lenses
+            if r.state is not LensState.CLEAN and r.lens not in clean
+        ]
+        if review.verified or clean:
+            named = (
+                "; ".join(f"{r.lens}: {r.state.value}" for r in short)
+                if short
+                else "the stop came after the lenses ran"
+            )
+            return (
+                "> **REVIEW PARTIAL -- not a clean review.** "
+                f"The review stopped early: {review.review_error}. The "
+                "verified findings below are the lenses' own and stand; "
+                f"what did not run to its end: {named}. This is not a "
+                "clean bill."
+            )
         return (
             f"> **REVIEW ERROR -- not a review.** The review stopped before "
             f"it could review: {review.review_error}. Nothing below is a "

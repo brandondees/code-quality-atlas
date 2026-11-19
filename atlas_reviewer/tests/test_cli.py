@@ -2762,6 +2762,53 @@ def test_a_live_agentic_review_renders_the_prompt_cache_section(tmp_path, monkey
     assert all(isinstance(adapter, OpenRouterLensModel) for adapter in made)
 
 
+def test_a_refused_key_on_the_agentic_picker_is_the_error_not_a_fallback(
+    tmp_path, monkeypatch
+):
+    """D92's fix round: the agentic picker's refusal is not the
+    critical-tier fallback -- the review stops before any lens is planned,
+    the error draft is what renders and posts, and no lens call is made on
+    the refused key. Kills the fallback mutant (the refusal landing in the
+    BoundaryError handler) and the CLI-swallow mutant (the refusal leaving
+    the command as a boundary exit with no draft)."""
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, key_status, reply
+
+    refusal = reply(
+        json.dumps({"error": {"message": "Insufficient credits"}}).encode(),
+        status=402,
+    )
+    fake = OpenRouterFake(
+        refusal,
+        key=reply(key_status(limit=5, remaining=5)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "review", "--pool-size", "1"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out, err=err, sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(fake, key, limits=limits),
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    # The picker's call was the only one: no lens ran on the refused key.
+    assert len(fake.chat_requests()) == 1
+
+
 def test_a_key_refused_mid_review_ends_the_review_as_the_error_it_is(
     tmp_path, monkeypatch
 ):

@@ -42,6 +42,7 @@ from atlas_reviewer.service_post import (
     _marked,
     comment_only,
     comment_payload,
+    error_marker_for,
     marker_for,
     post_key,
     render_comment,
@@ -670,6 +671,71 @@ def test_an_incomplete_review_posts_the_stop_banner():
     assert "REVIEW INCOMPLETE -- not a clean review" in render_comment(
         unknown, post_key(EVENT), lambda item: item
     )
+
+
+def test_an_error_post_does_not_block_a_later_review_of_the_same_head(tmp_path):
+    """D92's fix round: an error post dedupes under its own ledger key and
+    its own marker, so a head whose review was refused is reviewable again
+    once the key is served. Kills the plain-marker mutant (the error post
+    recorded under the head's key and marker, which would make every later
+    post of that head -- including the real review -- skip)."""
+    key = post_key(EVENT)
+    poster, github = _poster(tmp_path)
+    error = replace(REPORT, review_error="model key out of credit", findings=())
+    assert poster.post(EVENT, error) is False
+    body = _posted_body(github)["body"]
+    assert error_marker_for(key) in body
+    assert marker_for(key) not in body
+    # A retried error post dedupes against its own marker.
+    assert poster.post(EVENT, error) is True
+    # The head's own review is not blocked by the error post.
+    assert poster.post(EVENT, REPORT) is False
+    posts = [call for call in github.calls if call[0] == "POST"]
+    review_body = json.loads(posts[-1][2] or b"")["body"]
+    assert marker_for(key) in review_body
+    assert error_marker_for(key) not in review_body
+    assert poster.post(EVENT, REPORT) is True
+
+
+def test_a_partial_refusal_post_keeps_the_findings_and_names_the_stop():
+    """D92's fix round: a review whose lenses ran clean before the refusal
+    posts as a partial review -- the findings stand, the banner names the
+    fixed cause and what did not run -- never as the error post that says
+    the review could not run, and never as an ordinary review. Kills the
+    findings-dropping mutant (any review_error posting the error body) and
+    the unnamed-stop mutant."""
+    key = post_key(EVENT)
+    report = replace(
+        REPORT,
+        review_error="model key out of credit",
+        findings=("L1-F1 major `src/a.py:2` the loop drops the last item",),
+        lenses_run=("tracing-correctness-and-invariants",),
+    )
+    body = render_comment(report, key, lambda item: item)
+    assert "REVIEW PARTIAL -- not a clean review" in body
+    assert "model key out of credit" in body
+    assert "1 lens(es) did not run to their end" in body
+    assert "L1-F1" in body
+    assert "REVIEW ERROR -- not a review" not in body
+    assert error_marker_for(key) in body
+
+
+def test_a_refusal_after_the_lenses_ran_names_no_not_run_lens():
+    """D92's fix round: the re-assessment-after-clean case has no lens
+    that failed to run, and the partial banner says so instead of naming
+    a lens that did not run. Kills the count-of-zero mutant, which would
+    claim a lens did not run when the stop came after the lenses."""
+    key = post_key(EVENT)
+    report = replace(
+        REPORT,
+        review_error="model key refused",
+        findings=("L1-F1 major `src/a.py:2` the loop drops the last item",),
+        lenses_not_run=(),
+    )
+    body = render_comment(report, key, lambda item: item)
+    assert "REVIEW PARTIAL -- not a clean review" in body
+    assert "the stop came after the lenses ran" in body
+    assert "did not run to their end" not in body
 
 
 def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):

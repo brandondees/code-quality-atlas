@@ -45,7 +45,11 @@ from atlas_reviewer.lenses import (
     plan_lenses,
 )
 from atlas_reviewer.notes import quote_untrusted
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    ByokRefusedError,
+    KeyRefusedError,
+)
 
 PICKER_PATH = (
     Path(__file__).resolve().parent.parent
@@ -744,7 +748,11 @@ def _pick(
         return _critical(skip, False, hygiene)
     try:
         names = parse_picks(run_picker())
-    except ByokRefusedError:
+    except (ByokRefusedError, KeyRefusedError):
+        # A refused key is a review error, not a fallback pick (D92): the
+        # refusal travels to the caller, which stops the review and
+        # renders the error the fixed cause names -- the fallback would
+        # spend a lens plan on a key that cannot serve it.
         raise
     except BoundaryError as exc:
         return _critical(

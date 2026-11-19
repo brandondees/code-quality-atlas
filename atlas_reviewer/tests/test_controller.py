@@ -16,7 +16,13 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.picker import CRITICAL_TIER, Depth
-from atlas_reviewer.ports import BoundaryError, Listing, Narrative, NotFoundError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    KeyRefusedError,
+    Listing,
+    Narrative,
+    NotFoundError,
+)
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import ToolSpec
@@ -340,6 +346,81 @@ def test_runner_failure_marks_every_unrun_tool_unknown():
         in draft
     )
     assert s.sprites.live_names() == ()
+
+
+class RefusesSecondCall(PickingProvider):
+    """The fixture model whose second review call is refused (D92's fix
+    round): part 1 is served, part 2 meets the exhausted key."""
+
+    review_calls = 0
+
+    def complete(self, prompt):
+        if "--- lens picker ---" in prompt.system:
+            return super().complete(prompt)
+        self.review_calls += 1
+        if self.review_calls >= 2:
+            raise KeyRefusedError(
+                "OpenRouter HTTP 402 for "
+                "https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            )
+        return super().complete(prompt)
+
+
+class RefusesPicker(PickingProvider):
+    """The fixture model whose picker call is refused (D92's fix round):
+    the review stops before any part is narrated."""
+
+    def complete(self, prompt):
+        if "--- lens picker ---" in prompt.system:
+            raise KeyRefusedError(
+                "OpenRouter HTTP 402 for "
+                "https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            )
+        raise AssertionError("no part is narrated on a refused picker call")
+
+
+def test_a_refused_key_after_a_served_part_is_partial_and_keeps_the_narrative():
+    """D92's fix round: the one-shot review stops at the refused call and
+    keeps what ran before it. The draft is partial -- the served part's
+    narrative stands, the banner names the fixed cause and the part that
+    did not run -- and the status line carries the cause the service's
+    post renders. Kills the swallowed-refusal mutant (the 402 landing in
+    the boundary handler as a NarrativeFailure, the narration walking
+    past it) and the dropped-status-field mutant."""
+    s = Setup(github=BigDiff(FIXTURE), provider=RefusesSecondCall())
+    draft = s.run(diff_chars_per_call=60_000)
+    assert "REVIEW PARTIAL -- not a clean review" in draft
+    assert "model key out of credit" in draft
+    assert "Diff part 1 of 2" in draft
+    assert "Diff part 2 of 2" not in draft
+    assert "produced no narrative" not in draft
+    fields = json.loads(
+        draft.split("-->", 1)[0].removeprefix("<!-- atlas-review-status: ")
+    )
+    assert fields["review_error"] == "model key out of credit"
+    assert fields["coverage_complete"] is False
+
+
+def test_a_refused_key_on_the_one_shot_picker_is_the_error_not_a_fallback():
+    """D92's fix round: the picker's refusal is not the critical-tier
+    fallback -- the review stops with no part narrated, and the draft is
+    the error the fixed cause names. Kills the fallback mutant (the
+    refusal landing in the BoundaryError handler, which picks the
+    critical tier and narrates on a refused key)."""
+    # The real bundle's critical tier leaves the picker no room, so the
+    # picker tests run on the ROOMY library.
+    s = Setup(lenses=ROOMY, provider=RefusesPicker())
+    draft = s.run(model_calls=2)
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "### Diff part" not in draft
+    assert "produced no narrative" not in draft
+    fields = json.loads(
+        draft.split("-->", 1)[0].removeprefix("<!-- atlas-review-status: ")
+    )
+    assert fields["review_error"] == "model key out of credit"
 
 
 def test_harness_failure_still_produces_a_draft():

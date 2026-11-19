@@ -26,11 +26,13 @@ from atlas_reviewer.lens_contract import (
     Severity,
     Valence,
 )
+from atlas_reviewer.ports import KEY_AUTH_REFUSED, KEY_OUT_OF_CREDIT
 from atlas_reviewer.quotes import QuoteSource
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import ServiceError, config_from_env
 from atlas_reviewer.service_post import (
     comment_payload,
+    error_marker_for,
     marker_for,
     post_key,
     render_comment,
@@ -46,6 +48,7 @@ from atlas_reviewer.service_run import (
     SERVICE_DEADLINE_ENV,
     SERVICE_MODE_ENV,
     WEBHOOK_SECRET_ENV,
+    DraftParseError,
     ReviewRun,
     RunConfig,
     _read_token,
@@ -711,6 +714,29 @@ def test_an_error_draft_summarizes_to_the_error_report():
     assert report.coverage_complete is False
 
 
+def test_an_unrecognized_review_error_is_a_parse_failure():
+    """D92's fix round: the status line's `review_error` is typed -- only
+    the two fixed causes read; anything else is a draft this service
+    cannot map and raises, instead of posting unvalidated text where the
+    fixed cause belongs. Kills the any-string mutant."""
+    forged = _error_draft().replace(
+        '"review_error": "model key out of credit"',
+        '"review_error": "total provider outage"',
+    )
+    assert forged != _error_draft()
+    with pytest.raises(DraftParseError, match="not a cause this service knows"):
+        summarize_draft(forged, expect=MODE_AGENTIC)
+
+
+@pytest.mark.parametrize("cause", [KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED])
+def test_only_the_two_fixed_causes_read_as_the_review_error(cause):
+    """D92's fix round: both fixed causes parse; the typed field is the
+    service's only accepted spelling."""
+    draft = _error_draft().replace("model key out of credit", cause)
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.review_error == cause
+
+
 def test_the_error_report_posts_the_error_not_a_review():
     """D92: the posted result of a refused key names the fixed cause and
     carries no Findings section -- it is clearly an error, not a COMMENT
@@ -723,7 +749,10 @@ def test_the_error_report_posts_the_error_not_a_review():
     body = render_comment(report, key, lambda item: item)
     assert "REVIEW ERROR -- not a review" in body
     assert "Cause: model key out of credit." in body
-    assert body.endswith(marker_for(key))
+    # The error post dedupes under its own marker (D92's fix round): the
+    # head's own marker must stay free for the review that follows.
+    assert body.endswith(error_marker_for(key))
+    assert marker_for(key) not in body
     assert "## Findings" not in body
     assert "REVIEW INCOMPLETE" not in body
 

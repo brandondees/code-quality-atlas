@@ -59,6 +59,7 @@ from atlas_reviewer.lens_loop import (
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    KeyRefusedError,
     RateLimitedError,
     RefusedError,
 )
@@ -1909,6 +1910,39 @@ def test_a_halted_spend_with_a_refused_key_renders_the_error_draft():
     )
     assert fields["review_error"] == "model key out of credit"
     assert fields["coverage_complete"] is False
+
+
+def test_a_refused_carry_call_keeps_the_findings_and_names_the_partial_stop(tmp_path):
+    """D92's fix round: the lenses ran clean, then the carry-forward's own
+    call was refused. The review keeps the verified findings -- the
+    lenses' own -- and the headline says the review is partial, naming the
+    cause and that the stop came after the lenses ran; it never claims the
+    review never ran. Kills the re-raise-without-cause mutant (the carry
+    refusal leaving `review_error` empty, which posts an ordinary review)
+    and the findings-section mutant (any halt dropping the Findings)."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(finding()),
+            KeyRefusedError(
+                "OpenRouter HTTP 402 for "
+                "https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            ),
+        ],
+        decisions=(),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.review_error == "model key out of credit"
+    assert result.verified
+    draft = render_draft(result, Redactor())
+    assert "REVIEW PARTIAL -- not a clean review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings (verified quotes only)" in draft
+    assert "the stop came after the lenses ran" in draft
 
 
 OTHER = "sweeping-for-security"
