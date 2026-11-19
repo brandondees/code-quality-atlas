@@ -4824,8 +4824,8 @@ write through a patched `os.write` to pin it.
 
 **Tests** (`test_budget.py`, `test_service_receive.py`; each behavior a
 test that fails when reverted): the backfill and the retry's own spend
-(one test, the runner overwriting the evidence the way the real child
-does), the repeat recovery's no-op and its "already recorded" record,
+(one test, the runner appending its own run's events to the same file,
+the way the real child does), the repeat recovery's no-op and its "already recorded" record,
 the no-figure gap and the ordinary first run's silence, the preflight
 cap refusal, the bool-id guard, the both-bounds ordering, the
 `record_once` key semantics at the ledger level (once per key, a
@@ -4844,3 +4844,71 @@ dropped, and the partial-write loop reduced to a single `os.write`.
 beside this slice's `operator_ceiling_max` with no semantic
 interaction, and the decisions log now reads D80 through D86 with no
 gap.
+
+## 2026-11-19 (same day) — #773 round 2: the backfill's dedupe is attempt-scoped, and the append-only reality is what the docs say
+
+The r2 review of #773 approved with one Minor (M-R2-1, the stale-tail
+re-backfill) and two advisory nits the brief adopted as calls. Offline
+only, same rules as the entries above.
+
+**M-R2-1 — the stale tail cannot be re-counted.** The reviewer
+demonstrated the r1 keying's hole against the real code: the events file
+is append-only across a head's attempts (`JsonlSink` opens `O_APPEND`;
+`make_runner` clears nothing), so a retry that appended its startup
+events and died before its first progress record changed the whole-file
+hash while the newest progress record was still the previous attempt's
+-- one extra copy of that figure per occurrence, repeatable ($2.20
+demonstrated as $4.40 then $6.60). The fix scopes the dedupe to the
+crashed attempt's own span: `head_change.last_run_progress` delimits the
+events file's last run at its last ``seq: 1`` line (`seq` is the sink's
+per-run counter and restarts every run), merges the progress records
+inside that span only -- the same field-for-field newest-wins merge
+`read_progress` performs, over the same bounded tail, which also answers
+the advisory nit about the two readers agreeing on which record is
+newest -- and keys the ledger's `record_once` dedupe on that span (the
+run-start line hashed with the span's progress records). Appends never
+modify existing lines, so the pair is stable for one dead run forever
+and distinct across runs: a progress-less retry has no figure of its
+own, the previous attempt's stale tail is not its figure, and the backfill
+records nothing rather than re-counting -- one crashed attempt's spend
+lands exactly once, however many progress-less retries follow. The
+`read_progress` merge was lifted into a shared `_merge_progress` helper
+so the two readers cannot drift; `read_progress`'s behavior is
+unchanged, pinned by its existing tests. The r1 backfill test's fake
+runner now appends its own run's events to the same file the way the
+real child does (the r1 draft used `write_text`, modeling a mechanism
+production does not have), and the r1 entries' "overwrites" wording is
+corrected in place to the append reality -- in D86, the README's "What
+is counted" paragraph, and this log's r1 entry.
+
+**The two adopted nits.** The midnight crossing is the owner's call:
+keep recording a crashed attempt's spend on the recovery day's ledger --
+the day the retry is admitted under -- which is the safe direction, the
+spend counting against the retry's admission rather than escaping it;
+stated in D86 and the README. The over-count direction is stated in both
+places too: an over-count, were one ever to land, fails safe -- it makes
+the bounds refuse earlier, never later -- while every under-count path
+is fail-closed or named on the telemetry.
+
+**Tests** (`test_service_receive.py`, the r1 set re-shaped): the
+backfill test's runner appends its own run-start and progress lines (the
+ordering mutant still dies: a backfill after the runner reads the
+retry's span and over-counts); the new stale-tail test runs two
+progress-less retries after the crashed attempt and asserts $2.20
+exactly once, with the gap named on each retry's record; the new
+identical-progress test asserts a second attempt's byte-identical
+progress record -- `seq` restarts, so the fields can repeat exactly --
+is still recorded, keyed by its own run-start line. Four mutants applied
+by hand, all killed: the r1 whole-file keying restored (the stale-tail
+test), the span restriction dropped -- the file-wide newest progress
+returned as the last run's figure (the stale-tail test), the run-start
+line dropped from the key material (the identical-progress test, where
+the byte-identical figure would be deduplicated away), and every line
+accepted as a run start (the identical-progress test again, via the
+same collapse to a figure-only key).
+
+**Overlap.** The change is confined to `head_change.py` (the new
+`last_run_progress` and the shared `_merge_progress`; `read_progress`'s
+behavior unchanged), `service.py` (the backfill's read and its
+docstring), the two test files, and the three docs. No open PR touches
+these files; the branch stays two commits atop `3fed73d2`.

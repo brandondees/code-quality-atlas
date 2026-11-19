@@ -28,7 +28,10 @@ Three inputs drive the decision, each degraded safely:
   telemetry event per settled lens in the run directory's events file
   (`progress` / `lens settled`), carrying the lens count, the spend so
   far and the paths the lenses without a clean run are still reading.
-  `read_progress` reads those events back. A push that touches no file
+  `read_progress` reads those events back, and `last_run_progress` reads
+  the same events scoped to the file's last run, with the attempt-scoped
+  key the service's crash backfill deduplicates on (r2 review of #773).
+  A push that touches no file
   the review is still reading is benign however late it lands.
 - **How early the review is.** `decide` compares the fraction of lenses
   settled and the fraction of budget spent against the configured
@@ -45,6 +48,7 @@ when the kept review settles can be read against it.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -240,14 +244,7 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
     settled lenses is the record's own `lenses_done` field -- the one
     source of truth for that number, already deduplicated against
     continuations by the writer -- not a recount over lens names."""
-    done = 0
-    total = 0
-    calls = 0
-    committed = Decimal(0)
-    settled = Decimal(0)
-    reservation = Decimal(0)
-    reading: frozenset[str] = frozenset()
-    found = False
+    records: list[Mapping[str, object]] = []
     for path in paths:
         text = _tail(path, max_bytes)
         if text is None:
@@ -256,17 +253,90 @@ def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress
             fields = _progress_fields(line)
             if fields is None:
                 continue
-            found = True
-            done = _int(fields.get(FIELD_LENSES_DONE), done)
-            total = _int(fields.get(FIELD_LENSES_TOTAL), total)
-            calls = _int(fields.get(FIELD_CALLS), calls)
-            committed = _decimal(fields.get(FIELD_COMMITTED_USD), committed)
-            settled = _decimal(fields.get(FIELD_SETTLED_USD), settled)
-            reservation = _decimal(fields.get(FIELD_RESERVATION_USD), reservation)
-            reading = _reading(fields, reading)
-    if not found:
+            records.append(fields)
+    if not records:
         return None
+    return _merge_progress(records)
+
+
+def _merge_progress(records: list[Mapping[str, object]]) -> Progress:
+    """The field-for-field newest-wins merge every progress reader
+    performs: each record carries the cumulative fields, and a field a
+    record omits or carries unusably keeps the previous record's value."""
+    done = 0
+    total = 0
+    calls = 0
+    committed = Decimal(0)
+    settled = Decimal(0)
+    reservation = Decimal(0)
+    reading: frozenset[str] = frozenset()
+    for fields in records:
+        done = _int(fields.get(FIELD_LENSES_DONE), done)
+        total = _int(fields.get(FIELD_LENSES_TOTAL), total)
+        calls = _int(fields.get(FIELD_CALLS), calls)
+        committed = _decimal(fields.get(FIELD_COMMITTED_USD), committed)
+        settled = _decimal(fields.get(FIELD_SETTLED_USD), settled)
+        reservation = _decimal(fields.get(FIELD_RESERVATION_USD), reservation)
+        reading = _reading(fields, reading)
     return Progress(done, total, calls, committed, settled, reservation, reading)
+
+
+def _is_run_start(line: str) -> bool:
+    """True when one events line is a run's own first event: `seq` is the
+    sink's per-run counter and restarts at 1 every run, so the last
+    ``seq: 1`` line delimits where the events file's last run begins --
+    what makes an append-only file's runs tellable apart."""
+    try:
+        data = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return False
+    seq = data.get("seq") if isinstance(data, dict) else None
+    return isinstance(seq, int) and not isinstance(seq, bool) and seq == 1
+
+
+def last_run_progress(
+    *paths: Path, max_bytes: int = PROGRESS_MAX_BYTES
+) -> tuple[Progress, str] | None:
+    """The progress figure of the events files' **last run**, with the
+    attempt-scoped key that identifies it, or None when that run has no
+    progress figure of its own.
+
+    The events file is append-only across the runs one head's directory
+    accumulates (the telemetry sink opens `O_APPEND` and nothing clears
+    the directory), and `seq` restarts per run, so the last ``seq: 1``
+    line delimits the last run's span. The figure is merged from the
+    progress records inside that span only -- the same field-for-field
+    merge `read_progress` performs, over the same bounded tail -- so a
+    record left by an **earlier** run is never returned as this run's
+    figure: a run that died before its first progress record has no
+    figure, and the caller records nothing rather than re-counting the
+    stale tail (r2 review of #773, M-R2-1). The key hashes the run's
+    start line with the span's progress records; appends never modify
+    existing lines, so the pair is stable for one dead run forever, and
+    distinct across runs -- the start line's monotonic `start_s` differs
+    per run -- which is what makes a once-per-attempt backfill
+    idempotent in the ledger itself."""
+    texts: list[str] = []
+    for path in paths:
+        text = _tail(path, max_bytes)
+        if text is not None:
+            texts.append(text)
+    lines = [line for text in texts for line in text.splitlines() if line.strip()]
+    starts = [i for i, line in enumerate(lines) if _is_run_start(line)]
+    if not starts:
+        return None
+    span = lines[starts[-1] :]
+    records = [
+        fields for line in span if (fields := _progress_fields(line)) is not None
+    ]
+    if not records:
+        return None
+    evidence = "\n".join(
+        (span[0], *(line for line in span if _progress_fields(line) is not None))
+    )
+    hasher = hashlib.sha256()
+    hasher.update(evidence.encode("utf-8"))
+    return _merge_progress(records), hasher.hexdigest()
 
 
 def cap_reading(reading: Sequence[str]) -> str:

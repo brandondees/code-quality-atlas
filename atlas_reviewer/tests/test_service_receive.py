@@ -4880,10 +4880,10 @@ def test_config_from_env_parses_the_per_tenant_bounds(tmp_path):
 # ------------------------------------------------- the crash backfill (M1)
 
 
-def _progress_record(committed: str, calls: int) -> str:
+def _progress_record(committed: str, calls: int, seq: int = 2) -> str:
     return json.dumps(
         {
-            "seq": 1,
+            "seq": seq,
             "phase": "progress",
             "step": "lens settled",
             "status": "ok",
@@ -4899,13 +4899,36 @@ def _progress_record(committed: str, calls: int) -> str:
     )
 
 
+def _run_start_record(attempt: int = 1) -> str:
+    """One run's own first event: `seq` restarts at 1 per run, and the
+    monotonic `start_s` differs per run, so two attempts' start lines
+    never read the same."""
+    return json.dumps(
+        {
+            "seq": 1,
+            "phase": "review",
+            "step": "review started",
+            "status": "ok",
+            "start_s": 100.0 * attempt,
+            "duration_s": 0.0,
+        }
+    )
+
+
+def _append_events(path: Path, *lines: str) -> None:
+    """The way the real child writes: the telemetry sink opens the
+    events file `O_APPEND` and appends; nothing truncates."""
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
 def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_path):
     """M1: a review whose process died before the worker could settle it
     never reached the settle-time spend recording. The retry's pre-runner
     pass reads the progress figure the crash left in the run directory --
     the child's own token-counts-times-price-table accounting -- and
-    backfills it onto the day's ledger once, before the retry runs and
-    overwrites the evidence; the retry's own spend is then added on top."""
+    backfills it onto the day's ledger once, before the retry appends its
+    own run's events; the retry's own spend is then added on top."""
     path = tmp_path / "queue.json"
     board = Board(path)
     spend = _spend(tmp_path)
@@ -4915,19 +4938,23 @@ def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_pa
     assert board.claim() is not None
     run = run_dir(tmp_path, PrEvent(REPO, 7, SHA_A))
     run.mkdir(parents=True, exist_ok=True)
-    (run / "events.jsonl").write_text(
-        _progress_record("2.20", 3) + "\n", encoding="utf-8"
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
     )
     # Restart: the reloaded board queues the crashed head again, and the
-    # retry's child overwrites the events file with its own progress.
+    # retry's child appends its own run's events to the same file.
     reloaded = Board(path)
     telemetry = Telemetry(SystemClock())
     ran = []
 
     def runner(event, cancel):
         ran.append(event.head_sha)
-        (run / "events.jsonl").write_text(
-            _progress_record("3.00", 4) + "\n", encoding="utf-8"
+        _append_events(
+            run / "events.jsonl",
+            _run_start_record(attempt=2),
+            _progress_record("3.00", 4),
         )
         return ReviewRun(True, REPORT_COST)
 
@@ -4953,8 +4980,10 @@ def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
     event = PrEvent(REPO, 7, SHA_A)
     run = run_dir(tmp_path, event)
     run.mkdir(parents=True, exist_ok=True)
-    (run / "events.jsonl").write_text(
-        _progress_record("2.20", 3) + "\n", encoding="utf-8"
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
     )
     telemetry = Telemetry(SystemClock())
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
@@ -5036,3 +5065,72 @@ def test_a_boolean_installation_id_is_not_an_installation_id(tmp_path):
         }
     ).encode()
     assert _deliver(config, board, body, spend=spend).body == b"queued\n"
+
+
+def test_a_progress_less_retry_does_not_re_backfill_the_stale_tail(tmp_path):
+    """M-R2-1: the events file is append-only across a head's attempts,
+    so a retry that appends its startup events and dies before its first
+    progress record leaves the previous attempt's figure as the file's
+    newest progress line. The backfill keys on the crashed attempt's own
+    span -- its run-start line plus its progress records -- so the stale
+    tail is not that attempt's figure and records nothing: one crashed
+    attempt's spend lands exactly once, however many progress-less
+    retries follow."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    # Two further attempts append their startup events and die
+    # progress-less; neither re-arms the backfill on the stale tail.
+    for attempt in (2, 3):
+        _append_events(run / "events.jsonl", _run_start_record(attempt=attempt))
+        _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    backs = [e for e in telemetry.events if e.step == "crashed spend"]
+    assert len(backs) == 3
+    assert backs[0].fields["measured"] == "backfilled"
+    assert "no progress figure" in backs[1].error
+    assert "no progress figure" in backs[2].error
+
+
+def test_a_retry_s_identical_looking_progress_is_still_its_own(tmp_path):
+    """The dedupe is attempt-scoped, not figure-scoped: a second attempt
+    whose progress record is byte-identical to the first attempt's --
+    `seq` restarts per run, so the fields can repeat exactly -- is a
+    different attempt's spend, keyed by its own run-start line, and is
+    recorded rather than deduplicated away."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    # The second attempt dies after writing a byte-identical progress
+    # record: a different attempt, a different key, its own record.
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=2),
+        _progress_record("2.20", 3),
+    )
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("4.40")

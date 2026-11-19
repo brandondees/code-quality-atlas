@@ -584,11 +584,23 @@ record when a review did not finish; a review with no figure in either
 records nothing and the gap stays on the cost telemetry, because the
 amount is never guessed. No tenant-reported dollar figure is ever
 consumed. A review whose process crashed before the worker could settle
-it is backfilled from the progress figure its run directory left behind —
-once, deduplicated in the ledger itself by the evidence's content hash —
-before the retry runs and overwrites that evidence; a crash whose run
-directory holds no readable progress figure records nothing, and the gap
-is named on the recovery's telemetry.
+it is backfilled from the progress figure its own run left in the run
+directory. The events file is append-only across a head's attempts (the
+telemetry sink opens `O_APPEND` and nothing clears the directory), so
+the figure is scoped to the crashed attempt's own span — its run-start
+line plus its progress records — and a retry that appended its startup
+events and died before its first progress record has no figure of its
+own: the previous attempt's stale tail is not re-counted. The backfill
+is deduplicated in the ledger itself by that attempt-scoped key, once
+per crashed attempt however many recoveries repeat; it runs before the
+preflight check, so the crashed spend counts against the bounds the
+retry is admitted under. An over-count, were one ever to land, fails
+safe — it makes the bounds refuse earlier, never later — while every
+under-count path is fail-closed or named on the telemetry. A recovery
+that crosses the UTC boundary backfills into the recovery day's ledger,
+the day the retry is admitted under — the same safe direction. A crash
+whose run directory holds no readable progress figure records nothing,
+and the gap is named on the recovery's telemetry.
 
 **Where the total lives.** One append-only
 `<state dir>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per

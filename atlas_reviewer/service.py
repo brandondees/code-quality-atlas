@@ -14,7 +14,6 @@ review child is started without either.
 from __future__ import annotations
 
 import contextvars
-import hashlib
 import math
 import os
 import random
@@ -51,6 +50,7 @@ from atlas_reviewer.head_change import (
     classify_delivery,
     decide,
     head_change_policy,
+    last_run_progress,
     read_progress,
 )
 from atlas_reviewer.ledger import make_private_dirs
@@ -631,26 +631,6 @@ def _progress_paths(state_root: Path, running: PrEvent) -> tuple[Path, ...]:
     return (events.with_name(events.name + ".1"), events)
 
 
-def _progress_evidence_key(paths: tuple[Path, ...]) -> str | None:
-    """The progress evidence's content hash -- the dedupe key one
-    crashed attempt's backfill carries in the ledger (r1 review of #773,
-    M1). The files are read whole and hashed together; the child is dead
-    by the time a recovery runs, so the same crashed attempt hashes the
-    same on every recovery pass, while a retry that writes its own
-    progress hashes differently and is backfilled on its own. No
-    readable evidence hashes to None, and a None means there is nothing
-    to backfill."""
-    hasher = hashlib.sha256()
-    seen = False
-    for path in paths:
-        try:
-            hasher.update(path.read_bytes())
-            seen = True
-        except OSError:
-            continue
-    return hasher.hexdigest() if seen else None
-
-
 def _backfill_crashed_spend(
     spend: DailySpend | None,
     state_root: Path,
@@ -664,39 +644,44 @@ def _backfill_crashed_spend(
     reached the settle-time spend recording, so its committed spend --
     the child's own token-counts-times-price-table accounting, from the
     progress records the crash left in the run directory -- is appended
-    before that attempt's evidence is overwritten, exactly once: the
-    ledger's own `record_once` dedupes on the evidence's content hash, so
-    a second recovery or a second pre-run pass over the same crashed
-    attempt adds nothing, while a retry that writes its own progress
-    hashes differently and is recorded on its own.
+    before the retry appends over it, exactly once. The events file is
+    append-only across a head's attempts, so the figure is scoped to the
+    crashed attempt's own span (`head_change.last_run_progress`: the
+    run-start line plus that run's progress records): a retry that
+    appended its startup events and died before its first progress
+    record has no figure of its own, and the previous attempt's stale
+    tail is not re-counted (r2 review of #773, M-R2-1).
 
     No run directory at all is the ordinary first run of a head -- or a
     pending head that was re-queued without ever having run -- and is
-    silent. A directory left behind with no readable progress figure is
-    the crash the child died too early to record anything in; nothing is
-    appended, and the gap is named on the telemetry, where the
-    unrecorded possibility stays visible -- the overshoot bound carries
-    it the way it carries the race."""
+    silent. A directory left behind with no figure of the crashed
+    attempt's own records nothing, and the gap is named on the
+    telemetry, where the unrecorded possibility stays visible -- the
+    overshoot bound carries it the way it carries the race. An
+    over-count, were one ever to land, fails safe: it makes the bounds
+    refuse earlier, never later. A recovery that crosses the UTC
+    boundary backfills into the recovery day's ledger -- the day the
+    retry is admitted under -- which is the same safe direction."""
     if spend is None:
         return
     paths = _progress_paths(state_root, event)
     if not run_dir(state_root, event).is_dir():
         return
-    progress = read_progress(*paths)
-    key = _progress_evidence_key(paths)
+    evidence = last_run_progress(*paths)
     fields: dict[str, str | int] = dict(_fields(event))
-    if progress is None or key is None:
+    if evidence is None:
         _record(
             telemetry,
             "crashed spend",
             fields,
             error=(
                 "the crashed attempt's run directory holds no progress "
-                "figure; its spend, if any, is unrecorded (the overshoot "
-                "bound carries it)"
+                "figure of its own; its spend, if any, is unrecorded "
+                "(the overshoot bound carries it)"
             ),
         )
         return
+    progress, key = evidence
     fields.update(
         {
             "calls": progress.calls,
