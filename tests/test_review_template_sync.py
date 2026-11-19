@@ -43,10 +43,6 @@ def _normalized(text: str) -> str:
     return _CEILING_LINE.sub(_NORMALIZED, _CEILING_EXAMPLE_BLOCK.sub(_NORMALIZED, text))
 
 
-def _normalized(text: str) -> str:
-    return _CEILING_LINE.sub(_NORMALIZED, _CEILING_EXAMPLE_BLOCK.sub(_NORMALIZED, text))
-
-
 def test_review_md_matches_template():
     assert _normalized(_read("REVIEW.md")) == _normalized(
         _read("templates/REVIEW.md")
