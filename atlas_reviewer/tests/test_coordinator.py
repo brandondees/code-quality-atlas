@@ -1926,8 +1926,7 @@ def test_a_refused_carry_call_keeps_the_findings_and_names_the_partial_stop(tmp_
             READ_ALL,
             final(finding()),
             KeyRefusedError(
-                "OpenRouter HTTP 402 for "
-                "https://openrouter.ai/api/v1/chat/completions",
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
                 review_error="model key out of credit",
             ),
         ],

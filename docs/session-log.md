@@ -5683,7 +5683,6 @@ whitespace stripped — is the already-pinned
 --check, mypy and the drift check run before the push; the only new test is
 the pin above, and no product behavior changed.
 
-<<<<<<< HEAD
 **Update (2026-11-19, fix round 1 of #778).** The round-1 review's Major
 made the template's copy of the line inert: `templates/REVIEW.md` now ships
 the line commented out inside a fenced code block —

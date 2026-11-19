@@ -360,8 +360,7 @@ class RefusesSecondCall(PickingProvider):
         self.review_calls += 1
         if self.review_calls >= 2:
             raise KeyRefusedError(
-                "OpenRouter HTTP 402 for "
-                "https://openrouter.ai/api/v1/chat/completions",
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
                 review_error="model key out of credit",
             )
         return super().complete(prompt)
@@ -374,8 +373,7 @@ class RefusesPicker(PickingProvider):
     def complete(self, prompt):
         if "--- lens picker ---" in prompt.system:
             raise KeyRefusedError(
-                "OpenRouter HTTP 402 for "
-                "https://openrouter.ai/api/v1/chat/completions",
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
                 review_error="model key out of credit",
             )
         raise AssertionError("no part is narrated on a refused picker call")
