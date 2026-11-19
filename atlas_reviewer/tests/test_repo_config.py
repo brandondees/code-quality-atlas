@@ -385,3 +385,94 @@ def test_a_fenced_example_key_draws_no_unsupported_note():
     note = read_repo_config(_tarball({"REVIEW.md": files})).unsupported_notes[0]
     assert "review_real_but_unknown:" in note
     assert "review_severity_floor:" not in note
+
+
+def test_the_fence_walk_follows_the_commonmark_subset():
+    """r2 review of #769, Minor 2: the fence walk's edges are pinned --
+    an indented (up to three spaces) fence opens and closes like a
+    column-0 one, a four-space-indented marker is an indented code block
+    and not a fence, a `~~~` example is skipped like a ``` one, and a
+    closing fence is the same character at at least the open fence's
+    length. Kills the indent-bound mutant, the tilde-dropped mutant, and
+    the closing-rule-removed mutant."""
+    # A two-space indented ``` fence: the example inside is skipped (the
+    # key inside is column 0, so the indent bound is what gates it), and
+    # the key after the closing fence is named.
+    indented = (
+        b"# policy\n\n"
+        b"  ```\n"
+        b"review_indented_example: 1\n"
+        b"  ```\n"
+        b"review_after_indented: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": indented})).unsupported_notes[0]
+    assert "review_after_indented:" in note
+    assert "review_indented_example:" not in note
+
+    # A four-space-indented ``` is an indented code block, not a fence:
+    # the scan keeps reading, so a column-0 key "inside" it is still
+    # named (an indented key line is not a config attempt in this
+    # grammar either way -- the same silence main's treatment of the
+    # known keys has).
+    code_block = (
+        b"# policy\n\n"
+        b"    ```\n"
+        b"review_code_block_example: 1\n"
+        b"    ```\n"
+        b"review_after_code_block: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": code_block})).unsupported_notes[0]
+    assert "review_after_code_block:" in note
+    assert "review_code_block_example:" in note
+
+    # A `~~~` example is skipped like a ``` one, and the key after the
+    # closing fence is named.
+    tildes = b"# policy\n\n~~~\nreview_tilde_example: 1\n~~~\nreview_after_tilde: 1\n"
+    note = read_repo_config(_tarball({"REVIEW.md": tildes})).unsupported_notes[0]
+    assert "review_after_tilde:" in note
+    assert "review_tilde_example:" not in note
+
+    # A closing fence is the same character at at least the open fence's
+    # length: a ``` line does not close a ```` fence, and a `~~~` line
+    # does not close a ``` fence.
+    same_char = (
+        b"````\n"
+        b"review_inside_long_fence: 1\n"
+        b"```\n"
+        b"review_still_inside: 1\n"
+        b"````\n"
+        b"review_after_long_fence: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": same_char})).unsupported_notes[0]
+    assert "review_after_long_fence:" in note
+    assert "review_inside_long_fence:" not in note
+    assert "review_still_inside:" not in note
+
+    crossed = (
+        b"```\n"
+        b"review_inside_backtick_fence: 1\n"
+        b"~~~\n"
+        b"review_still_inside_backticks: 1\n"
+        b"```\n"
+        b"review_after_crossed: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": crossed})).unsupported_notes[0]
+    assert "review_after_crossed:" in note
+    assert "review_inside_backtick_fence:" not in note
+    assert "review_still_inside_backticks:" not in note
+
+    # A closing fence carries no info string: a ``` line with one does
+    # not close a ``` fence (same character, same length -- only the
+    # info string distinguishes it).
+    info = (
+        b"```\n"
+        b"review_inside_info_fence: 1\n"
+        b"``` python\n"
+        b"review_still_inside_info: 1\n"
+        b"```\n"
+        b"review_after_info_fence: 1\n"
+    )
+    note = read_repo_config(_tarball({"REVIEW.md": info})).unsupported_notes[0]
+    assert "review_after_info_fence:" in note
+    assert "review_inside_info_fence:" not in note
+    assert "review_still_inside_info:" not in note

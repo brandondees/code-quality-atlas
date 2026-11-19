@@ -18,8 +18,11 @@ key namespace -- the namespace every setting line in this file lives in
 -- that neither this module's schema nor the admission read
 (`service_admit.py`, the default branch, #756/#761) carries is ignored
 fail-open and named, the generalization of D68's unusable-line note.
-Lines inside a fenced code block are examples, not configuration
-attempts, and are skipped. Every note names the key,
+The unsupported scan skips lines inside a fenced code block -- a
+documented example of a future key is not a configuration attempt --
+while the known keys' own parsers read every line regardless of fences
+(main's behavior, deliberately unchanged), so a fenced known key is
+still live config. Every note names the key,
 the condition, and the default that stands, and **never echoes the raw
 rejected value**: the value is unvalidated author-controlled input
 (merge-base `REVIEW.md` is author-controllable in same-repo and stacked
@@ -175,7 +178,8 @@ def _ceiling_value(text: str) -> CeilingRead:
     """The `review_ceiling_usd:` line's value. One line, one value; no
     line reads as absent (empty note); a line that is present but not a
     positive dollar amount -- or more than one -- reads as unusable, with
-    the note that says so."""
+    the note that says so. Fence-blind by design: this is main's parser,
+    unchanged, so a fenced known key is still live config."""
     found: Decimal | None = None
     seen_line = False
     for line in text.splitlines():
@@ -204,7 +208,8 @@ def _lens_preferences(text: str) -> LensPreferencesRead:
     (D69). One line per key; no line for a key reads as absent. Any line
     that is present but carries no comma-separated list of lens-shaped
     names, or a key that appears twice, makes the whole read unusable: the
-    guideline stands, fail-open, with the note that says so."""
+    guideline stands, fail-open, with the note that says so. Fence-blind
+    by design: this is main's parser, unchanged."""
     values: dict[str, list[str]] = {}
     for pattern, key in (
         (LENS_INCLUDE_LINE, "include"),
@@ -282,6 +287,14 @@ _KNOWN_KEYS = frozenset(
 # matter how many unknown keys a file packs.
 _UNSUPPORTED_KEYS_NAMED = 8
 
+# A fenced code block's edge, the simple CommonMark subset the
+# unsupported scan walks: up to three leading spaces, then at least
+# three backticks or tildes. A closing fence is the same character at at
+# least the open fence's length, carries no info string, and sits inside
+# the same indent bound; a 4-space-indented marker is an indented code
+# block, not a fence.
+_FENCE_MARKER = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
 
 def _unsupported_notes(text: str) -> tuple[str, ...]:
     """The named note for the keys the schema does not carry: one note,
@@ -289,21 +302,35 @@ def _unsupported_notes(text: str) -> tuple[str, ...]:
     `_UNSUPPORTED_KEYS_NAMED` of them, the remainder counted), the
     condition, and the default that stands -- never any rejected value.
     The key names are validated markup-free by the scan's regex, so the
-    note carries no author-controlled text past validation. Lines inside
-    a fenced code block are skipped: a repo's policy file may document a
-    future key in an example, and an example is not a configuration
-    attempt. The fence walk is the same line-level toggle for every
-    fence marker, so an unbalanced fence flips the state for the rest of
-    the file -- a missed or an extra note, either way fail-open and
-    bounded, never a wrong value: the known keys' own parsers are
-    line-based and unchanged."""
+    note carries no author-controlled text past validation.
+
+    Lines inside a fenced code block are skipped: a repo's policy file
+    may document a future key in an example, and an example is not a
+    configuration attempt. The fence walk is CommonMark's fence-edge
+    subset -- up to three leading spaces then at least three backticks
+    or tildes opens; the same character at at least the open fence's
+    length, with no info string, closes -- so a ``` example and a `~~~`
+    example are both skipped, and a 4-space-indented marker is an
+    indented code block, not a fence. An unbalanced fence flips the
+    state for the rest of the file -- a missed or an extra note, either
+    way fail-open and bounded, never a wrong value: the known keys' own
+    parsers are line-based and unchanged, so a fenced known key is still
+    live config."""
     seen: list[str] = []
-    fenced = False
+    fence: str | None = None  # the open fence's marker run, e.g. "```"
     for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+        marker = _FENCE_MARKER.match(line)
+        if fence is not None:
+            if (
+                marker is not None
+                and marker.group(1)[0] == fence[0]
+                and len(marker.group(1)) >= len(fence)
+                and not line[marker.end() :].strip()
+            ):
+                fence = None
             continue
-        if fenced:
+        if marker is not None:
+            fence = marker.group(1)
             continue
         match = _UNSUPPORTED_KEY_LINE.match(line)
         if match is None:

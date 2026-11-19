@@ -4036,3 +4036,32 @@ said "non-critical"; the protection set changed under it. **Nit 2**
 (session-log rotation) is pre-existing debt, left alone as the fix brief
 directs. Full local gate re-run on the rebased tree; three new mutants
 applied by hand, all killed.
+
+## 2026-11-19 (same day) — #769 round 2: the fence walk is CommonMark's edge subset, and the docstring stops overclaiming
+
+The r2 protocol review (verdict APPROVE) left two Minors, fixed in one
+commit. **Minor 1** — the module docstring's fence sentence ("lines
+inside a fenced code block ... are skipped") overclaimed: unqualified,
+it is false for the known keys, whose parsers are line-based and
+fence-blind by design (main's behavior, deliberately unchanged), so a
+fenced `review_ceiling_usd: 20` still configures the ceiling. The
+docstring now scopes the skip to the unsupported scan and states the
+asymmetry the way the README and this log already did; no code change.
+
+**Minor 2** — the fence walk's edges were unpinned (the reviewer's
+`lstrip()`-removed mutant survived the suite) and the "every fence
+marker" claim was broader than the code. The walk now implements
+CommonMark's fence-edge subset and the claim matches it: up to three
+leading spaces, then at least three backticks or tildes, opens a fence;
+the same character at at least the open fence's length, carrying no
+info string, closes it; a four-space-indented marker is an indented
+code block, not a fence. `test_the_fence_walk_follows_the_commonmark_subset`
+pins each edge — an indented (≤3 spaces) fence skips a column-0 key
+inside it, a 4-space marker does not fence, a `~~~` example is skipped
+like a ``` one, a shorter or crossed-character marker does not close,
+and a closing fence with an info string does not close. Four mutants
+applied by hand, all killed: the indent bound dropped to column 0 (the
+reviewer's F4 direction, now dead), the tilde alternative removed, the
+closing rule reduced to "any marker line", and the no-info-string check
+dropped. The unbalanced-fence hide vector stays as the r2 review
+assessed it: disclosed, fail-open, and never a wrong value.
