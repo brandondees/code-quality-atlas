@@ -4912,3 +4912,108 @@ same collapse to a figure-only key).
 behavior unchanged), `service.py` (the backfill's read and its
 docstring), the two test files, and the three docs. No open PR touches
 these files; the branch stays two commits atop `3fed73d2`.
+
+## 2026-11-19 — Config slice S6: the reviewed repo's default-branch `AGENTS.md` reaches every lens as one fenced context block
+
+The user-configuration plan's S6 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S6, §3's guidelines row; the decisions are D81's Q8 -- ingestion stays in
+scope -- and Q5's no-PR-level-overrides). Offline only: the tests use fakes,
+the shipped fixture and the real CLI's dry run; no live model, Sprite or
+GitHub call was made, no secret was read, and no deployed service setting,
+Fly config value or secret changed.
+
+**One file, read from the default branch.** The block is the reviewed
+repo's root `AGENTS.md` and nothing more (D87): `CLAUDE.md` mirrors,
+editor-rule directories and the team-preferences overlay are separate
+surfaces with their own decided paths, and nothing decided names them
+here. The read source is the repo's **default branch** -- never the PR
+head and never the merge-base, both of which a same-repo or stacked PR
+controls, so a read from either would let a PR carry instructions into
+its own review; the default branch changes only through reviewed merges.
+This is the plan's §4 rule and D84's post-settings precedent, applied to
+the block's content rather than a setting's value, and it is recorded in
+D87 (the number taken past D86, which open S9 PR #773 holds; the
+decision guard tolerates the gap). The branch is resolved with one
+read-only repository lookup, the service's own default-branch readers'
+shape, and the file read is bounded at the same 64 KiB every `REVIEW.md`
+read keeps (`repo_config.MAX_CHECKED_BYTES`'s size, pinned equal by a
+test) -- a file over the bound is not read cut, because a truncation
+inside guideline text could read as a rule it is not.
+
+**Delivery reuses the conversation/CI assembly, it does not add a
+parallel path.** `conversation.guidelines_block` builds one
+`UntrustedBlock` labelled `agents-md`, wired into `agentic-review`'s
+caller context beside the conversation, CI-evidence and delta-highlight
+blocks (`cli.py`), so every lens's first turn -- the picker-chosen ones
+and triage's critical tier alike -- carries it inside the review's one
+nonce fence (D65). The content is `RepoText` (committed repository
+content, D33), so guideline code samples are not redacted into mush; the
+block's one controller-written line states the provenance and the
+data-only status in constant text, with no repo-controlled value (the
+branch name, the repo slug) outside the fence's data region. Its own cap
+is 16,384 characters, the same working default D52 gives the prior-round
+blocks and D73 the CI block; under a model-named room it takes what the
+three earlier blocks leave (fit − conversation − CI − delta, the first
+turn's budget order -- this review's own new material is spent before
+the repo's standing guideline content is), sized by the conversation
+block's own arithmetic: one build at the room minus the truncation
+marker, one multi-byte rebuild at a quarter of the room, byte bound by
+construction.
+
+**Named and silent.** What is named, with fixed phrases and counts and
+never the content: a default branch that cannot be resolved, a fetch
+that failed (error text quoted as data), a file over the read bound, and
+every cut the cap or the room made -- each an omission in the draft's
+context-omissions section, so each holds the review at COMMENT (D42).
+What is silent: a default branch that carries no `AGENTS.md` (or an
+empty one) is the ordinary unconfigured repo -- the absence of optional
+content is not a gap, the reasoning D74 recorded for a missing round
+log, because naming it would hold every first review of every
+unconfigured repo at COMMENT. The brief's "missing file" example is read
+against that precedent rather than literally; it is the one call in D87
+a reviewer should check first. The picker sees none of it -- its view
+stays D38's title, body and changed paths.
+
+**Tests** (`test_guidelines_block.py`, `test_agentic_context.py`; each
+behavior a test that fails when reverted): the positive block, the
+constant header, absence and the empty file silent, the branch-lookup
+failure and the unnamed branch named, a failed fetch named with its
+error quoted, the over-bound file refused whole, the bound pinned equal
+to the config reads', the cap truncation named with both counts, the
+marker-gate omission, the room paths (fits, the ASCII one-build budget,
+the multi-byte rebuild and its marker-aware budget), the 1-to-60
+small-fit band in both byte widths, invalid UTF-8 read as replacement
+characters, and the branch the file is actually read at. The fence-safety
+tests drive hostile content -- a closing tag carrying the review's own
+nonce, a guessed nonce of the right shape, a forged opening with the
+controller-notes label, markup headings and an "ignore previous
+instructions" line -- through `build_prompt` and `first_turn` and pin
+that it stays inside the element, that the nonce survives only in the
+controller's own pair, and that none of it reaches the system prompt;
+the end-to-end tests pin the block on every lens's first turn at review
+depth and on triage's floor lenses, the named omissions (failed fetch,
+unresolved branch, room overflow, cap cut) with their draft lines, and
+the room arithmetic (the block takes what the other three blocks leave).
+
+**Mutants**: sixteen applied by hand, all killed on their named tests --
+the absence named (G1), the read bound removed (G2), the marker
+allowance dropped from the first build (G3), the multi-byte rebuild
+dropped (G4) and rebuilt without its marker allowance (G5), the fit gate
+dropped (G6), the provenance header dropped (G7), the ref hard-coded to
+`main` (G8), the empty-file check dropped (G9), the decode made strict
+(G10), the cut omission suppressed (G11), the room omission suppressed
+(G12), the label renamed (G13), and the three wiring mutants -- the full
+fit passed instead of the remainder (W1), the omissions not merged (W2),
+the block not added to the context (W3). One process slip, caught and
+recovered: the first mutant pass ran on an uncommitted tree and its
+`git checkout` restores wiped the still-uncommitted `conversation.py` and
+`cli.py` edits; the implementation was re-applied and committed before
+the pass was re-run -- the same slip the log has recorded before, and
+the reason the pass now runs only on a committed tree.
+
+**Docs.** D87 in `open-questions.md` records the implementation
+decisions the plan left open (the file set, the read source, the cap and
+budget order, the named/silent split); the service README's module table
+gains the guidelines block on `conversation.py`'s row and the agentic
+prompt bullet names the fourth context block, its read source and its
+data-only status. The plan document is untouched, as the issue directs.

@@ -265,6 +265,24 @@ def test_an_ascii_truncation_fits_the_room_in_one_build():
     )
 
 
+def test_the_multi_byte_rebuild_leaves_room_for_the_marker():
+    """The rebuild's own budget leaves room for the marker too: with a
+    1,000-character room and four-byte content, the first build (at
+    `room - marker` characters) overflows the room in bytes and the
+    rebuild lands at `(room - marker) // 4` = 240 characters -- the
+    unmarked-quarter mutant rebuilds at 250 and names the wrong budget,
+    so the omission's value is what kills it (the byte bound alone does
+    not separate the two, since both builds fit the room in bytes)."""
+    room = 1_000
+    block, omissions = _block_at(_Source(raw=("😀" * 2_000).encode()), room)
+    assert block is not None
+    assert len(block.content.text.encode("utf-8")) <= room
+    assert any(
+        omission.limit == f"{(room - TRUNCATION_MARKER_CHARS) // 4}-character cap"
+        for omission in omissions
+    )
+
+
 def test_content_over_the_cap_is_truncated_with_a_named_omission():
     """Content past the block's own cap is cut at the cap with the
     truncation marker, and the cut is named with both counts -- a model
