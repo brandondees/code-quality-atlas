@@ -63,7 +63,11 @@ which is why a review now writes it to disk.
 
 `python -m atlas_reviewer.service` listens for GitHub App `pull_request`
 deliveries (`opened`, `synchronize`, `ready_for_review`). A draft is
-ignored. The HMAC is `X-Hub-Signature-256` over the raw body with
+ignored. One `edited` delivery is admitted too: a retarget, whose
+`changes` carries `base` — the PR was moved onto another base branch,
+and admission is re-run against the branch it now targets. A title or
+body edit carries no `changes.base` and is ignored. The HMAC is
+`X-Hub-Signature-256` over the raw body with
 `ATLAS_GITHUB_WEBHOOK_SECRET` (at least 16 characters). The repository
 must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
 A second delivery of a head SHA whose review already finished does nothing.
@@ -125,8 +129,9 @@ The owner decides; the service records every skip with its reason so the
 decision's effect is visible in the telemetry.
 
 Narrowing runs after the operator's envelope has passed — the delivery is
-a non-draft `pull_request` event of the three accepted kinds on an
-allowlisted repo — and the checks run in a fixed order: skip event, then
+a non-draft `pull_request` event of the three accepted kinds, or a
+retarget (`edited` with `changes.base`), on an allowlisted repo — and the
+checks run in a fixed order: skip event, then
 the base branch (an include list the delivery's base branch does not
 match, or an exclude match, skips it; exclude wins). The patterns come
 from the default branch; what they match is the delivery's base branch,
@@ -139,18 +144,21 @@ running nor supersedes a queued one, which finish under the envelope they
 were admitted under. The skip is a log record, not a comment; the service
 posts nothing for a PR it did not review.
 
-**A base retarget is a gap, not a covered case.** A PR opened against an
-excluded (or unlisted) base branch and then retargeted to an included one
-is not re-evaluated: the retarget arrives as an `edited` event with
-`changes.base`, which is outside the operator's three-event envelope, and
-admitting it would widen the operator's event set — an operator decision,
-not a repo-config one. The gap is bounded, not open-ended: the next push
-to the PR arrives as a `synchronize` delivery, which is admitted and
-re-evaluated against the narrowing, so a retargeted PR is picked up at
-its next push; only a PR that retargets and merges without any further
-push slips through unreviewed. Issue #758 tracks closing the gap
-properly by re-running admission on `edited` events that carry
-`changes.base`.
+**A base retarget re-enters admission.** A PR retargeted onto another
+base branch arrives as an `edited` delivery whose `changes` carries
+`base`; the service admits exactly that shape — a title or body edit is
+ignored — and re-runs the same admission path against the `base.ref` the
+payload now carries, reading the config from the default branch as
+always. A retarget onto an included (or unexcluded) base starts the
+usual review of the current head, deduplicated against any in-flight or
+settled review of that head by the queue's key. A retarget onto an
+excluded base is skipped with the usual `repo-base-branch` reason, and
+the skip acts on the delivery only: a review already running for the
+head was admitted under the base it was reviewed against and is
+advisory, so it finishes and posts, and nothing new is queued or
+posted. A retarget can no longer move a PR out of review without a
+record: every retarget delivery is either reviewed, deduplicated, or
+logged with its skip reason.
 
 There are deliberately no label-based or head-branch-based filters: the
 PR author controls both, so a skip rule matching either would let an
@@ -1801,7 +1809,7 @@ D41 records the 2026-11-12 probe that did.
 | `local_runner.py` | the dry-run runner: `LocalSprites` runs each exec's wrapper locally (the same class the bridge and lens-loop tests use) and `LocalTasks` answers the keepalive hold on a unix socket | subprocesses, a local socket |
 | `lens_script.py` | the dry-run lens script: the scripted reviewer's fixed reading behavior and the JSON scenarios the fixture ships | reads the script file |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
-| `service_admit.py` | webhook signature, event and allowlist admission; the repo-narrowed admission config (config slice S4): the default-branch `REVIEW.md` narrowing lines parsed bounded and fail-open with named notes, and the pure narrowing of an admitted delivery — skip events and base-branch include/exclude — that can only remove a review, never widen the operator's envelope | no |
+| `service_admit.py` | webhook signature, event and allowlist admission (including the base-change `edited` retarget, which re-runs admission against the new base); the repo-narrowed admission config (config slice S4): the default-branch `REVIEW.md` narrowing lines parsed bounded and fail-open with named notes, and the pure narrowing of an admitted delivery — skip events and base-branch include/exclude — that can only remove a review, never widen the operator's envelope | no |
 | `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
 | `delta.py` | the delta review a kept head's follow-up runs (#702): the delta scope, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |

@@ -3,9 +3,10 @@
 
 The body is untrusted. A delivery is admitted only when the HMAC matches,
 the event is a non-draft ``pull_request`` of ``opened``, ``synchronize``
-or ``ready_for_review``, and the repository is on the allowlist. Anything
-else is ignored. The dedupe key is the repository, the PR number and the
-head SHA; this module only names that commit.
+or ``ready_for_review``, or a retarget -- an ``edited`` delivery whose
+``changes`` carries ``base`` -- and the repository is on the allowlist.
+Anything else is ignored. The dedupe key is the repository, the PR
+number and the head SHA; this module only names that commit.
 """
 
 from __future__ import annotations
@@ -22,6 +23,11 @@ from typing import Any
 from atlas_reviewer.domain import InvalidEventError, PrEvent
 
 ACCEPTED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
+# The one ``edited`` delivery admission takes: a base change, the
+# retarget of an open PR onto another base branch (#758). A title or
+# body edit carries no ``changes.base`` and is ignored, so the widening
+# stays one event shape, not the whole ``edited`` family.
+RETARGET_ACTION = "edited"
 
 # The repo-narrowed admission surface (config slice S4 of the
 # user-configuration plan): a repo may narrow when the service reviews
@@ -92,9 +98,19 @@ def parse_delivery(body: bytes) -> Any | None:
 
 
 def admit(payload: Mapping[str, Any], allowlist: frozenset[str]) -> Admitted | Ignored:
-    """Admit one already-authenticated ``pull_request`` payload."""
+    """Admit one already-authenticated ``pull_request`` payload.
+
+    A retarget -- an ``edited`` delivery whose ``changes`` carries
+    ``base`` -- is admitted alongside the three accepted actions, so a
+    PR moved onto another base branch re-runs admission against that
+    base instead of waiting for its next push (#758). Every other edit
+    stays outside the envelope, and the retarget runs the same checks
+    as any delivery: non-draft, same-repo, allowlisted."""
     action = payload.get("action")
-    if action not in ACCEPTED_ACTIONS:
+    if action == RETARGET_ACTION:
+        if not base_changed(payload):
+            return Ignored("action")
+    elif action not in ACCEPTED_ACTIONS:
         return Ignored("action")
     pull = payload.get("pull_request")
     repository = payload.get("repository")
@@ -322,7 +338,11 @@ def narrow(payload: Mapping[str, Any], admission: RepoAdmission) -> Ignored | No
     patterns come from the default branch, which changes only through
     reviewed merges; what they match is the delivery's base branch,
     which the author chose but cannot rewrite -- the config source, not
-    the match target, is what keeps the author from opting out. A base
+    the match target, is what keeps the author from opting out. On a
+    retarget (#758) that base branch is the one the PR now targets, so
+    the delivery is narrowed against the branch it moved to, and a skip
+    acts on the delivery only: a review already running for the head
+    keeps the envelope it was admitted under. A base
     ref the shape does not carry matches nothing. Removing a review is
     the point and the risk: a skipped event's coverage is gone with it,
     and the skipped changes can land unreviewed."""
@@ -345,6 +365,17 @@ def base_ref(payload: Mapping[str, Any]) -> str:
     base = pull.get("base") if isinstance(pull, dict) else None
     ref = base.get("ref") if isinstance(base, dict) else None
     return ref if isinstance(ref, str) else ""
+
+
+def base_changed(payload: Mapping[str, Any]) -> bool:
+    """True when the payload is an ``edited`` delivery that carries
+    ``changes.base`` -- the PR was retargeted onto another base branch.
+    On such a payload ``pull_request.base`` already names the new base,
+    so the narrowing that follows matches the branch the PR now
+    targets; ``changes.base.from`` is the branch it left and is never
+    read."""
+    changes = payload.get("changes")
+    return isinstance(changes, dict) and isinstance(changes.get("base"), dict)
 
 
 def default_branch(payload: Mapping[str, Any]) -> str:

@@ -3963,3 +3963,206 @@ def test_a_fallback_lookup_404_is_a_recorded_gap_and_not_a_stand_down(
     assert len(gaps) == 1
     assert gaps[0].status == "error"
     assert "NotFoundError" in gaps[0].error
+
+
+# ------------------------------------------------------------------
+# The retarget re-admission (#758): a base-change `edited` delivery
+# re-runs admission against the base the PR now targets. A title or
+# body edit stays outside the envelope. A retarget into an excluded
+# base is skipped with the usual reason and leaves a review already
+# running for the head alone -- it was admitted under the old base and
+# is advisory -- and nothing new is queued or posted.
+
+
+def _retarget_body(
+    *,
+    from_ref,
+    base_ref,
+    sha=SHA_A,
+    updated_at="2026-11-12T21:00:00Z",
+):
+    body = json.loads(_labeled_body(base_ref=base_ref, sha=sha).decode())
+    body["action"] = "edited"
+    body["changes"] = {"base": {"ref": {"from": from_ref}}}
+    body["pull_request"]["updated_at"] = updated_at
+    return json.dumps(body).encode()
+
+
+def test_a_retarget_into_an_included_base_is_queued_against_the_new_base(tmp_path):
+    """The gap #758 closes: a PR opened against a base the narrowing
+    excludes is picked up when it is retargeted onto an included one,
+    without waiting for its next push. The config is still read from the
+    repository's default branch -- the retarget changes the match
+    target, never the config's source."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    seen: list[tuple[str, str]] = []
+    reader = _admission_reader("review_base_include: main\n", seen)
+    before = _deliver(
+        config,
+        board,
+        _labeled_body(base_ref="feature/x"),
+        admission_reader=reader,
+    )
+    assert before.detail == "ignored:repo-base-branch"
+    assert board.states() == ()
+    result = _deliver(
+        config,
+        board,
+        _retarget_body(from_ref="feature/x", base_ref="main"),
+        admission_reader=reader,
+    )
+    assert result.body == b"queued\n"
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+    assert seen == [(REPO, "trunk"), (REPO, "trunk")]
+
+
+def test_a_title_or_body_edit_is_ignored(tmp_path):
+    """The widening is one event shape, not the ``edited`` family: an
+    edit that carries no ``changes.base`` re-enters nothing, with or
+    without an admission reader on the deployment."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    reader = _admission_reader("review_base_include: main\n")
+    for changes in (
+        {"title": {"from": "old"}},
+        {"body": {"from": "old"}},
+        {"title": {"from": "a"}, "body": {"from": "b"}},
+    ):
+        body = json.loads(_retarget_body(from_ref="main", base_ref="main").decode())
+        body["changes"] = changes
+        result = _deliver(
+            config, board, json.dumps(body).encode(), admission_reader=reader
+        )
+        assert result.detail == "ignored:action"
+    assert board.states() == ()
+
+
+def test_a_retarget_into_an_excluded_base_is_skipped_with_the_usual_reason(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    reader = _admission_reader("review_base_include: main\n")
+    result = _deliver(
+        config,
+        board,
+        _retarget_body(from_ref="main", base_ref="feature/x"),
+        admission_reader=reader,
+        telemetry=telemetry,
+    )
+    assert result.detail == "ignored:repo-base-branch"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert [e.fields["reason"] for e in skips] == ["repo-base-branch"]
+
+
+def test_a_retarget_to_an_excluded_base_leaves_a_running_review_alone(tmp_path):
+    """The in-flight case, defined: the running review was admitted under
+    the base it was reviewed against and is advisory (the service is
+    COMMENT-only), so the skip acts on the delivery only -- the review
+    finishes and posts, and nothing new is queued. Mutant: a skip that
+    superseded the running job would leave nothing posted."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    started = threading.Event()
+    release = threading.Event()
+    posted: list[str] = []
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+
+    worker = _worker(board, runner, publish, tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(
+                config,
+                board,
+                _labeled_body(base_ref="main", sha=SHA_A),
+                admission_reader=_admission_reader("review_base_include: main\n"),
+            ).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _retarget_body(from_ref="main", base_ref="feature/x"),
+            admission_reader=_admission_reader("review_base_include: main\n"),
+        )
+        assert result.detail == "ignored:repo-base-branch"
+        assert board.states() == ((SHA_A, JobState.RUNNING),)
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not posted:
+            time.sleep(0.01)
+        assert posted == [SHA_A]
+    finally:
+        worker.stop()
+
+
+def test_a_retarget_while_a_review_runs_dedupes_against_it(tmp_path):
+    """A retarget onto an included base while a review of the same head
+    runs is a duplicate, not a supersede: the head did not move, so the
+    running review keeps its post."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    started = threading.Event()
+    release = threading.Event()
+    posted: list[str] = []
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_A:
+            started.set()
+            release.wait(2)
+        return ReviewRun(True, REPORT)
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+
+    worker = _worker(board, runner, publish, tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(
+                config,
+                board,
+                _labeled_body(base_ref="main", sha=SHA_A),
+                admission_reader=_admission_reader("review_base_include: main\n"),
+            ).body
+            == b"queued\n"
+        )
+        assert started.wait(2)
+        result = _deliver(
+            config,
+            board,
+            _retarget_body(from_ref="feature/x", base_ref="main"),
+            admission_reader=_admission_reader("review_base_include: main\n"),
+        )
+        assert result.body == b"duplicate\n"
+        assert board.states() == ((SHA_A, JobState.RUNNING),)
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not posted:
+            time.sleep(0.01)
+        assert posted == [SHA_A]
+    finally:
+        worker.stop()
+
+
+def test_a_retarget_of_a_draft_is_still_ignored(tmp_path):
+    """The retarget widening touches the event set only; the draft rule
+    of the operator envelope stands."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    body = json.loads(_retarget_body(from_ref="main", base_ref="main").decode())
+    body["pull_request"]["draft"] = True
+    result = _deliver(config, board, json.dumps(body).encode())
+    assert result.detail == "ignored:draft"
+    assert board.states() == ()

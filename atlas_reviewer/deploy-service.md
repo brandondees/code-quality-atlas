@@ -246,7 +246,10 @@ cover a repository on another account.
 ## What a delivery does
 
 `opened`, `synchronize`, and `ready_for_review` on a non-draft PR are
-queued. A draft is ignored. A bad signature is refused with HTTP 401. A
+queued. So is one `edited` delivery: a retarget, whose `changes` carries
+`base` — the PR was moved onto another base branch, and admission is
+re-run against the branch it now targets. A title or body edit is
+ignored. A draft is ignored. A bad signature is refused with HTTP 401. A
 second delivery of the same head SHA does nothing. A newer head cancels
 the review in progress, and that cancelled review is not posted — unless
 the head-change policy decides to keep it: under the default
