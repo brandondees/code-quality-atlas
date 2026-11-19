@@ -123,15 +123,53 @@ def test_an_abandoned_sign_in_is_reclaimed_by_the_next_start_login() -> None:
         assert store.get(cookie) is None
 
 
-def test_the_pre_login_cap_refuses_past_its_bound() -> None:
-    from atlas_settings.sessions import SessionError
+def test_at_the_cap_a_new_sign_in_evicts_the_oldest_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap never locks the page: at the pre-login cap the oldest row
+    is evicted and the new sign-in is admitted — one caller cannot hold
+    every new sign-in shut by keeping 256 rows alive (kills the
+    refuse-at-the-cap mutant)."""
+    from atlas_settings import sessions as sessions_module
 
+    monkeypatch.setattr(sessions_module, "_MAX_PRE_LOGIN_SESSIONS", 4)
     clock = FakeClock()
     store = _store(clock)
-    for _ in range(256):
-        store.start_login("s", "v")
-    with pytest.raises(SessionError, match="too many pending sign-ins"):
-        store.start_login("s", "v")
+    first_session, first_cookie = store.start_login("s0", "v0")
+    cookies = [store.start_login(f"s{n}", "v{n}")[1] for n in range(1, 4)]
+    # The 5th sign-in succeeds: the oldest row goes, nobody is refused.
+    _session, newest_cookie = store.start_login("s4", "v4")
+    assert store.get(first_cookie) is None
+    assert store.get(newest_cookie) is not None
+    assert all(store.get(c) is not None for c in cookies)
+    # A sign-in whose row was evicted fails cleanly: its upgrade is the
+    # consumed-session refusal, not a crash and not a second login.
+    from atlas_settings.sessions import SessionError
+
+    with pytest.raises(SessionError, match="already consumed"):
+        store.upgrade(first_session, 11, "octo-admin")
+
+
+def test_the_signed_in_table_evicts_its_least_recently_used_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from atlas_settings import sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 3)
+    clock = FakeClock()
+    store = _store(clock)
+    signed_cookies = []
+    for n in range(3):
+        session, _cookie = store.start_login(f"s{n}", "v{n}")
+        _signed, signed_value = store.upgrade(session, 100 + n, f"u{n}")
+        signed_cookies.append(signed_value)
+    clock.advance(10)
+    session4, _cookie = store.start_login("s3", "v3")
+    _signed, fourth = store.upgrade(session4, 103, "u3")
+    # The least recently used signed-in row (the first) made room.
+    assert store.get(signed_cookies[0]) is None
+    assert store.get(signed_cookies[1]) is not None
+    assert store.get(fourth) is not None
 
 
 def test_the_session_repr_redacts_the_bindings() -> None:
@@ -173,13 +211,20 @@ def test_upgrade_is_single_use_under_overlapping_callbacks() -> None:
     assert store.get(value) is None
 
 
-def test_the_cookie_max_age_is_the_absolute_cap() -> None:
-    from atlas_settings.sessions import ABSOLUTE_TTL_S, cookie_header
+def test_the_cookie_max_age_follows_the_absolute_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The header's Max-Age is the ABSOLUTE_TTL_S constant, not a
+    copy-pasted literal: with the constant patched, the header follows
+    it (kills the literal-43200 mutant)."""
+    from atlas_settings import sessions as sessions_module
+    from atlas_settings.sessions import cookie_header
 
+    monkeypatch.setattr(sessions_module, "ABSOLUTE_TTL_S", 99)
     clock = FakeClock()
     store = _store(clock)
     _session, value = store.start_login("s", "v")
-    assert f"Max-Age={ABSOLUTE_TTL_S}" in cookie_header(value)
+    assert "Max-Age=99" in cookie_header(value)
 
 
 def test_expiry_runs_on_the_monotonic_clock_not_the_wall_clock() -> None:
@@ -307,3 +352,70 @@ def test_the_default_clock_is_the_real_utc_now() -> None:
     assert store.get(value) is not None
     assert session.created.tzinfo is UTC
     assert store.get("no-such-cookie") is None
+
+
+def test_the_sweep_reclaims_an_expired_signed_in_row_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap-triggered sweep drops every kind of expired row: the
+    signed-in session whose TTL ran out goes with the abandoned
+    sign-ins, and its slot in the signed-in count goes with it."""
+    from atlas_settings import sessions as sessions_module
+    from atlas_settings.sessions import ABSOLUTE_TTL_S
+
+    monkeypatch.setattr(sessions_module, "_MAX_PRE_LOGIN_SESSIONS", 1)
+    clock = FakeClock()
+    store = _store(clock)
+    session, signed_cookie = store.start_login("s", "v")
+    _signed, _value = store.upgrade(session, 11, "octo-admin")
+    clock.advance(ABSOLUTE_TTL_S + 1)  # past the signed-in session's cap
+    _pre_login_session, pre_login_cookie = store.start_login("s2", "v2")
+    clock.advance(601)
+    # At the pre-login cap the sweep runs and takes the dead signed-in
+    # row with the expired sign-in; the new sign-in is admitted.
+    store.start_login("s3", "v3")
+    assert store.get(signed_cookie) is None
+    assert store.get(pre_login_cookie) is None
+
+
+def test_destroy_decrements_the_right_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Destroying a signed-in row and destroying a pre-login row each
+    release their own slot, so a later start_login and upgrade see the
+    true counts."""
+    from atlas_settings import sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "_MAX_PRE_LOGIN_SESSIONS", 1)
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 1)
+    clock = FakeClock()
+    store = _store(clock)
+    pre_session, pre_cookie = store.start_login("s", "v")
+    store.destroy(pre_session)
+    signed_session, _cookie = store.start_login("s2", "v2")
+    signed, signed_cookie = store.upgrade(signed_session, 11, "octo-admin")
+    store.destroy(signed)
+    # Both slots are free again: a fresh pre-login sign-in and a fresh
+    # upgrade are both admitted without any eviction.
+    session3, _c = store.start_login("s3", "v3")
+    _signed3, _v = store.upgrade(session3, 12, "u3")
+    assert store.get(pre_cookie) is None
+    assert store.get(signed_cookie) is None
+
+
+def test_destroying_an_already_gone_session_is_a_no_op() -> None:
+    clock = FakeClock()
+    store = _store(clock)
+    session, _cookie = store.start_login("s", "v")
+    store.destroy(session)
+    store.destroy(session)  # already gone: no error, no counter change
+    store.destroy(
+        type(session)(
+            sid="never-existed",
+            created=clock.now(),
+            last_used=clock.now(),
+            csrf="c",
+        )
+    )
+    # The counters still tell the truth: a fresh sign-in is admitted.
+    _session2, _value = store.start_login("s2", "v2")

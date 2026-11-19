@@ -13,9 +13,14 @@ refreshed on use up to a fixed absolute lifetime, after which every
 request is answered as signed-out — a read redirects to the sign-in
 page and a write is refused, so an expired session can change nothing.
 Expiry is measured on a monotonic clock (a wall-clock step backward
-cannot extend a session). The table is bounded: `start_login` sweeps
-expired rows and refuses a new pre-login session past the cap, so an
-abandoned sign-in cannot park state in the process forever.
+cannot extend a session). Both tables are bounded, and a full table
+never locks the page out: `start_login` at the pre-login cap first
+sweeps the expired rows and then, if the cap still holds, evicts the
+oldest pre-login row and admits the new sign-in — one caller cannot
+hold every new sign-in shut by keeping 256 rows alive; `upgrade` at the
+signed-in cap evicts the least-recently-used signed-in row the same
+way. The walks run only on those rare paths, so the common insert is
+constant work.
 """
 
 from __future__ import annotations
@@ -34,10 +39,13 @@ PRE_LOGIN_TTL_S = 600
 SESSION_TTL_S = 1800
 ABSOLUTE_TTL_S = 43200
 _ID_BYTES = 32
-# The pre-login table's bound: an unauthenticated surface must not be
-# able to park unbounded state in the process; past the cap a new
-# sign-in is refused until the sweep reclaims the expired rows.
+# The tables' bounds: an unauthenticated surface must not be able to
+# park unbounded state in the process, and neither may a signed-in
+# crowd. A full table never refuses: the expired rows are swept first
+# and the oldest live row is evicted after that, so one caller cannot
+# hold the page's sign-in (or its signed-in capacity) shut.
 _MAX_PRE_LOGIN_SESSIONS = 256
+_MAX_SIGNED_IN_SESSIONS = 4096
 
 
 class SessionError(RuntimeError):
@@ -98,6 +106,8 @@ class SessionStore:
         self._pre_login_ttl_s = pre_login_ttl_s
         self._absolute_s = absolute_ttl_s
         self._sessions: dict[str, Session] = {}
+        self._pre_login_count = 0
+        self._signed_in_count = 0
         self._lock = threading.Lock()
 
     def start_login(self, state: str, verifier: str) -> tuple[Session, str]:
@@ -107,10 +117,19 @@ class SessionStore:
         callback: a second callback presenting the same state finds the
         session already upgraded and is refused."""
         with self._lock:
-            self._sweep()
-            pending = sum(1 for s in self._sessions.values() if not s.signed_in)
-            if pending >= _MAX_PRE_LOGIN_SESSIONS:
-                raise SessionError("too many pending sign-ins; try again shortly")
+            if self._pre_login_count >= _MAX_PRE_LOGIN_SESSIONS:
+                # The rare path: the cap is reached, so the walk runs —
+                # the expired rows go first, and if live rows still fill
+                # the table the oldest is evicted. A new sign-in is never
+                # refused because someone else filled the table.
+                self._sweep()
+            if self._pre_login_count >= _MAX_PRE_LOGIN_SESSIONS:
+                oldest = min(
+                    (s for s in self._sessions.values() if not s.signed_in),
+                    key=lambda s: s.created_mono,
+                )
+                del self._sessions[oldest.sid]
+                self._pre_login_count -= 1
             now, mono_now = self._now(), self._mono()
             session = Session(
                 sid=self._new_id(),
@@ -123,6 +142,7 @@ class SessionStore:
                 last_used_mono=mono_now,
             )
             self._sessions[session.sid] = session
+            self._pre_login_count += 1
         return session, self.cookie_value(session)
 
     def _sweep(self) -> None:
@@ -141,6 +161,10 @@ class SessionStore:
             )
             if expired:
                 del self._sessions[sid]
+                if session.signed_in:
+                    self._signed_in_count -= 1
+                else:
+                    self._pre_login_count -= 1
 
     def upgrade(
         self, session: Session, user_id: int, login: str
@@ -156,6 +180,16 @@ class SessionStore:
             # one state cannot both mint a signed-in session.
             if popped is not session or session.signed_in:
                 raise SessionError("the sign-in session is already consumed")
+            # The popped pre-login row's slot moves to the signed-in
+            # table with it.
+            self._pre_login_count -= 1
+            if self._signed_in_count >= _MAX_SIGNED_IN_SESSIONS:
+                least_recent = min(
+                    (s for s in self._sessions.values() if s.signed_in),
+                    key=lambda s: s.last_used_mono,
+                )
+                del self._sessions[least_recent.sid]
+                self._signed_in_count -= 1
             now, mono_now = self._now(), self._mono()
             signed_in = Session(
                 sid=self._new_id(),
@@ -168,15 +202,18 @@ class SessionStore:
                 last_used_mono=mono_now,
             )
             self._sessions[signed_in.sid] = signed_in
+            self._signed_in_count += 1
         return signed_in, self.cookie_value(signed_in)
 
     def get(self, cookie_value: str) -> Session | None:
         """The live session a cookie value names, or None. The signature
         is verified first, so a forged or truncated cookie is None; an
-        expired session is removed on sight and answers None. The TTL is
-        idle time since the last use (sliding), capped by the absolute
-        lifetime since creation — a session kept alive by use still dies
-        at the absolute cap."""
+        expired session is removed on sight and answers None. A
+        signed-in session's TTL is idle time since the last use
+        (sliding), capped by the absolute lifetime since creation — a
+        session kept alive by use still dies at the absolute cap. A
+        pre-login session expires 10 minutes after it was created and is
+        never refreshed."""
         # `http.server` decodes headers as latin-1, so a client can send
         # a non-ASCII cookie; it is refused as the forged thing it is,
         # never encoded or compared.
@@ -196,12 +233,14 @@ class SessionStore:
             # created and is never refreshed by a repeat presentation.
             if not session.signed_in:
                 if age >= self._pre_login_ttl_s:
-                    self._sessions.pop(sid, None)
+                    del self._sessions[sid]
+                    self._pre_login_count -= 1
                     return None
                 return session
             idle = mono_now - session.last_used_mono
             if idle >= self._ttl_s or age >= self._absolute_s:
-                self._sessions.pop(sid, None)
+                del self._sessions[sid]
+                self._signed_in_count -= 1
                 return None
             session.last_used = now
             session.last_used_mono = mono_now
@@ -209,7 +248,11 @@ class SessionStore:
 
     def destroy(self, session: Session) -> None:
         with self._lock:
-            self._sessions.pop(session.sid, None)
+            if self._sessions.pop(session.sid, None) is not None:
+                if session.signed_in:
+                    self._signed_in_count -= 1
+                else:
+                    self._pre_login_count -= 1
 
     def cookie_value(self, session: Session) -> str:
         """The signed cookie value for one session:
