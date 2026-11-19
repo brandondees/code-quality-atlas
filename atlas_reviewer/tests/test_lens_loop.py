@@ -2,6 +2,7 @@
 """One agentic lens attempt over the real bridge (`LocalSprites` runs each
 exec here) with a scripted model. No model, Sprite or GitHub call is made."""
 
+import sys
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
@@ -13,10 +14,12 @@ from atlas_reviewer.attestation import (
     Cause,
     CheckedFinding,
     LensState,
+    ToolUse,
     body_digest,
 )
 from atlas_reviewer.bridge import BridgeResult, SessionLimits, Status, run_bridge
 from atlas_reviewer.bridge_args import TOOLS, RejectedError, Rev, validate
+from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
@@ -74,12 +77,13 @@ from .agentic import (
     READ_ALL,
     READ_DIFF,
     TOKEN,
+    TOP,
     final,
     finding,
     tools,
     trees,
 )
-from .helpers import FakeClock, LocalSprites
+from .helpers import HEAD, OLD, FakeClock, LocalSprites, source_tarball
 
 NONCE = "f00dfeedf00dfeed"
 CONTRACT = finding_contract()
@@ -99,7 +103,8 @@ def job(body=BODY, digest=DIGEST):
 
 
 def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline=None,
-            the_job=None, session_limits=None, tool_limits=None, model=None, **kw):  # fmt: skip
+            the_job=None, session_limits=None, tool_limits=None, model=None,
+            source=None, pytest_candidates=None, **kw):  # fmt: skip
     model = model or ScriptedLensModel(list(script))
     clock = clock or FakeClock()
     spend = spend or Spend(limits.resolve())
@@ -120,8 +125,10 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
         extra["session_limits"] = session_limits
     if tool_limits:
         extra["limits"] = tool_limits
+    if pytest_candidates is not None:
+        extra["pytest_candidates"] = pytest_candidates
     report = run_bridge(
-        LocalSprites(), MemoryLedger(), trees(), body, redactor=Redactor(),
+        LocalSprites(), MemoryLedger(), source or trees(), body, redactor=Redactor(),
         changed=CHANGED, name="cqa-lens-test", deadline_s=900, clock=clock,
         root=str(tmp_path / "bridge"), **extra,
     )  # fmt: skip
@@ -2155,6 +2162,10 @@ def test_the_prefix_instructions_and_the_paged_ones_agree_where_they_share():
             "Every quote is checked, and a finding whose quote is not found is "
             "not reported."
         ),
+        "Two tools execute, on a disposable copy of the head tree",
+        "run_tests runs the copy's pytest suite or the selector",
+        "a mutant that survived means the guard it stands for is not pinned",
+        "an inconclusive run is a gap, not evidence",
     ):
         assert shared in flat(INSTRUCTIONS)
         assert shared in flat(PREFIX_INSTRUCTIONS)
@@ -2636,3 +2647,218 @@ def test_a_scope_with_a_path_without_a_section_pages_and_is_not_attested(tmp_pat
     )
     assert Cause.FILES_UNREAD in outcome.causes
     assert outcome.state is LensState.PARTIAL
+
+
+# ----------------------------------------------------- execution tools (D80)
+
+EXEC_TOKEN_LINE = f'TOKEN = "{TOKEN}"\n'.encode()
+CALC_ROUND = b"def total(xs):\n    return sum(round(x, 2) for x in xs)\n"
+CALC_GUARDED = (
+    b"def total(xs):\n"
+    b"    if not xs:\n"
+    b"        return 0\n"
+    b"    return sum(round(x, 2) for x in xs)\n"
+)
+EXEC_TEST = (
+    b"from calc import total\n\ndef test_two_values():\n    assert total([1, 2]) == 3\n"
+)
+
+
+def exec_source(head_calc):
+    head = {
+        "calc.py": head_calc,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_calc.py": EXEC_TEST,
+    }
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF,
+    )  # fmt: skip
+    return SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD), the_job
+
+
+def test_a_run_tests_result_is_a_counted_run_and_a_cited_evidence_line(tmp_path):
+    source, the_job = exec_source(CALC_ROUND)
+    outcome, model, _ = attempt(
+        tmp_path, [tools(("run_tests", {})), final(finding())],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.test_runs == 1
+    assert outcome.mutants_survived == 0
+    # The result the model saw names the head the run is evidence at.
+    run_turn = model.requests[1].messages[-1].results[0]
+    assert f"head {HEAD}" in run_turn
+
+
+def test_a_survived_mutant_counts_and_is_not_a_gap(tmp_path):
+    source, the_job = exec_source(CALC_GUARDED)
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [
+            tools(
+                ("mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}),
+            ),
+            final(finding(evidence="return sum(round(x, 2) for x in xs)", location="calc.py:4")),
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.mutants_survived == 1
+    assert outcome.test_runs == 0
+    assert Cause.TOOL_GAP not in outcome.causes
+
+
+def test_an_inconclusive_mutant_is_a_tool_gap_and_never_a_survivor(tmp_path):
+    source, the_job = exec_source(CALC_GUARDED)
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [
+            tools(
+                ("mutate", {"path": "calc.py", "line": 1, "operator": "remove-guard"}),
+            ),
+            final(finding(evidence="return sum(round(x, 2) for x in xs)", location="calc.py:4")),
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.mutants_survived == 0
+    assert Cause.TOOL_GAP in outcome.causes
+
+
+def test_a_timed_out_run_is_a_gap_and_not_a_counted_run(tmp_path):
+    from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
+
+    slow = b"import time\n\ndef test_slow():\n    time.sleep(10)\n"
+    head = {
+        "calc.py": CALC_ROUND,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_slow.py": slow,
+    }
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF,
+    )  # fmt: skip
+    outcome, _model, _ = attempt(
+        tmp_path, [tools(("run_tests", {})), final(finding())],
+        the_job=the_job,
+        source=SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD),
+        pytest_candidates=(sys.executable,),
+        tool_limits={**DEFAULT_LIMITS, "run_tests": ToolLimits(16 * 1024, 1)},
+    )  # fmt: skip
+    assert outcome.test_runs == 0
+    assert Cause.TOOL_GAP in outcome.causes
+
+
+def test_a_failing_suite_still_counts_as_a_run_and_not_a_gap(tmp_path):
+    """A suite whose tests fail is the run's result, not a tool failure:
+    the run counts, and no gap opens (D80; the lens-loop side of the
+    bridge's own pin, so a gate that counts only passing runs fails
+    here)."""
+    head = {
+        "calc.py": CALC_ROUND,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_calc.py": (
+            b"from calc import total\n\n"
+            b"def test_two_values():\n    assert total([1, 2]) == 4\n"
+        ),
+    }
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF,
+    )  # fmt: skip
+    outcome, _model, _ = attempt(
+        tmp_path, [tools(("run_tests", {})), final(finding())],
+        the_job=the_job,
+        source=SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD),
+        pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.test_runs == 1
+    assert Cause.TOOL_GAP not in outcome.causes
+
+
+def test_the_stop_fold_refreshes_the_execution_counts_with_the_tools():
+    """The fold that carries a held finding across the tool work a
+    follow-up asked for refreshes the execution counts beside the tools
+    and turns (round-1 Nit), so the follow-up's runs and survivors are
+    not folded away. The other fold's follow-up never ran, so its held
+    counts stand."""
+    from atlas_reviewer.attestation import QuoteSource
+    from atlas_reviewer.lens_contract import (
+        Attribution,
+        Finding,
+        LineRange,
+        Route,
+        Severity,
+        Valence,
+    )
+
+    f = Finding(
+        LineRange("calc.py", 2, 2), Severity.MAJOR, Valence.DEFECT, Route.ENG,
+        Attribution.INTRODUCED, "something", "fix it", "return sum(xs)",
+    )  # fmt: skip
+    held = AttemptOutcome(
+        Attestation.ATTESTED, findings=(CheckedFinding(f, QuoteSource.REMOVED),),
+        test_runs=1,
+    )  # fmt: skip
+    p = _Progress(changed=CHANGED)
+    p.finding_hold = held
+    p.tools.append(ToolUse("run_tests", "{}", "OK"))
+    p.turns = 3
+    p.runs_executed = 2
+    p.mutants_survived = 1
+    outcome = p.cut(Cause.TURN_CAP, "stopped")
+    assert (outcome.test_runs, outcome.mutants_survived) == (2, 1)
+    assert [(t.tool, t.status) for t in outcome.tools] == [("run_tests", "OK")]
+    # The fold whose follow-up never ran keeps the held counts: nothing
+    # executed between the hold and the stop.
+    q = _Progress(changed=CHANGED)
+    q.held_outcome = held
+    untouched = q.cut(Cause.TURN_CAP, "stopped")
+    assert (untouched.test_runs, untouched.mutants_survived) == (1, 0)
+
+
+def test_a_byok_refusal_carries_the_executions_already_made(tmp_path):
+    """The Byok refusal's exception carries the execution counts beside
+    the turns and tools, so the ledger line it finishes records what the
+    attempt executed before the refusal (round-1 Nit). The refusal fails
+    the runner by design; the record is what this pins, so the test
+    catches the exception inside the bridge session, the way the
+    coordinator's ledger finish does."""
+    source, the_job = exec_source(CALC_ROUND)
+    caught: list[ByokRefusedError] = []
+
+    def body(bridge):
+        model = ScriptedLensModel(
+            [tools(("run_tests", {})), ByokRefusedError("refusing the review: byok")]
+        )
+        clock = FakeClock()
+        try:
+            run_attempt(
+                the_job, bridge, model, Spend(LIMITS.resolve()), clock,
+                review_deadline=clock.monotonic() + 600,
+                review_started=clock.monotonic(), sleep=clock.advance,
+            )  # fmt: skip
+        except ByokRefusedError as exc:
+            caught.append(exc)
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(), MemoryLedger(), source, body, redactor=Redactor(),
+        changed=CHANGED, name="cqa-lens-byok", deadline_s=300, clock=FakeClock(),
+        root=str(tmp_path / "bridge"), pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (exc,) = caught
+    assert exc.test_runs == 1
+    assert exc.mutants_survived == 0
+    assert exc.turns == 1

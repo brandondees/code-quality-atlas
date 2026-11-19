@@ -1,8 +1,11 @@
 # Plan: CI evidence for lenses, and a sandboxed `run_tests`/`mutate` tool in the Sprite
 
 **Status:** Part A implemented with D73 (2026-11-16, issue #715 Part A).
-Part B — the sandboxed `run_tests`/`mutate` tools — is not started:
-planning only. Brandon asked for this plan on 2026-11-13 alongside D58.
+Part B implemented with D80 (2026-11-18, issue #734): the decision
+record, the two bridge tools with their schemas, the attempt counters
+and the status line's counts; the parity rerun (phase 5) is not started
+and is not part of #734. Brandon asked for this plan on 2026-11-13
+alongside D58.
 
 ## Why this plan exists
 

@@ -198,6 +198,12 @@ class AttemptOutcome:
     unread: tuple[str, ...] = ()
     # None on a ledger line from before the per-file gate recorded a count.
     changed_files: int | None = None
+    # D80's execution counts, carried the way changed_files is: the
+    # run_tests calls that came back with a run, and the mutants whose
+    # verdict was survived. Zero on a ledger line from before the tools
+    # existed, and on an attempt that executed nothing.
+    test_runs: int = 0
+    mutants_survived: int = 0
     # None when the attempt was not stopped by a configured limit.
     limit_hit: LimitHit | None = None
     # Findings left out of the reply, each naming the raw severity (D54).
@@ -471,6 +477,8 @@ def _outcome_json(
         "detail": scrub(outcome.detail),
         "unread": [scrub(path) for path in outcome.unread],
         "changed_files": outcome.changed_files,
+        "test_runs": outcome.test_runs,
+        "mutants_survived": outcome.mutants_survived,
         "limit": _limit_json(outcome.limit_hit, scrub),
         "dropped": [scrub(note) for note in outcome.dropped],
         "nudges": [scrub(nudge) for nudge in outcome.nudges],
@@ -521,6 +529,14 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         raise TypeError("changed_files must be an integer")
     if isinstance(changed, int) and changed < 0:
         raise TypeError("changed_files must be an integer")
+    test_runs = data.get("test_runs", 0)
+    mutants_survived = data.get("mutants_survived", 0)
+    for name, count in (
+        ("test_runs", test_runs),
+        ("mutants_survived", mutants_survived),
+    ):
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise TypeError(f"{name} must be a non-negative integer")
     nudges = data.get("nudges", [])
     if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
         raise TypeError("nudges must be a list of strings")
@@ -536,6 +552,8 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _str(data["detail"]),
         tuple(unread),
         changed,
+        test_runs,
+        mutants_survived,
         _limit_from(data.get("limit")),
         _dropped_from(data.get("dropped", ())),
         tuple(nudges),

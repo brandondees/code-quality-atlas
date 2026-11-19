@@ -13,6 +13,7 @@ from atlas_reviewer.attestation import AttemptOutcome, Cause, LensState
 from atlas_reviewer.coordinator import render_draft, synthesize
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import (
+    REASONING_HINT_CAP,
     AgenticLimits,
     FinalReply,
     Spend,
@@ -219,16 +220,24 @@ def test_the_fit_runs_through_the_real_traced_wrapper():
 
 
 def test_the_live_model_fits_a_cap_whose_worst_case_is_in_the_budget():
-    """The fixture prices reasoning and the per-request fee nonzero
-    (round-1 review of #740), so a mutant dropping the reasoning term or
-    the request fee from the fit's rate math returns a cap whose true
-    worst case overshoots the budget and dies on the two assertions
-    below: the fit's cap must fit the budget, and one more token of cap
-    must not (maximality). The fee is set at or above the per-token rate,
-    so the fee-drop mutant shifts the fit's floor by at least one token
-    and cannot hide in the floor's rounding slack. The prices live on the
-    ZDR endpoint rows, because `load_terms` prices from the rows the
-    route selected, not from the catalog's headline numbers."""
+    """The fit's contract is safety first, tightness second: the worst
+    case of the returned cap stays within the budget, and the cap is the
+    largest within the fit's own whole-payload arithmetic -- not globally,
+    because the worst case is not monotonic in the cap across the
+    reasoning-hint halving regime (D50: the hint is
+    `min(output // 2, REASONING_HINT_CAP)`), and the adapter's metered
+    bound can realize one token more headroom than that arithmetic. The
+    assertions sweep several budgets so a prompt or schema byte change
+    that moves the fitted cap onto or off a regime boundary shifts which
+    budget is exercised, not whether the suite passes: safety must hold at
+    every budget, and the realized maximum may sit at most one token above
+    the returned cap (the fit's whole-payload bound is conservative by at
+    most the per-message overhead). The fee is set at or above the
+    per-token rate, so the fee-drop mutant shifts the fit's floor by at
+    least one token and overshoots the budget, dying on the safety
+    assertion. The prices live on the ZDR endpoint rows, because
+    `load_terms` prices from the rows the route selected, not from the
+    catalog's headline numbers."""
     lens, fake = model(
         reply(completion("ok")),
         zdr=reply(
@@ -236,14 +245,28 @@ def test_the_live_model_fits_a_cap_whose_worst_case_is_in_the_budget():
         ),
     )
     full = lens.worst_case_usd(request())
-    budget = full / 2
-    cap = lens.output_tokens_within(request(), budget)
-    assert 0 < cap < FULL
-    fitted = replace(request(), max_output_tokens=cap)
-    assert lens.worst_case_usd(fitted) <= budget
-    over = replace(request(), max_output_tokens=cap + 1)
-    assert lens.worst_case_usd(over) > budget
-    lens.turn(fitted)
+    cap = FULL
+    for fraction in (1, 2, 3, 5, 8, 10):
+        budget = full * fraction / 21
+        cap = lens.output_tokens_within(request(), budget)
+        assert 0 < cap <= FULL
+        fitted = replace(request(), max_output_tokens=cap)
+        # Safety: the invariant the spend protection depends on.
+        assert lens.worst_case_usd(fitted) <= budget
+        # Tightness within one token: scan upward for the realized maximum
+        # and require it to sit at most one token above the returned cap.
+        # The scan stops at FULL: the resolved cap is the contract's ceiling.
+        realized = cap
+        ceiling = min(cap + 1, FULL)
+        while (
+            realized < ceiling
+            and lens.worst_case_usd(replace(request(), max_output_tokens=realized + 1))
+            <= budget
+        ):
+            realized += 1
+        assert realized <= cap + 1
+        assert realized >= cap
+    lens.turn(replace(request(), max_output_tokens=cap))
     body = sent(fake)
     hint = default_reasoning_tokens(FULL)
     if hint >= cap:
@@ -251,6 +274,65 @@ def test_the_live_model_fits_a_cap_whose_worst_case_is_in_the_budget():
     assert body["max_tokens"] == cap
     assert body["reasoning"]["max_tokens"] == hint
     assert cap - hint > 1
+
+
+def test_the_fit_is_safe_on_both_sides_of_the_hint_halving_regime_edge():
+    """The hint's regime boundary sits at twice `REASONING_HINT_CAP`:
+    below it the hint grows with the cap, from there up the hint is the
+    constant cap. A cap fitted right at the edge pins the boundary on
+    purpose, so a prompt or schema byte change that moves the fitted cap
+    across it changes what this test exercises, never whether it passes:
+    safety and one-token tightness must hold on both sides, and the sent
+    body's hint must be the capped one above the edge."""
+    lens, fake = model(
+        reply(completion("ok")),
+        zdr=reply(
+            zdr_payload(pricing={"internal_reasoning": "0.000006", "request": "0.0001"})
+        ),
+    )
+    full = lens.worst_case_usd(request())
+    edge = 2 * REASONING_HINT_CAP
+    assert default_reasoning_tokens(edge - 1) == REASONING_HINT_CAP - 1
+    assert default_reasoning_tokens(edge) == REASONING_HINT_CAP
+    assert default_reasoning_tokens(edge + 1) == REASONING_HINT_CAP
+    # The first token past the edge is where the cap bites: the uncapped
+    # half would be one over, so an implementation that ignores the
+    # halving regime's cap is caught here and not at the boundary itself,
+    # where the two agree.
+    assert default_reasoning_tokens(edge + 2) == REASONING_HINT_CAP
+    budgets = {}
+    low, high = full / 64, full
+    for target in (edge - 1, edge, edge + 1):
+        while lens.output_tokens_within(request(), low) > target:
+            low /= 2
+        probe = high
+        while lens.output_tokens_within(request(), probe) < target:
+            probe = (probe + high) / 2
+        hi, lo = probe, low
+        for _ in range(80):
+            mid = (hi + lo) / 2
+            if lens.output_tokens_within(request(), mid) >= target:
+                hi = mid
+            else:
+                lo = mid
+        budgets[target] = hi
+    for target, budget in budgets.items():
+        cap = lens.output_tokens_within(request(), budget)
+        assert cap == target
+        fitted = replace(request(), max_output_tokens=cap)
+        assert lens.worst_case_usd(fitted) <= budget
+        realized = cap
+        while (
+            lens.worst_case_usd(replace(request(), max_output_tokens=realized + 1))
+            <= budget
+        ):
+            realized += 1
+            assert realized <= cap + 1
+        assert realized >= cap
+    lens.turn(replace(request(), max_output_tokens=edge + 2))
+    body = sent(fake)
+    assert body["max_tokens"] == edge + 2
+    assert body["reasoning"]["max_tokens"] == REASONING_HINT_CAP
 
 
 def test_the_fit_fits_the_same_per_token_rate_the_reservation_prices():

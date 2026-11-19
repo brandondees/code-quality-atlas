@@ -252,14 +252,20 @@ class OpenRouterLensModel:
         return self.provider._timeout_s
 
     def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
-        """The largest output cap, up to the resolved one, whose worst case
-        for this request stays within `budget_usd`. Below 1 when the input
-        alone does not fit. The input bound is taken with the resolved cap
-        in the payload, and a smaller cap is never more bytes, so the worst
-        case of the returned cap is within the budget at these prices. The
-        rate is the per-token worst case `budget.worst_case_usd` prices:
-        the higher of the completion and reasoning rates, one rate per
-        token, not their sum (issue #750)."""
+        """An output cap, up to the resolved one, whose worst case for this
+        request stays within `budget_usd` -- safety first; the cap is the
+        largest within the fit's own whole-payload arithmetic, not
+        globally: the worst case is not monotonic in the cap across the
+        reasoning-hint halving regime (`default_reasoning_tokens` caps the
+        hint at `REASONING_HINT_CAP`), and the adapter's metered bound can
+        realize a token more headroom than this whole-payload bound, so
+        the realized maximum may sit one token higher. Below 1 when the
+        input alone does not fit. The input bound is taken with the
+        resolved cap in the payload, and a smaller cap is never more
+        bytes, so the worst case of the returned cap is within the budget
+        at these prices. The rate is the per-token worst case
+        `budget.worst_case_usd` prices: the higher of the completion and
+        reasoning rates, one rate per token, not their sum (issue #750)."""
         terms, _, selected = self._ready()
         uncapped = replace(request, max_output_tokens=None)
         bounds = _bounds(self.per_call, terms, uncapped)

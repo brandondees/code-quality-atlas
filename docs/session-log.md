@@ -4250,6 +4250,57 @@ scripted framing tests and pure verdict tests; thirteen hand-applied
 mutants each die on a named test (listed in D80). No live model, Sprite
 or GitHub call; no secret read; no deployed setting changed.
 
+## 2026-11-18 — #734 part 2: the loop counts what executed, and the draft says so
+
+The stacked slice that closes #734: the execution tools reach the lens
+loop's instructions (one shared paragraph for the paged and shared-prefix
+variants, so the two cannot drift), and the attempt's counts ride the
+outcome the way `changed_files` does. `_tool` counts a `run_tests` call
+that came back with a run and a mutant whose verdict was survived onto
+the `_Progress`; the outcome carries `test_runs` and
+`mutants_survived`, the ledger round-trip reads both back, and the
+status line sums them over the lenses as `test_runs` and
+`mutants_survived`. An inconclusive mutant adds `TOOL_GAP` — an
+execution gap a review cannot approve over, the same rule a failed or
+timed-out run already rode; a failing suite is a result, not a gap, and
+still counts as a run. The plan's Status header now records Part B as
+implemented with D80, phase 5's parity rerun still open (and outside
+the issue's scope). Four counting tests run real pytest through
+`LocalSprites`; the status-line test sums over three lenses; the
+round-trip pins the two new fields.
+
+## 2026-11-18 — #753 round 1 fixes: the counting layer's pins, and the folds carry the counts
+
+The protocol review's verdict was COMMENT with no Major: two Minors and
+five Nits, all in the layer this PR owns. The two Minors were pinning
+gaps, not behavior: the lens-loop side of "a failing suite is a result,
+not a gap, and still counts as a run" had no test of its own (the
+bridge side's pin is #752's), so a gate that counted only passing runs
+would have passed this layer's whole suite — the new
+`test_a_failing_suite_still_counts_as_a_run_and_not_a_gap` runs a
+failing suite through the loop and pins the count and the absent gap;
+and the `_EXECUTION` instructions paragraph was unpinned, so dropping
+it from either prompt layout left the suite green — the anti-drift
+test's shared-sentence list now carries the paragraph's four key
+sentences. The Nits: the stop fold that carries a held finding across a
+follow-up's tool work now refreshes `test_runs`/`mutants_survived`
+beside the tools and turns it already refreshed (the fold whose
+follow-up never ran keeps the held counts, with the reason stated); a
+Byok refusal's exception carries the counts beside the turns and tools,
+and the ledger line the coordinator finishes with them records the
+executions the attempt had already made; the duplicated assertion was
+deleted (the second copy added nothing), and the rule it gestured at — a
+mutate call is not a run_tests run — stays pinned where it really lives,
+in `test_a_survived_mutant_counts_and_is_not_a_gap`'s
+`outcome.test_runs == 0`; the misleading test name now
+names what it tests; D80's Update names `_outcome_json` as the writer
+and `_outcome_from` as the reader; and the status line's sums are
+documented as the head's recorded executions, not what this review paid
+for — a reused lens's settled counts are real executions at this same
+head (D73's evidence stays at the head it belongs to). Five new
+hand-applied mutants over the fixes, each dead on a named test. The
+MD018 session-log fix had already landed at `07207c4d`.
+
 ## 2026-11-18 — #752 round 1: execution copies come from the object store, and MUTANT reads are hash-checked
 
 The round's Major (the routine's Blocker) was real and the review's
@@ -4417,3 +4468,28 @@ execs counted; the runner script's `timeout` asserted). The tool
 schema's `regex` description names the dialect (in the stacked #753).
 No live model, Sprite or GitHub call; no secret read; no deployed
 setting changed.
+
+## 2026-11-18 — #753 round 2 fixes: the boolean-count rejections pinned, and the regex schema names its dialect
+
+The round-2 review approves the counting layer, with one Minor and one
+nit. The Minor: the round-1 entry said the duplicated assertion "became
+the check it was meant to be" — it was deleted, and the rule it
+gestured at (a mutate call is not a run_tests run) lives where it
+always did, in
+`test_a_survived_mutant_counts_and_is_not_a_gap`'s
+`outcome.test_runs == 0`; the entry now says that. The mutant the
+review named (M12, the ledger reader's explicit boolean-count check —
+needed because `True` is an `int` in Python, so the isinstance gate
+alone would pass a boolean) is now pinned:
+`test_a_boolean_count_in_the_ledger_is_abandoned` feeds a boolean
+ledger line for `test_runs`, `mutants_survived` and `changed_files`
+and asserts `ABANDONED` for each. The restack onto #752's round-3 fix
+keeps the counting layer in step with the controller-side content
+reads and the regex-grep split: the `BridgeResult` shape is unchanged
+and the lens contract held with no edits. And the tool schema's
+`regex` argument description now names the dialect the bridge pinned on
+the #752 branch — "a POSIX extended regex (git grep -E's dialect), not
+a fixed string; an invalid regex is a gap" — so the model's `regex:
+true` calls mean what the runner's git grep will do with them. No live
+model, Sprite or GitHub call; no secret read; no deployed setting
+changed.
