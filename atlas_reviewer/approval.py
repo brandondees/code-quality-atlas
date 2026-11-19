@@ -129,14 +129,21 @@ class NeverApproved:
 # The fixed refusal reasons. Each names the condition and the counts --
 # how many commands the run's allow-list proposes, how many are approved
 # -- and never the command text. The counts come from the gate's own
-# state, so they are controller facts, not author text.
+# state, so they are controller facts, not author text. The voice is the
+# decided shape's (D88's update): pre-approval and channel answers, not a
+# live wait -- the channel answers from the run-start snapshot, so a
+# denial is the pre-approval record saying no and a no-answer is a
+# channel failure or a limit reached, never an operator who did not
+# answer in time.
 _DENIED = (
-    "the operator denied the proposed test command; the run's allow-list "
+    "the channel's pre-approval record denies the proposed test command; "
+    "the run's allow-list "
     "holds {proposed} proposed and {approved} approved, and the command "
     "stays unapproved -- the built-in pytest entry stands"
 )
 _NO_ANSWER = (
-    "no operator approval arrived within the run's remaining wall; the "
+    "the run's channel gave no usable answer (an error, a timeout, or the "
+    "run's wall or dollar limit reached); the "
     "run's allow-list holds {proposed} proposed and {approved} approved, "
     "and the command stays unapproved -- the built-in pytest entry stands"
 )

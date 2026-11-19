@@ -279,7 +279,9 @@ def test_a_denial_denies_sticky_and_names_the_counts():
     approvals, _ = gate("make check, sh run.sh", channel)
     approved, reason = approvals.admit("sh run.sh")
     assert not approved
-    assert "the operator denied the proposed test command" in reason
+    assert (
+        "the channel's pre-approval record denies the proposed test command" in reason
+    )
     assert "holds 2 proposed and 0 approved" in reason
     assert "sh run.sh" not in reason
     # Sticky: a later call in the same run is refused without re-asking.
@@ -293,7 +295,7 @@ def test_a_no_answer_denies_fail_closed():
     approvals, _ = gate("make check", ScriptedChannel())
     approved, reason = approvals.admit("make check")
     assert not approved
-    assert "no operator approval arrived within the run's remaining wall" in reason
+    assert "the run's channel gave no usable answer" in reason
     assert "holds 1 proposed and 0 approved" in reason
 
 
@@ -301,7 +303,7 @@ def test_a_channel_error_denies_fail_closed():
     approvals, _ = gate("make check", ScriptedChannel(error=RuntimeError("boom")))
     approved, reason = approvals.admit("make check")
     assert not approved
-    assert "no operator approval arrived" in reason
+    assert "the run's channel gave no usable answer" in reason
     assert "boom" not in reason
 
 
@@ -376,7 +378,7 @@ def test_a_never_approving_channel_is_the_production_default():
     approvals, _ = gate("make check", NeverApproved())
     approved, reason = approvals.admit("make check")
     assert not approved
-    assert "no operator approval arrived" in reason
+    assert "the run's channel gave no usable answer" in reason
     assert "holds 1 proposed and 0 approved" in reason
 
 
@@ -417,7 +419,7 @@ def test_a_channel_that_never_returns_denies_within_the_bound():
     approved, reason = approvals.admit("make check")
     elapsed = time.monotonic() - start
     assert not approved
-    assert "no operator approval arrived within the run's remaining wall" in reason
+    assert "the run's channel gave no usable answer" in reason
     assert elapsed < 10.0, "the gate's bound must end the wait, not the channel"
     assert channel.requests == [("make check", 0.0 + 0.2)]
     # Sticky: the still-outstanding request is never re-asked.
@@ -438,7 +440,7 @@ def test_an_answer_that_arrives_after_the_bound_is_ignored():
     time.sleep(0.6)  # the channel's answer lands now, after the bound
     approved_again, reason_again = approvals.admit("make check")
     assert not approved_again
-    assert "no operator approval arrived" in reason_again
+    assert "the run's channel gave no usable answer" in reason_again
     assert approvals.approved_count() == 0
     assert len(channel.requests) == 1
 
@@ -465,7 +467,7 @@ def test_a_non_enum_channel_answer_denies_fail_closed():
     approvals, _ = gate("make check", BareString())
     approved, reason = approvals.admit("make check")
     assert not approved
-    assert "no operator approval arrived" in reason
+    assert "the run's channel gave no usable answer" in reason
     approved_again, _ = approvals.admit("make check")
     assert not approved_again
 

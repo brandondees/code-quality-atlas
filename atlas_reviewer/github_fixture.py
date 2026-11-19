@@ -8,7 +8,6 @@ as GitHub serves them), `check-runs.json` (the runs at every commit;
 listed under the head branch's name; `list_workflow_runs_at` serves those at one SHA),
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
-<<<<<<< HEAD
 `issue-<n>.json`, `compare.json`, `repository.json` (the repository object;
 its `default_branch` is what the default-branch reads resolve), any
 default-branch file under its own path name (`get_file` serves it from the

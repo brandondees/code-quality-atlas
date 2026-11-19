@@ -5564,3 +5564,76 @@ guidelines block, S7's proposals read) coexist as separate one-lookup
 reads, and the README's S6 and S7 sections sit beside each other. The
 overlap D88 predicted held: nothing in S6's changes forced an S7 behavior
 change.
+
+## 2026-11-19 (same day) — #775 fix round 3: the committed conflict marker deleted, a guard against the next one, and the refusal phrases moved into the decided voice
+
+The re-check at `b9f4fe27` REQUEST CHANGES on one Blocker and three
+smaller findings; all fixed here, offline throughout.
+
+**The Blocker — the marker, and why every gate missed it.** The rebase's
+fixture-docstring resolution replaced the two sides' overlapping text but
+left the `<<<<<<< HEAD` line itself sitting in the module docstring --
+syntactically invisible (it is string content), so the gate, ruff, mypy
+and both suites stayed green over an unfinished conflict resolution. The
+line is deleted; the merged text around it was already the correct
+resolution.
+
+**The guard, so this cannot recur.** `tests/test_no_conflict_markers_are_
+committed.py` walks every tracked file (`git ls-files`) and fails on a
+committed conflict marker, with the shapes kept narrow per the brief: a
+line starting with seven `<` or seven `>` followed by a space (git's own
+`<<<<<<< HEAD` and `>>>>>>> label`), or a line that is exactly seven `=`.
+The divider's one legitimate look is a setext heading's underline, which
+directly follows the heading text -- so in a markdown or RST file a
+`=======` is flagged only when the line above is blank, while in every
+other tracked file it is flagged outright (no shape a source file,
+fixture or workflow legitimately carries is that line; the blocker sat
+exactly there, in a `.py` file). The first narrowing draft keyed the
+exclusion on the previous line being non-blank alone, which swallows the
+common real conflict (the divider directly follows the ours side) -- the
+file-type split is what keeps both properties. An indented line and
+longer marker runs are not the shapes git writes and are not flagged.
+The walk's end-to-end honesty is pinned by a tracked sample,
+`tests/fixtures/conflict-marker-sample.txt`, the one file allowed to
+carry markers: the walk must find it whole (both edges and the divider)
+and hold every other tracked file to none -- which is also what makes the
+walk-loop drop mutant killable instead of hiding behind a clean tree.
+**Mutants, each applied by hand and killed**: the marker reintroduced
+into the fixture docstring (the clean-tree walk fails), the walk loop
+dropped (the seeded-sample walk fails), the divider rule dropped, the
+setext exclusion dropped, the edge-shape rule dropped, and the walk's
+population emptied or filtered to nothing (the population pin fails on
+each). The check is recorded here as the brief directs; the pyc-cache
+lesson from fix round 1 was applied -- every mutant verdict above was
+scored with the mutated module's bytecode cache deleted first.
+
+**The Minor — D88's quote matches the shipped string.** D88's "Named gaps
+and records" paragraph quoted the controller line as "ran with operator
+approval for this run"; this round's rebase commit renamed it, and the
+entry now quotes the shipped `ran as a pre-approved addition for this
+run` (`bridge.py`'s render line) -- the append-only rules allow the
+correction as a later dated round's edit on the branch, and the entry
+already carried the update paragraph that claimed the rewording.
+
+**The two Nits.** `repo_config.py`'s grammar comment now reads "a request
+the operator pre-approves (D88's update: installation admins pre-approve
+on the S10 settings page, part B; no live approval during a review), never
+a grant" -- the one S7 surface the sweep had left with an unqualified
+"the operator approves". And `approval.py`'s `_DENIED` and `_NO_ANSWER`
+fixed phrases moved from the live-wait voice into the decided shape's:
+the denial is now "the channel's pre-approval record denies the proposed
+test command" and the no-answer is "the run's channel gave no usable
+answer (an error, a timeout, or the run's wall or dollar limit reached)"
+-- both still fail closed with the same counts and the same built-in
+pytest fallback, and the tests pinning them ride along word for word
+(`_DENIED`'s denial pin, the no-answer pins across the channel-error,
+no-answer, late-answer, non-enum and never-approving tests). The
+wall/dollar phrases keep their wait wording deliberately: they describe
+the bounded ask's fail-safety limits, which the decided shape keeps as
+the bound on any channel implementation.
+
+**Gates.** Both suites with their floors, ruff, ruff format, mypy, drift
+and markdownlint run before the push; the guard's seven mutants are the
+round's only new ones (no product behavior changed -- the refusal phrases
+are user-visible strings, and their pins are the tests that moved with
+them).

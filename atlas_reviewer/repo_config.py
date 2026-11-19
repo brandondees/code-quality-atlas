@@ -202,7 +202,9 @@ POST_VERBOSITY_LINE = re.compile(
 # execution-tool allow-list (config slice S7, D88): the value is a
 # comma-separated list of declared test commands, each one program token
 # plus optional fixed argument tokens separated by single spaces. A
-# proposal is a request the operator approves, never a grant, and the
+# proposal is a request the operator pre-approves (D88's update:
+# installation admins pre-approve on the S10 settings page, part B; no
+# live approval during a review), never a grant, and the
 # argv it may become is built by the bridge from these tokens alone.
 TEST_COMMANDS_LINE = re.compile(
     r"^review_test_commands:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"

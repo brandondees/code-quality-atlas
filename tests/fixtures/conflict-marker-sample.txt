@@ -1,0 +1,5 @@
+<<<<<<< HEAD
+the ours side of the sample conflict
+=======
+the theirs side of the sample conflict
+>>>>>>> the-sample-branch
