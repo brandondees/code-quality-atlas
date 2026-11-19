@@ -3884,7 +3884,11 @@ def test_a_followup_whose_changes_do_not_affect_a_lens_reuses_the_settled_result
         ),
     )
     result, _sprites = _lenses(
-        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(resolution_paths=frozenset()),
     )
     # The decision call and the carry-forward call are the review's only
     # model contact; the lens made no turn.
@@ -3901,7 +3905,12 @@ def test_a_re_run_lens_can_report_a_finding_outside_the_delta(tmp_path):
     names the file the delta never touched -- and a finding it reports
     on that file verifies and stands. Mutant: the path-restricted lens
     scope restored, which narrows the review to the delta's files: the
-    off-delta file reaches no lens and the finding cannot verify."""
+    off-delta file reaches no lens and the finding cannot verify. The
+    kill is two-legged by necessity: this test pins the coordinator's
+    side (whatever diff it is handed is not narrowed), while the
+    `_delta_input` mutant -- the restriction's actual home -- is killed
+    by the CLI dry-run twin's `changed_files == 3`, which is the only
+    test that reaches that function."""
     log = _round_log_with_prior(tmp_path)
     evidence = f'TOKEN = "{TOKEN}"'
     model = ScriptedLensModel(
@@ -3984,7 +3993,11 @@ def test_coverage_counts_reused_files(tmp_path):
         decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
     )
     result, sprites = _lenses(
-        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(resolution_paths=frozenset()),
     )
     assert result.coverage_complete
     assert result.runner is None
@@ -4125,9 +4138,498 @@ def test_a_merge_only_delta_reuses_every_eligible_lens_without_a_call(tmp_path):
         decisions=(_decided(lens=LENS, decision="rerun", reason="unreachable"),),
     )
     result, _sprites = _lenses(
-        tmp_path, [LENS], model, round_log=log, delta=_delta_scope(range_diff="")
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(range_diff="", resolution_paths=frozenset()),
     )
     turns = [request.messages[0].text for request in model.requests]
     assert not any(t.startswith("Lens decisions target") for t in turns)
     assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, True)]
     assert result.coverage_complete
+
+
+# --------------------------------------- fix round 1 (round-1 review of #760)
+
+DELTA_ADDED_DIFF = (
+    DIFF + "diff --git a/newmod.py b/newmod.py\nnew file mode 100644\n"
+    '--- /dev/null\n+++ b/newmod.py\n@@ -0,0 +1 @@\n+VALUE = "placeholder"\n'
+)
+
+
+def _reassess_reply(*findings: dict[str, str], withdrawn: tuple = ()):
+    from decimal import Decimal
+
+    from atlas_reviewer.lens_loop import FinalReply
+
+    return FinalReply(
+        json.dumps(
+            {
+                "lens": LENS,
+                "body_sha256": DIGEST,
+                "findings": list(findings),
+                "withdrawn": [
+                    {"id": identifier, "reason": reason}
+                    for identifier, reason in withdrawn
+                ],
+            }
+        ),
+        Decimal("0.02"),
+    )
+
+
+def test_a_delta_touched_file_no_lens_read_is_unreviewed_and_blocks_coverage(tmp_path):
+    """The reviewer's all-reuse probe, pinned (round-1 Major A): a delta
+    that ADDS a file cannot have been read by any reused result -- the
+    delta-admission gate guarantees only that the earlier review read the
+    pull request at ITS head -- so the file is unreviewed, coverage is
+    incomplete, and an otherwise-clean review cannot approve. This is an
+    accounting rule, not a lens scope: no lens is narrowed. Mutant: the
+    delta accounting dropped, which claims complete coverage over a file
+    no model saw this round."""
+    log = _round_log_with_prior(tmp_path, line=f"L1-F1 nit calc.py:2 {PRIOR_TEXT}")
+    model = ScriptedLensModel(
+        [_carry_reply(())],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(resolution_paths=frozenset({"newmod.py"})),
+        diff=DELTA_ADDED_DIFF,
+    )
+    assert result.lenses == ()
+    assert "newmod.py" in result.unreviewed_paths
+    assert not result.coverage_complete
+    # The approval the findings alone would allow is held at COMMENT.
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert "a delta-touched file no lens read" in render_draft(result, Redactor())
+
+
+def test_a_delta_touched_file_a_re_run_lens_read_is_covered(tmp_path):
+    """The accounting rule composes with reuse: the delta-touched file a
+    RE-RUN lens read this round is covered, and the reused lens's files
+    (which the delta did not touch) stay covered by the reused result."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS, OTHER],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        models=[
+            ScriptedLensModel([READ_ALL, final()]),
+            ScriptedLensModel(
+                [READ_ALL, final(lens=OTHER, digest=body_digest(OTHER_BODY))]
+            ),
+        ],
+    )
+    assert result.coverage_complete
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [
+        (LENS, True),
+        (OTHER, False),
+    ]
+
+
+def test_a_reused_lens_reassesses_when_the_evidence_moved(tmp_path):
+    """D73 on the delta-reuse path (round-1 Major B): the record stores
+    the digest the earlier review settled under; this review's snapshot
+    moved, so the reused lens earns its one bounded re-assessment -- the
+    same `_reassess_call` the ledger-reuse path runs -- and its additions
+    join the findings, its withdrawals are annotations, and the
+    composition is recorded on the decision. Mutant: the reassessment
+    dropped, which leaves a reused lens blind to newer CI evidence and
+    comments the re-run lenses all saw."""
+    from atlas_reviewer.telemetry import Telemetry
+
+    log = _round_log_with_prior(tmp_path)
+    # Store the earlier review's digest on the record at the delta base.
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (f"L1-F1 major calc.py:2 {PRIOR_TEXT}",),
+            False,
+            0,
+            "",
+            (),
+            (LENS,),
+            (LENS,),
+            "a" * 64,
+        )
+    )
+    telemetry = Telemetry(FakeClock())
+    model = ScriptedLensModel(
+        [
+            _carry_reply((_restated(),)),
+            _reassess_reply(
+                finding(
+                    location="calc.py:1",
+                    evidence="def total(xs):",
+                    finding="the rounding silently drops negative quantities",
+                    fix="guard the sign before rounding",
+                ),
+                withdrawn=(("P1", "the newer CI run shows the rounding holds"),),
+            ),
+        ],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=RoundLog(path),
+        delta=_delta_scope(),
+        evidence_digest="b" * 64,
+        telemetry=telemetry,
+    )
+    # Decision call, carry-forward call, re-assessment call: the reused
+    # lens's judgment happened.
+    assert len(model.requests) == 3
+    added = [f for f in result.verified if f.id.startswith("R")]
+    assert [(f.id, f.lens) for f in added] == [("R1-F1", LENS)]
+    # The withdrawal is an annotation on the decision, never a deletion.
+    decision = result.lens_decisions[0]
+    assert decision.reassessed
+    assert [w.reason for w in decision.withdrawn] == [
+        "the newer CI run shows the rounding holds"
+    ]
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    draft = render_draft(result, Redactor())
+    assert "re-assessed:" in draft
+    assert "## Withdrawn findings (re-assessed with newer evidence)" in draft
+    record = log.read().records[-1]
+    assert any("re-assessed:" in line for line in record.decisions)
+    events = [e for e in telemetry.events if e.step == "lens decision"]
+    assert events[-1].fields["reassessed"] is True
+
+
+def test_a_reused_lens_with_unchanged_evidence_makes_no_reassessment_call(tmp_path):
+    """The digest rule composes across the chain: when the record's digest
+    matches this review's snapshot, the reused result is shown to be
+    current, and no bounded call is spent."""
+    # The stray record gives the carry-forward a prior finding to
+    # dispose, so the request count below is decision + carry.
+    _round_log_with_prior(tmp_path)
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (f"L1-F1 major calc.py:2 {PRIOR_TEXT}",),
+            False,
+            0,
+            "",
+            (),
+            (LENS,),
+            (LENS,),
+            "c" * 64,
+        )
+    )
+    model = ScriptedLensModel(
+        [_carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=RoundLog(path),
+        delta=_delta_scope(),
+        evidence_digest="c" * 64,
+    )
+    assert len(model.requests) == 2
+    assert result.lens_decisions[0].reassessed is False
+    assert result.lens_decisions[0].reassess_note == ""
+
+
+def test_a_reused_lens_with_no_attributed_finding_makes_no_reassessment_call(tmp_path):
+    """A reused lens whose earlier record holds no finding attributed to
+    it has nothing to re-assess -- the same rule that spares an
+    unattested settled result a call -- so no bounded call is spent."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [_carry_reply(())],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        evidence_digest="b" * 64,
+    )
+    assert len(model.requests) == 2
+    assert result.lens_decisions[0].reassessed is False
+
+
+def test_the_decision_turn_sees_the_fresh_evidence_and_the_concerns(tmp_path):
+    """The reuse judgment is not blind (round-1 Major B, design call): the
+    decision turn carries the same fresh CI and conversation blocks the
+    lenses get, each lens's one-line concern summary, and the flag on a
+    lens whose earlier findings cite files the incremental diff touches.
+    Mutant: the context blocks dropped from the turn, which decides reuse
+    from the delta alone while the head's CI fails in the reused lens's
+    concern."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(),))],
+        decisions=(_decided(lens=LENS, decision="rerun", reason="the CI run is red"),),
+    )
+    from atlas_reviewer.prompt import RepoText, UntrustedBlock
+
+    _result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        context=(
+            UntrustedBlock(
+                "conversation",
+                RepoText("a maintainer commented that the rounding regressed"),
+            ),
+        ),
+    )
+    decision_text = model.requests[0].messages[0].text
+    # The fresh evidence reached the judgment.
+    assert "the rounding regressed" in decision_text
+    # The concern summary rides next to the name (the stub body's first
+    # line under its heading).
+    assert LENS in decision_text
+    assert "Trace every branch" in decision_text
+
+
+def test_the_decision_instructions_resolve_uncertainty_toward_rerun():
+    """The design call's floor, pinned in the prompt (round-1 review of
+    #760): uncertainty resolves toward re-running, so a steered or
+    mistaken reuse is the harder direction to land on. Mutant: the
+    instruction removed, which leaves the judgment neutral between a
+    silent shrink and a bounded cost."""
+    from atlas_reviewer.delta import DECISION_INSTRUCTIONS, decision_system
+
+    assert "When you are uncertain, re-run" in DECISION_INSTRUCTIONS
+    assert "When you are uncertain, re-run" in decision_system("f00dfeed")
+
+
+def test_a_lens_whose_findings_cite_the_delta_is_flagged_to_the_decision(tmp_path):
+    """The sharpest reuse case gets its signal (round-1 design call): a
+    lens whose earlier findings cite files the incremental diff touches
+    is flagged in the decision turn and the flag is recorded with the
+    decision. Mutant: the flag computation dropped, which offers the
+    highest-stakes reuse with no sign of the stakes."""
+    from atlas_reviewer.telemetry import Telemetry
+
+    log = _round_log_with_prior(tmp_path, line=f'L1-F1 major "calc.py:2" {PRIOR_TEXT}')
+    telemetry = Telemetry(FakeClock())
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply((_restated(),))],
+        decisions=(
+            _decided(lens=LENS, decision="reuse", reason="the change is a comment"),
+        ),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=log,
+        delta=_delta_scope(),
+        telemetry=telemetry,
+    )
+    decision_text = model.requests[0].messages[0].text
+    assert (
+        "its earlier findings cite files the incremental diff touches" in decision_text
+    )
+    assert result.lens_decisions[0].flagged is True
+    events = [e for e in telemetry.events if e.step == "lens decision"]
+    assert events[-1].fields["cites_delta"] is True
+
+
+def test_a_lens_the_earlier_review_left_failed_is_not_offered_for_reuse(tmp_path):
+    """Minor C, fixed at the source: the record now carries the lenses
+    that settled clean, and a lens the earlier review ran to a failure is
+    never offered -- there is no settled result behind it. Mutant: the
+    clean-set read dropped (reuse offered for any listed lens), which
+    reuses a lens whose earlier round produced nothing."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (),
+            False,
+            0,
+            "",
+            (),
+            (),
+            (),
+            "",
+        )
+    )
+    model = ScriptedLensModel(
+        [READ_ALL, final(), _carry_reply(())],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=RoundLog(path), delta=_delta_scope()
+    )
+    decision = result.lens_decisions[0]
+    assert decision.reuse is False
+    assert "no settled result" in decision.reason
+    # The lens re-ran: the offer never reached it, and the carry-forward
+    # early-returns over a record with no finding lines -- two lens
+    # turns, no decision call.
+    assert len(model.requests) == 2
+
+
+def test_no_reusable_lens_makes_no_decision_call(tmp_path):
+    """Minor E: with nothing reusable -- here, a record that settled
+    nothing clean -- the billed judgment call is skipped; every planned
+    lens re-runs structurally and the call could not have changed that."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (),
+            False,
+            0,
+            "",
+            (),
+            (),
+            (),
+            "",
+        )
+    )
+    model = ScriptedLensModel([READ_ALL, final()])
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=RoundLog(path), delta=_delta_scope()
+    )
+    turns = [request.messages[0].text for request in model.requests]
+    assert not any(t.startswith("Lens decisions target") for t in turns)
+    assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, False)]
+
+
+def test_the_decisions_cap_keeps_the_record_lines_bounded_and_names_the_overflow():
+    """Minor D: the record's decisions field is bounded at
+    `DECISIONS_CHARS`, and a plan whose lines overflow it stores what fit
+    and names the rest -- the mutant that raised the cap to 10**9
+    survived round 1 because nothing pinned the bound."""
+    from atlas_reviewer.coordinator import DECISIONS_CHARS, _stored_decisions
+    from atlas_reviewer.delta import LensDecision
+
+    decisions = tuple(
+        LensDecision(
+            f"lens-{n}",
+            True,
+            "a reason long enough that forty of them cannot fit the record's "
+            "decision bound, which is the point of this test",
+        )
+        for n in range(40)
+    )
+    stored = _stored_decisions(decisions, lambda text: text)
+    total = sum(len(line) for line in stored)
+    assert total <= DECISIONS_CHARS
+    assert stored[-1].endswith("more lens decision line(s) not stored")
+    kept = [line for line in stored if "lens-" in line]
+    assert 0 < len(kept) < 40
+    assert len(kept) + int(stored[-1].split()[0]) == 40
+
+
+def test_record_overflow_drops_decisions_before_findings():
+    """Minor F: on record overflow the decisions -- metadata the lens
+    list, the draft, the post and the telemetry each carry -- are dropped
+    before the finding lines, which are the payload the carry-forward
+    chain builds on."""
+    from atlas_reviewer.rounds import RECORD_CHARS, RoundRecord, fit_record
+
+    finding_line = f'L1-F1 major "calc.py:2" {"x" * 300}'
+    decisions = tuple(f"lens-{n} rerun: {'y' * 300}" for n in range(20))
+    record = RoundRecord(
+        "example-org/example-app",
+        7,
+        OLD,
+        "lens-a",
+        "COMMENT",
+        tuple(finding_line for _ in range(20)),
+        False,
+        0,
+        "",
+        decisions,
+    )
+    fitted = fit_record(record)
+    # The findings kept their room; the decisions went first.
+    assert len(fitted.findings) == 20
+    assert fitted.decisions == ()
+    bigger = RoundRecord(
+        "example-org/example-app",
+        7,
+        OLD,
+        "lens-a",
+        "COMMENT",
+        tuple(f'"{chr(97 + n % 26)}" ' + finding_line for n in range(40)),
+        False,
+        0,
+        "",
+        (),
+    )
+    starved = fit_record(bigger)
+    assert starved.findings == ()
+    assert starved.findings_omitted == 40
+    assert len(f"{starved}") <= RECORD_CHARS
+
+
+def test_the_record_attribution_field_outranks_the_fallbacks():
+    """The record's per-line `attributions` field is the answer when it
+    is present, and the `L<n>`-id fallback only fills records that lack
+    it (round-1 review of #760, Major B's attribution fix). Mutant: the
+    field ignored, which pins the finding on the lens the id's entry
+    index names -- the wrong lens, exactly the mis-attribution the field
+    exists to prevent."""
+    from atlas_reviewer.coordinator import _prior_attribution
+    from atlas_reviewer.rounds import RoundRecord
+
+    record = RoundRecord(
+        EVENT.repo,
+        EVENT.pr_number,
+        OLD,
+        "lens-a, lens-b",
+        "COMMENT",
+        ('L1-F1 major "calc.py:2" rounds drift',),
+        False,
+        0,
+        "",
+        (),
+        ("lens-b",),
+    )
+    assert _prior_attribution(record, 0, record.findings[0]) == "lens-b"

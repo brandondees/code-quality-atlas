@@ -136,6 +136,22 @@ class StubLibrary(LensLibrary):
     def body(self, name: str) -> str | None:
         return self._bodies.get(name)
 
+    def concern(self, name: str) -> str | None:
+        """The test body's first line under its heading, or None -- the
+        same rule the real library reads concerns by, so a scenario can
+        shape what the coordinator's decision turn shows."""
+        body = self._bodies.get(name)
+        if body is None:
+            return None
+        lines = body.splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("# "):
+                for follow in lines[index + 1 :]:
+                    if follow.strip():
+                        return follow.strip()
+                break
+        return None
+
 
 def small_bundle(*extra: str, chars: int = 100) -> StubLibrary:
     """Every critical-tier lens and each of `extra`, `chars` characters each,

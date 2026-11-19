@@ -3761,3 +3761,52 @@ path-restricted scope restored, both payload flips, the lookup
 inverted, the decision ignored, the reused-as-uncovered count, both
 record drops, the eligibility drop, and the two no-call branch drops),
 plus three on the reply parser and one on the highlight block.
+
+## 2026-11-18 (later) — #760 round 1: the two honest-accounting Majors, fixed under Brandon's calls
+
+The protocol review's verdict was CHANGES REQUESTED on two Majors, both
+in what the delta review CLAIMS rather than what it sends. **Major A**
+— the coverage contract's "a reused settled result that read it" was
+unenforced and unverifiable: a reused result read the pull request at
+the delta base and nothing more, so a file the delta added was claimed
+covered with no lens having read it this round, and the reviewer's
+probe reproduced an all-reuse APPROVE over a delta-added file. Fixed as
+an accounting rule, not a lens scope: the delta's touched paths ride on
+the review (`delta_paths`), every one must be read by a lens that ran
+this round, an uncovered one is unreviewed and holds the review at
+COMMENT; the merge-only fast path composes (empty touched set), the
+patchless-established case now gates too. **Major B** — the delta-reuse
+path never honored D73: a reused lens made no turn, so the fresh CI and
+conversation evidence never reached it, and with no ledger entry at
+this head the `_reused_with_reassessment` mechanism could never fire.
+Brandon decided the shape: the decision turn now sees the fresh
+evidence blocks the lenses get, and a reused lens earns its bounded D73
+re-assessment when the evidence moved — the round record now stores the
+digest each review settled under (a record without one reads as
+"cannot be shown to be current", so the first delta after this ships
+re-assesses), the same `_reassess_call` runs on a `#reassess-delta`
+ledger key, composed by the same `effective_outcome` over the lens's
+carried findings (the carry-forward's re-anchored versions, so the two
+judgments cannot disagree about what stands); additions join the
+findings minted `R<n>-F<m>`, revisions replace carried findings (never
+lowering a Blocker or Major — annotation-only), withdrawals are
+annotations, and the composition is recorded on the decision across the
+same four surfaces, with the verdict recomputed. Per-lens attribution
+came from a new parallel record field (`attributions`), with the
+`L<n>`-id fallback for older records. The design call landed as
+technical decisions: uncertainty resolves toward re-running (pinned in
+the prompt), each offered lens carries its one-line concern summary
+(`LensLibrary.concern`), and a lens whose findings cite delta-touched
+files is flagged to the turn and the flag recorded. The Minors: the
+record also carries `clean_lenses` so `_reuse_eligible` offers only
+settled results (Minor C, docstring corrected); the `DECISIONS_CHARS`
+bound and its overflow naming are pinned (Minor D — round 1's cap
+mutant survived, it dies now); an empty offer skips the billed decision
+call (Minor E); `fit_record` drops decisions before findings on
+overflow (Minor F). Nits: the README's empty-delta parenthetical names
+both cases, and the off-delta test's docstring states its two-legged
+kill. Twelve new hand-applied mutants, all dead on their named tests
+(the coverage accounting dropped, the reassessment dropped, both digest
+legs, the flag computation, the cap, the empty-offer skip, the
+fit-record order, the uncertainty sentence, the clean-set read, the
+turn's evidence blocks, and the concern line).

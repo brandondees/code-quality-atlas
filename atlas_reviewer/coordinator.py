@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import secrets
 import threading
 from collections.abc import Callable, Mapping, Sequence
@@ -85,6 +86,7 @@ from atlas_reviewer.attestation import (
     RunAttempt,
     Settled,
     ToolUse,
+    _finding_key,
     body_digest,
     next_step,
 )
@@ -97,6 +99,7 @@ from atlas_reviewer.delta import (
     CarryResult,
     DeltaScope,
     LensDecision,
+    _cited_path,
     apply_carry,
     capped,
     carry_system,
@@ -316,15 +319,18 @@ class AgenticReview:
     `review_ceiling_usd:` line that could not be used (round-1 review of
     #717, m-5), so a meant ceiling that silently fell back to the default
     is visible in the draft."""
-    carried_unverified: tuple[tuple[str, Finding], ...] = ()
+    carried_unverified: tuple[tuple[str, Finding, str], ...] = ()
     """Prior findings the delta review carries without a re-anchored,
-    verified quote (#702): each with its carry-forward label and the
-    finding exactly as the earlier record stored it. They are not
-    reported as findings (a quote that does not verify at this head is
-    not reported), but they are named in the draft and carried in the
-    round record, so the next review re-offers them -- never silently
-    dropped (D73) -- and their severities still count for the verdict,
-    because a failed re-anchor is not evidence the defect is fixed."""
+    verified quote (#702): each with its carry-forward label, the
+    finding exactly as the earlier record stored it, and the lens the
+    record attributes it to (empty when no record field or id mapping
+    can pin it -- the line still travels every surface either way).
+    They are not reported as findings (a quote that does not verify at
+    this head is not reported), but they are named in the draft and
+    carried in the round record, so the next review re-offers them --
+    never silently dropped (D73) -- and their severities still count
+    for the verdict, because a failed re-anchor is not evidence the
+    defect is fixed."""
     carried_raw: tuple[str, ...] = ()
     """Prior finding lines that do not parse (#702, round-1 M3): the
     record's own text, quoted verbatim in the draft's carried section and
@@ -350,6 +356,15 @@ class AgenticReview:
     delta_from: str = ""
     """The head this delta review builds on (#702), empty on a full
     review. The draft cites it; the service post cites it too."""
+    delta_paths: frozenset[str] = frozenset()
+    """The paths the delta touched that the pull request still changes
+    (D83, round-1 review of #760): the coverage accounting's own input.
+    A reused settled result read the pull request at the delta base and
+    nothing more, so a file the delta added or modified cannot be
+    claimed covered on reuse alone -- every path in this set must be
+    read by a lens that ran this round, or it is unreviewed and the
+    review cannot approve. Empty on a full review, and on a delta whose
+    touched paths are unknown or leave the pull request's diff."""
     lens_decisions: tuple[LensDecision, ...] = ()
     """The delta review's per-lens decisions (D83): for every planned
     lens, whether this follow-up re-ran it on the whole pull request or
@@ -362,8 +377,10 @@ class AgenticReview:
     @property
     def reused_lenses(self) -> frozenset[str]:
         """The planned lenses this delta review reused instead of run
-        (D83). Their files count as covered -- the reused settled result
-        read them -- and they appear in no lens entry."""
+        (D83). They appear in no lens entry, and their reuse covers the
+        files their settled results read -- except the files the delta
+        touched (`delta_paths`), which only a lens that ran this round
+        can have read."""
         return frozenset(
             decision.lens for decision in self.lens_decisions if decision.reuse
         )
@@ -695,10 +712,17 @@ def review_lenses(
     material, and a re-run lens may report findings anywhere in the pull
     request, unchanged content included. Before any lens runs, the
     coordinator judges each planned lens -- one bounded, tool-less call
-    over the incremental diff and the lens names -- whether to re-run it
-    or reuse the earlier review's settled result; a reused lens does not
-    run, its earlier findings stand, and its files still count as
-    covered. After the lenses settle, the earlier review's findings (the
+    over the incremental diff, the fresh evidence blocks and the lens
+    names with their concern summaries -- whether to re-run it or reuse
+    the earlier review's settled result; a reused lens does not run, its
+    earlier findings stand, and its files count as covered -- except the
+    files the delta touched, which only a lens that ran this round can
+    have read, so an uncovered one is unreviewed and the review cannot
+    approve (round-1 review of #760, Major A). A reused lens whose
+    evidence snapshot moved since the earlier review -- or that carries
+    no digest -- earns its one bounded D73 re-assessment after the
+    carry-forward composes (round-1 review of #760, Major B). After the
+    lenses settle, the earlier review's findings (the
     round log's records at the scope's `delta_from`) are carried forward
     through one bounded carry-forward call: re-stated findings
     re-anchored and quote-checked against this head, the new commits'
@@ -806,7 +830,7 @@ def _review_lenses(
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []
     planned = tuple(lenses)
-    decisions, prior_records, prior_note = _delta_prelude(
+    decisions, prior_records, prior_note, decision_failure = _delta_prelude(
         event,
         planned,
         delta,
@@ -820,6 +844,8 @@ def _review_lenses(
         trace,
         redactor,
         telemetry,
+        library,
+        blocks,
     )
     if decisions:
         names = tuple(decision.lens for decision in decisions if not decision.reuse)
@@ -934,6 +960,34 @@ def _review_lenses(
             trace,
             redactor,
         )
+        # The reused lenses' D73 re-assessment (round-1 review of #760,
+        # Major B) composes after the carry-forward: its priors are the
+        # carry-forward's own re-anchored dispositions, so the two
+        # judgments of the same prior finding cannot disagree about what
+        # stands.
+        review, decisions = _with_reused_reassessment(
+            review,
+            event,
+            decisions,
+            library,
+            ledger,
+            evidence_digest,
+            _prior_digest(prior_records),
+            blocks,
+            trees,
+            diff,
+            changed,
+            model,
+            spend,
+            resolved,
+            clock,
+            deadline,
+            fence_nonce,
+            contract or finding_contract(),
+            trace,
+            redactor,
+        )
+    _record_decisions(telemetry, decisions, decision_failure)
     return _record_round(
         round_log,
         event,
@@ -942,9 +996,24 @@ def _review_lenses(
             changed=changed,
             runners=reports,
             delta_from=delta.delta_from if delta is not None else "",
+            delta_paths=frozenset(delta.resolution_paths)
+            if delta is not None
+            else frozenset(),
+            lens_decisions=decisions,
         ),
         redactor,
     )
+
+
+def _prior_digest(records: Sequence[RoundRecord]) -> str:
+    """The evidence snapshot's digest (D73) the last review recorded at
+    the delta base settled under, or "" when none stored one -- which
+    reads as "cannot be shown to be current", D73's own trigger for the
+    bounded re-assessment."""
+    for record in reversed(records):
+        if record.evidence_digest:
+            return record.evidence_digest
+    return ""
 
 
 def _continuation_rounds(
@@ -1602,19 +1671,23 @@ def _delta_prelude(
     trace: ReviewTrace,
     redactor: Redactor,
     telemetry: Telemetry | None,
-) -> tuple[tuple[LensDecision, ...], tuple[RoundRecord, ...], str]:
+    library: LensLibrary,
+    blocks: Sequence[UntrustedBlock],
+) -> tuple[tuple[LensDecision, ...], tuple[RoundRecord, ...], str, str]:
     """A delta review's prelude (D83): the earlier review's records at
     the delta base -- read once, shared by the decision call and the
-    carry-forward -- and the coordinator's per-lens decisions. On a full
-    review the decisions are empty and the records unused."""
+    carry-forward -- and the coordinator's per-lens decisions, with the
+    decision call's failure text when it fell back. On a full review the
+    decisions are empty and the records unused."""
     if delta is None:
-        return (), (), ""
+        return (), (), "", ""
     records, note = _records_at(round_log, event, delta.delta_from)
-    decisions = _decide_lenses(
+    decisions, failure = _decide_lenses(
         event,
         planned,
         _reuse_eligible(records),
         delta,
+        records,
         model,
         spend,
         resolved,
@@ -1623,23 +1696,62 @@ def _delta_prelude(
         fence_nonce,
         trace,
         redactor,
-        telemetry,
+        library,
+        blocks,
     )
-    return decisions, records, note
+    return decisions, records, note, failure
+
+
+def _prior_attribution(record: RoundRecord, index: int, line: str) -> str:
+    """The lens a round record's finding line belongs to, as far as the
+    record can pin it: the record's own per-line attribution
+    (`attributions`, written from this release on and parallel to the
+    finding lines), else the `L<n>` id's entry index resolved against
+    the record's lens list -- a review's initial runs are its planned
+    lenses in plan order, so the first N ids name their lenses exactly --
+    else the record's whole lens list when it names exactly one, else ""
+    (unattributed: the line still travels every surface; it just cannot
+    be pinned on one lens, and the per-lens re-assessment is not offered
+    it)."""
+    if index < len(record.attributions) and record.attributions[index]:
+        return record.attributions[index]
+    identifier = line.split(" ", 1)[0]
+    match = re.fullmatch(r"L(\d+)-F\d+", identifier)
+    names = [name.strip() for name in record.lens.split(",") if name.strip()]
+    if match is not None:
+        entry = int(match.group(1))
+        if 1 <= entry <= len(names):
+            return names[entry - 1]
+        return ""
+    if len(names) == 1:
+        return names[0]
+    return ""
 
 
 def _reuse_eligible(records: Sequence[RoundRecord]) -> frozenset[str]:
     """The lenses a delta review may reuse (D83): the ones the earlier
-    review at the delta base actually ran, read from the round records'
-    lens lists -- the records name every lens that ran or was reused
-    there. A planned lens outside the set has no settled result at the
-    delta base and re-runs structurally; the judgment call is never
-    offered it, so a reuse cannot be invented for a lens the earlier
-    review never ran."""
+    review at the delta base recorded with a settled clean run. A record
+    that carries the `clean_lenses` field answers exactly (D76's rule:
+    some entry of the lens ran clean; a lens the earlier review ran to a
+    failure has no settled result to reuse, round-1 review of #760,
+    Minor C); a record from before the field falls back to its lens
+    list, which names every lens the review ran or reused -- what those
+    settled as is the old record's to answer for, and this docstring no
+    longer claims they ran clean."""
     names: set[str] = set()
+    carrying = []
     for record in records:
         names.update(name.strip() for name in record.lens.split(",") if name.strip())
-    return frozenset(names)
+        if record.clean_lenses is not None:
+            carrying.append(record)
+    if not carrying:
+        return frozenset(names)
+    # A lens settled clean in any review recorded at the delta base has
+    # a settled result that review stood behind; reuse builds on it.
+    eligible: set[str] = set()
+    for record in carrying:
+        eligible.update(record.clean_lenses or ())
+    return frozenset(eligible)
 
 
 def _decide_lenses(
@@ -1647,6 +1759,7 @@ def _decide_lenses(
     planned: Sequence[str],
     eligible: frozenset[str],
     delta: DeltaScope,
+    records: Sequence[RoundRecord],
     model: LensModel,
     spend: Spend,
     resolved: Limits,
@@ -1655,26 +1768,38 @@ def _decide_lenses(
     fence_nonce: str,
     trace: ReviewTrace,
     redactor: Redactor,
-    telemetry: Telemetry | None,
-) -> tuple[LensDecision, ...]:
+    library: LensLibrary,
+    blocks: Sequence[UntrustedBlock],
+) -> tuple[tuple[LensDecision, ...], str]:
     """The coordinator's per-lens decision for a delta review (D83).
 
     The returned tuple holds exactly one decision per planned lens, in
-    plan order. A lens the earlier review did not run has no settled
-    result at the delta base and re-runs structurally; the rest are the
-    judgment call's to decide -- from the incremental diff, whether the
-    incoming changes could affect the lens's concern. The call is
-    skipped, and every lens re-runs (the safe direction), when the delta
-    could not be established: with no incremental diff there is nothing
-    to judge from, and the follow-up is an ordinary full review. An
-    empty established delta -- a merge-only push, or an established
-    comparison with no readable patch -- is judged without a call: no
-    incoming change can affect any concern, so every eligible lens's
-    settled result stands and the carry-forward does the carrying. A
-    failed or refused judgment call falls back to re-running every
+    plan order, plus the decision call's failure text when it fell back
+    (the caller records the decisions once the re-assessments have
+    composed, so the telemetry event carries the whole disposition). A
+    lens the earlier review did not settle clean has no settled result
+    at the delta base and re-runs structurally; the rest are the
+    judgment call's to decide -- from the incremental diff and the fresh
+    evidence, whether the incoming changes could affect the lens's
+    concern. The call is skipped, and every lens re-runs (the safe
+    direction), when the delta could not be established: with no
+    incremental diff there is nothing to judge from, and the follow-up
+    is an ordinary full review. It is also skipped when the offer is
+    empty (round-1 review of #760, Minor E): nothing is reusable, every
+    lens re-runs structurally, and a billed call could not change the
+    outcome. An empty established delta -- a merge-only push, or an
+    established comparison with no readable patch -- is judged without a
+    call: no incoming change can affect any concern, so every eligible
+    lens's settled result stands and the carry-forward does the carrying.
+    A failed or refused judgment call falls back to re-running every
     eligible lens, with the failure named; a reuse is never silently
     invented, and never silently kept on a broken reply."""
     eligible_in_order = tuple(lens for lens in planned if lens in eligible)
+    touched = frozenset(delta.resolution_paths)
+    offered = tuple(
+        (lens, library.concern(lens), _cites_delta(records, lens, touched))
+        for lens in eligible_in_order
+    )
     failure = ""
     if delta.note:
         decided = fallback_decisions(
@@ -1682,6 +1807,10 @@ def _decide_lenses(
             "the delta could not be established; the review runs on the "
             "whole pull request and no lens is reused",
         )
+    elif not eligible_in_order:
+        # Nothing is reusable: no billed judgment call, every planned
+        # lens re-runs structurally below.
+        decided = ()
     elif not delta.range_diff:
         decided = tuple(
             LensDecision(
@@ -1690,7 +1819,7 @@ def _decide_lenses(
                 "the incremental diff is empty, so no incoming change "
                 "could affect any lens's concern",
             )
-            for lens in eligible_in_order
+            for (lens, _concern, _flagged) in offered
         )
     else:
         scrubber = Redactor(redactor.known_secrets, redactor.sources)
@@ -1698,7 +1827,7 @@ def _decide_lenses(
         try:
             decided = _decision_call(
                 event,
-                eligible_in_order,
+                offered,
                 delta,
                 lens_trace.wrap_model(model),
                 spend,
@@ -1706,6 +1835,7 @@ def _decide_lenses(
                 clock,
                 deadline,
                 fence_nonce,
+                blocks,
             )
         except Exception as exc:  # noqa: BLE001 -- a failed decision re-runs every lens
             failure = f"{type(exc).__name__}: {scrubber(str(exc)).text}"
@@ -1716,10 +1846,47 @@ def _decide_lenses(
             )
     by_lens = {decision.lens: decision for decision in decided}
     for lens in planned:
-        by_lens.setdefault(lens, LensDecision(lens, False, _NO_PRIOR_RESULT_WHY))
-    every = tuple(by_lens[lens] for lens in planned)
-    _record_decisions(telemetry, every, failure)
-    return every
+        by_lens.setdefault(
+            lens,
+            LensDecision(
+                lens,
+                False,
+                _NO_PRIOR_RESULT_WHY,
+                flagged=_cites_delta(records, lens, touched),
+            ),
+        )
+    # The flag is the offer's, not the reply's: every decision for a lens
+    # the turn flagged carries the flag, whatever the reply decided.
+    flags = {name: flagged for name, _concern, flagged in offered}
+    every = tuple(
+        replace(by_lens[lens], flagged=flags[lens]) if lens in flags else by_lens[lens]
+        for lens in planned
+    )
+    return every, failure
+
+
+def _cites_delta(
+    records: Sequence[RoundRecord], lens: str, touched: frozenset[str]
+) -> bool:
+    """Whether a lens's earlier findings cite files the incremental diff
+    touches -- the highest-stakes reuse, flagged to the coordinator's
+    decision turn and recorded with the decision (D83, round-1 review of
+    #760). The signal is data for the judgment, never a rule: a flagged
+    lens may still be reused, when the coordinator judges the delta's
+    change to those files outside the findings' concern."""
+    if not touched:
+        return False
+    for record in records:
+        for position, line in enumerate(record.findings):
+            if _prior_attribution(record, position, line) != lens:
+                continue
+            found = parse_prior_line(line)
+            if found is None:
+                continue
+            path = _cited_path(found[1].location)
+            if path is not None and path in touched:
+                return True
+    return False
 
 
 _NO_PRIOR_RESULT_WHY = (
@@ -1735,8 +1902,12 @@ def _record_decisions(
 ) -> None:
     """One telemetry event per lens decision (D83), so the reuse policy's
     judgments are readable next to the review cost events when it is
-    tuned. A decision call that failed records its error event first;
-    every decision still lands."""
+    tuned. Each event carries the whole disposition: the decision and
+    its reason, whether the lens's earlier findings cite the delta's
+    files, and -- recorded after the re-assessments composed (D73) --
+    whether the reused lens was re-assessed and with what note. A
+    decision call that failed records its error event first; every
+    decision still lands."""
     if telemetry is None:
         return
     if failure:
@@ -1748,15 +1919,17 @@ def _record_decisions(
             error=failure,
         )
     for decision in decisions:
-        telemetry.record(
-            DECISION_PHASE,
-            "lens decision",
-            {
-                "lens": decision.lens,
-                "decision": "reuse" if decision.reuse else "rerun",
-                "reason": decision.reason,
-            },
-        )
+        fields: dict[str, str | int | float | bool | None] = {
+            "lens": decision.lens,
+            "decision": "reuse" if decision.reuse else "rerun",
+            "reason": decision.reason,
+            "cites_delta": decision.flagged,
+        }
+        if decision.reuse:
+            fields["reassessed"] = decision.reassessed
+            if decision.reassess_note:
+                fields["reassess_note"] = decision.reassess_note
+        telemetry.record(DECISION_PHASE, "lens decision", fields)
 
 
 DECISION_PHASE = "delta review"
@@ -1773,7 +1946,7 @@ class DecisionCallRefused(Exception):
 
 def _decision_call(
     event: PrEvent,
-    offered: Sequence[str],
+    offered: Sequence[tuple[str, str | None, bool]],
     delta: DeltaScope,
     traced_model: LensModel,
     spend: Spend,
@@ -1781,13 +1954,17 @@ def _decision_call(
     clock: Clock,
     deadline: float,
     fence_nonce: str,
+    blocks: Sequence[UntrustedBlock],
 ) -> tuple[LensDecision, ...]:
-    """One bounded coordinator-decision call (D83): the incremental diff
-    and the reuse-eligible lens names in, one final reply out, validated
-    against the offered names. No tools are offered; the call is
-    reserved at its worst case against the review's shared spend (D68)
-    and settled like any turn; a BYOK refusal halts the review's spend
-    the way one in the lens loop does."""
+    """One bounded coordinator-decision call (D83): the incremental diff,
+    the fresh evidence around the pull request (the conversation and CI
+    blocks the lenses get -- the same data a reused lens's D73
+    re-assessment would see) and the reuse-eligible lens names with
+    their concern summaries in, one final reply out, validated against
+    the offered names. No tools are offered; the call is reserved at its
+    worst case against the review's shared spend (D68) and settled like
+    any turn; a BYOK refusal halts the review's spend the way one in the
+    lens loop does."""
     block = (
         UntrustedBlock(
             "delta-diff", RepoText(capped(delta.range_diff, DELTA_DIFF_CHARS))
@@ -1795,9 +1972,12 @@ def _decision_call(
         if delta.range_diff
         else None
     )
+    # The turn's own delta block is the guaranteed copy; a context block
+    # the CLI built for the lenses would duplicate it.
+    extra = tuple(block_ for block_ in blocks if block_.label != "delta-diff")
     request = TurnRequest(
         decision_system(fence_nonce),
-        (UserText(decision_turn(event, offered, block, fence_nonce)),),
+        (UserText(decision_turn(event, offered, block, extra, fence_nonce)),),
         (),
         None,
     )  # fmt: skip
@@ -1834,7 +2014,9 @@ def _decision_call(
     spend.settle(worst, reply.cost_usd)
     if not isinstance(reply, FinalReply):
         raise ContractError("the decision reply was a tool call, and the turn has none")
-    return parse_decision_reply(reply.text, offered)
+    return parse_decision_reply(
+        reply.text, [name for name, _concern, _flagged in offered]
+    )
 
 
 def _with_carryforward(
@@ -1884,7 +2066,8 @@ def _with_carryforward(
     prior: list[tuple[str, Finding, str]] = []
     raw_lines: list[str] = []
     for record in records:
-        for line in record.findings:
+        for position, line in enumerate(record.findings):
+            attribution = _prior_attribution(record, position, line)
             found = parse_prior_line(line)
             if found is None:
                 # Never dropped (D73): the raw line travels to the draft's
@@ -1894,8 +2077,12 @@ def _with_carryforward(
                 # The carry-forward labels the priors by position (P1,
                 # P2, ...), the labels `prior_findings_block` renders and
                 # the reply's `revises`/`withdrawn` entries resolve
-                # against; the record's own stored id stays in the record.
-                prior.append((f"P{len(prior) + 1}", found[1], record.lens))
+                # against; the record's own stored id stays in the record,
+                # and the lens the line is attributed to travels with it
+                # -- the per-lens re-assessment's (D73) input.
+                prior.append(
+                    (f"P{len(prior) + 1}", found[1], attribution or record.lens)
+                )
     omitted = sum(record.findings_omitted for record in records)
     if not prior and not raw_lines and not omitted:
         # An unreadable log is not "no findings recorded" -- nothing is
@@ -2184,13 +2371,310 @@ def _compose_carry(
                 if finding.sets_verdict
             ),
         ),
-        carried_unverified=result.unanchored,
+        carried_unverified=tuple(
+            (identifier, finding, lens_labels.get(identifier, ""))
+            for identifier, finding in result.unanchored
+        ),
         carried_raw=tuple(raw_lines),
         carried_omitted=omitted,
         resolved=result.resolved,
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
         committed_usd=str(spend.committed_usd),
+    )
+
+
+def _reassess_reused_lens(
+    review: AgenticReview,
+    event: PrEvent,
+    decision: LensDecision,
+    findings: list[MintedFinding],
+    library: LensLibrary,
+    ledger: AttemptLedger,
+    evidence_digest: str | None,
+    prior_digest: str,
+    blocks: Sequence[UntrustedBlock],
+    trees: SourceTrees,
+    diff: str,
+    changed: frozenset[str],
+    traced_model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+    fence_nonce: str,
+    contract: str,
+    scrub: Callable[[str], str],
+    order: int,
+) -> tuple[LensDecision, list[tuple[int, MintedFinding]], list[MintedFinding]]:
+    """One reused lens's D73 re-assessment (round-1 review of #760,
+    Major B): the trigger check against the digests, the bounded call on
+    the delta review's own `#reassess-delta` ledger key, and the
+    composition -- the reply's revisions swapped into the review's
+    findings in place (returned as `(index, minted)` swaps), its
+    additions returned to append, its annotations carried on the
+    decision. A reused lens with no attributed, verified standing
+    finding, no body in the bundle, or a review that gathered no
+    snapshot is left exactly as the carry-forward left it."""
+    carried = [f for f in findings if f.carried and f.lens == decision.lens]
+    body = library.body(decision.lens)
+    if not carried or body is None or evidence_digest is None:
+        return decision, [], []
+    key = LensKey(
+        event.repo,
+        event.pr_number,
+        event.head_sha,
+        f"{decision.lens}{REASSESS_SUFFIX}-delta",
+        body_digest(body),
+    )
+    settled = AttemptOutcome(
+        Attestation.ATTESTED,
+        frozenset(),
+        findings=tuple(CheckedFinding(f.finding, QuoteSource.HEAD) for f in carried),
+        turns=0,
+    )
+    recorded = ledger.attempts(key)
+    stored = ledger.evidence_digest(key) if recorded else (prior_digest or None)
+    effective, withdrawn, note = effective_outcome(settled, recorded)
+    reassessed = bool(recorded)
+    if stored is not None and stored == evidence_digest:
+        pass
+    elif spend.halted or clock.monotonic() >= deadline:
+        why = (
+            "the review's spend was halted"
+            if spend.halted
+            else "the review's wall clock had passed"
+        )
+        note = f"the re-assessment was not run: {why}"
+    else:
+        number = len(recorded) + 1
+        ledger.start(key, number)
+        try:
+            outcome = _reassess_call(
+                event,
+                decision.lens,
+                body,
+                contract,
+                fence_nonce,
+                blocks,
+                [CheckedFinding(f.finding, QuoteSource.HEAD) for f in carried],
+                trees,
+                diff,
+                changed,
+                traced_model,
+                spend,
+                resolved,
+                clock,
+                deadline,
+            )
+        except Exception as exc:  # noqa: BLE001 -- a supplementary call's failure must not fail the review
+            outcome = AttemptOutcome(
+                Attestation.UNACKNOWLEDGED,
+                frozenset({Cause.MODEL_ERROR}),
+                detail=str(exc),
+            )
+        ledger.finish(
+            key,
+            number,
+            outcome,
+            scrub=scrub,
+            evidence_digest=(
+                evidence_digest if outcome.attestation is Attestation.ATTESTED else None
+            ),
+        )
+        effective, withdrawn, note = effective_outcome(settled, ledger.attempts(key))
+        reassessed = True
+    dropped = [
+        note_text for note_text in effective.dropped if note_text not in settled.dropped
+    ]
+    if dropped:
+        note = f"{note}; " + "; ".join(dropped) if note else "; ".join(dropped)
+    settled_keys = {_finding_key(checked.finding) for checked in settled.findings}
+    replacement_keys = {
+        _finding_key(w.replacement.finding)
+        for w in withdrawn
+        if w.replaced and w.replacement is not None
+    }
+    swaps: list[tuple[int, MintedFinding]] = []
+    for w in withdrawn:
+        if not (w.replaced and w.replacement is not None):
+            continue
+        prior_key = _finding_key(w.finding)
+        for index, minted in enumerate(findings):
+            if minted.carried and _finding_key(minted.finding) == prior_key:
+                swaps.append(
+                    (
+                        index,
+                        replace(
+                            minted,
+                            finding=w.replacement.finding,
+                            source=(
+                                ""
+                                if w.replacement.source is None
+                                else w.replacement.source.value
+                            ),
+                            drift=w.replacement.drift,
+                        ),
+                    )
+                )
+                break
+    added = 0
+    additions: list[MintedFinding] = []
+    for checked in effective.findings:
+        finding_key = _finding_key(checked.finding)
+        if finding_key in settled_keys or finding_key in replacement_keys:
+            continue
+        added += 1
+        additions.append(
+            MintedFinding(
+                f"R{order}-F{added}",
+                decision.lens,
+                checked.finding,
+                checked.verified,
+                "" if checked.source is None else checked.source.value,
+                checked.problem,
+                checked.drift,
+            )
+        )
+    return (
+        replace(
+            decision,
+            reassessed=reassessed,
+            reassess_note=note,
+            withdrawn=withdrawn,
+        ),
+        swaps,
+        additions,
+    )
+
+
+def _with_reused_reassessment(
+    review: AgenticReview,
+    event: PrEvent,
+    decisions: tuple[LensDecision, ...],
+    library: LensLibrary,
+    ledger: AttemptLedger,
+    evidence_digest: str | None,
+    prior_digest: str,
+    blocks: Sequence[UntrustedBlock],
+    trees: SourceTrees,
+    diff: str,
+    changed: frozenset[str],
+    model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+    fence_nonce: str,
+    contract: str,
+    trace: ReviewTrace,
+    redactor: Redactor,
+) -> tuple[AgenticReview, tuple[LensDecision, ...]]:
+    """The reused lenses' D73 re-assessment (round-1 review of #760,
+    Major B). Brandon's D73 is binding on the delta-reuse path exactly as
+    on the ledger-reuse path: a reused result keeps its findings, and
+    when newer CI evidence or comments exist the lens re-assesses and
+    adds, revises or follows up. A reused lens has no ledger entry at
+    this head -- the ledger is keyed by head SHA and the earlier head's
+    run directory is gone -- so its settled result is the round record's,
+    and the mechanism is made reachable rather than reinvented: the same
+    bounded, tool-less `_reassess_call` runs, its attempts recorded on
+    the delta review's own `#reassess-delta` ledger key at this head
+    (distinct from the ledger-reuse path's key, whose composition inputs
+    are a settled outcome rather than record lines), composed by the same
+    `effective_outcome`.
+
+    The trigger is D73's own digest rule: the record stores the digest
+    the earlier review settled under (`RoundRecord.evidence_digest`), and
+    this review's snapshot digest is compared against it -- a moved or
+    absent digest is newer evidence or evidence that cannot be shown to
+    be current, and every reused lens whose findings stand earns its one
+    bounded call. A reused lens with no attributed, verified standing
+    finding earns none (nothing to re-assess -- the same rule that
+    spares an unattested settled result a call), and so does a review
+    that gathered no snapshot: D73's check is not wired there, and the
+    carry-forward's disposition of every prior finding against the
+    incremental diff is the re-assessment that ran.
+
+    The priors are the lens's carried findings -- the carry-forward's
+    re-anchored, quote-verified versions of what the record stored; only
+    verified priors take part (D73's rule), and the carried-but-
+    unanchored ones stand untouched beside them. The reply's additions
+    join the review's findings (quote-verified at this head by the
+    re-assessment judge, minted `R<n>-F<m>` under the reused lens's
+    name), its revisions replace the carried findings they name -- never
+    lowering a Blocker's or a Major's severity: annotation-only, the D73
+    rule -- its withdrawals are annotations that remove nothing, and a
+    reply the contract refused keeps every prior finding and is named.
+    The composition lands on the decision (`reassessed`, the note, the
+    withdrawals), so it travels the same four surfaces every decision
+    travels, and the verdict is recomputed over the composed set."""
+    reused = [decision for decision in decisions if decision.reuse]
+    if not reused:
+        return review, decisions
+    scrubber = Redactor(redactor.known_secrets, redactor.sources)
+
+    def scrub(text: str) -> str:
+        return scrubber(text).text
+
+    lens_trace = trace.with_scrub(scrub)
+    findings = list(review.findings)
+    new_decisions: list[LensDecision] = []
+    swaps: list[tuple[int, MintedFinding]] = []
+    additions: list[MintedFinding] = []
+    reassessed_count = 0
+    for decision in decisions:
+        if not decision.reuse:
+            new_decisions.append(decision)
+            continue
+        reassessed_count += 1
+        outcome = _reassess_reused_lens(
+            review,
+            event,
+            decision,
+            findings,
+            library,
+            ledger,
+            evidence_digest,
+            prior_digest,
+            blocks,
+            trees,
+            diff,
+            changed,
+            lens_trace.wrap_model(model),
+            spend,
+            resolved,
+            clock,
+            deadline,
+            fence_nonce,
+            contract,
+            scrub,
+            reassessed_count,
+        )
+        new_decision, lens_swaps, lens_additions = outcome
+        swaps.extend(lens_swaps)
+        additions.extend(lens_additions)
+        new_decisions.append(new_decision)
+    for index, minted in swaps:
+        findings[index] = minted
+    findings.extend(additions)
+    ranked = rank(tuple(findings))
+    return (
+        replace(
+            review,
+            findings=ranked,
+            verdict=decide(
+                ranked,
+                carried_setting=tuple(
+                    finding.severity
+                    for _identifier, finding, _lens in review.carried_unverified
+                    if finding.sets_verdict
+                ),
+            ),
+            model_calls=spend.calls,
+            committed_usd=str(spend.committed_usd),
+        ),
+        tuple(new_decisions),
     )
 
 
@@ -2381,15 +2865,19 @@ def _record_round(
     event: PrEvent,
     review: AgenticReview,
     redactor: Redactor,
+    evidence_digest: str | None = None,
 ) -> AgenticReview:
     """Append the one record for this finished review (D52), from the
-    synthesized verdict over every lens and continuation."""
+    synthesized verdict over every lens and continuation. `evidence_digest`
+    is the snapshot the review's reuse judgments settled under (D73),
+    stored so a later delta review can tell newer evidence from
+    unchanged evidence."""
     if round_log is None:
         return review
     scrubber = Redactor(
         redactor.known_secrets, redactor.sources, (*redactor.flagged, *review.flagged)
     )
-    lens = ", ".join(
+    names = tuple(
         dict.fromkeys(
             (
                 *(result.lens for result in review.lenses),
@@ -2407,7 +2895,13 @@ def _record_round(
     )
     try:
         round_log.append(
-            _round_record(event, lens, review, lambda text: scrubber(text).text)
+            _round_record(
+                event,
+                ", ".join(names),
+                review,
+                lambda text: scrubber(text).text,
+                evidence_digest,
+            )
         )
     except OSError as exc:
         note = f"the round log was not written: {_log_write_cause(exc)}. Detail: {exc}"
@@ -2416,7 +2910,11 @@ def _record_round(
 
 
 def _round_record(
-    event: PrEvent, lens: str, review: AgenticReview, scrub: Callable[[str], str]
+    event: PrEvent,
+    lens: str,
+    review: AgenticReview,
+    scrub: Callable[[str], str],
+    evidence_digest: str | None = None,
 ) -> RoundRecord:
     lines = tuple(
         scrub(
@@ -2435,9 +2933,24 @@ def _round_record(
             f"{identifier} {finding.severity.value} "
             f'"{finding.location}" {finding.finding}'
         )
-        for identifier, finding in review.carried_unverified
+        for identifier, finding, _lens in review.carried_unverified
     )
     lines += tuple(scrub(line) for line in review.carried_raw)
+    # Each finding line's lens, parallel to the lines: the per-lens
+    # re-assessment (D73) and the delta-citation flag read them; a
+    # carried line's lens is the one the record's attribution pinned it
+    # to, an unparsable line's is unknown.
+    attributions = (
+        tuple(item.lens for item in review.verified)
+        + tuple(
+            lens_name for _identifier, _finding, lens_name in review.carried_unverified
+        )
+        + ("",) * len(review.carried_raw)
+    )
+    # The lenses of this round that settled clean (D76's rule: some entry
+    # of the lens ran clean), in the lens list's own order, so a later
+    # delta review offers a reuse only for a settled result.
+    clean = {result.lens for result in review.lenses if result.state is LensState.CLEAN}
     stop = _first_limit_stop(review)
     record = fit_record(
         RoundRecord(
@@ -2450,6 +2963,9 @@ def _round_record(
             bool(review.context_omissions),
             limit_stop="" if stop is None else scrub(stop.message()),
             decisions=_stored_decisions(review.lens_decisions, scrub),
+            attributions=attributions,
+            clean_lenses=tuple(name for name in lens.split(", ") if name in clean),
+            evidence_digest=evidence_digest or "",
         )
     )
     if review.carried_omitted:
@@ -2476,25 +2992,48 @@ def _stored_decisions(
     decisions: Sequence[LensDecision], scrub: Callable[[str], str]
 ) -> tuple[str, ...]:
     """The decisions as the round record stores them (D83): one scrubbed
-    line per lens, kept under `DECISIONS_CHARS`; a plan too large for
-    the bound stores the decisions that fit and names how many were left
-    out, the record's never-silently-cut rule applied to its own field."""
+    line per lens -- the decision and its reason, the delta-citation flag
+    when it fired on a reuse, and the reused lens's D73 re-assessment as
+    its own line (round-1 review of #760) -- kept under `DECISIONS_CHARS`;
+    a plan too large for the bound stores the lines that fit and names
+    how many were left out, the record's never-silently-cut rule applied
+    to its own field."""
     lines: list[str] = []
     used = 0
     omitted = 0
     for decision in decisions:
-        line = scrub(
+        base = (
             f"{decision.lens} {'reuse' if decision.reuse else 'rerun'}: "
             f"{decision.reason}"
         )
-        if lines and used + len(line) > DECISIONS_CHARS:
-            omitted += 1
-            continue
-        lines.append(line)
-        used += len(line)
+        if decision.reuse and decision.flagged:
+            base += " (its earlier findings cite files the incremental diff touches)"
+        candidates = [base]
+        if decision.reassess_note:
+            candidates.append(
+                f"{decision.lens} "
+                f"{'re-assessed' if decision.reassessed else 're-assessment not run'}"
+                f": {_clipped(decision.reassess_note)}"
+            )
+        for candidate in candidates:
+            line = scrub(candidate)
+            if lines and used + len(line) > DECISIONS_CHARS:
+                omitted += 1
+                continue
+            lines.append(line)
+            used += len(line)
     if omitted:
-        lines.append(f"{omitted} more lens decision(s) not stored")
+        lines.append(f"{omitted} more lens decision line(s) not stored")
     return tuple(lines)
+
+
+def _clipped(text: str, cap: int = 600) -> str:
+    """A record line's note, clipped to the quoting default the draft
+    reads it at; the clip is the cap the reason cap already sets, so no
+    note outgrows the line the draft shows."""
+    if len(text) <= cap:
+        return text
+    return text[: cap - 3] + "..."
 
 
 def first_turn(
@@ -2904,10 +3443,10 @@ def _lens_gap(review: AgenticReview) -> str:
     not a clean run, so it never excuses a sibling that failed for a real
     cause; the files it left unread gate separately through
     `_unread_paths`. A reused lens (D83) is no entry here at all: its
-    reuse is its coverage -- the coordinator judged the incoming changes
-    could not affect its concern, and the reused settled result read the
-    files -- so the per-lens and unread-file gates run over the lenses
-    that ran."""
+    reuse is its coverage for the files its settled result read at the
+    delta base -- but a file the delta touched only a lens that ran this
+    round can have read, so `_delta_uncovered`'s paths gate first, and
+    the per-lens and unread-file gates run over the lenses that ran."""
     if review.context_omissions:
         return "partial context"
     if review.not_picked:
@@ -2927,6 +3466,8 @@ def _lens_gap(review: AgenticReview) -> str:
         return "a prior finding the delta could not assess"
     if not review.lenses and not review.reused_lenses:
         return "no lens selected"
+    if _delta_uncovered(review):
+        return "a delta-touched file no lens read"
     if _unread_paths(review):
         return "unread files"
     if _scoped(review.lenses):
@@ -2942,16 +3483,54 @@ def _lens_gap(review: AgenticReview) -> str:
     return ""
 
 
+def _delta_uncovered(review: AgenticReview) -> frozenset[str]:
+    """The delta-touched paths no lens that ran this round read (D83,
+    round-1 review of #760, Major A): a reused settled result read the
+    pull request at the delta base -- the delta-admission gate's whole
+    guarantee -- and nothing more, so a file the delta added or modified
+    cannot be claimed covered on reuse alone. The paths are threaded
+    onto the review (`delta_paths`, the resolution gate's touched paths
+    intersected with the pull request's own changes at `_review_lenses`),
+    and a path is covered when at least one lens entry read it -- a lens
+    whose entries all left it unread, or that never ran, covers nothing.
+    This is an accounting rule, not a lens scope: it never narrows what
+    a lens may read or report, it only refuses to claim coverage."""
+    if not review.delta_paths:
+        return frozenset()
+    pending = _pending_by_lens(review.lenses, review.changed)
+    names = {result.lens for result in review.lenses}
+    if not names:
+        unread_by_every_ran_lens = set(review.changed or ())
+    else:
+        # A lens absent from `pending` read everything its entries were
+        # assigned; an absent lens contributes an empty gap, so its read
+        # covers a path for the round.
+        gaps = [set(pending.get(name, frozenset())) for name in names]
+        unread_by_every_ran_lens = set.intersection(*gaps)
+    changed = review.changed if review.changed is not None else None
+    touched = (
+        review.delta_paths & changed if changed is not None else review.delta_paths
+    )
+    return frozenset(touched & unread_by_every_ran_lens)
+
+
 def _unread_paths(review: AgenticReview) -> tuple[str, ...]:
     if _scoped(review.lenses):
-        return _still_unread(review.lenses, review.changed)
-    seen: list[str] = []
-    for result in review.lenses:
-        if result.outcome is None:
-            continue
-        for path in result.outcome.unread:
-            if path not in seen:
-                seen.append(path)
+        seen = list(_still_unread(review.lenses, review.changed))
+    else:
+        seen = []
+        for result in review.lenses:
+            if result.outcome is None:
+                continue
+            for path in result.outcome.unread:
+                if path not in seen:
+                    seen.append(path)
+    extra = _delta_uncovered(review)
+    if extra:
+        # The delta-touched paths no ran lens read are unreviewed files
+        # too (D83, round-1 Major A): they join the list, so the draft
+        # and the status line count them.
+        seen.extend(path for path in extra if path not in seen)
     return tuple(sorted(seen, key=lambda path: (risk_tier(path).rank, path)))
 
 
@@ -2998,6 +3577,26 @@ def _delta_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str
     return lines
 
 
+def _decision_line(decision: LensDecision, scrub: Callable[[str], str]) -> str:
+    """One decisions-section bullet: the decision and its reason, the
+    delta-citation flag when it fired on a reuse, and the reused lens's
+    D73 re-assessment outcome (round-1 review of #760) -- recorded on the
+    same surfaces the decision travels."""
+    line = (
+        f"- {quote_untrusted(decision.lens, QUOTED_CHARS, scrub=scrub)}: "
+        f"{'reused' if decision.reuse else 're-ran'} -- "
+        f"{quote_untrusted(decision.reason, QUOTED_CHARS, scrub=scrub)}"
+    )
+    if decision.reuse and decision.flagged:
+        line += " (its earlier findings cite files the incremental diff touches)"
+    if decision.reassess_note:
+        line += (
+            f"; {'re-assessed' if decision.reassessed else 're-assessment not run'}: "
+            f"{quote_untrusted(decision.reassess_note, QUOTED_CHARS, scrub=scrub)}"
+        )
+    return line
+
+
 def _delta_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
     """The sections a delta review can add, in order: the per-lens
     decisions (D83), then the prior findings the new commits fixed --
@@ -3011,12 +3610,7 @@ def _delta_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[
             "",
             "## Lens decisions (delta review)",
             "",
-            *(
-                f"- {quote_untrusted(decision.lens, QUOTED_CHARS, scrub=scrub)}: "
-                f"{'reused' if decision.reuse else 're-ran'} -- "
-                f"{quote_untrusted(decision.reason, QUOTED_CHARS, scrub=scrub)}"
-                for decision in review.lens_decisions
-            ),
+            *(_decision_line(decision, scrub) for decision in review.lens_decisions),
         ]
     if review.resolved:
         lines += [
@@ -3040,7 +3634,7 @@ def _delta_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[
                 f"- **{identifier}** "
                 f"{quote_untrusted(str(finding.location), QUOTED_CHARS, scrub=scrub)}: "
                 f"{quote_untrusted(finding.finding, QUOTED_CHARS, scrub=scrub)}"
-                for identifier, finding in review.carried_unverified
+                for identifier, finding, _lens in review.carried_unverified
             ),
             *(
                 f"- {quote_untrusted(line, QUOTED_CHARS, scrub=scrub)}"
@@ -3187,28 +3781,41 @@ def _withdrawn_count(review: AgenticReview) -> int:
     and revisions alike -- since a pipeline gating on the status line must
     see that prior findings were re-judged, not only that new ones were
     added. A withdrawal removes nothing (M2), so the count is an
-    annotation count, never a deletion count."""
-    return sum(len(result.withdrawn) for result in review.lenses)
+    annotation count, never a deletion count. A reused lens's D73
+    re-assessment (round-1 review of #760) annotates the same way, on the
+    decision, so its annotations count here too."""
+    return sum(len(result.withdrawn) for result in review.lenses) + sum(
+        len(decision.withdrawn) for decision in review.lens_decisions
+    )
 
 
 def _withdrawn_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
     """The draft's withdrawn-findings section (D73), or an empty list when
     no re-assessment withdrew or revised anything: what the finding was,
     the stated reason the newer evidence showed it wrong, and, for a
-    revision, the finding that replaced it."""
-    pairs = [(result, w) for result in review.lenses for w in result.withdrawn]
+    revision, the finding that replaced it. A reused lens's annotations
+    (round-1 review of #760) ride on its decision and join the section."""
+    pairs: list[tuple[LensResult | LensDecision, Withdrawn]] = [
+        (result, w) for result in review.lenses for w in result.withdrawn
+    ]
+    pairs += [
+        (decision, w) for decision in review.lens_decisions for w in decision.withdrawn
+    ]
     if not pairs:
         return []
     return [
         "",
         "## Withdrawn findings (re-assessed with newer evidence)",
         "",
-        *(_withdrawn_line(result, w, scrub) for result, w in pairs),
+        *(_withdrawn_line(source, w, scrub, review) for source, w in pairs),
     ]
 
 
 def _withdrawn_line(
-    result: LensResult, w: Withdrawn, scrub: Callable[[str], str]
+    source: LensResult | LensDecision,
+    w: Withdrawn,
+    scrub: Callable[[str], str],
+    review: AgenticReview,
 ) -> str:
     """One annotated prior finding (D73): what it was, the stated reason
     the newer evidence changed its judgment, and, for a revision, what the
@@ -3220,7 +3827,7 @@ def _withdrawn_line(
     model-written or PR-written text, so it is quoted as data."""
     if w.replacement is None:
         return (
-            f"- {result.lens} proposes withdrawing "
+            f"- {source.lens} proposes withdrawing "
             f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
             f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
             f"[{w.finding.severity.value}]. Reason, quoted: "
@@ -3228,18 +3835,21 @@ def _withdrawn_line(
         )
     if w.replaced:
         text = (
-            f"- {result.lens} revises "
+            f"- {source.lens} revises "
             f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
             f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
             f"[{w.finding.severity.value}]. Reason, quoted: "
             f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
         )
         if w.replacement.verified:
-            return text + f". Revised finding: {_finding_id(result, w.replacement)}"
+            return (
+                text
+                + f". Revised finding: {_finding_id(source, w.replacement, review)}"
+            )
         return text + ". The revised finding did not verify; see Not verified"
     lowered = w.replacement.finding.severity.rank > w.finding.severity.rank
     head = (
-        f"- {result.lens} proposes revising "
+        f"- {source.lens} proposes revising "
         f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
         f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
         f"[{w.finding.severity.value}] down to "
@@ -3247,7 +3857,7 @@ def _withdrawn_line(
         f"{quote_untrusted(w.reason, QUOTED_CHARS, scrub=scrub)}"
         if lowered
         else (
-            f"- {result.lens} proposes revising "
+            f"- {source.lens} proposes revising "
             f"{quote_untrusted(str(w.finding.location), QUOTED_CHARS, scrub=scrub)}: "
             f"{quote_untrusted(w.finding.finding, QUOTED_CHARS, scrub=scrub)} "
             f"[{w.finding.severity.value}]. Reason, quoted: "
@@ -3273,13 +3883,24 @@ def _withdrawn_line(
     )
 
 
-def _finding_id(result: LensResult, checked: CheckedFinding) -> str:
-    """The minted id of one of the result's effective findings, found by
+def _finding_id(
+    source: LensResult | LensDecision,
+    checked: CheckedFinding,
+    review: AgenticReview,
+) -> str:
+    """The minted id of one of the source's effective findings, found by
     identity: `effective_outcome` puts the replacement's own object in the
     composed outcome, so the same object the withdrawal carries is in the
-    list the ids were minted over."""
-    findings = () if result.outcome is None else result.outcome.findings
-    for n, held in enumerate(findings, 1):
-        if held is checked:
-            return f"L{result.index}-F{n}"
+    list the ids were minted over. A reused lens's decision (round-1
+    review of #760) composes its replacements into the review's findings
+    directly, keeping the carried label's id, so the id is found there."""
+    if isinstance(source, LensResult):
+        findings = () if source.outcome is None else source.outcome.findings
+        for n, held in enumerate(findings, 1):
+            if held is checked:
+                return f"L{source.index}-F{n}"
+        return "a finding this draft does not list"
+    for minted in review.findings:
+        if minted.finding is checked.finding:
+            return minted.id
     return "a finding this draft does not list"

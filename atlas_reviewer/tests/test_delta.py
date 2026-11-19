@@ -1153,14 +1153,14 @@ def test_fallback_decisions_rerun_every_offered_lens():
 
 def test_the_decision_turn_lists_the_lenses_and_fences_the_delta():
     delta = UntrustedBlock("delta-diff", RepoText("diff --git a/calc.py b/calc.py"))
-    text = decision_turn(EVENT, ("lens-a",), delta, NONCE)
+    text = decision_turn(EVENT, (("lens-a", None, False),), delta, (), NONCE)
     assert text.startswith("Lens decisions target (from the controller):")
     assert "- lens-a" in text
     # Mutant: the delta shipped outside the fence, which would let
     # PR-written text pose as controller instructions.
     assert 'label="delta-diff"' in text
     assert text.count("</untrusted-data") == 1
-    bare = decision_turn(EVENT, ("lens-a",), None, NONCE)
+    bare = decision_turn(EVENT, (("lens-a", None, False),), None, (), NONCE)
     assert "delta-diff" not in bare
 
 

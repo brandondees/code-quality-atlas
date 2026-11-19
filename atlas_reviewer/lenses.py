@@ -111,6 +111,26 @@ class LensLibrary:
                 return found
         return None
 
+    def concern(self, name: str) -> str | None:
+        """The lens body's one-line concern summary -- the first
+        non-heading line under the body's `# <name>` heading -- or None
+        when the body has none. The delta review's decision turn carries
+        it next to the lens name, so the coordinator weighs the concern
+        and not the name alone (D83, round-1 review of #760). Bounded by
+        the caller: the line is prose the bundle generated, quoted like
+        the rest of the turn's controller-side listing."""
+        body = self.body(name)
+        if body is None:
+            return None
+        lines = body.splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("# "):
+                for follow in lines[index + 1 :]:
+                    if follow.strip():
+                        return follow.strip()
+                break
+        return None
+
 
 def plan_lenses(
     library: LensLibrary,

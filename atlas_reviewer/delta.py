@@ -104,6 +104,7 @@ from atlas_reviewer.reassess import (
     PRIOR_LABEL_CHARS,
     ReassessFinding,
     ReassessReply,
+    Withdrawn,
     reassess_finding,
 )
 from atlas_reviewer.reassess import (
@@ -561,10 +562,11 @@ The pull request's head moved after an earlier review finished; this
 follow-up's subject is the whole pull request at the current head, and
 the incremental diff -- what the commits between the earlier review's
 head and the current head changed -- is fenced below as the new
-material. You are deciding, for each lens named below, whether this
-follow-up re-runs it or reuses the earlier review's settled result.
-Nothing you write is posted anywhere; the operator reads the
-controller's draft first.
+material, next to the fresh evidence around the pull request (newer CI
+results, newer comments) that the lenses this round will also see. You
+are deciding, for each lens named below, whether this follow-up re-runs
+it or reuses the earlier review's settled result. Nothing you write is
+posted anywhere; the operator reads the controller's draft first.
 
 - Re-run the lens when the incoming changes could affect its concern:
   it runs again on the whole pull request, with the incremental diff
@@ -577,8 +579,15 @@ controller's draft first.
 
 The decision is your judgment over the incoming changes -- there is no
 fixed rule tying it to which files the incremental diff touched. Judge
-each lens on its own concern, and say in the reason what in the
-incremental diff drove the call.
+each lens on its own concern -- the one-line concern summary under each
+name -- and say in the reason what in the incoming changes drove the
+call. A lens marked as citing the incremental diff is the highest-
+stakes reuse: its earlier findings sit on code the new commits touched.
+
+When you are uncertain, re-run. A reuse the incoming changes would have
+contradicted silently shrinks this round's evaluation; an unnecessary
+re-run costs bounded calls under the review's ceiling, and a missed
+defect does not.
 
 When you are done, reply with exactly one JSON object and nothing else:
 {"decisions": [{"lens": ..., "decision": ..., "reason": ...}, ...]}.
@@ -591,11 +600,26 @@ this turn has none."""
 class LensDecision:
     """The coordinator's decision for one planned lens of a delta review
     (D83): re-run it on the whole pull request, or reuse the earlier
-    review's settled result. Every planned lens has exactly one."""
+    review's settled result. Every planned lens has exactly one.
+
+    `flagged` marks a reuse-eligible lens whose earlier findings cite
+    files the incremental diff touches -- the signal the decision turn
+    carries so the judgment weighs it, recorded with the decision. The
+    re-assessment fields (D73, round-1 review of #760) record what the
+    reused lens's bounded re-assessment against the newer CI and
+    conversation evidence decided: `reassessed` whether one ran,
+    `reassess_note` the controller note, `withdrawn` the annotations --
+    a withdrawal removes nothing, and a revision that would lower a
+    Blocker's or a Major's severity is annotation-only, exactly as the
+    ledger-reuse path's re-assessments compose."""
 
     lens: str
     reuse: bool
     reason: str
+    flagged: bool = False
+    reassessed: bool = False
+    reassess_note: str = ""
+    withdrawn: tuple[Withdrawn, ...] = ()
 
 
 def decision_system(nonce: str) -> str:
@@ -607,24 +631,36 @@ def decision_system(nonce: str) -> str:
 
 def decision_turn(
     event: PrEvent,
-    offered: Sequence[str],
+    offered: Sequence[tuple[str, str | None, bool]],
     delta: UntrustedBlock | None,
+    context: Sequence[UntrustedBlock],
     nonce: str,
 ) -> str:
     """The decision call's one user turn: the controller's subject, the
-    lenses a reuse is available for -- controller data, listed bare
-    (every plan name is validated lens-shaped before the plan exists,
-    D69) -- and, when the delta carries material, the incremental diff,
-    fenced with the review's one nonce."""
+    lenses a reuse is available for -- each with its one-line concern
+    summary from the bundle, so the judgment weighs the concern and not
+    the name alone, and flagged when its earlier findings cite files the
+    incremental diff touches (D83, round-1 review of #760) -- then the
+    incremental diff and the fresh evidence around the pull request (the
+    conversation and CI blocks the lenses get, D73), each fenced with
+    the review's one nonce."""
     subject = f"{event.repo}#{event.pr_number} at {event.head_sha}"
-    listing = "\n".join(f"- {name}" for name in offered)
+    lines = []
+    for name, concern, flagged in offered:
+        line = f"- {name}"
+        if concern:
+            line += f" -- {concern}"
+        if flagged:
+            line += " (its earlier findings cite files the incremental diff touches)"
+        lines.append(line)
     parts = [
         f"{DECISION_TARGET_PREFIX}{subject}",
         ("Lenses with a settled result from the earlier review, each to be decided:"),
-        listing,
+        "\n".join(lines),
     ]
     if delta is not None:
         parts.append(fence(delta, nonce))
+    parts.extend(fence(block, nonce) for block in context)
     return "\n\n".join(parts)
 
 

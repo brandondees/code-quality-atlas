@@ -293,7 +293,8 @@ is listed as run, with the failure carried as a recovered note
 among the limit stops (#692, D76); a lens with no clean run is still not
 run. A delta review's post adds the per-lens decisions (D83): which
 lenses the follow-up re-ran and which it reused, each with the
-coordinator's reason.
+coordinator's reason. A reused lens the round re-assessed under D73
+(round-1 review of #760) shows that on its line, with the note.
 
 ## Downgrading
 
