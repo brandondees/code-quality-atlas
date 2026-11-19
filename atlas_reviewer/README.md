@@ -791,7 +791,15 @@ proposal's own validated tokens, each shell-quoted, from the same
 disposable staged copy under the same `timeout`, output cap and
 environment as the built-in pytest entry — no shell string, no selector
 appended (a command and a selector are refused together), no environment
-change, no path outside the staged copy. The model cannot smuggle any of
+change. Those are what the bridge adds to a proposal's own text; they are
+not a containment guarantee the grammar makes — a proposal's argument can
+name any path shape its charset allows, and an approved program can reach
+the runner's filesystem regardless. What bounds a named interpreter (a
+shell included) is the operator's approval of the exact argv plus the
+deny-all, credential-free runner, named in the next sentence. The grammar
+does refuse the traversal-shaped argument tokens (`.` and `..`; an
+argument cannot carry `/`), so `pytest --rootdir ..` is dead by grammar
+rather than left to the approval to bound. The model cannot smuggle any of
 it: the named command is an exact-match lookup against the run's
 allow-list, extra arguments are refused, and a name no proposal carries is
 refused without an echo. A proposal may itself name a shell interpreter —

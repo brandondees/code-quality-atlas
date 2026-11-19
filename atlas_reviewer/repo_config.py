@@ -258,24 +258,36 @@ DEFAULT_POST_CONFIG = PostConfigRead(None, POST_VERBOSITY_FULL, ())
 # separated by single spaces; the tokens are a closed charset with no
 # shell metacharacter, quote, expansion or separator in them, and the
 # program's path shape is the bridge's own workspace-relative path rule
-# (`path_problem`), so a proposal can never name a shell, an absolute
-# path, or anything outside the staged copy. The bounds keep one line's
-# parse bounded; a line over any of them is unusable, fail-open to deny.
+# (`path_problem`). The charset is what keeps metacharacters out -- it
+# is **not** a containment guarantee: a proposal may name a shell
+# interpreter or an interpreter at a workspace-relative path, and what
+# bounds a named program is the operator's approval of the exact argv
+# plus the deny-all, credential-free runner (D88's three controls), not
+# this grammar. The bounds keep one line's parse bounded; a line over
+# any of them is unusable, fail-open to deny.
 _COMMAND_PROGRAM_TOKEN = re.compile(r"[A-Za-z0-9_.+/-]{1,512}")
 _COMMAND_ARG_TOKEN = re.compile(r"[A-Za-z0-9_.+-]{1,120}")
+# The traversal-shaped argument tokens (round-1 review of #775, F5): an
+# argument token cannot carry a `/` (the charset above), so a `..` path
+# segment inside one can only be the token itself -- the bare `.` and
+# `..` are refused, which kills the `pytest --rootdir ..` shape by
+# grammar rather than leaving it to the operator's approval to bound.
+_TRAVERSAL_ARGS = frozenset({".", ".."})
 _MAX_COMMAND_TOKENS = 8
 _MAX_RUN_PROPOSALS = 8
-_MAX_COMMAND_LINE_CHARS = 600
 
 
 def _test_commands(raw: str | None) -> tuple[CommandProposal, ...] | None:
     """The comma-separated declared commands of one line's value, or None
-    when the value is unusable: empty, a token outside its grammar, more
-    tokens or commands than the bounds, a program whose path the bridge's
-    own path rule refuses, or the same command twice. Whitespace runs
-    inside a command are token separators at work, not part of a token;
-    the canonical name is the tokens joined by single spaces, which is
-    the exact string a `run_tests` call names."""
+    when the value is unusable: empty, a token outside its grammar, a
+    traversal-shaped argument token (`.` or `..`; the charset keeps `/`
+    out of an argument, so a `..` segment inside one can only be the
+    token itself), more tokens or commands than the bounds, a program
+    whose path the bridge's own path rule refuses, or the same command
+    twice. Whitespace runs inside a command are token separators at
+    work, not part of a token; the canonical name is the tokens joined
+    by single spaces, which is the exact string a `run_tests` call
+    names."""
     if raw is None or not raw.strip():
         return None
     proposals: list[CommandProposal] = []
@@ -289,7 +301,10 @@ def _test_commands(raw: str | None) -> tuple[CommandProposal, ...] | None:
             or path_problem(program) is not None
         ):
             return None
-        if not all(_COMMAND_ARG_TOKEN.fullmatch(token) for token in args):
+        if not all(
+            _COMMAND_ARG_TOKEN.fullmatch(token) and token not in _TRAVERSAL_ARGS
+            for token in args
+        ):
             return None
         name = " ".join(tokens)
         if len(name) > MAX_COMMAND_CHARS or any(p.name == name for p in proposals):

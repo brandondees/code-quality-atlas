@@ -5416,3 +5416,95 @@ changes are additive and narrow for the open #774 rebase — `cli.py` gains
 one helper, two kwargs and the notes' ride-along; the fixture, ports and
 instrumented changes are the two reader methods; the plan document is
 untouched.
+
+## 2026-11-19 (same day) — #775 round 1: the gate enforces its own deadline, the grammar refuses traversal-shaped arguments, and the trust story says what actually bounds a named interpreter
+
+The round-1 review APPROVED head `62d3170c` with two Minors and four Nits;
+all six fixed in this round, offline throughout.
+
+**The gate now enforces its own deadline (F2, the Minor whose fix the owner
+called).** The first wording said a never-returning channel "is bounded by
+the run's own wall watchdog" — wrong mechanism: the watchdog destroys the
+Sprite at the deadline but cannot unblock the controller thread parked
+inside the synchronous `channel.request`. The gate no longer trusts the
+channel's cooperation: `RunApprovals._ask` runs the request on a daemon
+helper thread and joins it for at most the bounded wait (the shorter of
+`MAX_APPROVAL_WAIT_S` and the wall that remained), so a channel that never
+returns is denied at the bound and any answer it eventually produces is
+never read. An answer is read at all only when the thread settled inside
+the bound — the join's elapsed time is the discriminator, so an answer
+landing in the hair after the bound denies, the fail-closed direction. The
+residual is named rather than hidden: a channel that never returns leaves
+that one daemon thread parked until the process exits (the service's
+`ATLAS_SERVICE_DEADLINE_S` is what ends the child) while the gate itself
+has moved on. The deadline is still passed to the channel, so a cooperative
+one can honor it; the gate just no longer depends on that. D88's backstop
+wording is corrected in place (the entry keeps the first wording's text as
+the corrected record, per the house's in-place-correction pattern for a
+wrong claim).
+
+**The grammar's comment no longer overclaims (F1).** The comment beside the
+proposal grammar said the path rule means a proposal "can never name a
+shell, an absolute path, or anything outside the staged copy" — false:
+`sh`, `bash` and `bin/sh` all parse, deliberately. The comment now
+attributes containment to what provides it: the charset kills
+metacharacters, while what bounds a named interpreter is the operator's
+approval of the exact argv plus the deny-all, credential-free runner —
+D88's three controls, the same attribution the README and D88 already
+carry.
+
+**The grammar refuses traversal-shaped argument tokens (F5).** An argument
+token cannot carry `/` (the charset), so a `..` path segment inside one can
+only be the token itself; the bare `.` and `..` are now refused, killing
+the `pytest --rootdir ..` shape by grammar rather than leaving it to the
+operator's approval to bound, with the same fixed-phrase, no-echo note
+every other unusable value earns. The README's "no path outside the staged
+copy" phrase is reworded to say what each control owns: the bridge's
+guarantees are what it adds to the proposal's own text; a proposal's
+argument can name any path shape its charset allows, and what bounds a
+named interpreter is the approval plus the deny-all runner — with the
+traversal refusal named as the one shape the grammar itself kills.
+
+**The dead constant is gone (F3).** `_MAX_COMMAND_LINE_CHARS` was never
+read; the name bound lives in `bridge_args.MAX_COMMAND_CHARS`, which the
+parse imports and a test pins equal.
+
+**The fail-closed pin the review's surviving mutant wanted (F4).** A
+channel answering a truthy non-`ApprovalOutcome` value (the bare string
+`"approved"`) is denied sticky — the shipped `is` comparison already
+denied it; the pin kills the loosening mutant (`is` → `==`, which a
+`StrEnum` refactor could plausibly introduce, under which the bare string
+grants).
+
+**The live open-questions list points at the flagged-open question (F6).**
+New **Q27** — who is the operator for the S7 allow-list, and what channel
+answers a non-allowlisted installation's approval request — with a bullet
+in the "Genuinely still open" list and a short section pointing at D88 and
+the plan's §3 row; §8 Q4 stays open alongside it.
+
+**Tests** (`test_run_approvals.py`, 70 now): the never-returning channel
+denied inside the bound without the test hanging (a real-clock assertion
+that the deny lands in well under the mutant's hang), the sticky denial
+holding after a 0.5 s-late answer lands (the approved set stays empty — the
+behavioral pin of the any-later-answer-is-ignored rule), a channel
+answering within the bound still granting (the positive control the two
+delay tests need), the truthy non-enum answer denied sticky, and the
+traversal-shaped tokens refused with the no-echo note (the parametrized
+grammar list gained the three shapes too). **Mutants applied by hand this
+round, all killed**: the bounded join made unbounded (killed by the
+never-return test hanging — the test cannot pass with the mutant in), the
+`is` comparison loosened to `==` (killed by the non-enum pin), and the
+traversal refusal dropped (killed by the traversal pin). One mutant is
+recorded unobservable rather than killed: the join's elapsed-time
+discriminator dropped — its only effect is an answer landing inside the
+sub-microsecond window between the join's timeout return and the read
+being granted, which no test can force without flaky timing; the property
+it protects (an out-of-bound answer never grants) is what the late-answer
+test pins behaviorally. With the first round's 27 — the channel-error carrier re-verified after
+its move into the helper thread — the slice's total is 31 killed and 2
+recorded unobservable (the token-quoting drop is the other).
+
+**Overlap.** The round touches `approval.py`, `repo_config.py`, the S7
+section of `atlas_reviewer/README.md`, D88, the live open-questions list,
+and the test file — none of them files #774 (S6) edits except the README,
+whose S6 changes are in other sections; nothing to reconcile.

@@ -18,8 +18,14 @@ installation, and nothing here invents one. The production default is
 `NeverApproved`, a channel that never approves -- so on a deployed
 service every blocked command is denied and named as an unapproved gap,
 and no proposal is ever granted. A real channel joins by implementing
-`ApprovalChannel`; it must answer by the deadline it is given (on the
+`ApprovalChannel`; it should answer by the deadline it is given (on the
 caller's clock scale), and any exception it raises denies fail-closed.
+The gate does not trust the channel to honor that deadline: the request
+runs on a daemon helper thread the gate joins for at most the bounded
+wait, so a channel that never returns is denied at the bound and its
+eventual answer, if it ever produces one, is never read (the residual --
+that one parked daemon thread, ended only when the process does -- is
+named in D88).
 
 An approved addition lives in run-scoped state that dies with the run:
 `RunApprovals` is built per lens run, its approvals never persist, are
@@ -43,6 +49,8 @@ and is refused without a note.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -196,10 +204,7 @@ class RunApprovals:
             return self._deny(name, _DOLLAR_SPENT)
         wait_s = min(MAX_APPROVAL_WAIT_S, self.wall_left())
         deadline = self.clock.monotonic() + wait_s
-        try:
-            outcome = self.channel.request(proposal, deadline)
-        except Exception:  # noqa: BLE001 -- a channel's failure is the run's denial, fail closed
-            outcome = ApprovalOutcome.NO_ANSWER
+        outcome = self._ask(proposal, deadline, wait_s)
         if outcome is ApprovalOutcome.APPROVED:
             if self.wall_left() <= 0.0:
                 return self._deny(name, _WALL_SPENT_WAITING)
@@ -210,6 +215,41 @@ class RunApprovals:
         if outcome is ApprovalOutcome.DENIED:
             return self._deny(name, _DENIED)
         return self._deny(name, _NO_ANSWER)
+
+    def _ask(
+        self, proposal: CommandProposal, deadline: float, wait_s: float
+    ) -> ApprovalOutcome:
+        """Ask the channel, bounded by this gate and not by the channel's
+        own cooperation: the request runs on a daemon helper thread that
+        `join` holds for at most `wait_s` (the shorter of the max wait
+        and the wall that remained), so a channel that never returns
+        cannot park the lens past the bound. A request still outstanding
+        when the bound expires is a `NO_ANSWER`, and any answer the
+        channel eventually produces is never read; an answer read at all
+        is one the thread settled inside the bound (the join's elapsed
+        time is the discriminator, so an answer that lands in the hair
+        after the bound is denied, the fail-closed direction). An
+        exception out of the channel is a `NO_ANSWER` too. The residual
+        is named in D88: a channel that never returns leaves that one
+        daemon thread parked until the process exits -- the service's
+        deadline ends the child -- while the gate itself has moved on."""
+        answer: list[ApprovalOutcome] = []
+
+        def ask() -> None:
+            try:
+                answer.append(self.channel.request(proposal, deadline))
+            except Exception:  # noqa: BLE001, S110 -- a channel's failure is the run's denial; the missing answer reads as the NO_ANSWER below
+                pass
+
+        worker = threading.Thread(
+            target=ask, name="atlas-approval-request", daemon=True
+        )
+        worker.start()
+        started = time.monotonic()
+        worker.join(wait_s)
+        if time.monotonic() - started >= wait_s:
+            return ApprovalOutcome.NO_ANSWER
+        return answer[0] if answer else ApprovalOutcome.NO_ANSWER
 
     def _deny(self, name: str, reason: str) -> tuple[bool, str]:
         text = reason.format(proposed=len(self.proposals), approved=len(self._approved))

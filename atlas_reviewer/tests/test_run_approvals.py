@@ -10,6 +10,8 @@ channel is a scripted test double, and the production default
 (`NeverApproved`) is exercised as itself."""
 
 import sys
+import threading
+import time
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -163,6 +165,9 @@ def test_no_line_or_no_file_proposes_nothing_silently():
         "make --flag=value",
         "",
         "   ",
+        "pytest --rootdir ..",
+        "pytest ..",
+        "make .",
         "make " + "x" * 700,
         "make one two three four five six seven eight nine",
         "a b, a c, a d, a e, a f, a g, a h, a i, a j",
@@ -178,6 +183,20 @@ def test_an_out_of_grammar_value_fails_open_to_deny_with_the_named_note(value):
     if value.strip():
         assert value not in note
     assert "&&" not in note and "curl" not in note
+
+
+def test_a_traversal_shaped_argument_token_is_refused_by_the_grammar():
+    """Round-1 review of #775, F5: an argument token cannot carry a `/`
+    (the charset), so a `..` path segment inside one can only be the
+    token itself; the bare `.` and `..` are refused, so the
+    `pytest --rootdir ..` shape is dead by grammar, not by approval --
+    with the same fixed-phrase, no-echo note every other unusable value
+    earns."""
+    for value in ("pytest --rootdir ..", "pytest ..", "make .", "make .."):
+        read = parse_run_proposals(LINE.format(value=value))
+        assert read.proposals == ()
+        assert "no command is proposed" in read.notes[0]
+        assert value not in read.notes[0]
 
 
 def test_the_token_charset_is_the_smuggle_boundary():
@@ -359,6 +378,96 @@ def test_a_never_approving_channel_is_the_production_default():
     assert not approved
     assert "no operator approval arrived" in reason
     assert "holds 1 proposed and 0 approved" in reason
+
+
+@dataclass
+class BlockingChannel:
+    """A channel that never returns: the request parks on an event that
+    is never set, so the gate's own bound is the only thing that can end
+    the wait. The test must deny without hanging."""
+
+    requests: list = field(default_factory=list)
+    _never: threading.Event = field(default_factory=threading.Event)
+
+    def request(self, proposal: CommandProposal, deadline: float) -> ApprovalOutcome:
+        self.requests.append((proposal.name, deadline))
+        self._never.wait()
+        return ApprovalOutcome.APPROVED
+
+
+@dataclass
+class SlowChannel:
+    """A channel that answers `APPROVED` only after `delay` real seconds
+    -- past the gate's bound when the bound is shorter -- the shape the
+    any-later-answer-is-ignored rule pins."""
+
+    delay: float
+    requests: list = field(default_factory=list)
+
+    def request(self, proposal: CommandProposal, deadline: float) -> ApprovalOutcome:
+        self.requests.append((proposal.name, deadline))
+        time.sleep(self.delay)
+        return ApprovalOutcome.APPROVED
+
+
+def test_a_channel_that_never_returns_denies_within_the_bound():
+    channel = BlockingChannel()
+    approvals, _ = gate("make check", channel, wall_left=lambda: 0.2)
+    start = time.monotonic()
+    approved, reason = approvals.admit("make check")
+    elapsed = time.monotonic() - start
+    assert not approved
+    assert "no operator approval arrived within the run's remaining wall" in reason
+    assert elapsed < 10.0, "the gate's bound must end the wait, not the channel"
+    assert channel.requests == [("make check", 0.0 + 0.2)]
+    # Sticky: the still-outstanding request is never re-asked.
+    approved_again, reason_again = approvals.admit("make check")
+    assert not approved_again
+    assert reason_again == reason
+    assert len(channel.requests) == 1
+
+
+def test_an_answer_that_arrives_after_the_bound_is_ignored():
+    channel = SlowChannel(0.5)
+    approvals, _ = gate("make check", channel, wall_left=lambda: 0.2)
+    start = time.monotonic()
+    approved, _reason = approvals.admit("make check")
+    elapsed = time.monotonic() - start
+    assert not approved
+    assert elapsed < 5.0, "the gate's bound must end the wait, not the channel"
+    time.sleep(0.6)  # the channel's answer lands now, after the bound
+    approved_again, reason_again = approvals.admit("make check")
+    assert not approved_again
+    assert "no operator approval arrived" in reason_again
+    assert approvals.approved_count() == 0
+    assert len(channel.requests) == 1
+
+
+def test_a_channel_that_answers_within_the_bound_still_grants():
+    channel = SlowChannel(0.05)
+    approvals, _ = gate("make check", channel, wall_left=lambda: 0.2)
+    approved, reason = approvals.admit("make check")
+    assert approved and reason == ""
+    assert approvals.approved_count() == 1
+
+
+def test_a_non_enum_channel_answer_denies_fail_closed():
+    """The channel port's contract is the enum's three values; anything
+    else -- a truthy bare string included -- is not an explicit approval
+    and denies sticky, whatever a refactor of the comparison does."""
+
+    class BareString:
+        def request(
+            self, proposal: CommandProposal, deadline: float
+        ) -> ApprovalOutcome:
+            return "approved"  # type: ignore[return-value]  (the pin's shape)
+
+    approvals, _ = gate("make check", BareString())
+    approved, reason = approvals.admit("make check")
+    assert not approved
+    assert "no operator approval arrived" in reason
+    approved_again, _ = approvals.admit("make check")
+    assert not approved_again
 
 
 # ------------------------------------------------------------- the bridge
