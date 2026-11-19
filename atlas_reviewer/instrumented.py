@@ -147,6 +147,20 @@ class InstrumentedGitHub:
             SOURCE,
         )
 
+    def get_repository(self, repo: str) -> Json:
+        return self._read(
+            "repository", lambda: self._inner.get_repository(repo), lambda _: {}
+        )
+
+    def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
+        return self._read(
+            # The label names the controller-chosen path, never the
+            # branch or any untrusted string.
+            f"{path} at a branch",
+            lambda: self._inner.get_file(repo, ref, path, max_bytes),
+            _size,
+        )
+
     def list_reviews(self, repo: str, number: int) -> Listing:
         return self._read(
             f"reviews of #{number}",

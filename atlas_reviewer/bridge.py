@@ -43,6 +43,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from atlas_reviewer.approval import RunApprovals
 from atlas_reviewer.bridge_args import (
     MAX_READ_LINES,
     QUOTED_CHARS,
@@ -493,6 +494,11 @@ class BridgeResult:
     outcome: MutantOutcome | None = None
     outcome_reason: str = ""
     head_sha: str = ""
+    # The proposed command a pre-approved addition ran (S7, D88):
+    # the proposal's validated name, empty for every other result. The
+    # name may be shown because it is schema-validated config (the
+    # parse's own grammar), not model text.
+    approved: str = ""
 
 
 @dataclass(frozen=True)
@@ -886,7 +892,9 @@ def _local_list(files: Mapping[str, bytes], call: Call, limits: ToolLimits) -> _
     return _local_reply(0, shown, len(total), total.count(b"\0"))
 
 
-def run_test_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+def run_test_script(
+    staged: Staged, call: Call, limits: ToolLimits, argv: str | None = None
+) -> str:
     """One exec for `run_tests` (D80): a fresh disposable copy of the
     head tree staged from the repository's objects (`stage_copy_steps` --
     its exit is framed as its own STAGE block, so a copy that could not
@@ -894,9 +902,24 @@ def run_test_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     pytest process in it, its output captured and shown from the end (the
     summary and the failures sit there), framed like every bridge reply,
     and the copy removed again -- whatever the tests wrote dies with it,
-    and nothing it wrote or replaced reaches a later call."""
+    and nothing it wrote or replaced reaches a later call.
+
+    `argv`, when given, is the bridge-built argv of a pre-approved
+    proposed command (S7, D88): the declared command replaces the pytest
+    invocation -- the proposal's own tokens, each quoted, run from the
+    same disposable copy under the same `timeout`, output cap and
+    environment, with no shell and no selector appended. Nothing about
+    the copy, the framing or the caps changes with it."""
     scratch = quote(staged.scratch)
     root = quote(staged.root)
+    if argv is None:
+        # The built-in entry needs the interpreter the staging resolved;
+        # an approved command does not, and the caller refuses only the
+        # calls that need it.
+        assert staged.pytest is not None  # the caller refuses the call before this
+        run_argv = _pytest_argv(staged, call.get("path"))
+    else:
+        run_argv = argv
     return "\n".join(
         (
             f"cd {root}",
@@ -910,7 +933,7 @@ def run_test_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
-                f"{_pytest_argv(staged, call.get('path'))} ) > out 2> err"
+                f"{run_argv} ) > out 2> err"
             ),
             "  s=$?",
             f"  tail -c {limits.max_bytes} out > shown",
@@ -1613,6 +1636,12 @@ class Bridge:
     _attempt_shown: int = field(default=0, repr=False)
     _attempt_runs: int = field(default=0, repr=False)
     _attempt_mutants: int = field(default=0, repr=False)
+    # The run-scoped operator-approval gate (S7, D88), None when the run
+    # proposes no addition: the proposals the repo's default-branch
+    # config named, the approval channel, and the approved set that dies
+    # with this bridge. The gate is the only path an approved addition
+    # takes to the argv builder, and it never grants on its own.
+    approvals: RunApprovals | None = None
 
     def __post_init__(self) -> None:
         if not self.commits:
@@ -1670,7 +1699,57 @@ class Bridge:
             checked = validate(tool, args, frozenset(self.commits))
         except RejectedError as exc:
             return self._logged(self._refused(tool, Status.REJECTED, str(exc)))
+        if checked.tool == "run_tests" and checked.get("command"):
+            refusal = self._command_refusal(checked.get("command"))
+            if refusal is not None:
+                return self._logged(self._refused(tool, *refusal))
         return self._logged(self._run(checked))
+
+    def _command_refusal(self, name: str) -> tuple[Status, str] | None:
+        """The refusal a `run_tests` `command` name earns before anything
+        runs (S7, D88), or None when it may run. The name is an
+        exact-match lookup against the run's allow-list: a name no
+        proposal carries is a rejected call -- a fixed code, no echo --
+        because the model cannot mint a command; a proposed one routes
+        through the run-scoped gate, where only a **pre-approved**
+        addition grants -- installation admins pre-approve a repo's extra
+        commands on the S10 settings page (part B, D88's update), there
+        is no live approval during a review, and until part B the
+        production channel approves nothing -- and every other outcome is
+        the unapproved gap, named with the counts."""
+        if self.approvals is None:
+            return (
+                Status.REJECTED,
+                (
+                    "unknown-command: this run's allow-list proposes no test "
+                    "commands; the built-in pytest entry stands"
+                ),
+            )
+        proposal = self.approvals.proposal(name)
+        if proposal is None:
+            return (
+                Status.REJECTED,
+                (
+                    "unknown-command: no test command by that name is proposed "
+                    "for this run's allow-list; the built-in pytest entry stands"
+                ),
+            )
+        approved, reason = self.approvals.admit(name)
+        if approved:
+            return None
+        return (Status.UNAVAILABLE, f"unapproved-command: {reason}")
+
+    def _command_argv(self, call: Call) -> str:
+        """The bridge-built argv of the approved proposed command (S7,
+        D88): the proposal's own validated tokens, each shell-quoted,
+        joined -- the declared command exactly as it was proposed, with
+        no selector appended and nothing the model sent interpolated.
+        The caller refused every unapproved name before this runs."""
+        name = call.get("command")
+        assert self.approvals is not None
+        proposal = self.approvals.proposal(name)
+        assert proposal is not None  # the caller refused the call before this
+        return " ".join(quote(token) for token in proposal.argv)
 
     def _spent(self) -> str | None:
         limits = self.session_limits
@@ -1774,8 +1853,12 @@ class Bridge:
         the test processes chose to print. A missing interpreter, a
         malformed reply and a lost output are gaps, never crashes; the
         verdicts themselves are in-band evidence, like every status the
-        exec stream carries."""
-        if self.staged.pytest is None:
+        exec stream carries. A `run_tests` call naming an approved
+        proposed command (S7, D88) runs the proposal's own bridge-built
+        argv instead of the pytest one and needs no interpreter."""
+        command = call.get("command") if call.tool == "run_tests" else ""
+        argv = self._command_argv(call) if command else None
+        if argv is None and self.staged.pytest is None:
             return self._failed(
                 call,
                 Status.UNAVAILABLE,
@@ -1806,7 +1889,7 @@ class Bridge:
                 f"bridge {call.tool}",
                 mutate_script(self.staged, call, limits)
                 if call.tool == "mutate"
-                else run_test_script(self.staged, call, limits),
+                else run_test_script(self.staged, call, limits, argv),
                 stage="bridge",
                 budget_s=budget,
             )
@@ -2026,6 +2109,7 @@ class Bridge:
             outcome,
             outcome_reason,
             self.staged.head_sha,
+            call.get("command") if call.tool == "run_tests" else "",
         )
 
     def _exec(
@@ -2166,6 +2250,8 @@ def render(result: BridgeResult) -> str:
         head += f"; {len(result.secrets)} possible committed secret(s) reported to the controller"
     if result.head_sha:
         head += f"; head {result.head_sha}"
+    if result.approved:
+        head += f"; {result.approved} ran as a pre-approved addition for this run"
     head += _run_lines(result)
     error = f"\nerror: {result.error.text}" if result.error else ""
     return f"{head}{error}\n{result.content.text}"
@@ -2224,6 +2310,7 @@ def run_bridge(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
+    approvals: RunApprovals | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2232,7 +2319,11 @@ def run_bridge(
     `create_gate` shape how the create behind staging is retried and
     bounded; see `runner.run_session`. `pytest_candidates` names the
     interpreters the staging probe asks about (D80); the default is the
-    runner image's own pyenv versions and system python."""
+    runner image's own pyenv versions and system python. `approvals` is
+    the run-scoped operator-approval gate (S7, D88) -- the proposals the
+    repo's default-branch config named, the channel that answers them,
+    and the approved set that dies with this runner; None proposes
+    nothing, and every `command` a call then names is refused."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)
@@ -2264,6 +2355,7 @@ def run_bridge(
                 session_limits,
                 trees,
                 unpack,
+                approvals=approvals,
             )
         )
 

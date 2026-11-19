@@ -74,6 +74,12 @@ from enum import StrEnum
 from typing import Any, cast
 
 from atlas_reviewer.agentic_config import load_agentic_limits
+from atlas_reviewer.approval import (
+    ApprovalChannel,
+    CommandProposal,
+    NeverApproved,
+    RunApprovals,
+)
 from atlas_reviewer.attestation import (
     Attempt,
     AttemptLedger,
@@ -655,6 +661,8 @@ def review_lens(
     task_socket: str = SOCKET_PATH,
     trace: ReviewTrace | None = None,
     evidence_digest: str | None = None,
+    run_proposals: tuple[CommandProposal, ...] = (),
+    approval_channel: ApprovalChannel | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -668,7 +676,13 @@ def review_lens(
     `ATLAS_OTEL_ENDPOINT` is set in the environment. With neither, no
     exporter is built. JSONL telemetry is unchanged. `evidence_digest` is
     D73's evidence-snapshot digest: when given, a reused settled lens is
-    checked for newer evidence and re-assessed when it has some."""
+    checked for newer evidence and re-assessed when it has some.
+    `run_proposals` and `approval_channel` are the S7 allow-list
+    proposals (config slice S7, D88) and the approval channel they become
+    requests on; the decided channel is pre-approval (D88's update:
+    installation admins pre-approve on the S10 settings page, part B --
+    no live approval during a review), and the production default
+    approves nothing until part B lands."""
     resolved = limits.resolve()
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
@@ -700,6 +714,8 @@ def review_lens(
             task_socket=task_socket,
             index=1,
             evidence_digest=evidence_digest,
+            run_proposals=run_proposals,
+            approval_channel=approval_channel,
         )
         single = synthesize(
             [ran.result],
@@ -749,6 +765,8 @@ def review_lenses(
     delta: DeltaScope | None = None,
     path_ranks: PathRanks | None = None,
     operator_ceiling_max: Decimal | None = None,
+    run_proposals: tuple[CommandProposal, ...] = (),
+    approval_channel: ApprovalChannel | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -765,6 +783,20 @@ def review_lenses(
     every changed file still listed and still held to every lens -- and
     the re-ranking is recorded in the draft's note. Q25 (whether anything
     may be excluded from review at all) is untouched.
+
+    Config slice S7 (D88): `run_proposals` are the reviewed repo's
+    proposed additions to the #734 execution-tool allow-list, read from
+    the default-branch `REVIEW.md` before this entry point is called;
+    `approval_channel` is the approval channel they become requests on.
+    The decided channel is pre-approval (D88's update): installation
+    admins pre-approve a repo's extra commands on the S10 settings page
+    (part B), the run reads that pre-approved set once at start, and
+    there is no live approval during a review -- the production default
+    approves nothing until part B lands. A proposal is never
+    auto-granted: a blocked `run_tests` command routes to the channel,
+    every outcome other than an explicit approval denies, and an
+    approved addition lives in run-scoped state that dies with the lens
+    run's own runner.
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
@@ -861,6 +893,8 @@ def review_lenses(
             evidence_digest=evidence_digest,
             delta=delta,
             path_ranks=path_ranks,
+            run_proposals=run_proposals,
+            approval_channel=approval_channel,
         ),
     )
 
@@ -896,6 +930,8 @@ def _review_lenses(
     evidence_digest: str | None,
     delta: DeltaScope | None = None,
     path_ranks: PathRanks | None = None,
+    run_proposals: tuple[CommandProposal, ...] = (),
+    approval_channel: ApprovalChannel | None = None,
 ) -> AgenticReview:
     files = split_files(diff)
     changed = frozenset(f.path for f in files)
@@ -992,6 +1028,8 @@ def _review_lenses(
             create_retries=resolved.create_retries,
             evidence_digest=evidence_digest,
             ranks=path_ranks,
+            run_proposals=run_proposals,
+            approval_channel=approval_channel,
         )
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
@@ -1346,6 +1384,8 @@ def _review_one(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     evidence_digest: str | None = None,
     ranks: PathRanks | None = None,
+    run_proposals: tuple[CommandProposal, ...] = (),
+    approval_channel: ApprovalChannel | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1369,6 +1409,35 @@ def _review_one(
     deadline = (
         started + resolved.review_wall_s if review_deadline is None else review_deadline
     )
+    # The run-scoped operator-approval gate (config slice S7, D88), built
+    # per lens run: the proposals the repo's default-branch config named,
+    # the channel they become requests on (the decided channel is
+    # pre-approval -- installation admins pre-approve on the S10 settings
+    # page, part B; no live approval during a review -- and the production
+    # default approves nothing until it lands), and the run's own wall and
+    # dollar bounds as the
+    # wait's limits. The gate and its approved set live and die with this
+    # lens run's runner -- an approval is never carried to another lens's
+    # runner, another run, or any state on the volume.
+    approvals = (
+        RunApprovals(
+            {p.name: p for p in run_proposals},
+            approval_channel if approval_channel is not None else NeverApproved(),
+            clock,
+            lambda: deadline - clock.monotonic(),
+            lambda: spend.committed_usd < resolved.reservation_usd,
+        )
+        if run_proposals
+        else None
+    )
+    if approvals is not None and telemetry is not None:
+        # The run's allow-list is configured: the proposals count is the
+        # operator-facing fact (D88) -- a run that proposed nothing and a
+        # run whose proposals never reached the coordinator look the same
+        # in the draft, and this record is what tells them apart.
+        telemetry.record(
+            "run approvals", "configured", {"proposals": len(run_proposals)}
+        )
     diff_secrets = scan_diff(diff)
     ledger_lens = lens
     if continuation:
@@ -1471,6 +1540,7 @@ def _review_one(
         root=bridge_root,
         create_gate=create_gate,
         create_retries=create_retries,
+        approvals=approvals,
     )  # fmt: skip
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),

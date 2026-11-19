@@ -144,6 +144,23 @@ def _rev(value: Any, revs: frozenset[Rev]) -> Rev:
 
 _LINE = _int_in(1, 10_000_000)
 
+# The bound on the `command` name a `run_tests` call may send (S7, D88):
+# the exact-match lookup against the run's allow-list needs no longer
+# name than the parse can propose; the parse side (`repo_config`) bounds
+# a proposal's canonical name by the same value, pinned equal by a test.
+# A longer name matches nothing and is refused here, before any lookup.
+MAX_COMMAND_CHARS = 600
+
+
+def _command(value: Any, _revs: frozenset[Rev]) -> str:
+    text = _string(value)
+    if len(text.encode("utf-8")) > MAX_COMMAND_CHARS:
+        raise RejectedError(INVALID, f"is over {MAX_COMMAND_CHARS} characters")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
+        raise RejectedError(INVALID, "contains a control character")
+    return text
+
+
 # The closed set of single-operator mutants `mutate` applies (D80): one
 # named statement, one operator. `negate-condition` wraps the condition of
 # the `if`, `while` or conditional expression at the named line in `not
@@ -183,7 +200,15 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
         # pytest as one positional argument (a file, a directory or a
         # `file.py::node_id`), empty for the whole suite; `mutate`'s
         # `tests` selects what its baseline and mutated runs execute.
-        "run_tests": (_Arg("path", _prefix, ""),),
+        # S7 (D88): `command` names one of the run's allow-list
+        # proposals -- the exact string the repo's default-branch
+        # `REVIEW.md` proposed -- and is the only thing the model names
+        # about a declared command: the argv comes from the proposal's
+        # own validated tokens, the model's value is an exact-match
+        # lookup and never a shell string. It is optional, it combines
+        # with no selector, and `mutate` never takes it (its verdict
+        # needs pytest's own summary line).
+        "run_tests": (_Arg("path", _prefix, ""), _Arg("command", _command, "")),
         "mutate": (
             _Arg("path", _path),
             _Arg("line", _LINE),
@@ -218,9 +243,27 @@ def validate(tool: Any, args: Any, revs: frozenset[Rev]) -> Call:
             quote_untrusted(", ".join(unknown), QUOTED_CHARS, scrub=str),
         )
     values = tuple((a.name, _value(a, args, revs)) for a in spec)
-    return (
+    call = (
         _read_range(Call(tool, values)) if tool == "read_file" else Call(tool, values)
     )
+    return _run_tools_shape(call)
+
+
+def _run_tools_shape(call: Call) -> Call:
+    """The execution tools' cross-argument rule (S7, D88): a declared
+    command and a test selector cannot combine -- a proposal runs as it
+    was proposed, its argv the bridge's own, and appending a selector
+    would be argv the proposal never asked for. `mutate` never carries a
+    command: its verdict needs pytest's own summary line, so the argument
+    is not in its schema and an unknown-argument refusal already covers
+    it."""
+    if call.tool == "run_tests" and call.get("command") and call.get("path"):
+        raise RejectedError(
+            "conflicting-argument",
+            "a declared command and a test selector cannot combine; a "
+            "command runs as it was proposed",
+        )
+    return call
 
 
 def _value(arg: _Arg, args: Mapping[str, Any], revs: frozenset[Rev]) -> Any:

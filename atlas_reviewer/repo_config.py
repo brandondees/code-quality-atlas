@@ -72,6 +72,31 @@ Today's keys:
   draft through `diffs.rerank_note`; the patterns themselves never
   reach a model -- only their effect on the order does.
 
+- `review_test_commands:` (config slice S7, D88) -- the repo's
+  **proposed additions** to the #734 execution-tool allow-list: declared
+  test commands a `run_tests` call may name. A proposal is a **request,
+  never a grant** (the #734 decision, D80; the channel decided in D88's
+  update): the command runs only when the run's allow-list carries it
+  **pre-approved** -- installation admins pre-approve a repo's extra
+  commands on the S10 settings page (part B), the run reads that set once
+  at run start, and there is no live approval during a review, so until
+  part B the channel approves nothing and every proposal is denied and
+  named as an unapproved gap -- the approval lives in run-scoped state
+  that dies with the run, and the
+  argv the command runs is built by the bridge from the proposal's own
+  tokens -- the model names the proposal, never a shell string. Parsed
+  by `parse_run_proposals` from the **default branch** (the D84 read
+  source: a same-repo or stacked PR must not carry its own execution
+  proposals into its own review), like the S3 post keys and the
+  admission keys -- never from the merge-base, whose copy of the key the
+  merge-base read ignores silently (it is a known key, so no false
+  unsupported note draws). An unusable value fails open to deny -- no
+  proposal -- with a named note that counts and never echoes the
+  rejected text; the grammar is a closed set (tokens, no shell
+  metacharacters, workspace-relative program paths only), so no key can
+  widen network, secret, or Sprite access and the runner stays deny-all
+  and credential-free.
+
 The admission-class keys (`review_base_include:` /
 `review_base_exclude:` / `review_skip_events:`, #756 and #761) are
 `service_admit.py`'s -- read from the repo's default branch, a different
@@ -94,6 +119,8 @@ import tarfile
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
+from atlas_reviewer.approval import CommandProposal
+from atlas_reviewer.bridge_args import MAX_COMMAND_CHARS, path_problem
 from atlas_reviewer.diffs import PathRanks
 from atlas_reviewer.lens_contract import Severity
 from atlas_reviewer.picker import LENS_NAME, LensPreferences
@@ -171,6 +198,17 @@ SEVERITY_FLOOR_LINE = re.compile(
 POST_VERBOSITY_LINE = re.compile(
     r"^review_post_verbosity:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
 )
+# The default-branch line that proposes additions to the #734
+# execution-tool allow-list (config slice S7, D88): the value is a
+# comma-separated list of declared test commands, each one program token
+# plus optional fixed argument tokens separated by single spaces. A
+# proposal is a request the operator pre-approves (D88's update:
+# installation admins pre-approve on the S10 settings page, part B; no
+# live approval during a review), never a grant, and the
+# argv it may become is built by the bridge from these tokens alone.
+TEST_COMMANDS_LINE = re.compile(
+    r"^review_test_commands:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
 # The verbosity dial's closed set (D84): the current post body is the
 # ceiling of verbosity, so the dial is lowering-only by construction --
 # `brief` is the one value below it, and every other value fails open to
@@ -220,6 +258,151 @@ class PostConfigRead:
 
 
 DEFAULT_POST_CONFIG = PostConfigRead(None, POST_VERBOSITY_FULL, ())
+
+
+# The #734 allow-list proposals' grammar (config slice S7, D88). A
+# command is one program token plus optional fixed argument tokens,
+# separated by single spaces; the tokens are a closed charset with no
+# shell metacharacter, quote, expansion or separator in them, and the
+# program's path shape is the bridge's own workspace-relative path rule
+# (`path_problem`). The charset is what keeps metacharacters out -- it
+# is **not** a containment guarantee: a proposal may name a shell
+# interpreter or an interpreter at a workspace-relative path, and what
+# bounds a named program is the operator's approval of the exact argv
+# plus the deny-all, credential-free runner (D88's three controls), not
+# this grammar. The bounds keep one line's parse bounded; a line over
+# any of them is unusable, fail-open to deny.
+_COMMAND_PROGRAM_TOKEN = re.compile(r"[A-Za-z0-9_.+/-]{1,512}")
+_COMMAND_ARG_TOKEN = re.compile(r"[A-Za-z0-9_.+-]{1,120}")
+# The traversal-shaped argument tokens (round-1 review of #775, F5): an
+# argument token cannot carry a `/` (the charset above), so a `..` path
+# segment inside one can only be the token itself -- the bare `.` and
+# `..` are refused, which kills the `pytest --rootdir ..` shape by
+# grammar rather than leaving it to the operator's approval to bound.
+_TRAVERSAL_ARGS = frozenset({".", ".."})
+_MAX_COMMAND_TOKENS = 8
+_MAX_RUN_PROPOSALS = 8
+
+
+def _test_commands(raw: str | None) -> tuple[CommandProposal, ...] | None:
+    """The comma-separated declared commands of one line's value, or None
+    when the value is unusable: empty, a token outside its grammar, a
+    traversal-shaped argument token (`.` or `..`; the charset keeps `/`
+    out of an argument, so a `..` segment inside one can only be the
+    token itself), more tokens or commands than the bounds, a program
+    whose path the bridge's own path rule refuses, or the same command
+    twice. Whitespace runs inside a command are token separators at
+    work, not part of a token; the canonical name is the tokens joined
+    by single spaces, which is the exact string a `run_tests` call
+    names."""
+    if raw is None or not raw.strip():
+        return None
+    proposals: list[CommandProposal] = []
+    for piece in raw.split(","):
+        tokens = piece.split()
+        if not tokens or len(tokens) > _MAX_COMMAND_TOKENS:
+            return None
+        program, *args = tokens
+        if (
+            not _COMMAND_PROGRAM_TOKEN.fullmatch(program)
+            or path_problem(program) is not None
+        ):
+            return None
+        if not all(
+            _COMMAND_ARG_TOKEN.fullmatch(token) and token not in _TRAVERSAL_ARGS
+            for token in args
+        ):
+            return None
+        name = " ".join(tokens)
+        if len(name) > MAX_COMMAND_CHARS or any(p.name == name for p in proposals):
+            return None
+        proposals.append(CommandProposal(name, (program, *args)))
+    if len(proposals) > _MAX_RUN_PROPOSALS:
+        return None
+    return tuple(proposals)
+
+
+def _unusable_commands_note(lines: int) -> str:
+    """The note for the offending `review_test_commands:` lines: the key,
+    the condition, the count, and the default that stands -- no command
+    is proposed -- and never any rejected value."""
+    if lines == 1:
+        return (
+            f"the reviewed repo's default-branch {REVIEW_MD} carries a "
+            "review_test_commands: line it cannot use as the run's "
+            "proposed test commands (a comma-separated list of declared "
+            "test commands, one line per key); it is ignored and no "
+            "command is proposed -- the execution tools run the built-in "
+            "pytest entry only"
+        )
+    return (
+        f"the reviewed repo's default-branch {REVIEW_MD} carries "
+        f"{lines} review_test_commands: lines it cannot use as the run's "
+        "proposed test commands (a comma-separated list of declared test "
+        "commands, one line per key); they are ignored and no command is "
+        "proposed -- the execution tools run the built-in pytest entry "
+        "only"
+    )
+
+
+@dataclass(frozen=True)
+class RunProposalsRead:
+    """What the reviewed repo's **default-branch** `REVIEW.md` proposed
+    for the #734 execution-tool allow-list (config slice S7, D88):
+    `proposals` are the parsed, validated additions -- each becomes only
+    an approval request on the run's channel, never a grant, and the
+    decided channel is pre-approval (D88's update: installation admins
+    pre-approve on the S10 settings page, part B; no live approval during
+    a review); `notes` is controller
+    text, non-empty only when a line was seen and ignored, so "line
+    present but unusable" can be told apart from "no line". The note
+    counts the ignored lines and never echoes the rejected text."""
+
+    proposals: tuple[CommandProposal, ...]
+    notes: tuple[str, ...]
+
+
+DEFAULT_RUN_PROPOSALS = RunProposalsRead((), ())
+
+
+def parse_run_proposals(text: str | None) -> RunProposalsRead:
+    """The `review_test_commands:` line, parsed from one `REVIEW.md`
+    **text** -- the default-branch file the service fetches, never the
+    merge-base tarball and never the PR head (the D84 read source: a PR
+    that could carry its own proposals would name commands into its own
+    review's execution surface). No file, or no line for the key, reads
+    as no proposal, silently, exactly as no request at all. A line that
+    is present but unusable -- an empty or out-of-grammar value, or the
+    key more than once -- fails open to deny: the whole line is dropped,
+    nothing is proposed, and the note names the key, the condition, the
+    count and the default, never the rejected text. Fence-blind by
+    design: the known keys' parser is line-based, so a fenced known key
+    is still live config, exactly as the ceiling's and the lens lines'
+    own parsers read."""
+    if text is None:
+        return DEFAULT_RUN_PROPOSALS
+    proposals: tuple[CommandProposal, ...] | None = None
+    unusable = False
+    matched = 0
+    for line in text.splitlines():
+        match = TEST_COMMANDS_LINE.match(line)
+        if match is None:
+            continue
+        matched += 1
+        parsed = _test_commands(match.group(1))
+        if parsed is None or proposals is not None:
+            # An unusable value, or a second line for the one-line-per-key
+            # key: the whole read fails open to deny.
+            unusable = True
+            continue
+        proposals = parsed
+    if unusable:
+        # The note counts every line the key carried, and never echoes a
+        # rejected value.
+        return RunProposalsRead((), (_unusable_commands_note(matched),))
+    if proposals is None:
+        return DEFAULT_RUN_PROPOSALS
+    return RunProposalsRead(proposals, ())
 
 
 def parse_post_config(text: str | None) -> PostConfigRead:
@@ -540,15 +723,17 @@ _UNSUPPORTED_KEY_LINE = re.compile(r"^review_([a-z0-9_]{1,80}):")
 # The keys the build carries. The first five are this module's own
 # schema -- the merge-base reads' three, plus the service's two
 # post-window keys (S3), parsed by `parse_post_config` from the
-# default-branch file -- and the last three are the admission-class keys
-# `service_admit.py` reads and honors from the repo's default branch
-# (#756, #761) -- the same file serves both windows, so a key the
-# admission read carries is supported by the build, and naming it
-# "unsupported" here would be the false note the named-note pattern
-# exists to prevent. They are checked against `service_admit`
-# `_ADMISSION_KEYS` by a test, so a key added there without this set
-# fails rather than drawing a false note. All of them match the
-# unsupported scan's shape, so the scan excludes them by name.
+# default-branch file -- and the rest are the default-branch-class keys
+# other modules read and honor from the repo's default branch: the
+# admission keys `service_admit.py` reads (#756, #761) and the S7
+# execution-tool allow-list proposals `parse_run_proposals` reads (D88)
+# -- the same file serves both windows, so a key a default-branch read
+# carries is supported by the build, and naming it "unsupported" here
+# would be the false note the named-note pattern exists to prevent.
+# They are checked against `service_admit` `_ADMISSION_KEYS` by a test,
+# so a key added there without this set fails rather than drawing a
+# false note. All of them match the unsupported scan's shape, so the
+# scan excludes them by name.
 _KNOWN_KEYS = frozenset(
     {
         "review_ceiling_usd",
@@ -562,6 +747,7 @@ _KNOWN_KEYS = frozenset(
         "review_base_include",
         "review_base_exclude",
         "review_skip_events",
+        "review_test_commands",
     }
 )
 # How many distinct unsupported keys one note names; the remainder is

@@ -740,6 +740,85 @@ overshoot at the cost of serializing a repo's reviews; D81 accepts the
 bound instead. `ATLAS_KEY_CEILING_USD` stays what it is — a cap on the
 shared key's total credit limit, not a per-repo bound.
 
+## The execution-tool allow-list and operator approval (config slice S7, D88)
+
+A repo may **propose** additions to the #734 execution-tool allow-list:
+declared test commands a lens's `run_tests` call can run instead of the
+built-in pytest entry. The line is `review_test_commands:` in the
+`REVIEW.md` on the repo's **default branch** — the same read source the
+S3 post settings and the S4 admission narrowing use, never the PR head
+and never the merge-base, because a proposal a same-repo or stacked PR
+could carry would name commands into its own review's execution surface.
+
+**A proposal is a request, never a grant.** The value is a
+comma-separated list of commands, each one program token plus optional
+fixed argument tokens separated by spaces — `review_test_commands: make
+check, sh run.sh`. The grammar is a closed set: tokens over a
+conservative charset with no shell metacharacter, quote, expansion or
+separator in them, the program's path held to the bridge's own
+workspace-relative path rule, at most 8 commands of at most 8 tokens
+each. Any unusable value — an empty value, a token outside the grammar,
+too many commands or tokens, the same command twice, the key more than
+once — fails open to deny: nothing is proposed, and the review's note
+names the key, the condition, the count and the default that stands,
+never the rejected text.
+
+**How an approved command runs.** When a lens's `run_tests` call names a
+proposed command, the bridge routes one approval request through the
+`ApprovalChannel` port (`approval.py`) and grants **only an explicit
+approval** — every other outcome denies: a denial, no answer, a channel
+error, and the run's wall or dollar limit being reached while the request
+waits. The wait is bounded by the shorter of the run's remaining wall
+clock and a 30-second cap (provisional, pending the owner), so one wait
+cannot park the whole review wall, and it counts against the run's wall
+because it is the calling lens's own elapsed time. An approved addition
+lives in run-scoped state that dies with the lens run's runner: it is
+never carried to another lens's runner, another run, another PR, or any
+state on the volume.
+
+**The channel is decided: pre-approval, not live approval.** Brandon
+decided on 2026-11-19 at 12:05 PM CT (D88's update): **installation admins
+pre-approve a repo's extra commands on the S10 settings page (part B), and
+there is no live approval during a review.** The run reads that
+pre-approved, installation-scoped set once at run start; a proposal the
+run's allow-list does not carry pre-approved is denied and named as an
+unapproved gap, and nothing asks a live operator mid-run. The port stays
+as the seam part B backs with that set — until part B lands, nothing is
+pre-approved, so the production default (`NeverApproved`) never approves,
+and on a deployed service every blocked command is denied and named as an
+unapproved gap — an `unavailable` tool
+result whose reason carries the counts (how many commands the run's
+allow-list proposes, how many are approved) and never the command text.
+A review with an unapproved-command gap open cannot approve, the way any
+tool gap holds it.
+
+**Bridge-built argv only, nothing widened.** An approved command runs the
+proposal's own validated tokens, each shell-quoted, from the same
+disposable staged copy under the same `timeout`, output cap and
+environment as the built-in pytest entry — no shell string, no selector
+appended (a command and a selector are refused together), no environment
+change. Those are what the bridge adds to a proposal's own text; they are
+not a containment guarantee the grammar makes — a proposal's argument can
+name any path shape its charset allows, and an approved program can reach
+the runner's filesystem regardless. What bounds a named interpreter (a
+shell included) is the operator's approval of the exact argv plus the
+deny-all, credential-free runner, named in the next sentence. The grammar
+does refuse the traversal-shaped argument tokens (`.` and `..`; an
+argument cannot carry `/`), so `pytest --rootdir ..` is dead by grammar
+rather than left to the approval to bound. The model cannot smuggle any of
+it: the named command is an exact-match lookup against the run's
+allow-list, extra arguments are refused, and a name no proposal carries is
+refused without an echo. A proposal may itself name a shell interpreter —
+`sh run.sh` is the ordinary declared-command shape — but the operator
+sees and approves the exact argv, and the runner stays deny-all and
+credential-free, so no approval can widen network, secret, credential or
+Sprite access. `mutate` never takes a command: its verdict needs pytest's
+own summary line, so it runs the built-in entry whatever the repo
+proposes. Each lens run's gate records the proposals count on the
+telemetry (`run approvals` / `configured`), so a run that proposed nothing
+and a run whose proposals never reached the coordinator can be told
+apart.
+
 ## Run it offline (no credentials)
 
 From the repo root:
@@ -1819,7 +1898,10 @@ a `Bridge` to the caller.
   prefix), `read_file` (rev, path, at most 400 lines), `grep` (pattern,
   rev, prefix, fixed-string unless `regex`), and the two execution tools
   (D80): `run_tests` (an optional `path` selector — a file, a directory
-  or a `file.py::node_id`, empty for the whole suite) and `mutate`
+  or a `file.py::node_id`, empty for the whole suite; and, config slice
+  S7, an optional `command` naming one of the run's pre-approved
+  allow-list proposals, which takes no selector and runs the proposal's
+  own bridge-built argv) and `mutate`
   (`path`, `line`, `operator` — `negate-condition` or `remove-guard` —
   and an optional `tests` selector its two runs share). `rev` is BASE,
   HEAD, a staged DEFAULT, or MUTANT once a `mutate` call has committed
@@ -1939,8 +2021,8 @@ a `Bridge` to the caller.
   answer `unavailable`. The caps count what ran: a refused call --
   rejected arguments, an already-spent budget -- takes no execution
   slot; a run that timed out keeps its. The allow-list seam for
-  operator-approved commands is the bridge-owned argv table -- the
-  approval flow itself is not built (D80).
+  pre-approved commands is the bridge-owned argv table -- the approval
+  flow around it is config slice S7 (D88), built beside it.
 - **Results** are repository content and are not redacted. Each is
   scanned for committed secrets, and every hit is reported by path, line
   and pattern, pre-existing outside HEAD or in a file the PR did not
@@ -1952,8 +2034,8 @@ a `Bridge` to the caller.
   nonce-fenced like every tool result — evidence a finding may cite,
   never something that asserts one.
 
-Not built yet: `log`, `blame`, `run_check`, fetching the default-branch
-tarball, and the operator-approved command allow-list (D80's seam).
+Not built yet: `log`, `blame`, `run_check`, and fetching the default-branch
+tarball.
 
 ## Agentic lens loop (offline, D40)
 
@@ -2369,7 +2451,8 @@ D41 records the 2026-11-12 probe that did.
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
-| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line, the D69 lens-preference lines and the S5 path-ranking lines (`review_path_include:`, `review_path_exclude:`, `review_generated_files:`), read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base | no |
+| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line, the D69 lens-preference lines and the S5 path-ranking lines (`review_path_include:`, `review_path_exclude:`, `review_generated_files:`), read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base, and the S7 execution-tool allow-list proposals (`review_test_commands:`) parsed by `parse_run_proposals` from the same default-branch window | no |
+| `approval.py` | the #734 execution-tool allow-list's operator-approval gate (config slice S7, D88): `CommandProposal` (a parsed, validated declared test command), the `ApprovalChannel` port — the seam the decided shape backs with pre-approval (installation admins pre-approve on the S10 settings page, part B; no live approval during a review) — with `NeverApproved` as the production default until it lands, and `RunApprovals` -- the run-scoped gate that turns a blocked command into one approval request, denies every outcome but an explicit approval (a denial, a no-answer, an error, the run's wall or dollar limit reached while waiting), keeps denials sticky, and dies with the lens run | no |
 | `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. The `REVIEW.md` reads behind it live in `repo_config.py` (S1) | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |

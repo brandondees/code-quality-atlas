@@ -5334,3 +5334,306 @@ belongs to part B's intake validation, not to the store.
 **Tests** (`test_installation_store.py` extended by the m2' test).
 **One fix-round mutant applied by hand and killed:** the parse moved
 back outside the skip (the new record-shaped-name test).
+
+## 2026-11-19 — Config slice S7: the #734 allow-list's proposals and the in-run operator approval (issue #766)
+
+The user-configuration plan's S7 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S7, §3's "#734 tool allow-lists" row; the decisions are D80's allow-list
+paragraph and D81's Q5). Offline only: the tests use `LocalSprites`, scripted
+approval channels, fakes, and the real CLI's dry run; no live model, Sprite or
+GitHub call was made, no secret was read, and no deployed service setting, Fly
+config value or secret changed. D88 records the implementation decisions the
+plan left open; the open #774 (S6) holds D87, so the entry takes D88 and the
+decision guard tolerates the gap.
+
+**What an addition is.** The shape D80's revisit and the 2026-11-13 plan both
+point at: the repo's declared test command, beside the built-in pytest entry.
+A repo's default-branch `REVIEW.md` proposes them with
+`review_test_commands:` (comma-separated commands, one program token plus at
+most seven fixed argument tokens each, closed charset, the program held to
+the bridge's own workspace-relative path rule, at most 8 commands of 8
+tokens); the canonical name — the tokens joined by single spaces — is the
+exact string a `run_tests` call names. The whole read fails open to deny on
+any unusable line or a repeated key, with a note that counts and never
+echoes; the merge-base scan knows the key, so no false unsupported note
+draws and a merge-base copy is silently not honored (the S3 keys' cohesion).
+
+**The port.** `approval.ApprovalChannel.request(proposal, deadline)` is the
+whole operator-approval surface built: the plan does not specify the channel
+or who the operator is for a non-allowlisted installation, so nothing is
+invented and the production default is `NeverApproved` — every blocked
+command is denied and named as an unapproved gap. The channel must answer by
+its deadline; an exception is a no-answer, fail-closed. `RunApprovals` grants
+only an explicit approval, keeps denials sticky for the run, bounds the wait
+by the shorter of the run's remaining wall and 30 s (provisional, pending the
+owner), and checks the wall and the dollar bound before and after the wait —
+an approval that arrives after either ran out denies with its own reason.
+The wait counts against the run's wall because it is the calling lens's own
+elapsed time. The gate is built per lens run in `_review_one` and dies with
+that run's runner — the narrow reading of "within the same run": a grant is
+never carried into another lens's staged runner, another run, or any state
+on the volume.
+
+**The bridge surface.** `run_tests` gains an optional `command` argument: an
+exact-match lookup against the run's allow-list, refused as `unknown-command`
+with no echo when it names no proposal, combined with no selector
+(`conflicting-argument`), and — when approved — run as the proposal's own
+tokens, each shell-quoted, from the same disposable staged copy under the
+same `timeout`, output cap and environment as the built-in entry, with no
+interpreter requirement. The token charset is the primary control (no
+proposal can carry a metacharacter at all); shlex quoting is
+defense-in-depth whose drop-mutant is unobservable under the charset and is
+recorded rather than claimed killed. An unapproved proposed command refuses
+as `unavailable` — a tool gap the review cannot approve over — with the
+fixed reason and the counts; the telemetry records `run approvals` /
+`configured` with the proposals count per lens run, so a run that proposed
+nothing and a run whose proposals never reached the coordinator can be told
+apart. `mutate` never takes a command: its verdict needs pytest's own
+summary line.
+
+**The glue.** The CLI's agentic-review path fetches the default-branch
+`REVIEW.md` (one read-only repository lookup recovering the branch, the file
+under the same 64 KiB bound; a missing file is the silent unconfigured repo;
+a failed lookup, fetch or over-bound file is a named note with nothing
+proposed — a lost read can only narrow what the run may execute) and passes
+the proposals into `review_lenses`/`review_lens`; the coordinator builds the
+per-lens gate with the run's own wall and dollar bounds as the wait's
+limits. The fixture `GitHubReader` gains `get_repository`/`get_file` (the
+same methods S6's fetch adds; the rebase is mechanical), and the shipped
+fixtures gained `repository.json` each, `sample-pr` an unusable proposals
+line (the dry run pins the named note end to end) and `sample-pr-delta` a
+valid one (the dry run pins the telemetry record the plumb feeds).
+
+**Tests** (`atlas_reviewer/tests/test_run_approvals.py`, 62 tests; the
+reader-coverage list in `test_instrumented.py`): the grammar and fail-open
+notes, the merge-base scan's silence, the gate's every outcome and bound,
+the bridge surface's rejections and the approved command end to end through
+`LocalSprites`, the lens loop's ledger over both, the coordinator plumb, the
+CLI fetch's five shapes, and the two dry-run pins. **27 mutants applied by
+hand, all killed** on their named tests (the list is in D88), plus the one
+unobservable quoting mutant recorded above. **Overlap:** the shared-file
+changes are additive and narrow for the open #774 rebase — `cli.py` gains
+one helper, two kwargs and the notes' ride-along; the fixture, ports and
+instrumented changes are the two reader methods; the plan document is
+untouched.
+
+## 2026-11-19 (same day) — #775 round 1: the gate enforces its own deadline, the grammar refuses traversal-shaped arguments, and the trust story says what actually bounds a named interpreter
+
+The round-1 review APPROVED head `62d3170c` with two Minors and four Nits;
+all six fixed in this round, offline throughout.
+
+**The gate now enforces its own deadline (F2, the Minor whose fix the owner
+called).** The first wording said a never-returning channel "is bounded by
+the run's own wall watchdog" — wrong mechanism: the watchdog destroys the
+Sprite at the deadline but cannot unblock the controller thread parked
+inside the synchronous `channel.request`. The gate no longer trusts the
+channel's cooperation: `RunApprovals._ask` runs the request on a daemon
+helper thread and joins it for at most the bounded wait (the shorter of
+`MAX_APPROVAL_WAIT_S` and the wall that remained), so a channel that never
+returns is denied at the bound and any answer it eventually produces is
+never read. An answer is read at all only when the thread settled inside
+the bound — the join's elapsed time is the discriminator, so an answer
+landing in the hair after the bound denies, the fail-closed direction. The
+residual is named rather than hidden: a channel that never returns leaves
+that one daemon thread parked until the process exits (the service's
+`ATLAS_SERVICE_DEADLINE_S` is what ends the child) while the gate itself
+has moved on. The deadline is still passed to the channel, so a cooperative
+one can honor it; the gate just no longer depends on that. D88's backstop
+wording is corrected in place (the entry keeps the first wording's text as
+the corrected record, per the house's in-place-correction pattern for a
+wrong claim).
+
+**The grammar's comment no longer overclaims (F1).** The comment beside the
+proposal grammar said the path rule means a proposal "can never name a
+shell, an absolute path, or anything outside the staged copy" — false:
+`sh`, `bash` and `bin/sh` all parse, deliberately. The comment now
+attributes containment to what provides it: the charset kills
+metacharacters, while what bounds a named interpreter is the operator's
+approval of the exact argv plus the deny-all, credential-free runner —
+D88's three controls, the same attribution the README and D88 already
+carry.
+
+**The grammar refuses traversal-shaped argument tokens (F5).** An argument
+token cannot carry `/` (the charset), so a `..` path segment inside one can
+only be the token itself; the bare `.` and `..` are now refused, killing
+the `pytest --rootdir ..` shape by grammar rather than leaving it to the
+operator's approval to bound, with the same fixed-phrase, no-echo note
+every other unusable value earns. The README's "no path outside the staged
+copy" phrase is reworded to say what each control owns: the bridge's
+guarantees are what it adds to the proposal's own text; a proposal's
+argument can name any path shape its charset allows, and what bounds a
+named interpreter is the approval plus the deny-all runner — with the
+traversal refusal named as the one shape the grammar itself kills.
+
+**The dead constant is gone (F3).** `_MAX_COMMAND_LINE_CHARS` was never
+read; the name bound lives in `bridge_args.MAX_COMMAND_CHARS`, which the
+parse imports and a test pins equal.
+
+**The fail-closed pin the review's surviving mutant wanted (F4).** A
+channel answering a truthy non-`ApprovalOutcome` value (the bare string
+`"approved"`) is denied sticky — the shipped `is` comparison already
+denied it; the pin kills the loosening mutant (`is` → `==`, which a
+`StrEnum` refactor could plausibly introduce, under which the bare string
+grants).
+
+**The live open-questions list points at the flagged-open question (F6).**
+New **Q27** — who is the operator for the S7 allow-list, and what channel
+answers a non-allowlisted installation's approval request — with a bullet
+in the "Genuinely still open" list and a short section pointing at D88 and
+the plan's §3 row; §8 Q4 stays open alongside it.
+
+**Tests** (`test_run_approvals.py`, 70 now): the never-returning channel
+denied inside the bound without the test hanging (a real-clock assertion
+that the deny lands in well under the mutant's hang), the sticky denial
+holding after a 0.5 s-late answer lands (the approved set stays empty — the
+behavioral pin of the any-later-answer-is-ignored rule), a channel
+answering within the bound still granting (the positive control the two
+delay tests need), the truthy non-enum answer denied sticky, and the
+traversal-shaped tokens refused with the no-echo note (the parametrized
+grammar list gained the three shapes too). **Mutants applied by hand this
+round, all killed**: the bounded join made unbounded (killed by the
+never-return test hanging — the test cannot pass with the mutant in), the
+`is` comparison loosened to `==` (killed by the non-enum pin), and the
+traversal refusal dropped (killed by the traversal pin). One mutant is
+recorded unobservable rather than killed: the join's elapsed-time
+discriminator dropped — its only effect is an answer landing inside the
+sub-microsecond window between the join's timeout return and the read
+being granted, which no test can force without flaky timing; the property
+it protects (an out-of-bound answer never grants) is what the late-answer
+test pins behaviorally. With the first round's 27 — the channel-error carrier re-verified after
+its move into the helper thread — the slice's total is 31 killed and 2
+recorded unobservable (the token-quoting drop is the other).
+
+**Overlap.** The round touches `approval.py`, `repo_config.py`, the S7
+section of `atlas_reviewer/README.md`, D88, the live open-questions list,
+and the test file — none of them files #774 (S6) edits except the README,
+whose S6 changes are in other sections; nothing to reconcile.
+
+## 2026-11-19 (same day) — #775 rebased onto main (#774 merged), and the approval channel decided: installation admins pre-approve on the S10 settings page, no live approval
+
+Two things landed on the S7 branch in one round: the rebase onto main
+`0004fee0` (#774/S6 merged), and the owner's decision on the question the
+slice had flagged open.
+
+**The decision.** Brandon, 2026-11-19 at 12:05 PM CT: **"installation
+admins pre-approve a repo's extra commands on the S10 settings page (part
+B), and there is no live approval during a review."** Recorded as a dated
+update on D88 (edited in place on this branch — D88 is not on main's
+append-only log yet). The shape: the channel's backing data is a
+**pre-approved, installation-scoped set** read once at run start; a
+proposal the run's allow-list does not carry pre-approved is denied and
+named as an unapproved gap; nothing asks a live operator mid-run. The
+`ApprovalChannel` port and its `NeverApproved` production default stay as
+the seam — until part B's store and settings page land, nothing is
+pre-approved, so the deployed service grants nothing — and the bounded ask
+(the daemon-thread join, the wall/dollar checks) stays as the fail-safe
+that keeps any channel implementation bounded; with the decided shape
+nothing waits on a live operator, so the bound is pure fail-safety. No
+rename: `ApprovalChannel`/`NeverApproved`/`RunApprovals` keep their names
+(`NeverApproved` reads exactly as "nothing pre-approved yet"), and
+renaming would churn the tests for no clarity. What part B still owes: the
+encrypted installation store (S10's, already in scope for the
+credentials), the settings-page surface where the admin grants a repo's
+commands, and the run-start read that populates the gate's approved set —
+none of it built here. Every surface that promised in-run or live approval
+is reworded to the decided shape: the `approval.py` module and class
+docstrings, the bridge's refusal path docstring, the `repo_config` key
+descriptions, the CLI fetch's docstring, the coordinator's entry-point
+docstrings and gate comment, the tool schema's `command` description, the
+README's S7 section, and Q27 — decided with it, its section marked
+DECIDED with the answer and the bullet removed from the live
+"Genuinely still open" list. The session log's earlier S7 entries keep
+their original wording as history, this log being append-only.
+
+**No behavior change, so no new mutant.** The port, the production
+default, the gate's mechanics and every test assertion are unchanged; the
+round is wording and records.
+
+**The rebase.** Three conflicts, each resolved by keeping both sides:
+`docs/open-questions.md` (main's D87 slotting in before this branch's D88
+— the first commit's resolution placed them in order and the second
+commit's round-1 rewording of D88 landed on the survivor, deduplicated),
+`docs/session-log.md` (S6's entry and correction, then S7's, both whole,
+append-only preserved), and `atlas_reviewer/github_fixture.py` (the two
+slices' `get_repository` docstrings merged, and `get_file` merged so one
+method serves a default-branch path by name from the fixture root —
+`AGENTS.md` from `agents-md.txt`, S6's mapping, kept; a fixture-root
+`REVIEW.md` by its own name, S7's read; any other absent path a 404).
+`cli.py` and the README auto-merged: the two default-branch fetches (S6's
+guidelines block, S7's proposals read) coexist as separate one-lookup
+reads, and the README's S6 and S7 sections sit beside each other. The
+overlap D88 predicted held: nothing in S6's changes forced an S7 behavior
+change.
+
+## 2026-11-19 (same day) — #775 fix round 3: the committed conflict marker deleted, a guard against the next one, and the refusal phrases moved into the decided voice
+
+The re-check at `b9f4fe27` REQUEST CHANGES on one Blocker and three
+smaller findings; all fixed here, offline throughout.
+
+**The Blocker — the marker, and why every gate missed it.** The rebase's
+fixture-docstring resolution replaced the two sides' overlapping text but
+left the `<<<<<<< HEAD` line itself sitting in the module docstring --
+syntactically invisible (it is string content), so the gate, ruff, mypy
+and both suites stayed green over an unfinished conflict resolution. The
+line is deleted; the merged text around it was already the correct
+resolution.
+
+**The guard, so this cannot recur.** `tests/test_no_conflict_markers_are_
+committed.py` walks every tracked file (`git ls-files`) and fails on a
+committed conflict marker, with the shapes kept narrow per the brief: a
+line starting with seven `<` or seven `>` followed by a space (git's own
+`<<<<<<< HEAD` and `>>>>>>> label`), or a line that is exactly seven `=`.
+The divider's one legitimate look is a setext heading's underline, which
+directly follows the heading text -- so in a markdown or RST file a
+`=======` is flagged only when the line above is blank, while in every
+other tracked file it is flagged outright (no shape a source file,
+fixture or workflow legitimately carries is that line; the blocker sat
+exactly there, in a `.py` file). The first narrowing draft keyed the
+exclusion on the previous line being non-blank alone, which swallows the
+common real conflict (the divider directly follows the ours side) -- the
+file-type split is what keeps both properties. An indented line and
+longer marker runs are not the shapes git writes and are not flagged.
+The walk's end-to-end honesty is pinned by a tracked sample,
+`tests/fixtures/conflict-marker-sample.txt`, the one file allowed to
+carry markers: the walk must find it whole (both edges and the divider)
+and hold every other tracked file to none -- which is also what makes the
+walk-loop drop mutant killable instead of hiding behind a clean tree.
+**Mutants, each applied by hand and killed**: the marker reintroduced
+into the fixture docstring (the clean-tree walk fails), the walk loop
+dropped (the seeded-sample walk fails), the divider rule dropped, the
+setext exclusion dropped, the edge-shape rule dropped, and the walk's
+population emptied or filtered to nothing (the population pin fails on
+each). The check is recorded here as the brief directs; the pyc-cache
+lesson from fix round 1 was applied -- every mutant verdict above was
+scored with the mutated module's bytecode cache deleted first.
+
+**The Minor — D88's quote matches the shipped string.** D88's "Named gaps
+and records" paragraph quoted the controller line as "ran with operator
+approval for this run"; this round's rebase commit renamed it, and the
+entry now quotes the shipped `ran as a pre-approved addition for this
+run` (`bridge.py`'s render line) -- the append-only rules allow the
+correction as a later dated round's edit on the branch, and the entry
+already carried the update paragraph that claimed the rewording.
+
+**The two Nits.** `repo_config.py`'s grammar comment now reads "a request
+the operator pre-approves (D88's update: installation admins pre-approve
+on the S10 settings page, part B; no live approval during a review), never
+a grant" -- the one S7 surface the sweep had left with an unqualified
+"the operator approves". And `approval.py`'s `_DENIED` and `_NO_ANSWER`
+fixed phrases moved from the live-wait voice into the decided shape's:
+the denial is now "the channel's pre-approval record denies the proposed
+test command" and the no-answer is "the run's channel gave no usable
+answer (an error, a timeout, or the run's wall or dollar limit reached)"
+-- both still fail closed with the same counts and the same built-in
+pytest fallback, and the tests pinning them ride along word for word
+(`_DENIED`'s denial pin, the no-answer pins across the channel-error,
+no-answer, late-answer, non-enum and never-approving tests). The
+wall/dollar phrases keep their wait wording deliberately: they describe
+the bounded ask's fail-safety limits, which the decided shape keeps as
+the bound on any channel implementation.
+
+**Gates.** Both suites with their floors, ruff, ruff format, mypy, drift
+and markdownlint run before the push; the guard's seven mutants are the
+round's only new ones (no product behavior changed -- the refusal phrases
+are user-visible strings, and their pins are the tests that moved with
+them).

@@ -9,9 +9,12 @@ listed under the head branch's name; `list_workflow_runs_at` serves those at one
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
 `issue-<n>.json`, `compare.json`, `repository.json` (the repository object;
-its `default_branch` is what the default-branch reads resolve), `agents-md.txt`
-(the default-branch `AGENTS.md` the guidelines block reads; absent means the
-repo carries none), and a `source/` tree served as the
+its `default_branch` is what the default-branch reads resolve), any
+default-branch file under its own path name (`get_file` serves it from the
+fixture root: `agents-md.txt` is the default-branch `AGENTS.md` the
+guidelines block reads, a fixture-root `REVIEW.md` is the default branch's
+copy, distinct from the source trees; absent means the repo carries none),
+and a `source/` tree served as the
 tarball at any SHA (the head tree); a `source-<first 7 hex of the SHA>/`
 directory, when the fixture ships one, is served at that SHA instead, so
 a fixture can give the merge base the tree the diff is against.
@@ -180,18 +183,19 @@ class FixtureGitHub:
         return self._json(f"issue-{number}.json")
 
     def get_repository(self, repo: str) -> Json:
-        """The repository object; the fixture serves `repository.json`, the
-        one field the default-branch reads need being `default_branch`."""
+        """The repository object, as GitHub serves it; the fixture ships
+        `repository.json`, the one field the default-branch reads need
+        being `default_branch` (S4/S3/S7's shape)."""
         self.calls.append(("get_repository", repo))
         return self._json("repository.json")
 
     def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
-        """One file's raw contents at a ref. The fixture serves only the
-        file the guidelines block reads: `AGENTS.md` from `agents-md.txt`;
-        any other path is a 404, as GitHub would answer."""
+        """One file's bytes at `ref`, a default-branch file read. The
+        fixture serves a path by name from the fixture root -- AGENTS.md
+        from `agents-md.txt` (the guidelines block's file), REVIEW.md from
+        a fixture-root `REVIEW.md` (the default branch's copy, distinct
+        from the source trees) -- and any other absent path is a 404, as
+        GitHub would answer."""
         self.calls.append(("get_file", repo, ref, path))
-        if path != "AGENTS.md":
-            raise NotFoundError(f"fixture has no file {path}")
-        return self._capped(
-            self._file("agents-md.txt").read_bytes(), max_bytes, "agents-md.txt"
-        )
+        name = "agents-md.txt" if path == "AGENTS.md" else path
+        return self._capped(self._file(name).read_bytes(), max_bytes, name)
