@@ -176,6 +176,7 @@ jobs:
               - "collapsed/**"
               - "tooling/**"
               - "atlas_reviewer/**"
+              - "atlas_settings/**"
               - "tests/**"
               - "docs/research/**"
               - "commands/**"
@@ -240,6 +241,7 @@ jobs:
               - "collapsed/**"
               - "tooling/**"
               - "atlas_reviewer/**"
+              - "atlas_settings/**"
               - "tests/**"
               - "docs/research/**"
               - "commands/**"
@@ -419,6 +421,17 @@ jobs:
         # no credentials and no network calls beyond a loopback HTTP server.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+      - name: settings page tests (atlas_settings)
+        # The BYOK settings page (config slice S10, part B1) is its own
+        # top-level package with its own suite and its own coverage run
+        # against the same [tool.coverage.report] floor, the way the
+        # reviewer service's suite is. Fully offline: GitHub is a
+        # scripted fake transport, the store is the real one over temp
+        # files with an obviously fake Fernet key, and the egress
+        # refusals run against numeric and loopback addresses that
+        # resolve without any network.
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m pytest atlas_settings/tests -q --cov=atlas_settings
       - name: reviewer service dry run (offline fixture PR event)
         # The offline provider reviews no file, so the dry run must report
         # incomplete coverage: exit 4 and a non-approving status line (D36).
