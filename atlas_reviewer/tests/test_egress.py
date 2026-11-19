@@ -85,8 +85,12 @@ def test_a_public_address_is_allowed(address):
 
 def test_the_blocked_set_names_the_plans_required_ranges():
     """The plan §4 list is the minimum: assert the exact networks are
-    present, so trimming the set cannot happen silently."""
-    names = {str(network) for network in (*BLOCKED_V4, *BLOCKED_V6)}
+    present, so trimming the set cannot happen silently. The networks
+    are compared parsed, not as strings -- some Pythons print an
+    IPv4-mapped network as `::ffff:0.0.0.0/96` and some as
+    `::ffff:0:0/96`, and the set's membership is what the guard runs
+    on."""
+    blocked = (*BLOCKED_V4, *BLOCKED_V6)
     for required in (
         "10.0.0.0/8",
         "172.16.0.0/12",
@@ -101,7 +105,10 @@ def test_the_blocked_set_names_the_plans_required_ranges():
         "::/128",
         "::ffff:0:0/96",
     ):
-        assert required in names
+        wanted = ipaddress.ip_network(required)
+        assert any(network == wanted for network in blocked), (
+            f"the blocked set lost {required}"
+        )
 
 
 # --------------------------------------------- resolve, check, and pin
