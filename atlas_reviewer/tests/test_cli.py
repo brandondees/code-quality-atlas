@@ -2882,3 +2882,102 @@ def test_a_delta_dry_run_can_reuse_a_lens_and_still_cover_the_whole_pr(tmp_path)
     # three lenses the earlier review never ran do appear, re-run.
     assert "tracing-correctness-and-invariants: **" not in out
     assert "sweeping-for-security: **clean**" in out
+
+
+def test_a_dry_run_records_the_repos_path_rerank_in_the_draft(tmp_path, monkeypatch):
+    """S5 end to end (D81 Q6): the merge-base REVIEW.md path ranking
+    re-orders the changed-file listing the lens reads in the order of, and
+    the draft records the re-ranking -- naming what was deprioritized and
+    that no file was dropped. The review itself runs clean: ordering only."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_path_exclude: calc.py\n",
+        encoding="utf-8",
+    )
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["checking-restraint"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert code == cli.EXIT_OK, err
+    assert "review_path_exclude: ranked" in out
+    assert "no file was dropped from review" in out
+    assert '"calc.py"' in out
+    assert _status(out)["lenses"]["clean"] == 5
+
+
+def test_a_dry_run_records_an_unusable_path_ranking_line(tmp_path, monkeypatch):
+    """A ranking line that is present but unusable fails open to the risk
+    order and the draft says so, the way an unusable lens line is
+    recorded (D69) -- the key named, the value never echoed."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_path_exclude: [not a pattern]\n",
+        encoding="utf-8",
+    )
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["checking-restraint"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert code == cli.EXIT_OK, err
+    assert "review_path_exclude:" in out
+    assert "the risk order stands" in out
+    assert "[not a pattern]" not in out
+    assert _status(out)["lenses"]["clean"] == 5
+
+
+def test_the_context_fit_is_measured_against_the_ranked_first_turn():
+    """S5: the scaffold inside the fit is measured with the same path
+    ranking the real first turn carries, so the ranked listing's own
+    header -- not the unranked one -- is what the room is sized against.
+    Kills the scaffold-measured-unranked mutant."""
+    from types import SimpleNamespace
+
+    from atlas_reviewer.cli import _NONCE_PROBE, _input_room_chars
+    from atlas_reviewer.coordinator import first_turn
+    from atlas_reviewer.diffs import PathRanks
+    from atlas_reviewer.domain import PrEvent
+
+    from .agentic import LIMITS
+
+    diff = (
+        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+        "@@ -1 +1 @@\n+x\n"
+        "diff --git a/config/keys.py b/config/keys.py\n"
+        "--- a/config/keys.py\n+++ b/config/keys.py\n@@ -1 +1 @@\n+x\n"
+    )
+    event = PrEvent("example-org/example-app", 7, "a" * 40)
+
+    class Room:
+        def prefix_room_tokens(self):
+            return 200_000
+
+    ranked = PathRanks(exclude=("calc.py",))
+    plain = _input_room_chars(LIMITS, Room(), SimpleNamespace(uses=()), event, diff)
+    fit = _input_room_chars(
+        LIMITS, Room(), SimpleNamespace(uses=()), event, diff, ranked
+    )
+    assert plain is not None and fit is not None
+    assert fit < plain
+    assert plain - fit == len(
+        first_turn(event, diff, (), _NONCE_PROBE, ranks=ranked)
+    ) - len(first_turn(event, diff, (), _NONCE_PROBE))

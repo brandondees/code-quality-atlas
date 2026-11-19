@@ -4493,3 +4493,104 @@ a fixed string; an invalid regex is a gap" — so the model's `regex:
 true` calls mean what the runner's git grep will do with them. No live
 model, Sprite or GitHub call; no secret read; no deployed setting
 changed.
+
+## 2026-11-19 — Config slice S5: the merge-base `REVIEW.md` re-ranks the diff's paths, ordering only
+
+The user-configuration plan's S5 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S5, §3's path row; the decisions are D81's Q6 -- ordering-only until
+Q25 decides whether anything may be excluded from review at all -- and
+Q5's no-PR-level-overrides). Offline only: the tests use fakes, the
+shipped fixture and the real CLI's dry run; no live model, Sprite or
+GitHub call was made, no secret was read, and no deployed service
+setting, Fly config value or secret changed.
+
+**Three new keys, one job.** `repo_config.py` (D81's S1 parse module)
+gains three merge-base lines: `review_path_include:` and
+`review_path_exclude:` -- comma-separated path patterns in a glob-lite
+grammar (`*` and `?` over letters, digits, `/`, `_`, `.`, `-` and space,
+case-insensitive like the tier match, `*` crossing `/` per fnmatch;
+bracket classes outside the grammar, at most 32 patterns of at most 200
+characters) -- and `review_generated_files:`, a two-word enum
+(`deprioritize` or `normal`). All three join `_KNOWN_KEYS`, so a repo
+using them draws no unsupported-key note, and the parse stays additive
+and narrow: one new `PathRanksRead` record on `RepoConfig`, one window
+(`review_md_path_ranks`), the over-bound and no-file branches extended,
+the known keys' line-based parsers (fence-blind, main's behavior)
+unchanged.
+
+**The application is `diffs.py`, and it only ever re-orders.**
+`diffs.PathRanks` carries the parsed values; `rank_files` splits the
+files into three groups -- include-matched first, the unranked rest
+between, the deprioritized last (an exclude match beats an include
+match; an explicit include beats the generated heuristic) -- each group
+in risk order, so the output is a permutation of the input and nothing
+else about the selection changes. `is_generated` is the setting's
+path-shaped heuristic (build and tool-output directories, vendored and
+dependency trees, lockfiles, common generated-code suffixes); it reads
+no content and a repo's own patterns override it. `rerank_note` builds
+the draft's record: what each applied setting deprioritized, the paths
+quoted as data (`describe_by_risk`, at most 25 named and the rest
+counted), the statement that no file was dropped, and never a pattern --
+patterns are author-controlled text and only their validated effect on
+the order is reported.
+
+**Where it applies.** The agentic path (`agentic-review`): `cli.py`
+threads the parsed ranks into `review_lenses`, whose every lens job's
+first turn lists the changed files in the ranked order (the header says
+the ranking, not "highest risk first", so the model is never told a
+lie), and `_review_lenses` attaches the rerank note beside the ceiling
+note, scrubbed at render like the selection note. A changed file is
+still listed, still held to every lens, still counted for coverage --
+ordering and depth only. The one-shot `review` command fetches no
+merge-base tree and reads no repo config today (the pre-S1 state), so
+it runs on the risk order alone; that is stated in the README rather
+than papered over. A seen-but-unusable ranking line rides the same
+surface the lens lines' unusable note does: `_with_preference_note`
+appends `config.ranks.note` to the selection note.
+
+**Tests** (`test_repo_config.py`, `test_diffs.py`,
+`test_coordinator.py`, `test_cli.py`; each behavior a test that fails
+when reverted): the three lines parse (valid, tight, commented, the
+`normal` default, dedup in file order), fail open at every edge (bad
+charset, bracket classes, the cap, a repeated key, an unknown generated
+value, values never echoed), the combined read carries the rank read,
+the new keys never draw an unsupported note, and the over-bound note
+names them; `rank_files`' group order, precedence and permutation
+(nothing dropped -- Q25 untouched, pinned), case-insensitive matching,
+the generated shapes and their negatives; the note's wording, its cap,
+its silence when nothing ranks, and its refusal to carry a pattern;
+`first_turn`'s ranked header and unchanged default, the note in a
+rendered draft, the multi-lens entry point threading ranks into the
+lens jobs; and two end-to-end dry runs -- the recorded re-ranking and
+the unusable line's named note, each with the review running clean.
+
+**Mutants.** 26 applied by hand, all killed: the known-key entry
+dropped, the pattern charset loosened, the cap removed, the
+duplicate-key refusal dropped, the unknown-generated-value refusal
+dropped, the unusable note emptied, the dedup removed, the bad read
+returning ranks anyway, matching made case-sensitive, the exclude-over-
+include precedence swapped, the generated branch removed, the minified
+shape dropped, the middle group dropped, the note always emptied, the
+note cap raised past bounding, the no-drop clause dropped,
+`applies` forced False, the note echoing the patterns, the ranked header
+not stated, the ranking not applied in `first_turn`, the note not
+attached, the ranks not passed to the lens jobs, the ranks not threaded
+from the CLI, the scaffold measured without the ranking, and the
+unusable note not surfaced. (M6 was not applied: the note builder never
+receives a rejected value, so the no-echo rule has no mutant to kill.)
+One process note: applying M20 by hand and restoring with
+`git checkout -- coordinator.py` wiped the uncommitted slice work; the
+edits were re-applied and re-verified (mypy, ruff format, the targeted
+suites) before continuing -- the lesson recorded here so the next
+mutant is restored from the in-memory original, as the gauntlet script
+does, never from HEAD.
+
+**Overlap.** No open PR touches `diffs.py` (the D79 delta work touched
+`delta.py` and `head_change.py`; #759/#760's delta redesign has not
+started on it). #770 (S3) edits `repo_config.py`'s post-config keys and
+`service_post.py`/`service_run.py`/`service.py` -- this slice's
+`repo_config.py` change is additive (one record, one window, three
+known keys), so the rebase against it stays mechanical, and no
+`service_*` file is touched. #752/#753 (D80) touch the bridge files,
+not these. Q25 stays open and untouched; the plan document was not
+edited.

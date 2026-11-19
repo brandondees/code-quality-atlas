@@ -112,7 +112,15 @@ from atlas_reviewer.delta import (
     parse_decision_reply,
     parse_prior_line,
 )
-from atlas_reviewer.diffs import by_risk, risk_tier, split_files
+from atlas_reviewer.diffs import (
+    FileDiff,
+    PathRanks,
+    by_risk,
+    rank_files,
+    rerank_note,
+    risk_tier,
+    split_files,
+)
 from atlas_reviewer.domain import (
     CleanupStatus,
     Omission,
@@ -320,6 +328,13 @@ class AgenticReview:
     `review_ceiling_usd:` line that could not be used (round-1 review of
     #717, m-5), so a meant ceiling that silently fell back to the default
     is visible in the draft."""
+    rerank_note: str = ""
+    """Controller text recording the reviewed repo's path re-ranking
+    (config slice S5, D81 Q6), non-empty only when the merge-base
+    REVIEW.md carried a ranking line the parse accepted: it names what
+    the settings deprioritized and says the ordering never dropped a
+    file. Empty when nothing ranked, so an unconfigured review's draft
+    reads exactly as it did."""
     settle_overruns: tuple[str, ...] = ()
     """Per-settle notes for calls whose reported cost came in above the
     worst case reserved for them (D82's tripwire, round-1 review of
@@ -518,6 +533,7 @@ def synthesize(
     context_omissions: Sequence[Omission] = (),
     other_pull_requests: int = 0,
     ceiling_note: str = "",
+    rerank_note: str = "",
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -532,8 +548,22 @@ def synthesize(
         context_omissions=tuple(context_omissions),
         other_pull_requests=other_pull_requests,
         ceiling_note=ceiling_note,
+        rerank_note=rerank_note,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
     )
+
+
+def _rerank_note(
+    files: Sequence[FileDiff], path_ranks: PathRanks | None, redactor: Redactor
+) -> str:
+    """The draft note recording the reviewed repo's path re-ranking (S5):
+    empty when the config ranks nothing. The paths in it are quoted as
+    data by `diffs.rerank_note` against this redactor; the draft scrubs
+    the whole note again with its own, fuller scrubber, the way the
+    selection note is scrubbed."""
+    if path_ranks is None:
+        return ""
+    return rerank_note(files, path_ranks, scrub=lambda text: redactor(text).text)
 
 
 # --------------------------------------------------------------- the review
@@ -684,6 +714,7 @@ def review_lenses(
     trace: ReviewTrace | None = None,
     evidence_digest: str | None = None,
     delta: DeltaScope | None = None,
+    path_ranks: PathRanks | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -692,6 +723,14 @@ def review_lenses(
     Partial coverage still cannot approve. `picker_spend` is the calls and
     dollars the lens picker already committed; they count toward this
     review's `max_calls` and `reservation_usd`.
+
+    `path_ranks` is the reviewed repo's path-ranking config (config slice
+    S5, D81 Q6), read from the merge-base tree by `repo_config` before
+    this entry point is called: it re-orders the changed-file listing
+    every lens's first turn presents -- ordering only, never exclusion,
+    every changed file still listed and still held to every lens -- and
+    the re-ranking is recorded in the draft's note. Q25 (whether anything
+    may be excluded from review at all) is untouched.
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
@@ -781,6 +820,7 @@ def review_lenses(
             picker_spend=picker_spend,
             evidence_digest=evidence_digest,
             delta=delta,
+            path_ranks=path_ranks,
         ),
     )
 
@@ -815,8 +855,10 @@ def _review_lenses(
     picker_spend: tuple[int, Decimal],
     evidence_digest: str | None,
     delta: DeltaScope | None = None,
+    path_ranks: PathRanks | None = None,
 ) -> AgenticReview:
-    changed = frozenset(f.path for f in split_files(diff))
+    files = split_files(diff)
+    changed = frozenset(f.path for f in files)
     blocks, omissions, other_pull_requests = _review_context(
         event, context, context_omissions, round_log, prior_chars, redactor
     )
@@ -909,6 +951,7 @@ def _review_lenses(
             create_gate=gate,
             create_retries=resolved.create_retries,
             evidence_digest=evidence_digest,
+            ranks=path_ranks,
         )
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
@@ -947,6 +990,7 @@ def _review_lenses(
         context_omissions=omissions,
         other_pull_requests=other_pull_requests,
         ceiling_note=derivation.ceiling_note,
+        rerank_note=_rerank_note(files, path_ranks, redactor),
     )
     if decisions:
         review = replace(review, lens_decisions=decisions)
@@ -1260,6 +1304,7 @@ def _review_one(
     create_gate: threading.Semaphore | None = None,
     create_retries: int = DEFAULT_CREATE_RETRIES,
     evidence_digest: str | None = None,
+    ranks: PathRanks | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1358,7 +1403,7 @@ def _review_one(
         body,
         key.body_sha256,
         contract,
-        first_turn(event, diff, context, fence_nonce, only=scope),
+        first_turn(event, diff, context, fence_nonce, only=scope, ranks=ranks),
         scope,
         read_sources(trees.head, diff, scope),
         fence_nonce,
@@ -3085,11 +3130,23 @@ def first_turn(
     context: Sequence[UntrustedBlock],
     nonce: str,
     only: frozenset[str] | None = None,
+    ranks: PathRanks | None = None,
 ) -> str:
     """The operator's subject, then fenced: any caller context, the diff
-    stat and the changed files in risk order. No diff text: the lens reads
-    it through the tools. `only` narrows the list to a continuation's files."""
+    stat and the changed files in review order. No diff text: the lens
+    reads it through the tools. `only` narrows the list to a
+    continuation's files. `ranks` is the reviewed repo's path-ranking
+    config (S5, D81 Q6) read from the merge-base tree: when it carries a
+    setting, the listing follows `rank_files` -- ordering only, never
+    exclusion, every file still listed -- and the header says so instead
+    of claiming the risk order."""
     files = list(by_risk(split_files(diff)))
+    order = "highest risk first"
+    if ranks is not None and ranks.applies:
+        files = list(rank_files(files, ranks))
+        order = (
+            "the reviewed repo's REVIEW.md path ranking, risk order within each group"
+        )
     if only is not None:
         files = [f for f in files if f.path in only]
     listing = "\n".join(
@@ -3101,7 +3158,7 @@ def first_turn(
         *context,
         UntrustedBlock(
             "changed-files",
-            RepoText(f"{len(files)} changed file(s), highest risk first:\n{listing}"),
+            RepoText(f"{len(files)} changed file(s), {order}:\n{listing}"),
         ),
     )
     subject = f"{event.repo}#{event.pr_number} at {event.head_sha}"
@@ -3232,16 +3289,7 @@ def render_draft(
 
     lines = [status_line(review), "", _headline(review, scrub)]
     lines += _delta_lines(review, scrub)
-    if review.selection_note or review.not_picked:
-        lines += ["", "## Lens selection"]
-        if review.selection_note:
-            lines += ["", scrub(review.selection_note)]
-        if review.not_picked:
-            lines.append("")
-            lines += [
-                f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
-                for name, why in review.not_picked
-            ]
+    lines += _selection_and_rank_lines(review, scrub)
     lines += _reassess_sections(review, scrub)
     lines += _delta_sections(review, scrub)
     lines += ["", "## Findings (verified quotes only)", ""]
@@ -3355,6 +3403,28 @@ def _cache_lines(
             ),
         )
     ]
+
+
+def _selection_and_rank_lines(
+    review: AgenticReview, scrub: Callable[[str], str]
+) -> list[str]:
+    """The Lens selection section, then S5's recorded re-ranking note: a
+    note carrying quoted PR paths is scrubbed like the selection note,
+    never trusted."""
+    lines: list[str] = []
+    if review.selection_note or review.not_picked:
+        lines += ["", "## Lens selection"]
+        if review.selection_note:
+            lines += ["", scrub(review.selection_note)]
+        if review.not_picked:
+            lines.append("")
+            lines += [
+                f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
+                for name, why in review.not_picked
+            ]
+    if review.rerank_note:
+        lines += ["", scrub(review.rerank_note)]
+    return lines
 
 
 def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:

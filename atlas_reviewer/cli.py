@@ -80,7 +80,7 @@ from atlas_reviewer.delta import (
     delta_block,
     delta_scope,
 )
-from atlas_reviewer.diffs import diff_paths
+from atlas_reviewer.diffs import PathRanks, diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
     InvalidEventError,
@@ -735,6 +735,7 @@ def _input_room_chars(
     plan: LensPlan,
     event: PrEvent,
     diff: str,
+    ranks: PathRanks | None = None,
 ) -> int | None:
     """The characters of caller context -- the prior rounds, the
     conversation block and the CI evidence block, in the first turn's
@@ -758,7 +759,9 @@ def _input_room_chars(
         return None
     share = limits.resolve().diff_prefix_share
     skill = max((use.chars for use in plan.uses), default=0)
-    scaffold = len(first_turn(event, diff, (), _NONCE_PROBE))
+    # The scaffold is measured with the same path ranking the real first
+    # turn carries, so the listing's header measures what will be sent.
+    scaffold = len(first_turn(event, diff, (), _NONCE_PROBE, ranks=ranks))
     return int(room - share * room) - skill - scaffold - CONTEXT_RESERVE_CHARS
 
 
@@ -930,9 +933,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
         diff, delta = _delta_input(event, github, diff)
         # S1: the merge-base REVIEW.md is parsed once, against the closed
-        # schema -- the ceiling, the lens preference, and the unsupported
-        # keys' named notes.
+        # schema -- the ceiling, the lens preference, the path ranking,
+        # and the unsupported keys' named notes.
         config = read_repo_config(trees.base)
+        # S5 (D81 Q6): the repo's ordering-only path ranking, applied to
+        # the changed-file listing the lenses are read in the order of,
+        # and recorded in the draft. The patterns never reach a model;
+        # only the order they produce does.
+        path_ranks = config.ranks.ranks
         # The derivation's refusals are planned-count independent (D68;
         # round-1 review of #717, m-3): validate them here, before the
         # picker can spend, so a misconfiguration is a clean usage error
@@ -1027,7 +1035,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 ledger = AttemptLedger(
                     _attestation_ledger_path(args, env, scratch), clock
                 )
-                fit = _input_room_chars(limits, lens_model, plan, event, diff)
+                fit = _input_room_chars(
+                    limits, lens_model, plan, event, diff, path_ranks
+                )
                 # The remarks are gathered here, before the block is
                 # built, so a review whose conversation block is omitted
                 # still holds them -- D73's snapshot digest covers the
@@ -1110,6 +1120,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                         ci_collected, remarks, remarks_collected
                     ),
                     delta=delta,
+                    path_ranks=path_ranks,
                 )
                 review = replace(
                     review,
@@ -1170,12 +1181,13 @@ def _delta_input(
 def _with_preference_note(
     selection: LensSelection, config: RepoConfig
 ) -> LensSelection:
-    """The selection with the config parse's notes appended (D69; S1): a
-    seen-but-unusable preference line's note, and the unsupported keys'
-    named notes, so "lines present but ignored" is recorded the way the
-    ceiling's unusable line is, and can be told apart from no lines. The
-    notes are controller text that never echoes a rejected value."""
-    notes = [config.lenses.note, *config.unsupported_notes]
+    """The selection with the config parse's notes appended (D69; S1; S5):
+    a seen-but-unusable preference line's note, a seen-but-unusable
+    path-ranking line's note, and the unsupported keys' named notes, so
+    "lines present but ignored" is recorded the way the ceiling's unusable
+    line is, and can be told apart from no lines. The notes are controller
+    text that never echoes a rejected value."""
+    notes = [config.lenses.note, config.ranks.note, *config.unsupported_notes]
     extra = " ".join(note for note in notes if note)
     if not extra:
         return selection

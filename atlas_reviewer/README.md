@@ -205,7 +205,9 @@ Only these three keys are read at admission. The repo's two post settings
 (`review_severity_floor:`, `review_post_verbosity:` — the next section)
 are read from the same default branch, at post time. The file's
 review-side settings (`review_ceiling_usd:`, `review_lens_include:`,
-`review_lens_exclude:`) are the review child's, read from the merge-base
+`review_lens_exclude:`, `review_path_include:`, `review_path_exclude:`,
+`review_generated_files:`) are the review child's, read from the
+merge-base
 tree it already fetches through the shared parse module
 (`repo_config.py`, config slice S1); an unknown key — including a
 label-filter line from an earlier draft of this surface — is not named
@@ -1188,6 +1190,44 @@ already satisfy it, so an operator can tell applied-and-satisfied from
 ignored. `agentic-review` reads these lines; the one-shot `review`
 command fetches no merge-base tree and so runs on the guideline alone.
 
+**The reviewed repo's path ranking (config slice S5, D81 Q6).** The same
+merge-base `REVIEW.md` may also re-rank the diff's files:
+
+```text
+review_path_include: <pattern>[, <pattern>...]   # matching paths are read first
+review_path_exclude: <pattern>[, <pattern>...]   # matching paths are read last
+review_generated_files: deprioritize             # or `normal` (the default)
+```
+
+Ordering only, never exclusion (D81 Q6; whether anything may be excluded
+from review at all is Q25's undecided question, untouched): a pattern
+never drops a file. `agentic-review` re-orders the changed-file listing
+every lens's first turn presents -- include-matched paths first, then
+the rest, then the paths the exclude patterns and the generated-file
+setting deprioritize, risk order within each group -- and every changed
+file is still listed, still held to every lens, and still counts for
+coverage exactly as before. The generated-file heuristic is path-shaped
+only (build and tool-output directories, vendored and dependency trees,
+lockfiles, and common generated-code suffixes such as `*.min.js`,
+`*.map`, `*.pb.go`, `*_pb2.py`, `*.generated.*`, `*.snap`); a repo's own
+include and exclude patterns override it (an include match wins over the
+heuristic, an exclude match wins over an include). Patterns are
+glob-lite: `*` and `?` over letters, digits, `/`, `_`, `.`, `-` and
+space, matched case-insensitively like the risk tiers, with `*` crossing
+`/` (fnmatch's semantics, so `src/**` and `src/*` name the same set);
+bracket classes are outside the grammar. A pattern itself never reaches
+a model -- only the order it produces does -- and a note in the draft
+records the re-ranking, naming what each setting deprioritized (the
+paths quoted as data, at most 25 named and the rest counted) and that no
+file was dropped. A line that is present but unusable -- a value outside
+its key's grammar, a key repeated, more than 32 patterns, or one longer
+than 200 characters -- fails open to the risk order with a note naming
+the key, the condition and the default that stands, never the rejected
+value; the read rides the same 64 KiB bounded parse (`repo_config.py`)
+the ceiling and lens lines use. `agentic-review` reads these lines; the
+one-shot `review` command fetches no merge-base tree and so runs on the
+risk order alone.
+
 **The controller's shape facts (D69 round-1 F4).** The controller also
 detects, from the changed paths and the diff it already holds, the change
 shapes the guideline auto-includes a lens for -- a decision record or the
@@ -2083,7 +2123,7 @@ D41 records the 2026-11-12 probe that did.
 | `draft.py` | Markdown draft rendering | no |
 | `groups.py` | one CI gate seen as check run + job + log + workflow run → one independent check | no |
 | `notes.py` | the code-generated Controller notes | no |
-| `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts, fit the part size to the measured prompt | no |
+| `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts, fit the part size to the measured prompt; the reviewed repo's path ranking (`PathRanks`, `rank_files`, the generated-file heuristic and `rerank_note`, config slice S5) re-orders files -- ordering only, never exclusion | no |
 | `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier, skip the call when no picked lens could fit; applies a repo preference's include/exclude to the picks (D69) and records it | reads the bundle |
 | `verdict.py` | the proposed review event, the file-coverage gate on approval, the machine-readable status line and the incomplete-coverage warning | no |
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
@@ -2099,7 +2139,7 @@ D41 records the 2026-11-12 probe that did.
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
-| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line and the D69 lens-preference lines, read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base | no |
+| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line, the D69 lens-preference lines and the S5 path-ranking lines (`review_path_include:`, `review_path_exclude:`, `review_generated_files:`), read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base | no |
 | `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. The `REVIEW.md` reads behind it live in `repo_config.py` (S1) | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |

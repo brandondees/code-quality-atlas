@@ -12,9 +12,14 @@ from atlas_reviewer.diffs import (
     SUPPLY_CHAIN,
     TESTS,
     UNPARSED_PATH,
+    PathRanks,
+    by_risk,
     describe_by_risk,
     diff_paths,
     fit_diff,
+    is_generated,
+    rank_files,
+    rerank_note,
     risk_tier,
     select_diff,
     split_files,
@@ -408,3 +413,164 @@ def test_multibyte_parts_shrink_by_characters_not_bytes():
     )
     assert max(len(p.text.encode()) for p in sel.parts) <= room
     assert max(len(p.text.encode()) for p in sel.parts) > room - 3 * 1_000
+
+
+# --- the reviewed repo's path ranking (S5, ordering only) -------------------
+
+
+RANK_DIFF = (
+    file_diff("src/auth.py")
+    + file_diff("docs/guide.md")
+    + file_diff("dist/bundle.js")
+    + file_diff("settings.ini")
+)
+
+
+def test_rank_files_ranks_include_matches_first_and_keeps_risk_order_within():
+    ranks = PathRanks(include=("docs/*",))
+    assert paths(rank_files(split_files(RANK_DIFF), ranks)) == [
+        "docs/guide.md",
+        "src/auth.py",
+        "dist/bundle.js",
+        "settings.ini",
+    ]
+
+
+def test_rank_files_ranks_exclude_matches_last():
+    ranks = PathRanks(exclude=("settings.ini", "docs/*"))
+    # Each group keeps the risk order: the middle runs SOURCE before
+    # CONFIG, and the back group runs CONFIG before DOCS.
+    assert paths(rank_files(split_files(RANK_DIFF), ranks)) == [
+        "src/auth.py",
+        "dist/bundle.js",
+        "settings.ini",
+        "docs/guide.md",
+    ]
+
+
+def test_exclude_wins_over_include_and_include_wins_over_generated():
+    both = PathRanks(include=("src/**",), exclude=("src/auth.py",))
+    # Nothing matches include that exclude does not also name, so the
+    # front group is empty and the middle keeps its own risk order.
+    assert paths(rank_files(split_files(RANK_DIFF), both)) == [
+        "dist/bundle.js",
+        "settings.ini",
+        "docs/guide.md",
+        "src/auth.py",
+    ]
+
+    generated = PathRanks(include=("dist/*",), generated=True)
+    assert paths(rank_files(split_files(RANK_DIFF), generated))[0] == "dist/bundle.js"
+
+
+def test_generated_setting_deprioritizes_only_the_generated_paths():
+    ranks = PathRanks(generated=True)
+    assert paths(rank_files(split_files(RANK_DIFF), ranks)) == [
+        "src/auth.py",
+        "settings.ini",
+        "docs/guide.md",
+        "dist/bundle.js",
+    ]
+
+
+def test_rank_files_is_a_permutation_ordering_never_drops():
+    """S5's done-when, pinned: whatever the patterns name, the output is
+    the same files -- no path is ever dropped from review by user config
+    (Q25 untouched)."""
+    files = split_files(RANK_DIFF)
+    for ranks in (
+        PathRanks(),
+        PathRanks(include=("**",)),
+        PathRanks(exclude=("**",)),
+        PathRanks(include=("src/**",), exclude=("docs/*",), generated=True),
+    ):
+        ranked = rank_files(files, ranks)
+        assert sorted(f.path for f in ranked) == sorted(f.path for f in files), ranks
+        assert len(ranked) == len(files), ranks
+
+
+def test_ranking_matches_case_insensitively_like_the_tier_match():
+    ranks = PathRanks(include=("DOCS/*",))
+    assert paths(rank_files(split_files(RANK_DIFF), ranks))[0] == "docs/guide.md"
+
+
+def test_the_generated_heuristic_names_the_generated_shapes_only():
+    for path in (
+        "dist/bundle.js",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "Cargo.lock",
+        "go.sum",
+        "src/x.pb.go",
+        "src/x_pb2.py",
+        "src/x_pb2_grpc.py",
+        "web/app.min.css",
+        "web/app.js.map",
+        "src/types.generated.ts",
+        "snapshots/test.snap",
+    ):
+        assert is_generated(path), path
+    for path in ("src/auth.py", "docs/guide.md", "lib/generated.rs", "src/main.js"):
+        assert not is_generated(path), path
+
+
+def test_the_rerank_note_names_the_keys_and_the_deprioritized_paths():
+    scrub = lambda text: text
+    note = rerank_note(
+        split_files(RANK_DIFF), PathRanks(exclude=("settings.ini",)), scrub=scrub
+    )
+    assert "review_path_exclude:" in note
+    assert "no file was dropped from review" in note
+    assert '"settings.ini"' in note
+    # The patterns themselves never enter the note: only the paths they
+    # moved and the keys that moved them.
+    assert "settings.ini" in note and note.count("settings.ini") == 1
+
+
+def test_the_rerank_note_records_an_include_that_deprioritizes_the_rest():
+    scrub = lambda text: text
+    note = rerank_note(
+        split_files(RANK_DIFF), PathRanks(include=("docs/*",)), scrub=scrub
+    )
+    assert "review_path_include:" in note
+    # The note names what the include deprioritized: the three files that
+    # rank behind the match, not the match itself.
+    assert '"src/auth.py"' in note
+    assert '"dist/bundle.js"' in note
+    assert '"settings.ini"' in note
+    assert '"docs/guide.md"' not in note
+
+
+def test_the_rerank_note_records_a_key_that_matched_nothing():
+    scrub = lambda text: text
+    note = rerank_note(
+        split_files(RANK_DIFF), PathRanks(exclude=("nomatch/**",)), scrub=scrub
+    )
+    assert "ranked nothing" in note
+    assert "no file was dropped from review" in note
+
+
+def test_the_rerank_note_is_bounded_and_never_carries_a_raw_pattern():
+    scrub = lambda text: text
+    files = split_files("".join(file_diff(f"gen/file{i}.min.js") for i in range(30)))
+    note = rerank_note(files, PathRanks(generated=True), scrub=scrub)
+    assert "and 5 more" in note
+    assert "deprioritize setting" in note
+    # 25 named, the rest counted.
+    assert note.count('"gen/file') == 25
+
+
+def test_no_ranking_settings_leave_no_note_and_no_order_change():
+    scrub = lambda text: text
+    files = split_files(RANK_DIFF)
+    assert rerank_note(files, PathRanks(), scrub=scrub) == ""
+    assert paths(rank_files(files, PathRanks())) == paths(by_risk(files))
+
+
+def test_the_rerank_note_never_carries_a_pattern_only_paths():
+    scrub = lambda text: text
+    note = rerank_note(
+        split_files(RANK_DIFF), PathRanks(exclude=("docs/*", "*.min.js")), scrub=scrub
+    )
+    assert "docs/*" not in note
+    assert "*.min.js" not in note
