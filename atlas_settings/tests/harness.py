@@ -48,14 +48,20 @@ BASE_ENV: dict[str, str] = {
 
 
 class FakeClock:
-    """The wall clock the sessions and the audit run on, advanced by
-    tests so expiries are deterministic."""
+    """The wall clock — and its monotonic companion — that the sessions
+    and the audit run on, advanced by tests so expiries are
+    deterministic."""
 
     def __init__(self) -> None:
         self.moment = START
+        self._mono = 0.0
 
     def now(self) -> datetime:
         return self.moment
 
+    def monotonic(self) -> float:
+        return self._mono
+
     def advance(self, seconds: float) -> None:
         self.moment = self.moment + timedelta(seconds=seconds)
+        self._mono += seconds
