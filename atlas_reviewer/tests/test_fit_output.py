@@ -127,12 +127,14 @@ def test_a_failed_calls_resend_takes_the_models_cap_again(tmp_path):
     assert spend.committed_usd == Decimal("1.00") + 2 * COST
 
 
-def test_a_timeout_resend_takes_the_models_cap_again(tmp_path):
-    """D92 amends round-1 review of #740 the same way for D58's resend of
-    a timed-out request: no response arrived to bill from, the
-    reservation comes down, and the resend prices against the whole
-    remainder and fits whole. Kills the kept-reservation mutant on the
-    timeout settle."""
+def test_a_timeout_resend_refits_against_the_remainder_then_left(tmp_path):
+    """Round-1 review of #740, as D92's fix round settles the rule: the
+    D58 resend of a timed-out request goes through the reservation-short
+    path -- the timed-out send kept its reservation as spent (D58 item 5,
+    restored: the request was written, the provider may have billed it) --
+    and the resend re-fits against the remainder at that time. Kills the
+    release mutant on the timeout settle, which would fit the resend at
+    the model's whole cap."""
     limits = replace(LIMITS, reservation_usd=Decimal("2.00"), min_output_tokens=10_000)
     the_model = PricedModel(
         [TransportTimeoutError("the request timed out"), READ_ALL, final()]
@@ -141,9 +143,8 @@ def test_a_timeout_resend_takes_the_models_cap_again(tmp_path):
         tmp_path, [], model=the_model, limits=limits, spend=spent("1.00", limits)
     )
     assert outcome.state is LensState.CLEAN
-    assert [r.max_output_tokens for r in the_model.requests] == [None, None, None]
+    assert [r.max_output_tokens for r in the_model.requests] == [None, 16_000, 14_000]
     assert spend.calls == 3
-    assert spend.committed_usd == Decimal("1.00") + 2 * COST
 
 
 def test_the_floor_is_configurable_and_at_least_two():

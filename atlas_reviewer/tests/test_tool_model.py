@@ -399,6 +399,44 @@ def test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal(status, cause):
     assert len(fake.chat_requests()) == 1
 
 
+def test_a_priced_response_the_turn_rejects_carries_its_cost():
+    """D92's fix round: a 200 whose usage priced and whose turn then
+    failed -- an unfinished turn here -- raises with the parsed cost
+    attached, so the settle at the raise site books the real bill. Kills
+    the dropped-attachment mutant, which would leave the served call to
+    settle at $0."""
+    from decimal import Decimal
+
+    lens, _fake = model(
+        reply(
+            completion(text="later", finish="error"),
+        )
+    )
+    with pytest.raises(BoundaryError) as caught:
+        lens.turn(request())
+    assert caught.value.reported_cost == Decimal("0.0123")
+
+
+def test_the_largest_call_reservation_is_the_per_call_cap_priced():
+    """D92's fix round: the credit check's per-call figure is the LARGEST
+    reservation one call holds -- the per-call input cap priced at the
+    endpoint's rates -- and the method is named for what it computes.
+    Kills the smaller-bound mutant, which would price a smaller input and
+    let a key that cannot fund the largest call through the check."""
+
+    from atlas_reviewer.budget import worst_case_usd
+    from atlas_reviewer.tool_model import resolve_per_call
+
+    lens, _fake = model(reply(completion("done")))
+    terms, _counts, _selected = lens._ready()
+    bounds = resolve_per_call(lens.per_call, terms)
+    expected = worst_case_usd(bounds.max_input_tokens, terms, bounds)
+    assert lens.largest_call_reservation() == expected
+    assert lens.largest_call_reservation() >= worst_case_usd(
+        bounds.max_input_tokens // 2, terms, bounds
+    )
+
+
 def test_a_response_too_large_is_not_a_transport_error():
     """Review Minor 2: `ResponseTooLargeError` is raised after the response
     arrived, so it is a model-level error, not a retryable transport one."""
@@ -604,16 +642,27 @@ def test_a_changed_system_prompt_resets_the_meter():
 
 
 def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
-    """Review M2: the retry is its own reserved call against the shared
-    budget, counted like any turn. D92 amends the booking the older form
-    of this test pinned: the timed-out request was never served a
-    response, so it releases its reservation and settles at $0, and only
-    the served calls' settled costs remain committed."""
+    """Review M2: the timed-out request keeps its full reservation as
+    spent -- it may still be billed (D58 item 5, restored by D92's fix
+    round) -- and the retry is its own reserved call against the shared
+    budget, counted like any turn."""
+    from .test_lens_loop import CONTRACT, NONCE, job, lens_system
+
     lens, fake = model(
         TransportTimeoutError("POST timed out"),
         reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
         reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
     )
+    # The first request's worst case, measured on the exact conversation
+    # the loop's first turn sends.
+    ask = TurnRequest(
+        lens_system(
+            "tracing-correctness-and-invariants", BODY, CONTRACT, None, nonce=NONCE
+        ),
+        (UserText(job().first_turn),),
+        tool_schemas(),
+    )
+    first_worst = lens.worst_case_usd(ask)
     outcome, _model, spend = attempt(
         tmp_path,
         [],
@@ -624,9 +673,9 @@ def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
     )
     assert len(fake.chat_requests()) == 3
     assert spend.calls == 3
-    # committed = the two served calls' settled costs; the timed-out
-    # request released its reservation (D92).
-    assert spend.committed_usd == Decimal("0.02")
+    # committed = the timed-out request's reservation, kept as spent, plus
+    # the retry's and the nudge turn's settled costs.
+    assert spend.committed_usd == first_worst + Decimal("0.02")
     assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
 
 

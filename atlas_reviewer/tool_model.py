@@ -307,13 +307,17 @@ class OpenRouterLensModel:
             )
         try:
             data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)
-        except BoundaryError:
+        except BoundaryError as exc:
             if not counts_byok:
                 raise ByokRefusedError(
                     "refusing the review: this OpenRouter key does not count "
                     "BYOK spend against its credit limit, and the response "
                     "could not be parsed, so is_byok could not be checked"
                 ) from None
+            # The response arrived; nothing in it priced. The settle keeps
+            # the reservation (D43), the served call's own rule (D92's fix
+            # round).
+            exc.reported_cost = UNPRICED
             raise
         usage = data.get("usage")
         usage_obj = usage if isinstance(usage, dict) else {}
@@ -400,11 +404,11 @@ class OpenRouterLensModel:
         status = self.provider._key_status
         return None if status is None else status.limit_remaining
 
-    def smallest_call_reservation(self) -> Decimal | None:
+    def largest_call_reservation(self) -> Decimal | None:
         """The worst case the review's largest allowed call reserves (D92):
         the per-call input cap priced at the endpoint's rates, output cap
         included. This is the largest single reservation the plan holds
-        against the key before any settle, and the smallest credit the
+        against the key before any settle, and so the smallest credit the
         review must be able to fund to start at all. None when the
         endpoint's terms cannot be read."""
         try:
@@ -611,7 +615,9 @@ def _turn(
     cost = _cost(usage_obj, terms)
     served = data.get("model")
     if not isinstance(served, str) or not _is_configured_model(served, model_id):
-        raise BoundaryError(f"OpenRouter served {served!r}, not {model_id}")
+        raise _priced(
+            BoundaryError(f"OpenRouter served {served!r}, not {model_id}"), cost
+        )
     choice = _choice(data)
     finish = choice.get("finish_reason")
     _remember(
@@ -621,20 +627,37 @@ def _turn(
         raise LimitRefused(hit("max_output_tokens", output_cap, "finish_reason=length"))
     message = choice.get("message")
     if not isinstance(message, dict):
-        raise BoundaryError("model response has no message")
+        raise _priced(BoundaryError("model response has no message"), cost)
     calls = message.get("tool_calls")
     if isinstance(calls, list) and calls:
         if finish not in ("tool_calls", "stop"):
-            raise BoundaryError(
-                f"model tool calls did not finish (finish_reason={finish})"
+            raise _priced(
+                BoundaryError(
+                    f"model tool calls did not finish (finish_reason={finish})"
+                ),
+                cost,
             )
         return ToolCalls(tuple(_one_call(call) for call in calls), cost)
     if finish != "stop":
-        raise BoundaryError(f"model turn did not finish (finish_reason={finish})")
+        raise _priced(
+            BoundaryError(f"model turn did not finish (finish_reason={finish})"), cost
+        )
     text = message.get("content")
     if not isinstance(text, str) or not text.strip():
-        raise BoundaryError(f"model returned no text (finish_reason={finish})")
+        raise _priced(
+            BoundaryError(f"model returned no text (finish_reason={finish})"), cost
+        )
     return FinalReply(text, cost)
+
+
+def _priced(exc: BoundaryError, cost: Decimal) -> BoundaryError:
+    """`exc` with the served response's priced cost attached (D92's fix
+    round): the settle at the raise site books the real bill the usage
+    priced instead of treating a served call as a refused one. The cost is
+    `UNPRICED` when the response carried no usable usage -- the settle
+    then keeps the reservation (D43), the served call's own rule."""
+    exc.reported_cost = cost
+    return exc
 
 
 def _remember(

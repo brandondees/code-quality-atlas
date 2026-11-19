@@ -3,6 +3,8 @@
 exec here) with a scripted model. No model, Sprite or GitHub call is made."""
 
 import sys
+import threading
+import time
 from dataclasses import dataclass, replace
 from decimal import Decimal
 
@@ -27,6 +29,7 @@ from atlas_reviewer.lens_loop import (
     CALL_RETRY_BACKOFF_S,
     CONTRACT_HEADING,
     DIFF_PREFIX_LABEL,
+    HALTED_CALL,
     INSTRUCTIONS,
     PREFIX_INSTRUCTIONS,
     SYNTHESIS,
@@ -37,11 +40,13 @@ from atlas_reviewer.lens_loop import (
     LimitsUnsetError,
     Spend,
     ToolResults,
+    TurnRequest,
     UserText,
     _DiffPages,
     _Progress,
     _quote_repair_nudge,
     _repair,
+    _reserve_call,
     _time_up,
     diff_prefix_for,
     finding_contract,
@@ -64,6 +69,7 @@ from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import DeadlineExceededError
+from atlas_reviewer.tool_model import UNPRICED
 
 from .agentic import (
     BODY,
@@ -219,16 +225,18 @@ def test_a_failed_call_settles_at_the_cost_its_response_reported():
     assert spend.settled_usd == Decimal("0.05")
 
 
-def test_every_exception_path_after_a_reservation_settles_the_failed_call():
-    """D92 amends round-2 review of #717, m-6: a call that failed still
-    settles on every exit -- a transport timeout and its retry, a
-    transport failure, a model error -- but at the cost its response
-    reported, $0 when none is, releasing the reservation it held only
-    while in flight; a turn that stops at the output cap was served and
-    keeps its reservation as spent (D43). Kills the keep-the-worst
-    mutants on the model-error and transport settles, the transport
-    timeout's kept reservation (C5), and the dropped-settle mutant on the
-    turn-level output cap (C4)."""
+def test_every_exception_path_after_a_reservation_settles_it_as_spent():
+    """Round-2 review of #717, m-6, as D92's fix round settles the rule:
+    a call that will never report an actual settles at its reservation on
+    every exit -- a turn that stops at the output cap, a transport
+    timeout and its retry, a transport failure (D58 item 5's booking,
+    restored: the request was written, the provider may have billed it) --
+    so the in-flight backpressure never waits on a worst case that will
+    never come down. The one failed-call settle that stays a release is
+    the model error with no served response (D92): each is retried once
+    and settles at $0. Kills the dropped-settle mutants on the turn-level
+    output cap (C4) and the transport timeout (C5), and the settle-at-zero
+    mutant on the timeout and transport bookings."""
 
     class Refused:
         name = "refused"
@@ -266,10 +274,7 @@ def test_every_exception_path_after_a_reservation_settles_the_failed_call():
         def turn(self, request):
             raise BoundaryError("the model refused")
 
-    for model, spent in (
-        (Refused(), Decimal("0.10")),
-        (TransportFails(), Decimal("0.00")),
-    ):
+    for model in (Refused(), TransportFails()):
         spend = Spend(LIMITS.resolve())
         clock = FakeClock()
         outcome = run_attempt(
@@ -278,16 +283,12 @@ def test_every_exception_path_after_a_reservation_settles_the_failed_call():
             review_started=clock.monotonic(),
         )  # fmt: skip
         assert spend.calls == 1
-        # Served at the output cap: the reservation is spent (D43). A
-        # transport failure was never served: it releases and settles at
-        # $0 (D92).
-        assert spend.committed_usd == spent, model.name
-        assert spend.settled_usd == spent, model.name
+        assert spend.committed_usd == Decimal("0.10")
+        assert spend.settled_usd == Decimal("0.10"), model.name
     # A model error is retried once (D49): each failed call releases its
-    # reservation and settles at $0 -- a refused call billed nothing
-    # (D92) -- so the committed spend stays at what was really served,
-    # and the retry is still its own reserved, settled call before the
-    # lens fails.
+    # reservation and settles at $0 -- no served response, nothing billed
+    # (D92) -- and the retry is still its own reserved, settled call
+    # before the lens fails.
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
@@ -300,9 +301,8 @@ def test_every_exception_path_after_a_reservation_settles_the_failed_call():
     assert spend.committed_usd == Decimal("0.00")
     assert spend.settled_usd == Decimal("0.00")
     assert Cause.MODEL_ERROR in outcome.causes
-    # The timed-out call and its one retry (D58 item 5's retry, D92's
-    # booking) each release their reservation and settle at $0: no
-    # response arrived to bill from.
+    # The timed-out request and its retry each keep their full
+    # reservation as spent (D58 item 5, restored by D92's fix round).
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
@@ -311,8 +311,8 @@ def test_every_exception_path_after_a_reservation_settles_the_failed_call():
         review_started=clock.monotonic(),
     )  # fmt: skip
     assert spend.calls == 2
-    assert spend.committed_usd == Decimal("0.00")
-    assert spend.settled_usd == Decimal("0.00")
+    assert spend.committed_usd == Decimal("0.20")
+    assert spend.settled_usd == Decimal("0.20")
     assert Cause.TRANSPORT_ERROR in outcome.causes
 
 
@@ -411,8 +411,6 @@ def test_concurrent_reservations_never_pass_the_call_cap():
     """Pooled lenses reserve at once. A worst case whose addition is slow
     holds each thread between the cap check and the count; only the lock
     keeps the other threads out of that window."""
-    import threading
-    import time
 
     class Slow(Decimal):
         def __radd__(self, other):
@@ -1701,6 +1699,112 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     assert outcome.limit_hit.limit == "review_wall_s"
     assert outcome.limit_hit.observed == "12.500s"
     assert outcome.limit_hit.configured == "600"
+
+
+def test_a_waiter_blocked_on_the_cap_commits_nothing_when_the_key_refuses():
+    """D92's fix round: the refused key's settle and halt land under one
+    lock, and no reservation commits on a halted review. A waiter whose
+    worst case did not fit waits for the in-flight call's settle; the
+    settle is the refusal's, so the waiter wakes to a halted review,
+    commits nothing, and sends no turn -- `committed_usd` ends at $0, not
+    at the waiter's own reservation. Kills the commit-after-halt mutant
+    (the waiter's reservation committing in the room the release freed)
+    and the kept-reservation mutant (the unsent waiter's worst case
+    staying booked)."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("3.00")).resolve())
+    assert spend.reserve(Decimal("2.00")) is None  # the in-flight call
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Waiter:
+        """Parks inside the pricing, so the reservation decision happens
+        after the refusal has landed."""
+
+        name = "waiter"
+
+        def worst_case_usd(self, req):
+            entered.set()
+            assert release.wait(5)
+            return Decimal("2.00")
+
+        def turn(self, req):
+            raise AssertionError("the waiter's call is not sent")
+
+    outcome: dict[str, object] = {}
+    ask = TurnRequest("system", (), (UserText("Review the change."),))
+
+    def run_waiter():
+        try:
+            outcome["value"] = _reserve_call(
+                Waiter(), ask, spend, FakeClock(), time.monotonic() + 5
+            )
+        except BaseException as exc:  # noqa: BLE001 -- the test reads it
+            outcome["error"] = repr(exc)
+
+    thread = threading.Thread(target=run_waiter)
+    thread.start()
+    assert entered.wait(5)
+    # The in-flight call is the one the key refused: one locked settle and
+    # halt, the way `_place_call` lands them.
+    spend.fail_and_halt(Decimal("2.00"), None, "model key out of credit")
+    release.set()
+    thread.join(5)
+    assert outcome["value"] == (Cause.MODEL_ERROR, HALTED_CALL)
+    assert spend.calls == 1
+    assert spend.committed_usd == Decimal("0.00")
+    assert spend.settled_usd == Decimal("0.00")
+
+
+def test_a_reservation_that_committed_before_the_halt_is_released(monkeypatch):
+    """D92's fix round: a reservation that committed before the halt
+    showed is released -- the caller returns the halt's outcome and never
+    sends the call it reserved. The interleaving is forced inside
+    `reserve`'s own window, between the commit and the caller's halted
+    check. Kills the kept-reservation mutant on the halted-commit
+    release."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("3.00")).resolve())
+    real_reserve = spend.reserve
+
+    def reserve_then_halt(worst, clock=None, wait_until=None):
+        refused = real_reserve(worst, clock=clock, wait_until=wait_until)
+        if refused is None:
+            spend.halt("model key out of credit")
+        return refused
+
+    monkeypatch.setattr(spend, "reserve", reserve_then_halt)
+
+    class Model:
+        name = "halted-after-reserve"
+
+        def worst_case_usd(self, req):
+            return Decimal("2.00")
+
+        def turn(self, req):
+            raise AssertionError("the halted call is not sent")
+
+    ask = TurnRequest("system", (), (UserText("Review the change."),))
+    outcome = _reserve_call(Model(), ask, spend, FakeClock(), time.monotonic() + 5)
+    assert outcome == (Cause.MODEL_ERROR, HALTED_CALL)
+    assert spend.calls == 1
+    assert spend.committed_usd == Decimal("0.00")
+
+
+def test_a_priced_response_the_turn_rejected_settles_at_its_cost(tmp_path):
+    """D92's fix round: a served call whose response priced and whose turn
+    then failed settles at the parsed cost -- the real bill -- not at $0
+    and not at the reservation. Kills the settle-at-zero mutant on the
+    boundary branch and the settle-at-reservation mutant."""
+    priced = BoundaryError("model turn did not finish (finish_reason=error)")
+    priced.reported_cost = Decimal("0.03")
+    unpriced = BoundaryError("model returned no text (finish_reason=stop)")
+    unpriced.reported_cost = UNPRICED
+    outcome, model, spend = attempt(tmp_path, [priced, unpriced])
+    assert Cause.MODEL_ERROR in outcome.causes
+    # The priced call settles at its parsed cost; the served-but-unpriced
+    # one keeps its reservation (D43).
+    assert spend.calls == 2
+    assert spend.committed_usd == Decimal("0.03") + model.worst_usd
+    assert spend.settled_usd == Decimal("0.03") + model.worst_usd
 
 
 def test_a_model_call_that_keeps_failing_fails_the_lens(tmp_path):

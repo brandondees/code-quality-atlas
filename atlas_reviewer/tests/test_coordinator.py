@@ -2020,7 +2020,7 @@ class Credited(ScriptedLensModel):
     def remaining_credit_usd(self) -> Decimal:
         return self.remaining
 
-    def smallest_call_reservation(self) -> Decimal:
+    def largest_call_reservation(self) -> Decimal:
         return self.smallest
 
 

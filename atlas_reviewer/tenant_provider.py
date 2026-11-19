@@ -98,6 +98,7 @@ from atlas_reviewer.tool_model import (
     _choice,
     _messages,
     _one_call,
+    _priced,
     _remember,
     _session_label,
     _tokens,
@@ -587,7 +588,10 @@ def _tenant_turn(
         and served != model_id
         and not _is_dated_revision(served, model_id)
     ):
-        raise BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}")
+        raise _priced(
+            BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}"),
+            cost,
+        )
     choice = _choice(data)
     finish = choice.get("finish_reason")
     _remember(data, usage_obj, served, finish)
@@ -597,22 +601,34 @@ def _tenant_turn(
         )
     message = choice.get("message")
     if not isinstance(message, dict):
-        raise BoundaryError("the tenant endpoint's response has no message")
+        raise _priced(
+            BoundaryError("the tenant endpoint's response has no message"), cost
+        )
     calls = message.get("tool_calls")
     if isinstance(calls, list) and calls:
         if finish not in ("tool_calls", "stop"):
-            raise BoundaryError(
-                f"the tenant endpoint's tool calls did not finish (finish_reason={finish})"
+            raise _priced(
+                BoundaryError(
+                    f"the tenant endpoint's tool calls did not finish "
+                    f"(finish_reason={finish})"
+                ),
+                cost,
             )
         return ToolCalls(tuple(_one_call(call) for call in calls), cost)
     if finish != "stop":
-        raise BoundaryError(
-            f"the tenant endpoint's turn did not finish (finish_reason={finish})"
+        raise _priced(
+            BoundaryError(
+                f"the tenant endpoint's turn did not finish (finish_reason={finish})"
+            ),
+            cost,
         )
     text = message.get("content")
     if not isinstance(text, str) or not text.strip():
-        raise BoundaryError(
-            f"the tenant endpoint returned no review text (finish_reason={finish})"
+        raise _priced(
+            BoundaryError(
+                f"the tenant endpoint returned no review text (finish_reason={finish})"
+            ),
+            cost,
         )
     return FinalReply(text, cost)
 

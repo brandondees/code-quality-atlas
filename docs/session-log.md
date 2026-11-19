@@ -5878,6 +5878,49 @@ causes pinned by the parametrized parse test).
 **#783 — the waiter race, the priced-response settle, and the booking
 reversal** are recorded in that layer's own entry below.
 
+**Update (2026-11-19, part 2's fix round — the waiter race, the priced
+settle, and the booking reversal, on the stacked PR).** Three of the
+round-1 review's findings, each with its own pinned test. **The waiter
+race:** `_place_call` settled the refused call and halted second, so a
+backpressure waiter waking on the release saw room, committed its own
+worst case before the flag was up, and then — past the halt — either sent
+a call the key had already refused or returned the halt outcome with the
+reservation left booked (the review reproduced both: $8 of booked worst
+case on a $10 cap with two waiters, $2 left stranded by one). `Spend.
+fail_and_halt` now lands the failed call's settle and the halt flag under
+one lock acquisition; `_reserve` refuses to commit once the review has
+halted, both before the wait and after it ends on the halt; and
+`_reserve_call` releases a reservation that committed before the halt
+showed, because the caller returns the halt's outcome and never sends the
+call it reserved. The re-assessment, decision and carry handlers land
+their settle and halt the same way. **The priced settle:** a 200 whose
+usage priced and whose turn then failed — a wrong served model, no
+message, an unfinished turn, no text — settled at $0, dropping a real
+bill; the adapters now attach the parsed cost to the raised
+`BoundaryError` (`reported_cost`, `UNPRICED` when the response carried no
+usable usage), and the lens loop's and the coordinator's boundary-branch
+settles book the parsed cost when there is one, keep the reservation when
+the response was served but unpriced (D43), and release at $0 only when
+nothing was served. **The booking reversal:** the round-0 rule that
+released a transport timeout's and a transport failure's reservation is
+reversed — D58 item 5 stands (the request was written; the provider may
+have billed it), so only a definite refusal settles at $0. D92's own
+entry carries the correction. **Tests:** the waiter blocked on the cap
+commits nothing and sends no turn (`committed_usd` ends at $0); a
+reservation that committed before the halt shows is released; a priced
+response the turn rejected settles at its parsed cost; the timeout's
+refit and the timeout-retry's own reservation are pinned at their
+pre-part-2 shape again; the adapter's attachment and the renamed
+`largest_call_reservation` (the method computes the largest reservation
+one call holds; the old name said the opposite of the check's own
+semantics) each carry their pin. **Mutants, each applied by hand and
+killed** (bytecode cache deleted first): the two halted-reserve guards
+dropped (the waiter commits in the released room), the halted-commit
+release dropped (the unsent reservation stays booked), the priced cost
+dropped from the boundary settle, the adapter's attachment dropped, the
+timeout booking flipped back to the release, and `fail_and_halt` settling
+without ever setting the flag (the race restored).
+
 ## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
 
 The live code-quality-atlas bot reviewed both heads; its findings were

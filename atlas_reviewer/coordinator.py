@@ -163,6 +163,7 @@ from atlas_reviewer.lens_loop import (
     _refusal_cause,
     _reserve_call,
     _Reserved,
+    _valid_cost,
     finding_contract,
     retry_reasons,
     run_attempt,
@@ -617,10 +618,10 @@ def _credit_refusal(model: LensModel, per_lens_usd: Decimal) -> str:
     own caps and the operator's price table -- accepts, as does a key
     that reports no credit limit to compare against."""
     remaining = getattr(model, "remaining_credit_usd", None)
-    smallest = getattr(model, "smallest_call_reservation", None)
-    if not callable(remaining) or not callable(smallest):
+    largest = getattr(model, "largest_call_reservation", None)
+    if not callable(remaining) or not callable(largest):
         return ""
-    left, one_call = remaining(), smallest()
+    left, one_call = remaining(), largest()
     if left is None or one_call is None or left >= min(one_call, per_lens_usd):
         return ""
     return KEY_OUT_OF_CREDIT
@@ -1839,10 +1840,9 @@ def _reassess_call(
     except KeyRefusedError as exc:
         # A refused key is a review error, not a spend (D92): the review's
         # spend halts with the fixed cause the draft and the post carry,
-        # and the refusal is never retried. The failed call settles at
-        # what its response reported -- $0 (D92).
-        spend.settle_failure(worst, None)
-        spend.halt(exc.review_error)
+        # and the refusal is never retried. The settle and the halt land
+        # under one lock (`fail_and_halt`).
+        spend.fail_and_halt(worst, None, exc.review_error)
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED, frozenset({Cause.MODEL_ERROR}), detail=str(exc)
         )
@@ -2259,18 +2259,29 @@ def _decision_call(
         # spend halts with the fixed cause, and the decision fallback then
         # re-runs lenses on a halted spend -- every one NOT RUN -- so the
         # review renders and posts as the error the cause names.
-        spend.settle(worst, None)
-        spend.halt(exc.review_error)
+        spend.fail_and_halt(worst, None, exc.review_error)
         raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
         raise
     except TransportError:
-        spend.settle_failure(worst, None)
+        # A written request may still have been billed (D58 item 5,
+        # restored by D92's fix round): the reservation is kept as spent.
+        spend.settle(worst, None)
         raise
-    except BoundaryError:
-        spend.settle_failure(worst, None)
+    except BoundaryError as exc:
+        # The settle reads what the exception carries (D92's fix round):
+        # a priced 200 the turn rejected settles at the parsed cost, a
+        # served response with no usable usage keeps the reservation
+        # (D43), and anything that never served a response releases at $0.
+        reported = exc.reported_cost
+        if reported is not None and _valid_cost(reported):
+            spend.settle(worst, reported)
+        elif reported is not None:
+            spend.settle(worst, None)
+        else:
+            spend.settle_failure(worst, None)
         raise
     spend.settle(worst, reply.cost_usd)
     if not isinstance(reply, FinalReply):
@@ -2519,18 +2530,29 @@ def _carry_call(
         # priors as recorded, and the finalized review carries the cause
         # as its review error -- the posted result is the error or the
         # partial record it names, never an ordinary review.
-        spend.settle(worst, None)
-        spend.halt(exc.review_error)
+        spend.fail_and_halt(worst, None, exc.review_error)
         raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
         raise
     except TransportError:
-        spend.settle_failure(worst, None)
+        # A written request may still have been billed (D58 item 5,
+        # restored by D92's fix round): the reservation is kept as spent.
+        spend.settle(worst, None)
         raise
-    except BoundaryError:
-        spend.settle_failure(worst, None)
+    except BoundaryError as exc:
+        # The settle reads what the exception carries (D92's fix round):
+        # a priced 200 the turn rejected settles at the parsed cost, a
+        # served response with no usable usage keeps the reservation
+        # (D43), and anything that never served a response releases at $0.
+        reported = exc.reported_cost
+        if reported is not None and _valid_cost(reported):
+            spend.settle(worst, reported)
+        elif reported is not None:
+            spend.settle(worst, None)
+        else:
+            spend.settle_failure(worst, None)
         raise
     spend.settle(worst, reply.cost_usd)
     if not isinstance(reply, FinalReply):
