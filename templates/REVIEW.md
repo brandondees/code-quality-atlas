@@ -252,7 +252,9 @@ line, or carry none and take the deployment's default; the value in
 code-quality-atlas's own copy of this file is that repo's own setting, not
 a recommended default for copies.
 
+```text
 # review_ceiling_usd: 25   # example — uncomment and set your repo's own value, or delete to take the deployment's default
+```
 
 ## Scope discipline
 

@@ -108,14 +108,19 @@ def test_this_repos_own_review_md_parses_to_the_decided_25():
 
 
 def test_the_shipped_template_carries_no_live_ceiling():
-    """The template ships its ceiling line commented out (round-1 review
-    of #778, M1): a repo that copies `templates/REVIEW.md` wholesale takes
+    """The template ships its ceiling line commented out inside a fenced
+    code block (round-1 review of #778, M1): a repo that copies
+    `templates/REVIEW.md` wholesale takes
     the deployment's default, not this repo's $25. The commented line is
     inert by the parser's own anchors — `CEILING_LINE` matches only at the
     line start, and the unsupported-key scan's `^review_` anchor does not
     match a `#`-prefixed line — so the copy parses to no ceiling, with no
     note and no unsupported-line note, rather than silently configuring
-    anything."""
+    anything. The fence is what keeps markdownlint's single-H1 rule from
+    reading the `#`-prefixed comment as a heading; it is safe only because
+    the line inside it carries the comment — a fenced uncommented key would
+    still be live config, the known-key parsers being deliberately
+    fence-blind."""
     root = Path(__file__).resolve().parents[2]
     text = (root / "templates" / "REVIEW.md").read_text(encoding="utf-8")
     read = read_repo_config(

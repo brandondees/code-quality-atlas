@@ -5685,12 +5685,18 @@ the pin above, and no product behavior changed.
 
 **Update (2026-11-19, fix round 1 of #778).** The round-1 review's Major
 made the template's copy of the line inert: `templates/REVIEW.md` now ships
+the line commented out inside a fenced code block —
 `# review_ceiling_usd: 25   # example — uncomment and set your repo's own
-value, or delete to take the deployment's default` — commented, so a
+value, or delete to take the deployment's default` — so a
 wholesale `cp` of the template parses to no ceiling and takes the
 deployment default (the anchored `CEILING_LINE` regex cannot match a
 `#`-prefixed line, and the unsupported-key scan's `^review_` anchor draws
-no note on it either), while the live `review_ceiling_usd: 25` stays only
+no note on it either; the fence is also what keeps markdownlint's
+single-H1 rule from reading the `#`-prefixed comment as a second document
+heading, which the branch's first gate run failed on, and it is safe only
+because the line inside it carries the comment — a fenced uncommented key
+would still be live config), while the live
+`review_ceiling_usd: 25` stays only
 in the root copy. `tests/test_review_template_sync.py` is relaxed to
 normalize exactly that one line before comparing — every other byte stays
 guarded — with a new guard holding each copy to exactly one
