@@ -1591,65 +1591,85 @@ a `Bridge` to the caller.
   name cannot move a match to another file, and every name `list_files`
   shows plainly reads back through `read_file` (the rest are marked).
   `diff_file` shows a renamed file as a rename from either path.
-- **Execution (D80, corrected 2026-11-18 rounds 1-2).** `run_tests` and `mutate`
-  never trust runner state an executed run could have touched: each execution
-  call -- and every read that follows one -- first **re-stages the runner's
-  repository, trees, scratch and staging indexes from the controller-held
-  tarballs** (`_restage` -> `restage_script`: remove and rebuild; the staged
-  commits are deterministic, so the recorded BASE/HEAD ids must come back
-  exactly, and a recorded mutation re-applies deterministically so the
-  recorded mutant id and its tree survive the rebuild), because executed PR
-  code runs as the same user that owns that state and **git does not
-  re-verify a loose object on read** -- an in-place overwrite of a blob file
-  under its recorded name is served verbatim by every read that trusts the
-  object store. The freshly uploaded tarballs are **digest-checked in the
-  runner before anything is extracted**, closing the upload-to-verify window
-  a daemon could write into. Each staging step's exit is its own
-  `__ATLAS_STAGE__` block: a copy that could not be built is a staging
-  failure (`unavailable`, a gap), never a test result. The argv is built by
-  the bridge and never by the model: `<trusted interpreter> -I -B -m pytest
-  -q --color=no -p no:cacheprovider <selector>` -- isolated (`-I`: no
-  `PYTHON*` variables, no user site, cwd off `sys.path`, so a PR `pytest.py`
-  cannot shadow the runner machinery; `-B` because isolated mode ignores
-  `PYTHONDONTWRITEBYTECODE`), module mode, and the model's selector as one
-  positional argument. One test process runs at a time. A run's wall clock
-  is the tool's `timeout_s` (default 60s, provisional) under the guest's
-  `timeout`; its captured output is capped at the tool's `max_bytes`
-  (default 16 KiB, provisional) and shown from the end, where pytest's
-  summary and failures sit. A `mutate` call runs the baseline, stages a
-  **fresh** copy (the baseline's writes carry into neither the mutated run
-  nor the mutant commit), applies the one-operator mutation with a fixed
-  AST script as a **span splice** (the model named only a path, a line and
-  an operator; the rest of the file stays byte-identical), commits the
-  mutated copy into the bare repository and records its id -- the mutated
-  tree is reachable at exactly one new revision, and MUTANT resolves at
-  that **recorded commit id** -- then runs the mutated copy. The verdict is
-  the controller's, from the runs' reported exits and its own parse of
-  their final pytest summary lines: `survived` only when the baseline ran
-  at least one test and passed and the mutated run also passed with a
+- **Execution (D80, corrected 2026-11-18 rounds 1-2; amended for the
+  between-call daemon).** Executed PR code runs as the same user that owns
+  the runner's state, and git does **not** re-verify a loose object on
+  read -- so nothing the runner holds is trusted as content after PR code
+  has run. Three layers hold the line:
+  - **The file-content reads are controller-side.** `read_file`, `grep`
+    and `list_files` answer from the controller's own copy of the staged
+    trees (extracted in memory from the tarballs it already holds) and,
+    for MUTANT, from the recorded mutation's splice applied to that copy
+    -- the same span splice the runner's script applies, parity pinned.
+    They never exec and never trust anything read back from the runner; a
+    runner that refuses every exec still serves them.
+  - **A stray-process sweep precedes every re-stage and every execution**
+    (`Session.sweep`): the live sweep kills every process of the
+    execution user except the exec chain's own ancestors (walked by
+    `PPid` to init; zombies skipped), waits, then verifies with a second
+    scan; a survivor, a failed sweep, or no answer is fail-closed
+    (`unavailable`, a gap). This is what the diff trio's runner reads
+    (`diff_stat`, `diff_file`, renames) rest on -- after a verified
+    sweep, no process is alive to write between the rebuild and the read
+    -- together with the finding gate, whose quotes verify against
+    controller-held head content a forged diff cannot mint. The sweep's
+    uid scope on a real Sprite is reasoned from the single-review
+    disposable-runner model and has not been observed on a live Sprite;
+    the local runner's sweep is the testable stand-in, scoped to the
+    processes the runner spawned or adopted (`PR_SET_CHILD_SUBREAPER`),
+    because the test machine's other work shares the uid.
+  - **The re-stage from the controller-held tarballs** (below) closes
+    every *timestamped* tamper: the repository, `trees`, the scratch and
+    the staging indexes are removed and rebuilt from freshly re-uploaded,
+    digest-checked tarballs, and the staged commits are deterministic, so
+    the recorded BASE/HEAD ids must come back exactly; a recorded
+    mutation re-applies deterministically and the re-created mutant id is
+    checked against the record.
+  Each execution call -- and every runner read that follows one --
+  sweeps, re-stages, and only then serves or runs; the reads and the next
+  run are genuine even with a daemon detached from its exec's group
+  re-forging the object store continuously (the regression fixture).
+  The argv is built by the bridge and never by the model: `<trusted
+  interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
+  <selector>` -- isolated (`-I`: no `PYTHON*` variables, no user site,
+  cwd off `sys.path`, so a PR `pytest.py` cannot shadow the runner
+  machinery; `-B` because isolated mode ignores
+  `PYTHONDONTWRITEBYTECODE`), module mode, and the model's selector as
+  one positional argument. One test process runs at a time. A run's wall
+  clock is the tool's `timeout_s` (default 60s, provisional) under the
+  guest's `timeout`; its captured output is capped at the tool's
+  `max_bytes` (default 16 KiB, provisional) and shown from the end,
+  where pytest's summary and failures sit. A `mutate` call runs the
+  baseline, stages a **fresh** copy (the baseline's writes carry into
+  neither the mutated run nor the mutant commit), applies the
+  one-operator mutation with the fixed script as a **span splice** (the
+  model named only a path, a line and an operator; the rest of the file
+  stays byte-identical), commits the mutated copy into the bare
+  repository and records its id -- the mutated tree is reachable at
+  exactly one new revision, and MUTANT resolves at that **recorded
+  commit id** -- then runs the mutated copy. The verdict is the
+  controller's, from the runs' reported exits and its own parse of their
+  final pytest summary lines: `survived` only when the baseline ran at
+  least one test and passed and the mutated run also passed with a
   summary showing one -- an exit 0 whose output carries no summary line
   proves nothing and is inconclusive; an already-failing,
   nothing-collected or nothing-ran baseline, a timed-out run, a mutated
   run where no test ran, and a mutated run at a non-test exit are
   `inconclusive` with the reason, never `survived`; a mutation that did
-  not apply or a tree that could not be committed ends after the baseline
-  and is inconclusive. The exits are in-band evidence, not proof -- the
-  standing caveat `runner.parse_exit` records -- and here PR code runs, so
-  a PR can shape its own test results; a forged verdict changes only what
-  a lens may claim, and the finding still needs a verified quote. The
-  residuals a same-user runner cannot close are owned, not hidden: a daemon
-  that escaped the process-group kill could race steps inside one exec --
-  the digest checks and the re-created-id check turn the two shapes that
-  matter into refused reads, not forged records -- and image binaries
-  (git, the interpreters) are trusted the way the whole runner already
-  trusts them. The re-stage costs an upload-and-rebuild per execution and
-  per post-execution read, bounded by the exec budget and the existing
-  caps. The interpreter is resolved before any PR content is unpacked; none
-  means the tools answer `unavailable`. The caps count what ran: a refused
-  call -- rejected arguments, an already-spent budget -- takes no execution
+  not apply or a tree that could not be committed ends after the
+  baseline and is inconclusive. The exits are in-band evidence, not
+  proof -- the standing caveat `runner.parse_exit` records -- and here
+  PR code runs, so a PR can shape its own test results; a forged verdict
+  changes only what a lens may claim, and the finding still needs a
+  verified quote. The re-stage's cost -- an upload-and-rebuild per
+  execution and per post-execution runner read, plus a sweep -- is
+  bounded by the exec budget and the existing caps. The interpreter is
+  resolved before any PR content is unpacked; none means the tools
+  answer `unavailable`. The caps count what ran: a refused call --
+  rejected arguments, an already-spent budget -- takes no execution
   slot; a run that timed out keeps its. The allow-list seam for
-  operator-approved commands is the bridge-owned argv table -- the approval
-  flow itself is not built (D80).
+  operator-approved commands is the bridge-owned argv table -- the
+  approval flow itself is not built (D80).
 - **Results** are repository content and are not redacted. Each is
   scanned for committed secrets, and every hit is reported by path, line
   and pattern, pre-existing outside HEAD or in a file the PR did not

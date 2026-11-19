@@ -530,6 +530,105 @@ def _last_int(text: str) -> int | None:
     return int(found[-1]) if found else None
 
 
+# --------------------------------------------------- stray-process sweep (D80)
+
+
+SWEEP_BUDGET_S = 30.0
+SWEEP_TAG = "atlas-sweep"
+# SIGKILL, then a beat, then the verification scan: a killed process is
+# gone (its parent reaps it or it is reparented to the runner's init), so
+# anything the second scan still sees is a survivor.
+SWEEP_SETTLE_S = 0.5
+
+
+def sweep_script() -> str:
+    """Kills every process of the execution user that is not an ancestor
+    of the sweep itself, then verifies none remain (`D80` round 2). The
+    runner is a single-review disposable Sprite: the execution user's
+    processes are this review's own exec chain -- protected by walking
+    `PPid` from here to init -- and whatever a PR's tests left behind,
+    detached from it (`start_new_session` or a double fork), which is
+    exactly the population a between-call daemon needs. Zombies are
+    skipped: they are dead, hold no code, and their reaping belongs to
+    the parent. The verification is fail-closed: any surviving process of
+    the execution user prints a survivor count and fails the script, and
+    `parse_sweep` turns that into a boundary error. `ps` is not assumed;
+    the scan reads `/proc` directly."""
+    return "\n".join(
+        (
+            "me=$(id -u)",
+            "self=$$",
+            "ancestors=''",
+            "p=$$",
+            (
+                'while [ -n "$p" ] && [ "$p" != 0 ]; do '
+                'ancestors="$ancestors $p"; '
+                "p=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null); "
+                "done"
+            ),
+            "for dir in /proc/[0-9]*; do",
+            "  pid=${dir#/proc/}",
+            '  case "$ancestors" in *" $pid "*) continue ;; esac',
+            '  [ "$pid" = "$self" ] && continue',
+            (
+                "  state=$(awk '/^State:/{print $2}' \"$dir/status\" 2>/dev/null); "
+                '[ "$state" = Z ] && continue'
+            ),
+            (
+                "  uid=$(awk '/^Uid:/{print $2}' \"$dir/status\" 2>/dev/null); "
+                '[ "$uid" = "$me" ] || continue'
+            ),
+            '  kill -9 "$pid" 2>/dev/null || true',
+            "done",
+            f"sleep {SWEEP_SETTLE_S}",
+            "survivors=0",
+            "for dir in /proc/[0-9]*; do",
+            "  pid=${dir#/proc/}",
+            '  case "$ancestors" in *" $pid "*) continue ;; esac',
+            '  [ "$pid" = "$self" ] && continue',
+            (
+                "  state=$(awk '/^State:/{print $2}' \"$dir/status\" 2>/dev/null); "
+                '[ "$state" = Z ] && continue'
+            ),
+            (
+                "  uid=$(awk '/^Uid:/{print $2}' \"$dir/status\" 2>/dev/null); "
+                '[ "$uid" = "$me" ] || continue'
+            ),
+            "  survivors=$((survivors+1))",
+            "done",
+            'if [ "$survivors" -gt 0 ]; then',
+            f'  echo "{SWEEP_TAG}:survivors:$survivors"',
+            "  exit 1",
+            "fi",
+            f'echo "{SWEEP_TAG}:clean"',
+        )
+    )
+
+
+def parse_sweep(code: int | None, text: str) -> None:
+    """The sweep's answer: a clean scan passes; a survivor count, a failed
+    script, or no answer at all is a boundary error -- the runner's state
+    stays untrusted and the caller fails closed."""
+    survivor = re.search(rf"^{SWEEP_TAG}:survivors:(\d+)$", text, re.MULTILINE)
+    if survivor is not None:
+        raise BoundaryError(
+            f"the stray-process sweep left {survivor.group(1)} survivor(s)"
+        )
+    if code != 0 or f"{SWEEP_TAG}:clean" not in text:
+        raise BoundaryError(
+            f"the stray-process sweep failed (exit {code}): "
+            f"{guest_text(text, GUEST_TAIL_CHARS)}"
+        )
+
+
+def _sweep(run: _Run, budget_s: float) -> None:
+    code, text = _exec(
+        run,
+        _Exec("session", "stray-process sweep", sweep_script(), budget_s=budget_s),
+    )
+    parse_sweep(code, text)
+
+
 Trigger = Literal["watchdog", "final", "sweep"]
 
 
@@ -809,6 +908,20 @@ class Session:
         """Writes `data` to the controller-chosen `path` through the same
         exec shape as the source upload; raises unless every byte landed."""
         _upload(self._run, data, path, purpose)
+
+    def sweep(self, budget_s: float = SWEEP_BUDGET_S) -> None:
+        """Kills and then verifies away the runner's stray processes (D80
+        round 2): executed PR code can start a detached process that
+        outlives every exec and re-forges the runner's state between a
+        re-stage and the use of it, so every re-stage and every execution
+        is preceded by a sweep that kills every process of the execution
+        user except this exec chain's own ancestors, waits, and verifies
+        none remain. A survivor is fail-closed: `BoundaryError`, an
+        `unavailable` gap. The local runner implements the same contract
+        scoped to its own process tree (`local_runner.LocalSprites.sweep`);
+        the uid-scoped form here is reasoned from the single-review Sprite
+        model and has not been observed on a live Sprite."""
+        _sweep(self._run, budget_s)
 
 
 def run_session(

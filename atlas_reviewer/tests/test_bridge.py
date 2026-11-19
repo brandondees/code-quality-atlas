@@ -640,7 +640,10 @@ def test_every_call_is_in_the_ledger_and_telemetry_names_only_the_tool(tmp_path)
     assert read.shown_bytes == read.total_bytes > 0
     assert rejected.status is Status.REJECTED
     steps = [e.step for e in telemetry.events if e.phase == "exec"]
-    assert "bridge read_file" in steps
+    # The content reads are controller-served (D80 round 2): no exec ran
+    # for them, so no exec step names them -- and no runner output ever
+    # carried the file's content.
+    assert "bridge read_file" not in steps
     assert not any("settings" in str(e.fields) for e in telemetry.events)
 
 

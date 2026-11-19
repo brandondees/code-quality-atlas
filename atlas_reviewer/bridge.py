@@ -28,11 +28,14 @@ assert one.
 
 from __future__ import annotations
 
+import ast
 import base64
 import codecs
 import hashlib
+import io
 import json
 import re
+import tarfile
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -137,6 +140,18 @@ _CONTINUATION = bytes(range(0x80, 0xC0))
 # and each call's script runs its processes to completion before it
 # returns.
 RUN_TOOLS = frozenset({"run_tests", "mutate"})
+
+# The file-content tools (D80 round 2): answered from the controller's own
+# copy of the trees and the deterministic splice, never from the runner's
+# state -- executed code can start a process no sweep can name, so nothing
+# read back from the runner is trusted as content.
+LOCAL_TOOLS = frozenset({"read_file", "grep", "list_files"})
+
+# The tools that still read the runner's repository (the diff trio): their
+# integrity rests on the sweep -- after a verified sweep, no process is
+# alive to write between the rebuild and the read -- and on the finding
+# gate, whose quotes verify against controller-held head content a forged
+# diff cannot mint.
 
 PYTEST_FLAGS = ("-q", "--color=no", "-p", "no:cacheprovider")
 
@@ -634,6 +649,236 @@ def _pytest_argv(staged: Staged, selector: str) -> str:
 
 def _selector(selector: str) -> str:
     return f" {quote(selector)}" if selector else ""
+
+
+# ------------------------------------------------- controller-side contents
+
+
+def _tree_files(tarball: bytes) -> dict[str, bytes]:
+    """The controller's own copy of one staged tree, extracted in memory
+    from the tarball it already holds (`D80` round 2): the same
+    `--strip-components=1` shape the runner's extraction uses, keeping
+    every regular file. Names decode the way tar names do (the
+    filesystem encoding, with surrogates for bytes that are not UTF-8);
+    a name the read tools would refuse (`path_problem`'s rules) still
+    lives in the map -- `list_files` lists it and marks it unreadable,
+    and `grep` can match inside it, exactly as the runner's tools did --
+    while `read_file` can never name it: `validate` rejects such a path
+    before anything runs. Nothing is extracted to disk."""
+    files: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(tarball), mode="r:gz") as archive:
+        for member in archive:
+            if not member.isreg():
+                continue
+            _, _, name = member.name.partition("/")
+            if not name or name.endswith("/"):
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:  # pragma: no cover - isreg implies bytes
+                continue
+            files[name] = extracted.read()
+    return files
+
+
+def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] | None:
+    """The controller-side form of `MUTATION_SCRIPT`'s span splice (D80
+    round 2): the same parse, the same mutated span, the same replacement
+    -- `None` when the edit does not apply. One splice semantics for the
+    runner's mutant commit and the controller's mutant map; the parity
+    between this and the script is pinned by
+    `test_the_controller_splice_matches_the_runner_script`."""
+    try:
+        source = content.decode("utf-8")
+        tree = ast.parse(source)
+    except (UnicodeDecodeError, SyntaxError):
+        return None
+    at_line = sorted(
+        (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
+        key=lambda node: getattr(node, "col_offset", 0),
+    )
+    offsets = [0]
+    for part in source.split("\n"):
+        offsets.append(offsets[-1] + len(part) + 1)
+
+    def span(
+        lineno: int, col: int, end_lineno: int | None, end_col: int | None
+    ) -> tuple[int, int]:
+        # end_lineno/end_col_offset are Optional in the ast stubs but set
+        # for every node a parse produces.
+        return (
+            offsets[lineno - 1] + col,
+            offsets[(end_lineno or lineno) - 1] + (end_col or col),
+        )
+
+    if operator == "negate-condition":
+        target = next(
+            (
+                node
+                for node in at_line
+                if isinstance(node, (ast.If, ast.While, ast.IfExp))
+            ),
+            None,
+        )
+        if target is None:
+            return None
+        start, end = span(
+            target.test.lineno, target.test.col_offset,
+            target.test.end_lineno, target.test.end_col_offset,
+        )  # fmt: skip
+        replacement = f"not ({source[start:end]})"
+    else:
+        target = next((node for node in at_line if isinstance(node, ast.If)), None)
+        if target is None:
+            return None
+        start, end = span(
+            target.body[0].lineno, target.body[0].col_offset,
+            target.body[-1].end_lineno, target.body[-1].end_col_offset,
+        )  # fmt: skip
+        replacement = "pass"
+    before = source[start:end]
+    mutated = f"{source[:start]}{replacement}{source[end:]}"
+    try:
+        compile(mutated, "<mutant>", "exec")
+    except SyntaxError:
+        return None
+    return mutated.encode("utf-8"), before, replacement
+
+
+class _MissingPath(ValueError):
+    """A read named a path the controller's copy of the tree does not
+    hold; the message keeps the shape the runner's git error had."""
+
+
+def _local_reply(
+    code: int, content: bytes, total_bytes: int, total_lines: int
+) -> _Reply:
+    """The framed reply a controller-served read would have produced: the
+    same fields the exec framing carries, so `_result`'s capping,
+    rendering, secret scan and ledger apply unchanged."""
+    return _Reply(
+        code=code,
+        view_code=0,
+        total_bytes=total_bytes,
+        total_lines=total_lines,
+        shown_bytes=len(content),
+        content=content,
+        stderr=b"",
+    )
+
+
+def _shown_bytes(data: bytes, max_bytes: int) -> bytes:
+    """`data` capped at `max_bytes`, cut only between whole UTF-8
+    characters -- the same cut the exec's `head -c` and the framing's
+    page repair produced."""
+    if len(data) <= max_bytes:
+        return data
+    cut = data[:max_bytes]
+    return cut[: len(cut) - _incomplete_tail(cut)]
+
+
+def _local_read(files: Mapping[str, bytes], call: Call, limits: ToolLimits) -> _Reply:
+    """`read_file` from the controller's copy: the same `sed -n
+    start,end p` window, byte and line caps, and cut semantics."""
+    content = files.get(call.get("path"))
+    if content is None:
+        raise _MissingPath(
+            f"fatal: path '{call.get('path')}' does not exist in the staged tree"
+        )
+    lines = content.splitlines(keepends=True)
+    window_lines = lines[call.get("start") - 1 : call.get("end")]
+    window = b"".join(window_lines)
+    shown_lines = (
+        window_lines[: limits.max_lines]
+        if limits.max_lines is not None
+        else window_lines
+    )
+    shown = _shown_bytes(b"".join(shown_lines), limits.max_bytes)
+    return _local_reply(0, shown, len(window), window.count(b"\n"))
+
+
+def _local_grep(
+    files: Mapping[str, bytes], call: Call, limits: ToolLimits, rev_id: str
+) -> _Reply:
+    """`grep` from the controller's copy, in the records shape the runner's
+    `git grep -z -n -I --max-count=50` produced: `<staged id>:<path>`,
+    the line number, the line; binary files (a NUL in the first 8,000
+    bytes, git's `-I` heuristic) are skipped; fifty matches a file; the
+    fixed-string and regex modes keep their meaning."""
+    pattern = call.get("pattern")
+    prefix = call.get("prefix")
+    compiled = re.compile(pattern) if call.get("regex") else None
+    needle = pattern.encode("utf-8")
+    chunks: list[bytes] = []
+    for path in sorted(files):
+        if prefix and not (path == prefix or path.startswith(f"{prefix}/")):
+            continue
+        data = files[path]
+        if b"\x00" in data[:8_000]:
+            continue
+        split = data.split(b"\n")
+        if data.endswith(b"\n"):
+            split = split[:-1]
+        count = 0
+        for number, line in enumerate(split, 1):
+            hit = (
+                compiled.search(line.decode("utf-8", errors="replace"))
+                if compiled is not None
+                else needle in line
+            )
+            if hit:
+                chunks.append(
+                    f"{rev_id}:{path}\0{number}\0".encode("utf-8", "surrogateescape")
+                    + line
+                    + b"\n"
+                )
+                count += 1
+                if count >= 50:
+                    break
+    text = b"".join(chunks)
+    # The runner's cut was newline-based for grep (only the fields within
+    # a record are NUL-separated; the records end with newlines), so the
+    # line cap keeps whole records and the count is the record count.
+    shown_lines = (
+        text.splitlines(keepends=True)[: limits.max_lines]
+        if limits.max_lines is not None
+        else text.splitlines(keepends=True)
+    )
+    shown = _shown_bytes(b"".join(shown_lines), limits.max_bytes)
+    code = 0 if text else _GREP_NO_MATCH
+    return _local_reply(code, shown, len(text), text.count(b"\n"))
+
+
+def _capped_nul_records(text: bytes, limits: ToolLimits) -> bytes:
+    """The `head -z -n <max_lines> | head -c <max_bytes>` cut of a
+    NUL-terminated record stream (`list_files`'s shape: one name per
+    NUL-terminated record)."""
+    if limits.max_lines is not None:
+        positions = [i for i, byte in enumerate(text) if byte == 0]
+        if len(positions) >= limits.max_lines:
+            text = text[: positions[limits.max_lines - 1] + 1]
+    return _shown_bytes(text, limits.max_bytes)
+
+
+def _local_list(files: Mapping[str, bytes], call: Call, limits: ToolLimits) -> _Reply:
+    """`list_files` from the controller's copy: the names under the
+    prefix, in tree order (`ls-tree -r --name-only`'s sorted order), the
+    NUL-record framing and caps the runner's listing had."""
+    prefix = call.get("prefix")
+    names = sorted(
+        path
+        for path in files
+        if not prefix or path == prefix or path.startswith(f"{prefix}/")
+    )
+    encoded = [name.encode("utf-8", "surrogateescape") for name in names]
+    cut = limits.max_lines is not None and len(encoded) > limits.max_lines
+    shown_names = encoded[: limits.max_lines] if cut else encoded
+    # Every record carries its own NUL, exactly as `ls-tree -z` emitted
+    # them, so a cut listing stays parse-complete and the cut is reported
+    # by the byte totals.
+    raw = b"".join(name + b"\0" for name in shown_names)
+    total = b"".join(name + b"\0" for name in encoded)
+    shown = _shown_bytes(raw, limits.max_bytes)
+    return _local_reply(0, shown, len(total), total.count(b"\0"))
 
 
 def run_test_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
@@ -1351,6 +1596,11 @@ class Bridge:
     # re-stage re-applies it deterministically, so the recorded mutant id
     # and the tree it names survive the rebuild.
     _mutation: MutationRecord | None = field(default=None, repr=False)
+    # The controller's own copy of every staged tree's files (D80 round
+    # 2), built once from the tarballs it holds, plus the recorded
+    # mutation's splice for MUTANT. `read_file`, `grep` and `list_files`
+    # answer from these maps and never from the runner's state.
+    _contents: dict[Rev, dict[str, bytes]] = field(default_factory=dict, repr=False)
     # The attempt now running, as `_spent`'s refusals name it, and the
     # counters its budget spends. Empty/unspent until `begin_attempt`.
     _attempt: str = field(default="", repr=False)
@@ -1362,6 +1612,35 @@ class Bridge:
     def __post_init__(self) -> None:
         if not self.commits:
             self.commits = self.staged.commits
+        for rev, data in self.trees.staged():
+            if rev in self.staged.commits:
+                self._contents[rev] = _tree_files(data)
+
+    def _mutant_contents(self) -> dict[str, bytes]:
+        """MUTANT's controller-side map: the head tree with the recorded
+        mutation spliced in by the same span-splice `MUTATION_SCRIPT`
+        applies (their parity is pinned). A splice that does not re-apply
+        cannot happen for a mutation the runner committed -- and would be
+        a boundary error, not a silently wrong map."""
+        head = dict(self._contents[Rev.HEAD])
+        mutation = self._mutation
+        assert mutation is not None
+        spliced = _splice(head[mutation.path], mutation.line, mutation.operator)
+        if spliced is None:
+            raise BoundaryError(
+                "the recorded mutation does not re-apply to the controller's copy"
+            )
+        mutated, _before, _after = spliced
+        head[mutation.path] = mutated
+        return head
+
+    def _sweep(self) -> None:
+        """The runner's stray-process sweep (D80 round 2): executed code
+        can leave a detached process that outlives every exec, so every
+        re-stage and every execution is preceded by a sweep that kills
+        and verifies away the runner's strays. A survivor is fail-closed:
+        `BoundaryError`, an `unavailable` gap."""
+        self.session.sweep()
 
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters
@@ -1439,6 +1718,8 @@ class Bridge:
         started = self.clock.monotonic()
         if call.tool in RUN_TOOLS:
             return self._run_exec(call, limits, started)
+        if call.tool in LOCAL_TOOLS:
+            return self._run_local(call, limits, started)
         try:
             paths = self._diff_paths(call)
             reply = self._exec(call, limits, paths)
@@ -1449,6 +1730,34 @@ class Bridge:
         except BoundaryError as exc:
             return self._failed(call, Status.UNAVAILABLE, str(exc), started)
         return self._result(call, reply, paths, self.clock.monotonic() - started)
+
+    def _run_local(
+        self, call: Call, limits: ToolLimits, started: float
+    ) -> BridgeResult:
+        """`read_file`, `grep` and `list_files` are answered from the
+        controller's own copy of the trees and the recorded mutation's
+        splice (D80 round 2's decision): executed PR code can leave a
+        process no sweep can name alive in the runner, so nothing read
+        back from the runner is trusted as content -- these tools serve
+        the controller-held bytes and never exec. The result then runs
+        through the same rendering, capping, secret scan and ledger the
+        runner-served results use."""
+        rev = call.get("rev")
+        files = self._contents.get(rev)
+        if files is None:  # pragma: no cover - validate gates the revisions
+            return self._failed(
+                call, Status.UNAVAILABLE, f"no controller copy of {rev}", started
+            )
+        try:
+            if call.tool == "read_file":
+                reply = _local_read(files, call, limits)
+            elif call.tool == "grep":
+                reply = _local_grep(files, call, limits, self.commits[rev])
+            else:
+                reply = _local_list(files, call, limits)
+        except _MissingPath as exc:
+            return self._failed(call, Status.FAILED, str(exc), started)
+        return self._result(call, reply, (), self.clock.monotonic() - started)
 
     def _run_exec(self, call: Call, limits: ToolLimits, started: float) -> BridgeResult:
         """`run_tests` and `mutate` (D80): one exec per call, its reply
@@ -1467,10 +1776,13 @@ class Bridge:
                 started,
             )
         try:
-            # Executed code may have rewritten anything it could reach
-            # since the last call (D80 round 2): the execution always
-            # starts from a re-staged, digest-checked repository and
-            # trees.
+            # The sweep runs before every execution (D80 round 2): a
+            # detached process an earlier run left behind must be gone
+            # before the re-stage rebuilds and the new copy runs. Then,
+            # since the last execution could have rewritten anything it
+            # could reach, the execution starts from a re-staged,
+            # digest-checked repository and trees.
+            self._sweep()
             if self._suspect:
                 self._restage()
             budget = (
@@ -1514,12 +1826,16 @@ class Bridge:
         controller-held tarballs (D80 round 2), because executed code can
         rewrite anything it can reach and git does not re-verify a loose
         object on read: the tarballs are the one source of truth it can
-        never touch. The staging is deterministic, so the recorded BASE
-        and HEAD ids must come back exactly -- anything else is a boundary
-        error, a gap. A recorded mutation re-applies on a fresh copy, and
-        the mutant commit is re-created with the same id, so the reads at
-        MUTANT keep serving the mutation the record names. Cleared, the
-        runner's state is exactly what the controller staged."""
+        never touch. The sweep runs first -- a stray process alive during
+        the rebuild could forge what it writes -- and the staging is
+        deterministic, so the recorded BASE and HEAD ids must come back
+        exactly -- anything else is a boundary error, a gap. A recorded
+        mutation re-applies on a fresh copy, and the mutant commit is
+        re-created with the same id, so the reads at MUTANT keep serving
+        the mutation the record names. Cleared, the runner's state is
+        exactly what the controller staged, with nothing alive that could
+        rewrite it before the caller's read."""
+        self._sweep()
         digests = {
             rev: hashlib.sha256(data).hexdigest() for rev, data in self.trees.staged()
         }
@@ -1623,11 +1939,15 @@ class Bridge:
         )  # fmt: skip
         if ok and applied.commit not in ("-", ""):
             # MUTANT resolves at the commit id this bridge's own commit
-            # step recorded (D80 round 1): a commit id is
-            # content-addressed and git's read path verifies it, so
-            # executed code moving or forging the `atlas-mutant` ref
-            # changes nothing the read tools serve. The ref stays as
-            # bookkeeping only.
+            # step recorded (D80 rounds 1-2): the id is a
+            # content-addressed *name* the controller holds, and what
+            # protects the content behind it is the re-stage -- which
+            # rebuilds the repository from the digest-checked tarballs
+            # and re-applies the recorded mutation deterministically --
+            # plus the re-created-id check, not git's read path (git does
+            # not re-verify a loose object on read). Executed code moving
+            # or forging the `atlas-mutant` ref changes nothing the read
+            # tools serve; the ref stays as bookkeeping only.
             self.commits = MappingProxyType(
                 {**self.staged.commits, Rev.MUTANT: applied.commit}
             )
@@ -1642,8 +1962,11 @@ class Bridge:
         if record.commit:
             # A re-stage re-applies this mutation deterministically (D80
             # round 2), so the mutant tree the record names survives the
-            # rebuild.
+            # rebuild -- and the controller's own MUTANT map, what the
+            # read tools actually serve, is the same splice applied to
+            # its own copy of the head tree.
             self._mutation = record
+            self._contents[Rev.MUTANT] = self._mutant_contents()
         runs: tuple[RunRecord, ...] = (RunRecord(baseline.code, _summary_of(baseline)),)
         if mutated is not None:
             runs += (RunRecord(mutated.code, _summary_of(mutated)),)

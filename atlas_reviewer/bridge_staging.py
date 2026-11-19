@@ -299,10 +299,14 @@ def mutant_commit_steps(
 ) -> tuple[str, ...]:
     """Commits the mutated copy into the bare repository and moves
     `MUTANT_REF` onto it (D80). The bridge reads MUTANT at the commit id
-    its own commit step recorded -- the ref is bookkeeping, not a read
-    path, so executed code moving or forging it changes nothing the tools
-    serve; a commit id is content-addressed and git's read path verifies
-    it. Prints `MUTANT_TAG:<commit>` only when the ref moved; carries the
+    its own commit step recorded -- a content-addressed *name* the
+    controller holds, whose content is protected by the re-stage (the
+    repository is rebuilt from the digest-checked tarballs and the
+    recorded mutation re-applied deterministically) and by the
+    re-created-id check, **not** by git's read path: git does not
+    re-verify a loose object on read. Executed code moving or forging the
+    ref changes nothing the tools serve; the ref is bookkeeping only.
+    Prints `MUTANT_TAG:<commit>` only when the ref moved; carries the
     staging commit identity of its own."""
     g = _git_cmd(git, root)
     index = f"GIT_INDEX_FILE={quote(root)}/index-mutant"

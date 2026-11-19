@@ -29,6 +29,7 @@ from atlas_reviewer.bridge import (
     _pytest_argv,
     _run_status,
     _RunBlock,
+    _splice,
     mutant_outcome,
     parse_mutation,
     parse_run_blocks,
@@ -46,7 +47,7 @@ from atlas_reviewer.bridge_staging import (
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, FakeSprites, MemoryLedger
 from atlas_reviewer.local_runner import LocalSprites
-from atlas_reviewer.ports import StreamTimeoutError
+from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.telemetry import Telemetry
 
@@ -1515,9 +1516,12 @@ DESTRUCTIVE_TEST = (
 )
 
 CARRIER_TEST = (
+    "import os\n\n"
     "from calc import total\n\n"
+    "marker_predated_the_run = os.path.exists('baseline_marker.txt')\n"
     "open('baseline_marker.txt', 'w').write('the baseline ran here')\n\n\n"
-    "def test_two_values():\n    assert total([1, 2]) == 3\n"
+    "def test_marker_did_not_predate_the_run():\n"
+    "    assert not marker_predated_the_run\n"
 )
 
 TAMPER_TREES = {
@@ -1671,6 +1675,13 @@ def test_the_baseline_runs_writes_do_not_carry_into_the_mutant(tmp_path):
 
     report = bridge_run(tmp_path, body, source=source)[0]
     assert report.status is RunnerStatus.COMPLETED, report.note
+    # The carrier flips on the fresh copy: its test asserts the marker
+    # did NOT exist before the module imported -- true in a copy staged
+    # fresh (the fix), false in the baseline's dirty scratch (a dropped
+    # second staging, where the marker the baseline run wrote is still
+    # lying there and the test fails, turning the verdict KILLED). So the
+    # fix's SURVIVED verdict is the pin, and the marker read at MUTANT is
+    # the controller-side record of the clean tree.
     assert collected["mutate"].outcome is MutantOutcome.SURVIVED
     assert collected["marker"].status is not Status.OK
     assert "the baseline ran here" not in collected["marker"].content.text
@@ -1776,15 +1787,19 @@ def test_a_tampered_upload_stops_the_restage(tmp_path):
     def body(bridge):
         bridge.call("run_tests", {"path": "test_calc.py"})
         # The daemon the executed run left behind starts tampering with
-        # whatever is uploaded from here on.
+        # whatever is uploaded from here on. The call that follows is one
+        # of the tools that still read the runner's repository (the diff
+        # trio), so it re-stages first -- and the digest check stops the
+        # re-stage: `unavailable`, never a result built from attacker
+        # bytes.
         sprites.armed = True
-        collected["read"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        collected["diff"] = bridge.call("diff_stat", {})
         return "done"
 
     report = bridge_run(tmp_path, body, sprites=sprites, source=trees(SUITE))[0]
     assert report.status is RunnerStatus.COMPLETED, report.note
-    assert collected["read"].status is Status.UNAVAILABLE
-    assert "bridge staging failed" in collected["read"].error.text
+    assert collected["diff"].status is Status.UNAVAILABLE
+    assert "bridge staging failed" in collected["diff"].error.text
 
 
 def test_a_daemon_racing_the_edit_cannot_forge_the_recorded_mutant(tmp_path):
@@ -1828,8 +1843,9 @@ def test_a_daemon_racing_the_edit_cannot_forge_the_recorded_mutant(tmp_path):
         # The recorded mutant's id was minted from the tree the daemon's
         # write landed in; the re-stage re-applies the recorded mutation
         # to a clean copy and re-creates the id the splice alone produces,
-        # so the mismatch refuses the read.
-        collected["read"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        # so the mismatch refuses the next runner-side read -- a diff
+        # call, one of the tools that still read the repository.
+        collected["diff"] = bridge.call("diff_stat", {})
         return "done"
 
     report = bridge_run(
@@ -1839,6 +1855,257 @@ def test_a_daemon_racing_the_edit_cannot_forge_the_recorded_mutant(tmp_path):
 
     assert report.status is RunnerStatus.COMPLETED, report.note
     assert collected["mutate"].status is Status.OK
-    assert collected["read"].status is Status.UNAVAILABLE
-    assert "differs from the recorded one" in collected["read"].error.text
+    assert collected["diff"].status is Status.UNAVAILABLE
+    assert "differs from the recorded one" in collected["diff"].error.text
     assert MUTATION_SCRIPT  # the marker the racer keys on is the fixed script
+
+
+# --------------------------------------------- round 2: the between-call daemon
+
+
+DAEMON_LOADER = (
+    "import glob, os, time, zlib\n"
+    "\n"
+    "repo = os.path.join(os.environ['ATLAS_DAEMON_BRIDGE'], 'repo.git')\n"
+    "deadline = time.time() + 30\n"
+    "while time.time() < deadline:\n"
+    "    for path in glob.glob(os.path.join(repo, 'objects', '[0-9a-f][0-9a-f]', '*')):\n"
+    "        try:\n"
+    "            raw = open(path, 'rb').read()\n"
+    "            data = zlib.decompress(raw)\n"
+    "        except (OSError, zlib.error):\n"
+    "            continue\n"
+    "        if b'sum(xs)' in data:\n"
+    "            forged = data.replace(b'return sum(xs)', b'return 999  # DAEMON')\n"
+    "            tmp = path + '.tmp'\n"
+    "            open(tmp, 'wb').write(zlib.compress(forged))\n"
+    "            os.replace(tmp, path)\n"
+)
+
+DAEMON_CONFTEST = (
+    "import os, subprocess, sys\n"
+    "from pathlib import Path\n"
+    "\n"
+    "BRIDGE = Path(__file__).resolve().parents[2]\n"
+    "LOADER = " + repr(DAEMON_LOADER) + "\n"
+    "\n"
+    "def pytest_configure(config):\n"
+    "    subprocess.Popen(\n"
+    "        [sys.executable, '-c', LOADER],\n"
+    "        start_new_session=True,\n"
+    "        stdout=subprocess.DEVNULL,\n"
+    "        stderr=subprocess.DEVNULL,\n"
+    "        stdin=subprocess.DEVNULL,\n"
+    "        env={**os.environ, 'ATLAS_DAEMON_BRIDGE': str(BRIDGE)},\n"
+    "    )\n"
+)
+
+DAEMON_SUITE = {
+    "calc.py": CALC.encode(),
+    "test_calc.py": TEST_TOTAL.encode(),
+    "conftest.py": DAEMON_CONFTEST.encode(),
+}
+
+
+def test_a_detached_daemon_cannot_reach_a_later_read_or_run(tmp_path):
+    """Round 2's B1 (the review's probe, as a fixture): a PR test spawns a
+    daemon detached from its exec's process group (`start_new_session`),
+    which keeps re-forging the `calc.py` loose blob in place for as long
+    as it lives. The sweep that precedes every re-stage and every
+    execution kills it and verifies none remain, the re-stage rebuilds
+    from the controller-held tarballs, and the content reads are answered
+    from the controller's own copy -- so the reads, the diff and the next
+    run are all genuine. (At the pre-sweep head this test fails: the
+    daemon outlives every exec and both post-re-stage reads serve its
+    forgery.)"""
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["before"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["daemon_run"] = bridge.call("run_tests", {"path": "test_calc.py"})
+        # Two reads, each preceded by a sweep and (an execution having
+        # run) a re-stage: the daemon's window is what these close.
+        out["read1"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["read2"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["diff"] = bridge.call("diff_stat", {})
+        out["run2"] = bridge.call("run_tests", {})
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(
+        tmp_path,
+        body,
+        source=trees(
+            DAEMON_SUITE, base={"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+        ),
+    )[0]
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    for name in ("before", "read1", "read2"):
+        result = collected[name]
+        assert result.status is Status.OK
+        assert result.content.text == CALC
+    assert "DAEMON" not in collected["read2"].content.text
+    # The diff still reads the real repository: the sweep and the
+    # re-stage healed it before the read.
+    assert collected["diff"].status is Status.OK
+    assert "calc.py" in collected["diff"].content.text
+    # And the next execution runs the real tree: the daemon's forgery
+    # would fail the real test.
+    (run2,) = collected["run2"].runs
+    assert collected["run2"].status is Status.OK and run2.exit == 0
+    assert run2.summary is not None and run2.summary.count("passed") == 1
+
+
+def test_the_sweep_kills_a_runner_descendant(tmp_path):
+    """The local sweep's contract, on a real process: a child the runner
+    process spawned -- the daemon shape, detached into its own session --
+    is killed and reaped by the sweep, and the sweep stays clean."""
+    import time as time_module
+
+    sprites = LocalSprites()
+    daemon = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        assert daemon.poll() is None
+        sprites.sweep("cqa-sweep-test")
+        deadline = time_module.monotonic() + 5
+        while daemon.poll() is None and time_module.monotonic() < deadline:
+            time_module.sleep(0.05)
+        assert daemon.poll() is not None  # killed and reaped
+    finally:
+        if daemon.poll() is None:  # pragma: no cover - only on a failed sweep
+            daemon.kill()
+            daemon.wait()
+
+
+def test_the_sweep_fails_closed_on_a_survivor():
+    """A sweep that cannot clear the runner's strays is a fail-closed
+    boundary error -- the `unavailable` gap -- never a silent pass."""
+    import os as os_module
+
+    class Haunted(LocalSprites):
+        def _stray_descendants(self):
+            return {os_module.getpid() + 4_194_304}
+
+    with pytest.raises(BoundaryError, match="survivor"):
+        Haunted().sweep("cqa-haunted")
+
+
+def test_the_live_sweep_answer_is_parsed_fail_closed():
+    """The live sweep script's answer is controller-parsed: clean passes,
+    a survivor count or a failed or missing answer is a boundary error."""
+    from atlas_reviewer.runner import parse_sweep
+
+    parse_sweep(0, "atlas-sweep:clean\n")
+    with pytest.raises(BoundaryError, match="survivor"):
+        parse_sweep(1, "atlas-sweep:survivors:2\n")
+    with pytest.raises(BoundaryError, match="failed"):
+        parse_sweep(1, "sh: id: not found\n")
+    with pytest.raises(BoundaryError, match="failed"):
+        parse_sweep(0, "nothing the sweep would print\n")
+
+
+def test_the_live_sweep_script_excludes_its_own_ancestry():
+    """The uid scope the live sweep kills under excludes the exec chain
+    the sweep itself runs in: the script walks `PPid` to init and skips
+    every pid on it, skips zombies, and verifies with a second scan whose
+    survivor count is the fail-closed marker."""
+    from atlas_reviewer.runner import SWEEP_TAG, sweep_script
+
+    script = sweep_script()
+    assert 'ancestors="$ancestors $p"' in script
+    assert "p=$(awk '/^PPid:/{print $2}' /proc/$p/status" in script
+    assert '"$state" = Z' in script
+    assert 'kill -9 "$pid"' in script
+    assert f'echo "{SWEEP_TAG}:survivors:$survivors"' in script
+    assert f'echo "{SWEEP_TAG}:clean"' in script
+
+
+def test_the_content_tools_answer_without_the_runner(tmp_path):
+    """The round-2 decision's structural half: `read_file`, `grep` and
+    `list_files` are answered from the controller's own copy and never
+    exec -- a runner that refuses every exec still serves them, and a
+    diff call (which still reads the runner) is the `unavailable` gap."""
+
+    class NoExec(LocalSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            script = argv[-1]
+            # The lifecycle scripts (resolve, staging, uploads, sweeps,
+            # the hold) still run; the read tools' git invocations are
+            # what must never be needed for a content answer.
+            if any(
+                token in script
+                for token in ("cat-file", "grep -z", "ls-tree -r", "--find-renames")
+            ):
+                raise BoundaryError("the runner must not be exec'd for a content read")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        out["read"] = bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"})
+        out["grep"] = bridge.call("grep", {"pattern": "sum(xs)"})
+        out["list"] = bridge.call("list_files", {})
+        out["diff"] = bridge.call("diff_stat", {})
+        collected.update(out)
+        return "done"
+
+    report = bridge_run(
+        tmp_path, body, sprites=NoExec(),
+        source=trees(SUITE, base={"calc.py": b"def total(xs):\\n    return sum(xs)\\n"}),
+    )[0]  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["read"].status is Status.OK
+    assert collected["read"].content.text == CALC
+    assert collected["grep"].status is Status.OK
+    assert "sum(xs)" in collected["grep"].content.text
+    assert collected["list"].status is Status.OK
+    assert "calc.py" in collected["list"].content.text
+    # The runner-reading tools fail closed when their exec is refused.
+    assert collected["diff"].status is Status.UNAVAILABLE
+    assert "must not be exec'd" in collected["diff"].error.text
+
+
+def test_the_controller_splice_matches_the_runner_script(tmp_path):
+    """One splice semantics for the runner's mutant commit and the
+    controller's mutant map: for every fixture shape, `_splice`'s mutated
+    bytes and before/after are exactly what `MUTATION_SCRIPT` writes and
+    prints."""
+    shapes = (
+        (CALC, 2, "negate-condition"),
+        (CALC, 2, "remove-guard"),
+        (REQUIRE, 2, "negate-condition"),
+        (REQUIRE, 2, "remove-guard"),
+        (
+            "def spin(n):\n    while n > 0:\n        n -= 1\n    return n\n",
+            2,
+            "negate-condition",
+        ),
+        ("def pick(n):\n    return 1 if n else 2\n", 2, "negate-condition"),
+        (
+            "def pick(n):\n    if (\n        n\n    ):\n        return 1\n    return 2\n",
+            2,
+            "negate-condition",
+        ),
+        ("x = 1\n", 1, "remove-guard"),  # not applicable: both refuse
+    )
+    for text, line, operator in shapes:
+        result, path = edit(tmp_path, text, line, operator)
+        status, rest = payload_of(result)
+        spliced = _splice(text.encode(), line, operator)
+        if status == "no":
+            assert spliced is None, (text, line, operator)
+            continue
+        assert spliced is not None
+        before_b64, after_b64 = rest.split(" ")
+        mutated, before, after = spliced
+        assert path.read_bytes() == mutated, (text, line, operator)
+        assert base64.b64decode(before_b64).decode() == before
+        assert base64.b64decode(after_b64).decode() == after

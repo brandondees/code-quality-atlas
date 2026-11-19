@@ -4259,9 +4259,12 @@ commit (the next `read_file` at MUTANT served the attacker's file),
 replaced `trees/head` wholesale (the next `mutate` staged, mutated,
 committed and quoted the attacker's content as the head file's), and
 deleted `trees` (the next call mislabeled the shell's exit as a test
-result). The probes also established what survives: forging a loose
-object **at its SHA** is rejected by git's read-path hash check, so
-commit-id-addressed reads keep their integrity. The fix takes the
+result). The round-1 fix then leaned on what the probe read as
+survival: forging a loose object **at its SHA** looked rejected by git's
+read-path hash check, so commit-id-addressed reads looked sound.
+*(Rejected by the round-2 entry below — git does not re-verify a loose
+object on read — and the re-stage from the controller-held tarballs is
+what closes it.)* The fix takes the
 strongest option that fits the fakes and the `LocalSprites` seam — no
 new users, mounts or binaries, only git plumbing the staging already
 trusts. Every execution copy is now staged **from the bare repository's
@@ -4328,3 +4331,54 @@ in one regression fixture (the forged ref, the replaced `trees`, the
 in-place object overwrite, twice); six more mutants die on named tests.
 No live model, Sprite or GitHub call; no secret read; no deployed
 setting changed.
+
+## 2026-11-18 — #752 round 2 fix: the between-call daemon loses — controller-side content reads, and a verified sweep before every re-stage and execution
+
+The round-2 review's Blocker (Brandon's round-3 thread, reproduced
+independently by the reviewer's probe): a PR test spawns a daemon
+detached from its exec's process group (`start_new_session=True`); the
+daemon outlives every exec and every re-stage and re-forges the
+`calc.py` loose blob every 20ms, so a read that came after its own
+successful re-stage still served the forgery, and the next execution ran
+the daemon's tree. The re-stage closes every timestamped tamper; it
+cannot close a window against a process still alive when the rebuild
+ends. The owner's decision: both halves, no owned residual. (1) The
+file-content reads moved to the controller: `read_file`, `grep` and
+`list_files` answer from the controller's own extraction of the tarballs
+it already holds (`_tree_files`), MUTANT from the recorded mutation's
+splice applied to that copy (`_splice`, the controller-side form of
+`MUTATION_SCRIPT`, parity pinned by
+`test_the_controller_splice_matches_the_runner_script`); they never exec
+(`test_the_content_tools_answer_without_the_runner` pins it against a
+runner that refuses every exec). The diff trio still reads the runner's
+repository — its integrity rests on the sweep plus the finding gate's
+controller-held quotes, and that reliance is recorded, not hidden. (2) A
+stray-process sweep (`Session.sweep`) precedes every re-stage and every
+execution: the live sweep kills every process of the execution user
+except the exec chain's own ancestors (a `/proc` walk of `PPid` to init;
+zombies skipped), waits, verifies with a second scan, and fails closed
+on a survivor (`parse_sweep` → `BoundaryError` → `unavailable`). The
+uid scope on a real Sprite is reasoned from the single-review
+disposable-runner model and has NOT been observed on a live Sprite (the
+offline rules forbid the observation); the LOCAL sweep is the testable
+stand-in and is scoped differently of necessity — the test machine's
+other work shares the uid — so `LocalSprites` sets
+`PR_SET_CHILD_SUBREAPER` (every orphan its execs leave becomes a direct
+child of the runner process), reaps, kills its descendants, reaps again,
+and fails closed (`test_the_sweep_kills_a_runner_descendant`,
+`test_the_sweep_fails_closed_on_a_survivor`). Neither sweep keys on the
+environment, so a daemon that scrubs its own environment is inside the
+live sweep's uid scope and outside no layer. The daemon probe is the
+regression test
+(`test_a_detached_daemon_cannot_reach_a_later_read_or_run`): reads, the
+diff and the next execution all genuine after the daemon's run — and it
+fails at the pre-sweep head (`85c101ed`, three consecutive runs) and
+passes at the fixed head (six). The sweep mutants die on it (the
+executions' sweep dropped, the re-stage's sweep dropped — the diff then
+serves the daemon's forgery); the controller-side dispatch's mutant dies
+on the no-exec test; and F2's second staging finally has a carrier that
+flips the verdict (the old one was satisfiable by the detection path;
+M-E now dies). F12: the two comments claiming git verifies a loose
+object on read are corrected to name what actually protects the
+content — the re-stage and the re-created-id check. No live model,
+Sprite or GitHub call; no secret read; no deployed setting changed.
