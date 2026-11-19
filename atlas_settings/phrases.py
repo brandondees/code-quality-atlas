@@ -80,6 +80,16 @@ CAP_STATEMENT = (
     "either way — whichever bound is stricter governs each review."
 )
 
+# The daily-cap refusal, the phrase `config.parse_daily_cap` raises with.
+# The bound it names ($10000) is `config.MAX_CAP_USD`; the test pins the
+# two together so they cannot drift.
+CAP_REFUSED = (
+    "the daily cap must be a dollar amount between $0.01 and $10000 "
+    "with at most two decimal places, or empty to clear it (no cap set "
+    "means none applies; the per-repo daily budget and the operator's "
+    "max per review remain the outer bounds either way)"
+)
+
 # The fixed texts whose words a tenant key must not collide with (D89's
 # r2 record, n-c: refusing colliding keys is part B's intake check). The
 # service's fixed refusals are the log text that is guaranteed to
@@ -88,6 +98,7 @@ REDACTION_GUARD_TEXTS: tuple[str, ...] = (
     CONSENT_STATEMENT,
     CONSENT_PROMPT,
     CONSENT_REFUSED,
+    CONSENT_UNCHECKED,
     ADMIN_REFUSED,
     GATE_REFUSED,
     CSRF_REFUSED,
@@ -96,7 +107,12 @@ REDACTION_GUARD_TEXTS: tuple[str, ...] = (
     LOGIN_FAILED,
     GITHUB_CHECK_FAILED,
     DELETE_CONFIRM_PROMPT,
+    DELETE_MISMATCH,
     CAP_STATEMENT,
+    CAP_REFUSED,
+    STORE_REFUSED_PREFIX,
+    ENDPOINT_REFUSED_PREFIX,
+    MODEL_REFUSED_PREFIX,
     CONSENT_REQUIRED,
     STORE_BROKEN,
     BUDGET_REACHED,

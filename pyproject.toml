@@ -82,7 +82,8 @@ max-complexity = 15
 files = ["tooling", "atlas_reviewer", "atlas_settings"]
 # The tests and the sample-pr fixture's source trees (including a PR's own
 # sample modules, which can repeat a name across trees) are data, not the
-# annotated package.
+# annotated package: tests/, atlas_reviewer/tests/ and atlas_settings/tests/
+# are all out of scope by the exclude below.
 exclude = ["^atlas_reviewer/tests/", "^atlas_reviewer/fixtures/", "^atlas_settings/tests/"]
 python_version = "3.12"
 warn_unused_ignores = true
