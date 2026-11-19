@@ -155,7 +155,10 @@ from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, snapshot_digest
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
 from atlas_reviewer.repo_config import RepoConfig, read_repo_config
-from atlas_reviewer.review_wide import derive_review_wide
+from atlas_reviewer.review_wide import (
+    derive_review_wide,
+    operator_repo_ceiling_max,
+)
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -855,6 +858,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             "--lens-script is a dry-run fixture; live mode calls the real model"
         )
     limits = _agentic_limits(args, env)
+    ceiling_max = _ceiling_max(env)
     event = load_event(Path(args.event))
     _check_out_path(args.out)
     with _review_lock(args, env), ExitStack() as claims:
@@ -944,7 +948,12 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # The derivation's refusals are planned-count independent (D68;
         # round-1 review of #717, m-3): validate them here, before the
         # picker can spend, so a misconfiguration is a clean usage error
-        # and not a traceback after a billed picker call.
+        # and not a traceback after a billed picker call. S9's operator
+        # clamp is not applied to this validation value: it only lowers
+        # dollars, and every refusal the derivation raises is
+        # planned-count independent, so the clamp cannot change the
+        # verdict -- the coordinator applies the clamp where the review
+        # actually derives its limits.
         try:
             derive_review_wide(limits, 1, repo_ceiling=config.ceiling.value)
         except ValueError as exc:
@@ -1121,6 +1130,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     ),
                     delta=delta,
                     path_ranks=path_ranks,
+                    operator_ceiling_max=ceiling_max,
                 )
                 review = replace(
                     review,
@@ -1231,6 +1241,16 @@ def _live_github(
     tokens = _review_tokens(env, event, args.include_issues, transport)
     credentials.register(tokens.secrets)
     return GitHubClient(transport, tokens)
+
+
+def _ceiling_max(env: Mapping[str, str]) -> Decimal:
+    """The operator max per review (config slice S9), validated with the
+    other limits so an unusable operator setting is a clean usage error
+    before anything runs."""
+    try:
+        return operator_repo_ceiling_max(env)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
 
 
 def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]) -> AgenticLimits:

@@ -23,10 +23,17 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from atlas_reviewer.budget import (
+    DEFAULT_REPO_DAILY_BUDGET_USD,
+    SKIP_BUDGET_REASON,
+    DailySpend,
+    repo_daily_budget_usd,
+)
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.head_change import (
@@ -37,11 +44,13 @@ from atlas_reviewer.head_change import (
     POLICY_CANCEL,
     POLICY_KEEP,
     Decision,
+    Progress,
     PushClass,
     cancel_fraction,
     classify_delivery,
     decide,
     head_change_policy,
+    last_run_progress,
     read_progress,
 )
 from atlas_reviewer.ledger import make_private_dirs
@@ -52,6 +61,7 @@ from atlas_reviewer.repo_config import (
     PostConfigRead,
     parse_post_config,
 )
+from atlas_reviewer.review_wide import operator_repo_ceiling_max
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
@@ -210,6 +220,13 @@ class ServiceConfig:
     # cancel branch compares the lens and spend fractions against.
     head_change_policy: str = POLICY_KEEP
     cancel_fraction: float = DEFAULT_CANCEL_FRACTION
+    # The per-tenant daily spend bound (config slice S9, D81): the
+    # operator's per-repo daily budget, the decided $100 default. The
+    # per-installation daily cap rides the same check through
+    # `DailySpend.cap_for`; the operator max per review
+    # (`ATLAS_REPO_CEILING_MAX_USD`) is the child's clamp and is validated
+    # here but read there from the environment.
+    repo_daily_budget_usd: Decimal = DEFAULT_REPO_DAILY_BUDGET_USD
 
     def __post_init__(self) -> None:
         if len(self.secret) < 16:
@@ -258,6 +275,13 @@ class ServiceConfig:
             or not 0.0 <= self.cancel_fraction <= 1.0
         ):
             raise ServiceError("the cancel fraction must be between 0.0 and 1.0")
+        if (
+            isinstance(self.repo_daily_budget_usd, bool)
+            or not isinstance(self.repo_daily_budget_usd, Decimal)
+            or not self.repo_daily_budget_usd.is_finite()
+            or self.repo_daily_budget_usd <= 0
+        ):
+            raise ServiceError("the repo daily budget must be a positive dollar amount")
 
 
 @dataclass(frozen=True)
@@ -279,6 +303,7 @@ def handle_delivery(
     classifier: PushClassifier | None = None,
     telemetry: Telemetry | None = None,
     admission_reader: AdmissionReader | None = None,
+    spend: DailySpend | None = None,
 ) -> HttpResult:
     """One HTTP request. A bad signature is refused. Everything else that
     is not a queued review is acknowledged so GitHub does not keep the
@@ -302,6 +327,24 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
+        # The per-tenant daily bounds (config slice S9, D81) refuse before
+        # any GitHub read: a repo over its day's budget -- or over its
+        # installation's daily cap, when one is set -- costs no admission
+        # read and no review, and the refusal is recorded, never silent.
+        # The check runs again at preflight, inside the worker, because a
+        # delivery can sit queued while the day's total is spent.
+        if spend is not None:
+            refusal, gap = spend.refusal(
+                decision.event.repo, _delivery_installation(payload)
+            )
+            if refusal:
+                _record(
+                    telemetry,
+                    "review skipped",
+                    {**_fields(decision.event), "reason": SKIP_BUDGET_REASON},
+                    error=f"{refusal} ({gap})" if gap else refusal,
+                )
+                return HttpResult(202, b"ignored\n", f"ignored:{SKIP_BUDGET_REASON}")
         # The handler's GitHub reads -- the admission read and, when a
         # review is running, the head-change classification -- share one
         # overall budget, so the two together cannot hold the handler
@@ -388,6 +431,19 @@ def _repo_admission(
 
 
 PushClassifier = Callable[[PrEvent, PrEvent], PushClass]
+
+
+def _delivery_installation(payload: Mapping[str, Any]) -> str:
+    """The delivery's App installation id, the key the per-installation
+    daily cap is looked up by (config slice S9/S10), or the empty string
+    when the payload's shape does not carry one. The id is read from the
+    payload when GitHub sent it and never guessed; the cap's value is
+    S10's store, whose S9 provider answers None for every id."""
+    installation = payload.get("installation")
+    ident = installation.get("id") if isinstance(installation, dict) else None
+    if isinstance(ident, int) and not isinstance(ident, bool) and ident > 0:
+        return str(ident)
+    return ""
 
 
 def _admit_to_queue(
@@ -575,6 +631,85 @@ def _progress_paths(state_root: Path, running: PrEvent) -> tuple[Path, ...]:
     return (events.with_name(events.name + ".1"), events)
 
 
+def _backfill_crashed_spend(
+    spend: DailySpend | None,
+    state_root: Path,
+    event: PrEvent,
+    telemetry: Telemetry | None,
+) -> None:
+    """Backfill one crashed attempt's committed spend onto the day's
+    ledger (r1 review of #773, M1).
+
+    A review whose process died before the worker could settle it never
+    reached the settle-time spend recording, so its committed spend --
+    the child's own token-counts-times-price-table accounting, from the
+    progress records the crash left in the run directory -- is appended
+    before the retry appends over it, exactly once. The events file is
+    append-only across a head's attempts, so the figure is scoped to the
+    crashed attempt's own span (`head_change.last_run_progress`: the
+    run-start line plus that run's progress records): a retry that
+    appended its startup events and died before its first progress
+    record has no figure of its own, and the previous attempt's stale
+    tail is not re-counted (r2 review of #773, M-R2-1).
+
+    No run directory at all is the ordinary first run of a head -- or a
+    pending head that was re-queued without ever having run -- and is
+    silent. A directory left behind with no figure of the crashed
+    attempt's own records nothing, and the gap is named on the
+    telemetry, where the unrecorded possibility stays visible -- the
+    overshoot bound carries it the way it carries the race. An
+    over-count, were one ever to land, fails safe: it makes the bounds
+    refuse earlier, never later. A recovery that crosses the UTC
+    boundary backfills into the recovery day's ledger -- the day the
+    retry is admitted under -- which is the same safe direction."""
+    if spend is None:
+        return
+    paths = _progress_paths(state_root, event)
+    if not run_dir(state_root, event).is_dir():
+        return
+    evidence = last_run_progress(*paths)
+    fields: dict[str, str | int] = dict(_fields(event))
+    if evidence is None:
+        _record(
+            telemetry,
+            "crashed spend",
+            fields,
+            error=(
+                "the crashed attempt's run directory holds no progress "
+                "figure of its own; its spend, if any, is unrecorded "
+                "(the overshoot bound carries it)"
+            ),
+        )
+        return
+    progress, key = evidence
+    fields.update(
+        {
+            "calls": progress.calls,
+            "committed_usd": str(progress.committed_usd),
+            "measured": "backfilled",
+        }
+    )
+    try:
+        appended, gap = spend.record_once(
+            event.repo, progress.committed_usd, progress.calls, key
+        )
+    except OSError as exc:
+        _record(
+            telemetry,
+            "crashed spend",
+            fields,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return
+    if gap:
+        fields["measured"] = "unknown"
+        _record(telemetry, "crashed spend", fields, error=gap)
+        return
+    if not appended:
+        fields["measured"] = "already recorded"
+    _record(telemetry, "crashed spend", fields)
+
+
 def _header(headers: Mapping[str, str], name: str) -> str | None:
     lowered = {key.lower(): value for key, value in headers.items()}
     return lowered.get(name.lower())
@@ -593,6 +728,8 @@ class Worker:
         concurrency: int = 1,
         state_root: Path | None = None,
         now: Callable[[], float] | None = None,
+        spend: DailySpend | None = None,
+        installation: str = "",
     ) -> None:
         self._board = board
         self._runner = runner
@@ -604,6 +741,15 @@ class Worker:
         self._random = random.random
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        # The per-tenant daily bounds (config slice S9, D81): the
+        # preflight re-check runs here, inside the worker, because a
+        # delivery can sit queued while the day's total is spent; the
+        # spend recording rides the settle-time cost event. The
+        # installation id is the configured one -- at preflight the
+        # payload is long gone; admission resolves it from the payload
+        # when GitHub sent it.
+        self._spend = spend
+        self._installation = installation
 
     def healthy(self) -> bool:
         """False once a worker thread has died. ``/health`` then fails
@@ -694,9 +840,18 @@ class Worker:
         and a redelivery of that
         head is answered duplicate, so without the recovery it is never
         reviewed. Runs on every worker pass; it installs only when there
-        is something to install."""
+        is something to install. Before each head is re-queued, the
+        crashed attempt's own committed spend is backfilled onto the
+        day's ledger once (r1 review of #773, M1) -- a pending head that
+        never ran has no run directory and is passed over silently; the
+        pre-runner pass in `_execute` covers the head a plain crash left
+        running, which the queue's own reload re-queues without ever
+        reaching this loop."""
         try:
             for event in self._board.recover_pending():
+                _backfill_crashed_spend(
+                    self._spend, self._state_root, event, self._telemetry
+                )
                 self._telemetry.record("service", "follow-up queued", _fields(event))
         except Exception as exc:  # noqa: BLE001 -- recovery must not kill the worker
             self._telemetry.record(
@@ -743,16 +898,41 @@ class Worker:
         )
 
     def _execute(self, job: Job) -> None:
+        fields = _fields(job.event)
+        if self._spend is not None:
+            # The crash backfill runs before the preflight check, so a
+            # crashed attempt's spend counts against the bounds the retry
+            # is admitted under, and before the runner starts, so the
+            # evidence it reads is still the crashed attempt's.
+            _backfill_crashed_spend(
+                self._spend, self._state_root, job.event, self._telemetry
+            )
+            refusal, gap = self._spend.refusal(job.event.repo, self._installation)
+            if refusal:
+                # The preflight re-check (config slice S9): the delivery
+                # was admitted under a total that has since been spent.
+                # The review never starts, nothing is posted, and the
+                # record says plainly what refused it.
+                self._telemetry.record(
+                    "service",
+                    "review skipped",
+                    {**fields, "reason": SKIP_BUDGET_REASON},
+                    status=ERROR,
+                    error=f"{refusal} ({gap})" if gap else refusal,
+                )
+                committed = self._settle(job, JobState.FAILED)
+                if committed is JobState.SUPERSEDED:
+                    self._note(job, committed, fields)
+                return
         self._telemetry.record(
             "service",
             "runner named",
-            {**_fields(job.event), "runner": event_runner_name(job.event)},
+            {**fields, "runner": event_runner_name(job.event)},
         )
         try:
             run = self._runner(job.event, job.cancel)
         except Exception as exc:  # noqa: BLE001 -- a review bug must not post
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
-        fields = _fields(job.event)
         if job.superseded:
             self._cost_event(job, None)
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
@@ -794,6 +974,7 @@ class Worker:
         the decision records and the cost records stays visible."""
         fields: dict[str, str | int] = dict(_fields(job.event))
         cost = review_cost(report) if report is not None else None
+        progress = None
         if cost is not None:
             fields.update(
                 {"calls": cost[0], "committed_usd": cost[1], "measured": "final"}
@@ -811,7 +992,47 @@ class Worker:
                 )
             else:
                 fields["measured"] = "unknown"
+        self._record_spend(job, cost, progress, fields)
         self._telemetry.record("service", "review cost", fields)
+
+    def _record_spend(
+        self,
+        job: Job,
+        cost: tuple[int, str] | None,
+        progress: object,
+        fields: dict[str, str | int],
+    ) -> None:
+        """Append the review's committed spend to the day's ledger (config
+        slice S9, D81). The figure is the review child's own committed
+        accounting -- reported token counts priced at the operator's price
+        table, never a tenant-reported dollar figure -- from the finished
+        draft's cost line, or from the last progress record when the
+        review did not finish; the final-over-partial precedence is
+        `_cost_event`'s by construction, which reads the progress record
+        only when the draft's cost line is absent, so this method never
+        sees both figures for one review. A review with no figure in
+        either records
+        nothing: the amount is never guessed, and the gap the cost event
+        carries is where the miss stays visible. A write failure is a
+        named gap and leaves the total short rather than wrong."""
+        if self._spend is None:
+            return
+        if cost is not None:
+            amount, calls = Decimal(cost[1]), cost[0]
+        elif isinstance(progress, Progress):
+            amount, calls = progress.committed_usd, progress.calls
+        else:
+            return
+        try:
+            self._spend.record(job.event.repo, amount, calls)
+        except OSError as exc:
+            self._telemetry.record(
+                "service",
+                "spend not recorded",
+                fields,
+                status=ERROR,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _publish(self, job: Job, report: ReviewReport) -> None:
         fields = _fields(job.event)
@@ -1146,6 +1367,7 @@ class _Handler(BaseHTTPRequestHandler):
             classifier=getattr(self.server, "classifier", None),
             telemetry=getattr(self.server, "telemetry", None),
             admission_reader=getattr(self.server, "admission_reader", None),
+            spend=getattr(self.server, "spend", None),
         )
         self._send(result.status, result.body)
         route = self.path.split("?", 1)[0][:200]
@@ -1207,6 +1429,7 @@ class ReviewServer(ThreadingHTTPServer):
     classifier: PushClassifier | None = None
     telemetry: Telemetry | None = None
     admission_reader: AdmissionReader | None = None
+    spend: DailySpend | None = None
 
     def __init__(
         self,
@@ -1266,6 +1489,10 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         deadline_s = service_deadline(env, mode=mode)
         policy = head_change_policy(env)
         fraction = cancel_fraction(env)
+        budget = repo_daily_budget_usd(env)
+        # Validated here so a mistyped per-tenant bound stops the service
+        # at boot, not the first review that reads it in the child.
+        operator_repo_ceiling_max(env)
     except ValueError as exc:
         raise ServiceError(str(exc)) from exc
     return ServiceConfig(
@@ -1281,6 +1508,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         deadline_s=deadline_s,
         head_change_policy=policy,
         cancel_fraction=fraction,
+        repo_daily_budget_usd=budget,
     )
 
 
@@ -1348,6 +1576,7 @@ def serve(
     admission_reason: str = "",
     post_config_fetcher: PostConfigFetcher | None = None,
     post_config_reason: str = "",
+    spend: DailySpend | None = None,
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
@@ -1355,6 +1584,12 @@ def serve(
     if not _state_is_writable(config.state_dir):
         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
         return 2
+    if spend is None:
+        # The per-tenant daily bounds (config slice S9, D81): production
+        # wires the decided default budget and the S9 cap provider -- no
+        # installation has a cap until S10's store lands, so none applies.
+        # A test passes its own to pin the refusal and a cap double.
+        spend = DailySpend(config.state_dir, config.repo_daily_budget_usd)
     board = Board(config.state_dir / "queue.json")
     redactor = Redactor(
         known_secrets=_service_secrets(config, env), sources=secret_sources
@@ -1393,17 +1628,21 @@ def serve(
             posting_publisher,
             config.concurrency,
             config.state_dir,
+            spend=spend,
+            installation=env.get("ATLAS_GITHUB_INSTALLATION_ID", ""),
         )
         server = ReviewServer(config, board, log)
         server.worker = worker
         server.classifier = classifier
         server.telemetry = telemetry
         server.admission_reader = admission_reader
+        server.spend = spend
         # A pending head stranded by a crash or a failed save (round-1
         # review of #747, F7) is queued here at boot, before any worker
         # runs, and the same recovery runs on the worker's idle passes.
         try:
             for event in board.recover_pending():
+                _backfill_crashed_spend(spend, config.state_dir, event, telemetry)
                 telemetry.record("service", "follow-up queued", _fields(event))
         except Exception as exc:  # noqa: BLE001 -- a failed boot recovery is the worker loop's problem
             log(f"atlas-reviewer: pending-head recovery failed: {exc}")
@@ -1441,6 +1680,7 @@ def serve(
             f" on {config.host}:{config.port};"
             f" concurrency {config.concurrency} (refuses above {MAX_CONCURRENCY});"
             f" repos {', '.join(sorted(config.allowlist))};"
+            f" repo daily budget ${config.repo_daily_budget_usd}"
             f" head-change policy {config.head_change_policy}"
             f" (cancel fraction {config.cancel_fraction:.0%})"
             + (

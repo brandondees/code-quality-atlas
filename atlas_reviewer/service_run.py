@@ -10,7 +10,10 @@ the model key, the Sprites token, a read-only installation token,
 ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``, ``ATLAS_ALLOW_SAFETY_RETENTION``,
 ``ATLAS_REQUIRE_ZDR``, ``ATLAS_KEY_CEILING_USD``, and the agentic limit
 variables (``agentic_config.ENV``, D68's derived limits and the $10
-per-review ceiling included). The agentic child also takes
+per-review ceiling included). The per-tenant bound the child clamps a
+repo-raised ceiling with, ``ATLAS_REPO_CEILING_MAX_USD`` (config slice
+S9), rides along too; the daily budget is the parent's own admission
+bound and is not passed. The agentic child also takes
 ``--round-log`` naming the per-pull-request round log on the volume
 (D74), outside the per-head run directory, so a later head of the same
 pull request reads the earlier rounds; the one-shot command takes no
@@ -62,6 +65,7 @@ from atlas_reviewer.openrouter import (
     ENV_REQUIRE_ZDR,
 )
 from atlas_reviewer.picker import FLOOR_TIER
+from atlas_reviewer.review_wide import ENV_REPO_CEILING_MAX_USD
 from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.verdict import parse_status
 
@@ -97,6 +101,9 @@ _CHILD_ALLOWED = frozenset(
         ENV_ALLOW_SAFETY_RETENTION,
         ENV_REQUIRE_ZDR,
         ENV_KEY_CEILING_USD,
+        # The per-tenant bound the child clamps a repo-raised ceiling with
+        # (config slice S9): a setting, not a credential.
+        ENV_REPO_CEILING_MAX_USD,
     }
     # The agentic limits (D68's per-lens knobs and the per-review dollar
     # ceiling included) ride along in both modes: the agentic child reads

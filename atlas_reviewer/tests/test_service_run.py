@@ -172,6 +172,8 @@ def test_the_child_receives_the_route_settings_and_the_agentic_limits():
         ENV_ALLOW_SAFETY_RETENTION: "true",
         ENV_REQUIRE_ZDR: "false",
         ENV_KEY_CEILING_USD: "4",
+        "ATLAS_REPO_CEILING_MAX_USD": "25",
+        "ATLAS_REPO_DAILY_BUDGET_USD": "100",
         "ATLAS_MAX_CALLS": "4",
         "ATLAS_MAX_TURNS": "4",
         "ATLAS_MAX_INPUT_TOKENS": "8000",
@@ -195,6 +197,11 @@ def test_the_child_receives_the_route_settings_and_the_agentic_limits():
     assert env[ENV_ALLOW_SAFETY_RETENTION] == "true"
     assert env[ENV_REQUIRE_ZDR] == "false"
     assert env[ENV_KEY_CEILING_USD] == "4"
+    # The per-tenant clamp variable rides along (config slice S9): the
+    # child clamps a repo-raised ceiling with it; the daily budget does
+    # not travel, because the parent enforces it.
+    assert env["ATLAS_REPO_CEILING_MAX_USD"] == "25"
+    assert "ATLAS_REPO_DAILY_BUDGET_USD" not in env
     for name in LIMIT_ENV.values():
         assert env.get(name) == parent.get(name)
     assert env["ATLAS_PER_LENS_CALLS"] == "50"

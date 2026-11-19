@@ -4650,3 +4650,265 @@ Offline only, same rules as the entries above; the full gate re-run on
 the rebased tree (both suites with the coverage floors, ruff, mypy,
 drift, markdownlint), and the r1 mutant set re-run plus the new
 overlap-wording mutant, all killed.
+
+## 2026-11-19 — Config slice S9: the per-tenant spend bounds — the operator max per review, the per-repo daily budget, and the per-installation daily cap (issue #767)
+
+The user-configuration plan's S9 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S9; the decisions are D81's 3:39, 5:13 and 5:51 PM CT updates, §8 Q1 and
+Q5, §7 decision 4). Offline only: the tests use fakes, temp files and the
+real CLI's dry run; no live model, Sprite or GitHub call was made, no
+secret was read, and no deployed service setting, Fly config value or
+secret changed.
+
+**The operator max per review clamps a repo raise, and the clamp is
+named.** `review_wide.clamp_repo_ceiling` sits beside D68's
+`resolve_ceiling` and uses the seam the resolution already documents: a
+repo's `review_ceiling_usd:` may still raise or lower its ceiling (D81
+Q2 keeps D68's semantics), but the value the review actually runs under
+cannot pass `ATLAS_REPO_CEILING_MAX_USD` (default $25, the decided
+5:13 PM CT value). Only a **repo-set** ceiling runs through the clamp --
+the operator's own configured ceiling and the default are the operator's
+own choices -- and the clamp is named in D68's ceiling note, with both
+figures schema-validated numbers. The variable rides the child env
+allowlist (`service_run._CHILD_ALLOWED`), is validated at service boot
+(`config_from_env`) and again where the child reads it (`cli`), and the
+coordinator composes the clamp into the derivation so the derived
+reservation cannot sit above the max either.
+
+**The daily budget refuses at admission and again at preflight.**
+`budget.DailySpend` is the day's committed-spend ledger and the bounds
+read against it: one append-only
+`<state root>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per
+UTC day, the owner and repo segments percent-encoded with every byte
+outside `[A-Za-z0-9]` escaped (so `a-b/c` and `a/b-c` are distinct files
+and the joining `-` is unambiguous), the date in the name making the UTC
+reset structural, a lost file losing only that day's total. The counted
+spend is the child's own committed accounting -- reported token counts
+priced at the operator's price table, from the finished draft's cost
+line, or from the last progress record when a review did not finish;
+a review with no figure in either records nothing and the gap stays on
+the cost telemetry -- never a tenant-reported dollar figure. A repo over
+its budget is refused in `handle_delivery` before any GitHub read, and
+re-checked in the worker before its review starts; the record carries the
+fixed reason label `daily-budget` and the plain text "skipped: daily
+budget reached", recorded as an error so it cannot read as a clean
+review. A spend file the service cannot parse holds the budget (the
+total reads unknown and the refusal stands) until repaired, with the gap
+named -- a ledger this service cannot read never opens the budget.
+
+**The per-installation daily cap is enforced against a narrow interface.**
+`budget.InstallationCap` is a function from installation id to cap-or-None;
+production wires `no_installation_cap` (always None) until S10's store
+lands, so until then the cap is unset and none applies. The id is
+resolved from the delivery payload at admission and from the configured
+`ATLAS_GITHUB_INSTALLATION_ID` at preflight; a test double pins the
+stricter-of-the-two rule (a refusal on either bound refuses), the unset
+cap meaning none applies, and the refusal's own plain text ("skipped:
+installation daily cap reached"). The race is accepted, not locked, as
+D81 names it: the bound is pinned by tests at the decided values -- 32
+in-flight admissions that all read an unspent total, then 32 x $25
+committed, land at $899.99 against the $100 + 32 x $25 = $900 bound, and
+the next admission after the spend is committed is the one refused, past
+the cap by the same bound.
+
+**Tests** (`atlas_reviewer/tests/test_budget.py` new; `test_review_wide.py`,
+`test_service_receive.py`, `test_service_run.py`, `test_cli.py`; each
+behavior a test that fails when reverted, each mutant applied by hand and
+killed): the encoding and file distinctness, the ledger's read-record-
+restart-reset cycle, the fail-closed unreadable ledger, the budget
+refusals and the plain records, the cap's stricter-wins and unset-means-
+none, the bounded race at the decided values, the clamp's scoping and
+note (unit, scripted-bridge draft, and the CLI dry run end to end), the
+child-allowlist ride-along, the boot and CLI validation of both operator
+variables, the preflight refusal, and the settle-time spend recording
+(final draft figure over a stale progress record, the failed review's
+partial figure, and the no-figure records-nothing rule). Twenty-seven
+mutants applied by hand, all killed: the segment escaping dropped, the
+unreadable-record fail-closed dropped, the at-the-budget boundary
+loosened (`>=` to `>`), the cap check dropped, an unset cap treated as a
+zero cap, a missing file treated as unknown, the budget variable
+ignored, the ledger's clock replaced with the wall clock, the recorded
+amount zeroed, the negative-amount refusal dropped, the clamp dropped,
+the operator default changed, the nonpositive refusal dropped, the clamp
+boundary loosened (`<=` to `<`), the clamp's env name dropped from the
+note, the coordinator's clamp composition dropped, the CLI's
+`operator_ceiling_max` wiring dropped, the admission check dropped, the
+installation-id resolution dropped, the preflight re-check dropped, the
+spend recording dropped, the recording's final-over-partial precedence
+swapped, the check-before-read ordering moved after the admission read,
+the boot validation dropped, the preflight's settle state changed, the
+unknown-total fail-closed dropped, and the child-allowlist ride-along
+dropped.
+
+**Overlap.** The shared files were kept additive for exactly the two
+rebases this entry's history now records: #752/#753 (D80) merged first
+and the branch rebased onto their main, then #772 (S5, D85) merged and
+the branch rebased again onto `3fed73d2` -- four conflicts, each one
+mechanical hunk, resolved by keeping both sides: the `path_ranks` and
+`operator_ceiling_max` parameter lines in `cli.py` and `coordinator.py`
+compose beside each other, and D85 precedes D86, closing the gap. The
+decisions the plan left open are recorded as **D86** in
+`docs/open-questions.md`: the clamp's scoping, the budget always-on
+default, the fail-closed unreadable ledger, the refusal records' shape
+and the preflight location, the spend-recording sources, and the cap
+interface's id resolution.
+
+## 2026-11-19 (same day) — #773 round 1: the crashed attempt's spend is backfilled, and the check order and the overlap text are pinned
+
+The r1 review of #773 approved with three Minors and six Nits; the fixes
+land in one commit on the branch rebased onto `3fed73d2` (#772 merged,
+D85 on main). The rebase's four conflicts were each one mechanical hunk,
+resolved by keeping both sides: the `path_ranks` and
+`operator_ceiling_max` parameter lines in `cli.py` and `coordinator.py`
+(the reviewer's trial rebase predicted exactly these), D85 before D86 in
+the decisions log -- closing the D85 gap -- and the S5 entry before the
+S9 entry in this log. Offline only, same rules as the entries above.
+
+**M1 — the crash under-count is backfilled (the owner's call:
+safety-first).** A review whose process died before the worker could
+settle it never reached the settle-time spend recording, so its
+committed spend read low. The fix backfills it from the progress figure
+the crashed attempt's run directory left behind -- the child's own
+token-counts-times-price-table accounting, the same source class the
+settle path uses -- at two hook points, because the two re-queue paths
+are different machinery: the recovery points (`Worker._recover` and the
+boot loop's `recover_pending`, before the head is re-queued) and the
+pre-runner pass in `Worker._execute`, which covers the head a plain
+crash left running -- that one is re-queued by the queue's own reload
+(`running` loads back as `queued`) and never passes through
+`recover_pending` at all. The backfill runs before the preflight check,
+so the crashed spend counts against the bounds the retry is admitted
+under, and before the runner starts, so the evidence it reads is still
+the crashed attempt's. The once is the ledger's own, not a marker file:
+`budget.DailySpend.record_once` dedupes on the evidence's content hash
+(`service._progress_evidence_key`), so a recovery that runs twice
+against the same crashed attempt -- a failed queue save puts the head
+back -- appends nothing the second time, while a retry that writes its
+own progress hashes differently and is recorded on its own; no crash
+between an append and a bookkeeping step can double-count, because the
+append is the only act. An attempt with no run directory at all is the
+ordinary first run (or a pending head re-queued without ever having
+run) and stays silent; a directory left behind with no readable
+progress figure records nothing and names the gap on the recovery's
+telemetry -- the remaining under-count, carried by the overshoot bound
+the way the race is, named in D86 and the README's "What is counted"
+section as the brief directed.
+
+**M2 — the check order is pinned.** `test_when_both_bounds_are_spent_
+the_record_names_the_budget` holds a total at or over both bounds and
+asserts the budget's text; the reviewer's swap-the-check-order mutant
+dies on it.
+
+**M3 — the overlap wording.** D86's and this entry's Overlap paragraphs
+now say what is true after the rebase: #772 merged, D85 precedes D86,
+and the four conflicts were the four mechanical hunks the reviewer's
+trial rebase found.
+
+**The nits.** N1 -- `_record_spend`'s docstring and D86's sentence no
+longer claim a precedence the method cannot exercise: the
+final-over-partial precedence is `_cost_event`'s by construction (the
+progress record is read only when the draft's cost line is absent), and
+the wording now says so; the behavior pin is unchanged. N2 --
+`test_a_boolean_installation_id_is_not_an_installation_id` pins the
+bool-id guard (the reviewer's mutant dies there). N3 --
+`test_a_queued_review_is_refused_at_preflight_by_the_installation_cap`
+exercises the cap double at the preflight re-check. N4 -- the README's
+spend-bounds section states that ledger files are kept indefinitely,
+with no retention, the same trade the per-PR round logs make. N5 --
+D86 records the placement call: the refusal rides S4's surface in
+`service.py`, not `service_admit.py` as the plan's file column named.
+N6 -- `DailySpend._append` writes the whole line to completion (a short
+`os.write` count is written again until the line is whole), and
+`test_the_ledger_write_completes_a_partial_write` drives a short first
+write through a patched `os.write` to pin it.
+
+**Tests** (`test_budget.py`, `test_service_receive.py`; each behavior a
+test that fails when reverted): the backfill and the retry's own spend
+(one test, the runner appending its own run's events to the same file,
+the way the real child does), the repeat recovery's no-op and its "already recorded" record,
+the no-figure gap and the ordinary first run's silence, the preflight
+cap refusal, the bool-id guard, the both-bounds ordering, the
+`record_once` key semantics at the ledger level (once per key, a
+different key recorded, no append onto an unreadable ledger, the key
+required), and the partial-write completion. Eight mutants applied by
+hand, all killed: the pre-runner backfill dropped, the backfill moved
+after the runner (the evidence read is then the retry's, and the total
+over-counts), the no-figure branch disabled (which crashes on the
+missing figure) and re-pointed at the gap text's absence, the
+`record_once` dedupe check dropped, the dedupe key dropped from the
+written record, the budget/cap check order swapped, the bool-id guard
+dropped, and the partial-write loop reduced to a single `os.write`.
+
+**Overlap.** The rebase's four conflicts are described above; the
+`coordinator.py` and `cli.py` hunks compose S5's `path_ranks` parameter
+beside this slice's `operator_ceiling_max` with no semantic
+interaction, and the decisions log now reads D80 through D86 with no
+gap.
+
+## 2026-11-19 (same day) — #773 round 2: the backfill's dedupe is attempt-scoped, and the append-only reality is what the docs say
+
+The r2 review of #773 approved with one Minor (M-R2-1, the stale-tail
+re-backfill) and two advisory nits the brief adopted as calls. Offline
+only, same rules as the entries above.
+
+**M-R2-1 — the stale tail cannot be re-counted.** The reviewer
+demonstrated the r1 keying's hole against the real code: the events file
+is append-only across a head's attempts (`JsonlSink` opens `O_APPEND`;
+`make_runner` clears nothing), so a retry that appended its startup
+events and died before its first progress record changed the whole-file
+hash while the newest progress record was still the previous attempt's
+-- one extra copy of that figure per occurrence, repeatable ($2.20
+demonstrated as $4.40 then $6.60). The fix scopes the dedupe to the
+crashed attempt's own span: `head_change.last_run_progress` delimits the
+events file's last run at its last ``seq: 1`` line (`seq` is the sink's
+per-run counter and restarts every run), merges the progress records
+inside that span only -- the same field-for-field newest-wins merge
+`read_progress` performs, over the same bounded tail, which also answers
+the advisory nit about the two readers agreeing on which record is
+newest -- and keys the ledger's `record_once` dedupe on that span (the
+run-start line hashed with the span's progress records). Appends never
+modify existing lines, so the pair is stable for one dead run forever
+and distinct across runs: a progress-less retry has no figure of its
+own, the previous attempt's stale tail is not its figure, and the backfill
+records nothing rather than re-counting -- one crashed attempt's spend
+lands exactly once, however many progress-less retries follow. The
+`read_progress` merge was lifted into a shared `_merge_progress` helper
+so the two readers cannot drift; `read_progress`'s behavior is
+unchanged, pinned by its existing tests. The r1 backfill test's fake
+runner now appends its own run's events to the same file the way the
+real child does (the r1 draft used `write_text`, modeling a mechanism
+production does not have), and the r1 entries' "overwrites" wording is
+corrected in place to the append reality -- in D86, the README's "What
+is counted" paragraph, and this log's r1 entry.
+
+**The two adopted nits.** The midnight crossing is the owner's call:
+keep recording a crashed attempt's spend on the recovery day's ledger --
+the day the retry is admitted under -- which is the safe direction, the
+spend counting against the retry's admission rather than escaping it;
+stated in D86 and the README. The over-count direction is stated in both
+places too: an over-count, were one ever to land, fails safe -- it makes
+the bounds refuse earlier, never later -- while every under-count path
+is fail-closed or named on the telemetry.
+
+**Tests** (`test_service_receive.py`, the r1 set re-shaped): the
+backfill test's runner appends its own run-start and progress lines (the
+ordering mutant still dies: a backfill after the runner reads the
+retry's span and over-counts); the new stale-tail test runs two
+progress-less retries after the crashed attempt and asserts $2.20
+exactly once, with the gap named on each retry's record; the new
+identical-progress test asserts a second attempt's byte-identical
+progress record -- `seq` restarts, so the fields can repeat exactly --
+is still recorded, keyed by its own run-start line. Four mutants applied
+by hand, all killed: the r1 whole-file keying restored (the stale-tail
+test), the span restriction dropped -- the file-wide newest progress
+returned as the last run's figure (the stale-tail test), the run-start
+line dropped from the key material (the identical-progress test, where
+the byte-identical figure would be deduplicated away), and every line
+accepted as a run start (the identical-progress test again, via the
+same collapse to a figure-only key).
+
+**Overlap.** The change is confined to `head_change.py` (the new
+`last_run_progress` and the shared `_merge_progress`; `read_progress`'s
+behavior unchanged), `service.py` (the backfill's read and its
+docstring), the two test files, and the three docs. No open PR touches
+these files; the branch stays two commits atop `3fed73d2`.

@@ -11,12 +11,14 @@ import sys
 import threading
 import time
 from dataclasses import replace as dataclass_replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from http.client import HTTPConnection
 from pathlib import Path
 
 import pytest
 
+from atlas_reviewer.budget import DailySpend, no_installation_cap, spend_file
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.redact import Redactor
@@ -118,6 +120,7 @@ def _deliver(
     classifier=None,
     telemetry=None,
     admission_reader=None,
+    spend=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
@@ -135,16 +138,18 @@ def _deliver(
         classifier=classifier,
         telemetry=telemetry,
         admission_reader=admission_reader,
+        spend=spend,
     )
 
 
-def _worker(board, runner, publisher=None, root=None, telemetry=None):
+def _worker(board, runner, publisher=None, root=None, telemetry=None, spend=None):
     return Worker(
         board,
         runner,
         telemetry or Telemetry(SystemClock()),
         publisher,
         state_root=root,
+        spend=spend,
     )
 
 
@@ -4568,3 +4573,564 @@ def test_the_wrapped_publisher_hands_the_poster_a_post_config_read():
     assert wrapped is not None
     wrapped(PrEvent(REPO, 7, SHA_A), REPORT)
     assert seen == [PostConfigRead(None, "brief", ())]
+
+
+# -------------------------------- the per-tenant daily bounds (S9, issue 767)
+
+
+_BUDGET_DAY = date(2026, 11, 19)
+
+
+def _spend(tmp_path, *, budget=Decimal("100.00"), cap=None):
+    """`cap` is an installation-id-keyed dict, the test double for S10's
+    installation store; None is the S9 production provider (no cap)."""
+    caps = cap or {}
+    return DailySpend(
+        tmp_path,
+        budget,
+        cap_for=(lambda installation: caps.get(installation))
+        if cap is not None
+        else no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+
+
+def test_a_repo_over_its_daily_budget_is_refused_at_admission(tmp_path):
+    """The done-when: a repo over its daily budget is refused with the
+    plain record -- the fixed reason label, the plain refusal text -- and
+    the delivery is acknowledged and ignored, never queued."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("100.0000"), 4)
+    result = _deliver(config, board, _body(), telemetry=telemetry, spend=spend)
+    assert result.status == 202
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert skips and skips[0].fields["reason"] == "daily-budget"
+    assert "skipped: daily budget reached" in skips[0].error
+
+
+def test_a_repo_under_its_daily_budget_is_queued(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("99.9900"), 4)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+
+
+def test_the_budget_check_runs_before_the_admission_read(tmp_path):
+    """A repo over its budget costs no GitHub read: the delivery is
+    refused before the default-branch REVIEW.md is fetched."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    reads = []
+
+    def reader(repo, branch):
+        reads.append(repo)
+
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("100.0000"), 4)
+    _deliver(config, board, _body(), admission_reader=reader, spend=spend)
+    assert reads == []
+
+
+def test_an_installation_over_its_daily_cap_is_refused_the_same_way(tmp_path):
+    """The cap double (S10's store stands in): an installation over its
+    admin's cap is refused with the cap's own plain record, and an
+    installation with no cap is not refused by one that has one."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path, cap={"1234": Decimal("50.00")})
+    spend.record(REPO, Decimal("50.0000"), 2)
+    body = json.dumps(
+        {
+            "action": "opened",
+            "installation": {"id": 1234},
+            "repository": {"full_name": REPO},
+            "pull_request": {
+                "number": 7,
+                "draft": False,
+                "updated_at": "2026-11-12T20:00:00Z",
+                "head": {"sha": SHA_A},
+                "base": {"repo": {"full_name": REPO}},
+            },
+        }
+    ).encode()
+    result = _deliver(config, board, body, telemetry=telemetry, spend=spend)
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert "skipped: installation daily cap reached" in skips[0].error
+    # A different installation with no cap set: none applies.
+    body_other = json.loads(body)
+    body_other["installation"] = {"id": 5678}
+    assert (
+        _deliver(
+            config,
+            board,
+            json.dumps(body_other).encode(),
+            spend=spend,
+        ).body
+        == b"queued\n"
+    )
+
+
+def test_an_unset_cap_leaves_the_budget_the_only_bound(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+    spend.record(REPO, Decimal("99.0000"), 1)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+
+
+def test_an_unreadable_spend_file_refuses_and_names_the_gap(tmp_path):
+    """Fail closed: a spend file the service cannot parse holds the
+    budget until it is repaired, and the record names the ledger gap
+    beside the plain refusal."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    path = spend_file(tmp_path, REPO, _BUDGET_DAY)
+    path.parent.mkdir(parents=True)
+    path.write_text("not a record\n", encoding="utf-8")
+    result = _deliver(
+        config, board, _body(), telemetry=telemetry, spend=_spend(tmp_path)
+    )
+    assert result.detail == "ignored:daily-budget"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert "skipped: daily budget reached" in skips[0].error
+    assert "unreadable record" in skips[0].error
+
+
+def test_a_queued_review_is_refused_again_at_preflight(tmp_path):
+    """The re-check: a delivery admitted while the day had room is
+    refused in the worker before the review starts, when the day's total
+    was spent in between. The runner never runs, nothing is posted, and
+    the record says plainly what refused it."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+    spend.record(REPO, Decimal("100.0000"), 4)
+    ran = []
+
+    def runner(event, cancel):
+        ran.append(event.head_sha)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    assert worker.run_one() is True
+    assert ran == []
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert skips and skips[0].fields["reason"] == "daily-budget"
+    assert "skipped: daily budget reached" in skips[0].error
+    published = [e for e in telemetry.events if e.step == "review finished"]
+    assert published == []
+
+
+def test_a_settled_review_records_its_committed_spend_on_the_days_ledger(tmp_path):
+    """The counting: the finished review's committed spend -- the child's
+    own token-counts-times-price-table figure from the draft's cost line
+    -- is appended to the day's file, and the next admission sees it. The
+    finished draft's figure is the one recorded, not a stale progress
+    record's partial."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 3,
+                    "settled_usd": "1.10",
+                    "committed_usd": "2.20",
+                    "reservation_usd": "10",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return ReviewRun(True, REPORT_COST)
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    _deliver(config, board, _body(), spend=spend)
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("3.40")
+    # The committed spend governs the next admission: enough reviews at
+    # the ceiling spend the day.
+    spend.record(REPO, Decimal("99.9900"), 1)
+    assert _deliver(config, board, _body(sha=SHA_B), spend=spend).detail == (
+        "ignored:daily-budget"
+    )
+
+
+def test_a_failed_review_records_the_spend_its_progress_recorded(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 3,
+                    "settled_usd": "1.10",
+                    "committed_usd": "2.20",
+                    "reservation_usd": "10",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("2.20")
+
+
+def test_a_review_with_no_cost_figure_records_nothing(tmp_path):
+    """The amount is never guessed: a review whose cost is in neither the
+    draft nor a progress record records nothing, and the gap the cost
+    event carries is where the miss stays visible."""
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal(0), "")
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    assert costs and costs[0].fields["measured"] == "unknown"
+
+
+def test_the_spend_records_survive_a_service_restart(tmp_path):
+    """The total lives on the state volume: a DailySpend built fresh over
+    the same state root -- what a restarted service constructs -- reads
+    the spend the previous process recorded."""
+    _spend(tmp_path).record(REPO, Decimal("40.0000"), 2)
+    spend = DailySpend(
+        tmp_path,
+        Decimal("100.00"),
+        today=lambda: _BUDGET_DAY,
+    )
+    assert spend.committed(REPO) == (Decimal("40.0000"), "")
+    assert spend.refusal(REPO, "") == ("", "")
+    spend.record(REPO, Decimal("60.0000"), 2)
+    assert spend.refusal(REPO, "") == ("skipped: daily budget reached", "")
+
+
+def test_config_from_env_parses_the_per_tenant_bounds(tmp_path):
+    env = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        "ATLAS_SERVICE_PROVIDER": "offline",
+    }
+    config = config_from_env(env)
+    assert config.repo_daily_budget_usd == Decimal("100.00")
+    custom = {**env, "ATLAS_REPO_DAILY_BUDGET_USD": "40"}
+    assert config_from_env(custom).repo_daily_budget_usd == Decimal(40)
+    for bad in ("abc", "0", "-5"):
+        with pytest.raises(ServiceError, match="ATLAS_REPO_DAILY_BUDGET_USD"):
+            config_from_env({**env, "ATLAS_REPO_DAILY_BUDGET_USD": bad})
+    # The child's clamp variable is validated at boot too.
+    with pytest.raises(ServiceError, match="ATLAS_REPO_CEILING_MAX_USD"):
+        config_from_env({**env, "ATLAS_REPO_CEILING_MAX_USD": "abc"})
+    ok = config_from_env({**env, "ATLAS_REPO_CEILING_MAX_USD": "30"})
+    assert ok.repo_daily_budget_usd == Decimal("100.00")
+
+
+# ------------------------------------------------- the crash backfill (M1)
+
+
+def _progress_record(committed: str, calls: int, seq: int = 2) -> str:
+    return json.dumps(
+        {
+            "seq": seq,
+            "phase": "progress",
+            "step": "lens settled",
+            "status": "ok",
+            "lens": "tracing",
+            "lenses_done": 1,
+            "lenses_total": 4,
+            "calls": calls,
+            "settled_usd": "1.10",
+            "committed_usd": committed,
+            "reservation_usd": "10",
+            "reading": "src/x.py",
+        }
+    )
+
+
+def _run_start_record(attempt: int = 1) -> str:
+    """One run's own first event: `seq` restarts at 1 per run, and the
+    monotonic `start_s` differs per run, so two attempts' start lines
+    never read the same."""
+    return json.dumps(
+        {
+            "seq": 1,
+            "phase": "review",
+            "step": "review started",
+            "status": "ok",
+            "start_s": 100.0 * attempt,
+            "duration_s": 0.0,
+        }
+    )
+
+
+def _append_events(path: Path, *lines: str) -> None:
+    """The way the real child writes: the telemetry sink opens the
+    events file `O_APPEND` and appends; nothing truncates."""
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write("".join(line + "\n" for line in lines))
+
+
+def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_path):
+    """M1: a review whose process died before the worker could settle it
+    never reached the settle-time spend recording. The retry's pre-runner
+    pass reads the progress figure the crash left in the run directory --
+    the child's own token-counts-times-price-table accounting -- and
+    backfills it onto the day's ledger once, before the retry appends its
+    own run's events; the retry's own spend is then added on top."""
+    path = tmp_path / "queue.json"
+    board = Board(path)
+    spend = _spend(tmp_path)
+    # The crashed attempt: head A was claimed (left running) and wrote
+    # progress before the process died.
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert board.claim() is not None
+    run = run_dir(tmp_path, PrEvent(REPO, 7, SHA_A))
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    # Restart: the reloaded board queues the crashed head again, and the
+    # retry's child appends its own run's events to the same file.
+    reloaded = Board(path)
+    telemetry = Telemetry(SystemClock())
+    ran = []
+
+    def runner(event, cancel):
+        ran.append(event.head_sha)
+        _append_events(
+            run / "events.jsonl",
+            _run_start_record(attempt=2),
+            _progress_record("3.00", 4),
+        )
+        return ReviewRun(True, REPORT_COST)
+
+    worker = _worker(reloaded, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    assert worker.run_one() is True
+    assert ran == [SHA_A]
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("2.20") + Decimal("3.40")
+    backs = [e for e in telemetry.events if e.step == "crashed spend"]
+    assert backs and backs[0].fields["measured"] == "backfilled"
+    assert backs[0].fields["committed_usd"] == "2.20"
+
+
+def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
+    """The once is the ledger's own: the dedupe key is the evidence's
+    content hash, so a recovery that runs twice against the same crashed
+    attempt -- a failed queue save puts the head back -- appends nothing
+    the second time."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    backs = [e for e in telemetry.events if e.step == "crashed spend"]
+    assert len(backs) == 2
+    assert backs[0].fields["measured"] == "backfilled"
+    assert backs[1].fields["measured"] == "already recorded"
+
+
+def test_a_crash_with_no_progress_figure_records_nothing_and_names_the_gap(
+    tmp_path,
+):
+    """A run directory left behind with no readable progress figure --
+    the child died before its first progress record -- records nothing,
+    and the gap is named on the recovery's telemetry rather than silent.
+    An ordinary first run (no run directory at all) stays silent."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run_dir(tmp_path, event).mkdir(parents=True, exist_ok=True)
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal(0), "")
+    backs = [e for e in telemetry.events if e.step == "crashed spend"]
+    assert backs and "no progress figure" in backs[0].error
+    # No run directory: the ordinary first run -- no event, no note.
+    quiet = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, PrEvent(REPO, 7, SHA_B), quiet)
+    assert [e for e in quiet.events if e.step == "crashed spend"] == []
+
+
+def test_a_queued_review_is_refused_at_preflight_by_the_installation_cap(tmp_path):
+    """N3: the cap double is enforced at the preflight re-check too, not
+    only at admission -- a delivery admitted under an unset-spent cap is
+    refused in the worker when the cap is spent by the time it claims."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path, cap={"": Decimal("10.00")})
+    assert _deliver(config, board, _body(), spend=spend).body == b"queued\n"
+    spend.record(REPO, Decimal("10.0000"), 4)
+    ran = []
+
+    def runner(event, cancel):
+        ran.append(event.head_sha)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path, telemetry=telemetry, spend=spend)
+    assert worker.run_one() is True
+    assert ran == []
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert "skipped: installation daily cap reached" in skips[0].error
+
+
+def test_a_boolean_installation_id_is_not_an_installation_id(tmp_path):
+    """N2: the payload's installation id is read only when it is a real
+    integer -- a boolean is not one -- so a cap keyed on its string form
+    is never consulted."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path, cap={"True": Decimal("0.01")})
+    spend.record(REPO, Decimal("0.0100"), 1)
+    body = json.dumps(
+        {
+            "action": "opened",
+            "installation": {"id": True},
+            "repository": {"full_name": REPO},
+            "pull_request": {
+                "number": 7,
+                "draft": False,
+                "updated_at": "2026-11-12T20:00:00Z",
+                "head": {"sha": SHA_A},
+                "base": {"repo": {"full_name": REPO}},
+            },
+        }
+    ).encode()
+    assert _deliver(config, board, body, spend=spend).body == b"queued\n"
+
+
+def test_a_progress_less_retry_does_not_re_backfill_the_stale_tail(tmp_path):
+    """M-R2-1: the events file is append-only across a head's attempts,
+    so a retry that appends its startup events and dies before its first
+    progress record leaves the previous attempt's figure as the file's
+    newest progress line. The backfill keys on the crashed attempt's own
+    span -- its run-start line plus its progress records -- so the stale
+    tail is not that attempt's figure and records nothing: one crashed
+    attempt's spend lands exactly once, however many progress-less
+    retries follow."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    # Two further attempts append their startup events and die
+    # progress-less; neither re-arms the backfill on the stale tail.
+    for attempt in (2, 3):
+        _append_events(run / "events.jsonl", _run_start_record(attempt=attempt))
+        _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    backs = [e for e in telemetry.events if e.step == "crashed spend"]
+    assert len(backs) == 3
+    assert backs[0].fields["measured"] == "backfilled"
+    assert "no progress figure" in backs[1].error
+    assert "no progress figure" in backs[2].error
+
+
+def test_a_retry_s_identical_looking_progress_is_still_its_own(tmp_path):
+    """The dedupe is attempt-scoped, not figure-scoped: a second attempt
+    whose progress record is byte-identical to the first attempt's --
+    `seq` restarts per run, so the fields can repeat exactly -- is a
+    different attempt's spend, keyed by its own run-start line, and is
+    recorded rather than deduplicated away."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True, exist_ok=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=1),
+        _progress_record("2.20", 3),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    # The second attempt dies after writing a byte-identical progress
+    # record: a different attempt, a different key, its own record.
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(attempt=2),
+        _progress_record("2.20", 3),
+    )
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("4.40")

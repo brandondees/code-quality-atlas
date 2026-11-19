@@ -28,7 +28,13 @@ from atlas_reviewer.lens_loop import (
     _reserve_call,
 )
 from atlas_reviewer.redact import Redactor
-from atlas_reviewer.review_wide import derive_review_wide, resolve_ceiling
+from atlas_reviewer.review_wide import (
+    DEFAULT_REPO_CEILING_MAX_USD,
+    clamp_repo_ceiling,
+    derive_review_wide,
+    operator_repo_ceiling_max,
+    resolve_ceiling,
+)
 from atlas_reviewer.verdict import parse_status
 
 from .agentic import (
@@ -49,7 +55,14 @@ from .test_coordinator import EVENT
 
 
 def run(
-    tmp_path, names, models, *, limits=None, picker_spend=(0, Decimal(0)), trees_=None
+    tmp_path,
+    names,
+    models,
+    *,
+    limits=None,
+    picker_spend=(0, Decimal(0)),
+    trees_=None,
+    operator_ceiling_max=None,
 ):
     """A multi-lens review over the real bridge through `LocalSprites`,
     one scripted model per lens. No model, Sprite or GitHub call is made."""
@@ -88,6 +101,7 @@ def run(
             task_socket=str(tasks.path),
             model_for=model_for,
             picker_spend=picker_spend,
+            operator_ceiling_max=operator_ceiling_max,
         )
     finally:
         tasks.close()
@@ -854,3 +868,102 @@ def test_the_clamp_is_reported_from_the_value_it_bit_on():
     )
     assert derive_review_wide(AgenticLimits(), 12)[1].clamped
     assert not derive_review_wide(AgenticLimits(), 1)[1].clamped
+
+
+# ------------------------------------------------- the operator max (S9)
+
+
+def test_the_operator_max_defaults_to_the_decided_twenty_five_dollars():
+    assert operator_repo_ceiling_max({}) == Decimal("25.00")
+    assert DEFAULT_REPO_CEILING_MAX_USD == Decimal("25.00")
+
+
+def test_the_operator_max_reads_the_operator_variable():
+    assert operator_repo_ceiling_max({"ATLAS_REPO_CEILING_MAX_USD": "40"}) == (
+        Decimal(40)
+    )
+
+
+def test_an_empty_operator_max_variable_reads_as_unset():
+    assert operator_repo_ceiling_max({"ATLAS_REPO_CEILING_MAX_USD": ""}) == (
+        Decimal("25.00")
+    )
+
+
+@pytest.mark.parametrize("raw", ["abc", "0", "-5", "Infinity"])
+def test_an_unusable_operator_max_is_refused_naming_the_variable(raw):
+    with pytest.raises(ValueError, match="ATLAS_REPO_CEILING_MAX_USD"):
+        operator_repo_ceiling_max({"ATLAS_REPO_CEILING_MAX_USD": raw})
+
+
+def test_a_repo_ceiling_at_or_under_the_operator_max_is_not_clamped():
+    clamped, note = clamp_repo_ceiling(Decimal("25.00"), Decimal("25.00"))
+    assert clamped == Decimal("25.00")
+    assert note == ""
+    clamped, note = clamp_repo_ceiling(Decimal("7.00"), Decimal("25.00"))
+    assert clamped == Decimal("7.00")
+    assert note == ""
+
+
+def test_a_repo_ceiling_above_the_operator_max_is_clamped_and_named():
+    """The done-when: a repo-raised ceiling cannot pass the operator max,
+    and the clamp is named -- both figures schema-validated numbers, the
+    operator's variable named, no rejected value echoed as text."""
+    clamped, note = clamp_repo_ceiling(Decimal("50.00"), Decimal("25.00"))
+    assert clamped == Decimal("25.00")
+    assert "$50.00" in note
+    assert "$25.00" in note
+    assert "ATLAS_REPO_CEILING_MAX_USD" in note
+    assert "clamped" in note
+
+
+def test_no_repo_ceiling_and_no_operator_max_clamp_nothing():
+    assert clamp_repo_ceiling(None, Decimal("25.00")) == (None, "")
+    assert clamp_repo_ceiling(Decimal("50.00"), None) == (Decimal("50.00"), "")
+    assert clamp_repo_ceiling(None, None) == (None, "")
+
+
+def test_the_clamped_ceiling_is_what_the_derivation_runs_under():
+    """The clamp composes with D68's resolution through the documented
+    seam: the derivation receives the clamped value, so the derived
+    reservation cannot sit above the operator max either."""
+    clamped, _ = clamp_repo_ceiling(Decimal("50.00"), Decimal("25.00"))
+    limits = load_agentic_limits({"ATLAS_REVIEW_CEILING_USD": "8"})
+    derived, record = derive_review_wide(limits, 12, repo_ceiling=clamped)
+    assert record.ceiling == Decimal("25.00")
+    assert derived.reservation_usd == Decimal("25.00")
+
+
+def test_a_repo_ceiling_over_the_operator_max_is_clamped_and_named_in_the_draft(
+    tmp_path,
+):
+    """End to end over the scripted bridge: a merge-base
+    `review_ceiling_usd:` above the operator max runs the review under
+    the max, and the draft's ceiling note names the clamp, the way D68's
+    ceiling note names the ceiling."""
+    models = [ScriptedLensModel([READ_ALL, final(lens="lens-1")])]
+    result = run(
+        tmp_path,
+        ["lens-1"],
+        models,
+        trees_=_mixed_trees(b"review_ceiling_usd: 50\n", None),
+        operator_ceiling_max=Decimal("25.00"),
+    )
+    draft = render_draft(result, Redactor())
+    assert "clamped" in draft
+    assert "$25.00" in draft
+    assert "ATLAS_REPO_CEILING_MAX_USD" in draft
+
+
+def test_a_repo_ceiling_under_the_operator_max_leaves_the_draft_silent(tmp_path):
+    models = [ScriptedLensModel([READ_ALL, final(lens="lens-1")])]
+    result = run(
+        tmp_path,
+        ["lens-1"],
+        models,
+        trees_=_mixed_trees(b"review_ceiling_usd: 7\n", None),
+        operator_ceiling_max=Decimal("25.00"),
+    )
+    draft = render_draft(result, Redactor())
+    assert "clamped" not in draft
+    assert result.coverage_complete

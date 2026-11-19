@@ -187,7 +187,7 @@ from atlas_reviewer.reassess import (
 )
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.repo_config import review_md_ceiling
-from atlas_reviewer.review_wide import derive_review_wide
+from atlas_reviewer.review_wide import clamp_repo_ceiling, derive_review_wide
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
     RECORD_CHARS,
@@ -715,6 +715,7 @@ def review_lenses(
     evidence_digest: str | None = None,
     delta: DeltaScope | None = None,
     path_ranks: PathRanks | None = None,
+    operator_ceiling_max: Decimal | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -745,6 +746,9 @@ def review_lenses(
     The derivation happens before any lens runs, so a configuration it
     refuses stops the review before any lens runs; the CLI validates the
     same refusals before its picker spends (round-1 review of #717, m-3).
+    Config slice S9: `operator_ceiling_max` clamps a repo-raised ceiling
+    to the operator's max per review, and the clamp is named through
+    D68's ceiling note.
 
     D73: `evidence_digest` is the digest of the evidence snapshot this
     review gathered (the CI block's and the conversation's gathered data,
@@ -779,13 +783,16 @@ def review_lenses(
     code, everything else carried as it was recorded, never silently
     dropped."""
     read = review_md_ceiling(trees.base)
+    effective, clamp_note = clamp_repo_ceiling(read.value, operator_ceiling_max)
     derived, derivation = derive_review_wide(
         limits,
         len(lenses),
         picker_spend[0],
         picker_spend[1],
-        repo_ceiling=read.value,
-        repo_ceiling_note=read.note,
+        repo_ceiling=effective,
+        repo_ceiling_note=(
+            f"{read.note} {clamp_note}".strip() if clamp_note else read.note
+        ),
     )
     return _traced_review(
         event,

@@ -43,7 +43,11 @@ The resolution is one pure function (`resolve_ceiling`) that takes the
 configured value and the repo override and returns the ceiling: a later
 per-run policy adjusts the ceiling by computing the value it passes
 there, with no redesign -- that is the seam, and no policy engine is
-built here.
+built here. The per-tenant spend bounds (config slice S9, D81's 3:39 PM
+CT update) use the seam: a repo may raise its ceiling, but
+`clamp_repo_ceiling` caps the raise at the operator's max per review
+(`ATLAS_REPO_CEILING_MAX_USD`, default $25) and names the clamp, and the
+clamped value is what the derivation receives.
 
 An operator-set `--max-calls`, `--reservation-usd` or
 `--review-wall-seconds` still wins for that one limit
@@ -55,8 +59,9 @@ observed value and the knob (`lens_loop.Derivation`).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from atlas_reviewer.lens_loop import (
     DEFAULT_MAX_CALLS,
@@ -82,12 +87,74 @@ def resolve_ceiling(
     `REVIEW.md` value wins over the operator's `ATLAS_REVIEW_CEILING_USD`
     or `--review-ceiling-usd`, which wins over the $10 default. A later
     per-run policy adjusts the ceiling by computing the value it passes
-    here -- the documented seam, no policy engine."""
+    here -- the documented seam, no policy engine. The per-tenant bounds
+    (config slice S9) use that seam: `clamp_repo_ceiling` computes the
+    value this function receives when a repo raised its ceiling."""
     if repo_override is not None:
         return repo_override
     if configured is not None:
         return configured
     return DEFAULT_REVIEW_CEILING_USD
+
+
+# The operator max per review (config slice S9, D81's 3:39 PM CT update):
+# the value a repo's own `review_ceiling_usd:` raise is clamped to. The
+# decided default is $25.
+ENV_REPO_CEILING_MAX_USD = "ATLAS_REPO_CEILING_MAX_USD"
+DEFAULT_REPO_CEILING_MAX_USD = Decimal("25.00")
+
+
+def operator_repo_ceiling_max(env: Mapping[str, str]) -> Decimal:
+    """The operator's max per review, `ATLAS_REPO_CEILING_MAX_USD` (S9):
+    the decided $25 default when unset, and a `ValueError` naming the
+    variable when a set value is not a positive dollar amount -- an
+    unusable operator setting stops the deployment rather than silently
+    unbounding what a repo may raise its ceiling to."""
+    raw = env.get(ENV_REPO_CEILING_MAX_USD)
+    if raw is None or raw == "":
+        return DEFAULT_REPO_CEILING_MAX_USD
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise ValueError(
+            f"{ENV_REPO_CEILING_MAX_USD} must be a positive dollar amount, not {raw!r}"
+        ) from None
+    if not value.is_finite() or value <= 0:
+        raise ValueError(
+            f"{ENV_REPO_CEILING_MAX_USD} must be a positive dollar amount, not {raw!r}"
+        )
+    return value
+
+
+_CLAMP_NOTE = (
+    "the reviewed repo's merge-base REVIEW.md ceiling ${repo} was clamped "
+    "to the operator's ${max} maximum per review "
+    f"({ENV_REPO_CEILING_MAX_USD})"
+)
+
+
+def clamp_repo_ceiling(
+    repo_ceiling: Decimal | None, operator_max: Decimal | None
+) -> tuple[Decimal | None, str]:
+    """The clamp beside the ceiling resolution (config slice S9, D81's
+    3:39 PM CT update): a repo may raise its own
+    `review_ceiling_usd:` (D81 Q2 keeps D68's semantics), but the value
+    the review actually runs under cannot pass the operator's max per
+    review. Returns the effective repo ceiling and the note naming the
+    clamp, empty when nothing was clamped.
+
+    Only a **repo-set** ceiling runs through here: the operator's own
+    configured ceiling and the default are the operator's own choices,
+    and this knob bounds what a repo may raise *to*, not what the
+    operator may configure. Both figures the note names are
+    schema-validated numbers (the repo's parsed ceiling, the operator's
+    own setting), so the note is controller text that carries no
+    author-controlled value."""
+    if repo_ceiling is None or operator_max is None or repo_ceiling <= operator_max:
+        return repo_ceiling, ""
+    return operator_max, _CLAMP_NOTE.format(
+        repo=f"{repo_ceiling:.2f}", max=f"{operator_max:.2f}"
+    )
 
 
 def derive_review_wide(
