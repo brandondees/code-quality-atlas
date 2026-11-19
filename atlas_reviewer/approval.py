@@ -142,8 +142,7 @@ _DENIED = (
     "stays unapproved -- the built-in pytest entry stands"
 )
 _NO_ANSWER = (
-    "the run's channel gave no usable answer (an error, a timeout, or the "
-    "run's wall or dollar limit reached); the "
+    "the run's channel gave no usable answer (an error or a timeout); the "
     "run's allow-list holds {proposed} proposed and {approved} approved, "
     "and the command stays unapproved -- the built-in pytest entry stands"
 )
