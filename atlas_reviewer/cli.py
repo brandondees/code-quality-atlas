@@ -63,6 +63,7 @@ from atlas_reviewer.conversation import (
     ConversationBudget,
     build_conversation,
     fetch_remarks,
+    guidelines_block,
     picker_block,
     review_context,
 )
@@ -1092,11 +1093,28 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     if delta is not None
                     else (None, ())
                 )  # fmt: skip
-                context = tuple(b for b in (block, ci, highlight) if b is not None)
+                highlight_bytes = (
+                    len(highlight.content.text.encode("utf-8")) if highlight else 0
+                )
+                # The guidelines block (config slice S6, D81 Q8) takes the
+                # room the conversation, CI and delta blocks left, last in
+                # the first turn's budget order, so all four together
+                # cannot exceed the fit; the delta highlight, this review's
+                # own new material, is spent before the repo's standing
+                # guideline content is.
+                guidelines, guideline_omissions = guidelines_block(
+                    event.repo, github, scrub,
+                    None if fit is None
+                    else fit - conversation_bytes - ci_bytes - highlight_bytes,
+                )  # fmt: skip
+                context = tuple(
+                    b for b in (block, ci, highlight, guidelines) if b is not None
+                )
                 context_omissions = (
                     *context_omissions,
                     *ci_omissions,
                     *delta_omissions,
+                    *guideline_omissions,
                 )
                 if fit is None:
                     prior = PRIOR_ROUND_CHARS

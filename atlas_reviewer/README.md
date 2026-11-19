@@ -1936,7 +1936,16 @@ D41 records the 2026-11-12 probe that did.
   section. Nothing is cut. The first user turn is the operator's
   subject, then prior atlas rounds (`rounds.RoundLog`) and any context
   the caller passes, then the risk-ordered list of every file in the
-  current diff, each fenced with the review's nonce. Prior finding
+  current diff, each fenced with the review's nonce. The caller context
+  on the shipped `agentic-review` path is the conversation block, the CI
+  evidence block, a delta review's highlight, and the reviewed repo's
+  default-branch `AGENTS.md` as one coding-guidelines block (config
+  slice S6, D81 Q8): fenced, budgeted against the model's input room in
+  that order, every cut or failed read a named omission. The
+  `AGENTS.md` is read from the repo's default branch — never the PR head
+  or the merge-base, which a same-repo or stacked PR controls — and it
+  is delivered as data only, never instructions; a repo whose default
+  branch carries none is the ordinary unconfigured repo, not a gap. Prior finding
   lines are quoted in full, up to the 8,192-character record cap,
   not the 200-character quote default. They do not remove a file. A
   continuation may later list a subset. This first turn does not, and
@@ -2211,7 +2220,7 @@ D41 records the 2026-11-12 probe that did.
 | `prompt.py` | trusted system prompt + nonce-fenced untrusted blocks (`RedactedText`, or `RepoText` for the unredacted diff) | no |
 | `committed_secrets.py` | scan each file of the diff for possible committed secrets, located by file line and side | no |
 | `evidence.py` | GitHub JSON / runner results → `EvidenceItem`, PR commits and remarks, shape validation | no |
-| `conversation.py` | the PR conversation block under its budget, every cut and dropped remark an omission | via `GitHubReader` |
+| `conversation.py` | the PR conversation block under its budget, every cut and dropped remark an omission; and the coding-guidelines block (config slice S6, D81 Q8): the reviewed repo's default-branch `AGENTS.md` as one more fenced, budgeted untrusted block (`guidelines_block`), its read failures, over-bound file and cuts named, its content never instructions | via `GitHubReader` |
 | `archive.py` | bounded in-memory ZIP reading for untrusted artifacts | no |
 | `pagination.py` | `Link` header parsing | no |
 | `pricing.py`, `budget.py` | catalog/key parsing (fail closed); per-review call and cost budget | no |

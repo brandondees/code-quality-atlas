@@ -8,7 +8,10 @@ as GitHub serves them), `check-runs.json` (the runs at every commit;
 listed under the head branch's name; `list_workflow_runs_at` serves those at one SHA),
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
-`issue-<n>.json`, `compare.json`, and a `source/` tree served as the
+`issue-<n>.json`, `compare.json`, `repository.json` (the repository object;
+its `default_branch` is what the default-branch reads resolve), `agents-md.txt`
+(the default-branch `AGENTS.md` the guidelines block reads; absent means the
+repo carries none), and a `source/` tree served as the
 tarball at any SHA (the head tree); a `source-<first 7 hex of the SHA>/`
 directory, when the fixture ships one, is served at that SHA instead, so
 a fixture can give the merge base the tree the diff is against.
@@ -175,3 +178,20 @@ class FixtureGitHub:
     def get_issue(self, repo: str, number: int) -> Json:
         self.calls.append(("get_issue", repo, str(number)))
         return self._json(f"issue-{number}.json")
+
+    def get_repository(self, repo: str) -> Json:
+        """The repository object; the fixture serves `repository.json`, the
+        one field the default-branch reads need being `default_branch`."""
+        self.calls.append(("get_repository", repo))
+        return self._json("repository.json")
+
+    def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
+        """One file's raw contents at a ref. The fixture serves only the
+        file the guidelines block reads: `AGENTS.md` from `agents-md.txt`;
+        any other path is a 404, as GitHub would answer."""
+        self.calls.append(("get_file", repo, ref, path))
+        if path != "AGENTS.md":
+            raise NotFoundError(f"fixture has no file {path}")
+        return self._capped(
+            self._file("agents-md.txt").read_bytes(), max_bytes, "agents-md.txt"
+        )
