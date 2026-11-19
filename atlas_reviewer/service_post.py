@@ -203,11 +203,7 @@ def render_comment(
     head += tuple(settings)
     brief = config.verbosity == POST_VERBOSITY_BRIEF
     tail = (
-        *(
-            ()
-            if brief
-            else (_section("Lenses run", report.lenses_run, scrub),)
-        ),
+        *(() if brief else (_section("Lenses run", report.lenses_run, scrub),)),
         # The brief dial drops "Lenses not run" as bookkeeping -- except
         # on an incomplete review, where #757's banner and its Findings
         # note point the reader at that section by name, so it joins the

@@ -1740,7 +1740,9 @@ def test_an_incomplete_brief_post_keeps_lenses_not_run():
     from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
 
     report = dataclasses.replace(
-        REPORT, coverage_complete=False, lenses_not_run=("reviewing-concurrency-and-async: over the budget",)
+        REPORT,
+        coverage_complete=False,
+        lenses_not_run=("reviewing-concurrency-and-async: over the budget",),
     )
     body = render_comment(
         report, "k", lambda text: text, post=_floor(verbosity=POST_VERBOSITY_BRIEF)
@@ -1760,7 +1762,9 @@ def test_the_floor_on_an_incomplete_review_never_hides_the_incompleteness():
     mutant that lets the held note win the section."""
     from atlas_reviewer.lens_contract import Severity
 
-    report = dataclasses.replace(_findings_report((_MINOR, _NIT)), coverage_complete=False)
+    report = dataclasses.replace(
+        _findings_report((_MINOR, _NIT)), coverage_complete=False
+    )
     body = render_comment(
         report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
     )
@@ -1869,7 +1873,7 @@ def test_an_already_posted_head_never_reads_the_post_config_source(tmp_path):
     from atlas_reviewer.lens_contract import Severity
     from atlas_reviewer.repo_config import PostConfigRead
 
-    poster, github = _poster(tmp_path)
+    poster, _github = _poster(tmp_path)
     source_calls: list[int] = []
 
     def source() -> PostConfigRead:

@@ -4164,7 +4164,7 @@ rather than claimed away.
 
 ## 2026-11-19 (same day) — #770 round 1: the layer restacked onto #757, and the two post-truths composed
 
-#757 (D82) merged six minutes after the S3 head was committed, and #769
+PR #757 (D82) merged six minutes after the S3 head was committed, and #769
 was rebased onto it (new head `538d1e53`); the restack
 (`git rebase --onto`, per the fix brief) conflicts exactly where the r1
 review said it would — `service_post.py`, where #757's `incomplete`
@@ -4182,7 +4182,7 @@ of cut, hold and incompleteness leaves the section reading as a plain
 `None.` — while a complete review's cut and hold notes stand as each
 slice wrote them. And the brief dial's "Lenses not run" drop is
 **brief-aware**: an incomplete brief post keeps the section, because
-#757's banner and its Findings note point the reader there by name; a
+PR #757's banner and its Findings note point the reader there by name; a
 complete brief post still drops it as bookkeeping.
 
 **Tests** (`test_service_post.py`, `test_service_receive.py`): the three

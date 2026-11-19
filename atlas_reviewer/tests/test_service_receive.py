@@ -4448,7 +4448,6 @@ def test_serve_installs_the_post_config_wrapper_and_the_post_honors_it(
     wrapper's installation in `serve`."""
     import atlas_reviewer.service as service_module
     from atlas_reviewer.http import HttpResponse
-    from atlas_reviewer.repo_config import PostConfigRead
     from atlas_reviewer.service_post import PostLedger, ReviewPoster
 
     class _ConfigClient:
@@ -4463,10 +4462,14 @@ def test_serve_installs_the_post_config_wrapper_and_the_post_honors_it(
     )
 
     findings = (
-        "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
-        "(reviewing-api-contract-safety): breaks callers",
-        "**L1-F2** [minor, defect, route: eng, introduced] `a.py:3` "
-        "(checking-restraint): naming",
+        (
+            "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
+            "(reviewing-api-contract-safety): breaks callers"
+        ),
+        (
+            "**L1-F2** [minor, defect, route: eng, introduced] `a.py:3` "
+            "(checking-restraint): naming"
+        ),
     )
     report = dataclass_replace(
         REPORT,
@@ -4557,7 +4560,6 @@ def test_the_wrapped_publisher_hands_the_poster_a_post_config_read():
 
     def publisher(event, report, source):
         seen.append(source())
-        return None
 
     def fetcher(repo: str) -> bytes | None:
         return b"review_post_verbosity: brief\n"
