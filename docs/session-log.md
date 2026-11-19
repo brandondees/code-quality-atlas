@@ -4288,9 +4288,11 @@ beside the tools and turns it already refreshed (the fold whose
 follow-up never ran keeps the held counts, with the reason stated); a
 Byok refusal's exception carries the counts beside the turns and tools,
 and the ledger line the coordinator finishes with them records the
-executions the attempt had already made; the duplicated assertion
-became the check it was meant to be (`outcome.test_runs == 0` — a
-mutate call is not a run_tests run) and the misleading test name now
+executions the attempt had already made; the duplicated assertion was
+deleted (the second copy added nothing), and the rule it gestured at — a
+mutate call is not a run_tests run — stays pinned where it really lives,
+in `test_a_survived_mutant_counts_and_is_not_a_gap`'s
+`outcome.test_runs == 0`; the misleading test name now
 names what it tests; D80's Update names `_outcome_json` as the writer
 and `_outcome_from` as the reader; and the status line's sums are
 documented as the head's recorded executions, not what this review paid

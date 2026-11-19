@@ -264,6 +264,25 @@ def test_the_execution_counts_round_trip_and_are_checked(tmp_path):
     assert attempt.outcome is ABANDONED
 
 
+def test_a_boolean_count_in_the_ledger_is_abandoned(tmp_path):
+    """The reader rejects a boolean where a count belongs (`True` is an
+    `int` in Python, so the check is explicit) -- a ledger line carrying
+    `true` for either execution count, or for `changed_files`, reads as
+    damaged, not as a number."""
+    for field in ("test_runs", "mutants_survived", "changed_files"):
+        damaged = AttemptLedger(tmp_path / "state" / f"bool-{field}.jsonl", FakeClock())
+        damaged.start(KEY, 1)
+        damaged.finish(KEY, 1, outcome(), scrub=str)
+        lines = damaged.path.read_text().splitlines()
+        finished = json.loads(lines[-1])
+        finished["outcome"][field] = True
+        lines[-1] = json.dumps(finished)
+        damaged.path.write_text("\n".join(lines) + "\n")
+        again = ledger_path(tmp_path / "state" / f"bool-{field}.jsonl")
+        (attempt,) = again.attempts(KEY)
+        assert attempt.outcome is ABANDONED, field
+
+
 def test_the_ledger_file_is_private_and_holds_the_key_and_head(tmp_path):
     book = ledger(tmp_path)
     book.start(KEY, 1)
