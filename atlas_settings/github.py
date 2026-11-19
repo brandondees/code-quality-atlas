@@ -29,7 +29,7 @@ import json
 import secrets as random_secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard
 
 from atlas_reviewer.github_auth import (
     AppInstallationTokens,
@@ -50,7 +50,10 @@ USER_AGENT = "code-quality-atlas-settings"
 # step is recorded as **not done** (D90, the README), and nothing works
 # around the missing permission.
 MEMBERS_PERMISSION: Mapping[str, str] = {"members": "read"}
-REPO_LIST_PERMISSION: Mapping[str, str] = {"contents": "read"}
+# Listing the installation's repositories needs metadata read only —
+# `contents` is the permission that reads files, commits and releases,
+# and the coverage read reads no file.
+REPO_LIST_PERMISSION: Mapping[str, str] = {"metadata": "read"}
 # The coverage read's pagination bound: 10 pages of 100 repositories. An
 # installation with more that never matched the allowlist is refused
 # fail-closed — the gate is never satisfied by running out of pages.
@@ -179,7 +182,7 @@ class GitHubClient:
     def get_user(self, token: str) -> GitHubUser:
         data = self._api("GET", "/user", token=token)
         ident, login = data.get("id"), data.get("login")
-        if not isinstance(ident, int) or not isinstance(login, str) or not login:
+        if not _valid_id(ident) or not isinstance(login, str) or not login:
             raise GitHubRefused("GitHub sign-in did not identify the user")
         return GitHubUser(ident, login)
 
@@ -203,7 +206,7 @@ class GitHubClient:
             account.get("type"),
         )
         if (
-            not isinstance(ident, int)
+            not _valid_id(ident)
             or not isinstance(login, str)
             or not login
             or kind not in ("User", "Organization")
@@ -367,6 +370,14 @@ class GitHubClient:
         return resp.status, _json_body(
             resp.body, "GitHub did not answer this check as it must"
         )
+
+
+def _valid_id(ident: object) -> TypeGuard[int]:
+    """The id rule every GitHub identity read applies: a non-bool int
+    greater than 0. JSON `true` is not an id (and `True == 1` in Python,
+    so accepting it would fail the admin gate open onto user id 1), and
+    `0` matches `0` the same way."""
+    return isinstance(ident, int) and not isinstance(ident, bool) and ident > 0
 
 
 def _json_body(raw: bytes, phrase: str) -> dict[str, Any]:
