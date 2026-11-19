@@ -319,6 +319,11 @@ class AgenticReview:
     `review_ceiling_usd:` line that could not be used (round-1 review of
     #717, m-5), so a meant ceiling that silently fell back to the default
     is visible in the draft."""
+    settle_overruns: tuple[str, ...] = ()
+    """Per-settle notes for calls whose reported cost came in above the
+    worst case reserved for them (D82's tripwire, round-1 review of
+    #757), carried into the draft's cost line: the observable signal
+    that a provider billed past the priced worst case."""
     carried_unverified: tuple[tuple[str, Finding, str], ...] = ()
     """Prior findings the delta review carries without a re-anchored,
     verified quote (#702): each with its carry-forward label, the
@@ -526,6 +531,7 @@ def synthesize(
         context_omissions=tuple(context_omissions),
         other_pull_requests=other_pull_requests,
         ceiling_note=ceiling_note,
+        settle_overruns=tuple(spend.overruns) if spend is not None else (),
     )
 
 
@@ -2391,6 +2397,11 @@ def _compose_carry(
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
         committed_usd=str(spend.committed_usd),
+        # The carry call settles after `synthesize` captured the overruns,
+        # so the tripwire line is refreshed here with it (round-3 review
+        # of #757) -- an overrun on a post-synthesis settle is counted in
+        # committed spend and must reach the draft's cost line too.
+        settle_overruns=tuple(spend.overruns),
     )
 
 
@@ -2684,6 +2695,10 @@ def _with_reused_reassessment(
             ),
             model_calls=spend.calls,
             committed_usd=str(spend.committed_usd),
+            # The re-assessment call settles after `synthesize` captured
+            # the overruns, so the tripwire line is refreshed here with it
+            # (round-3 review of #757), the way the totals are.
+            settle_overruns=tuple(spend.overruns),
         ),
         tuple(new_decisions),
     )
@@ -3263,6 +3278,15 @@ def render_draft(
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    if review.settle_overruns:
+        # D82's tripwire (round-1 review of #757): a settle that reported
+        # above its own worst case. The line stays one `Model calls:` line
+        # so the posted Cost section carries it, and the amounts are
+        # controller-computed figures, not PR text.
+        lines[-1] += (
+            f" {len(review.settle_overruns)} settle(s) reported a cost above "
+            "their reservation (D82's tripwire): " + "; ".join(review.settle_overruns)
+        )
     if review.ceiling_note:
         # Controller text about the ceiling (D68): no PR data in it, so it
         # needs no quoting.

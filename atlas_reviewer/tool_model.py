@@ -14,16 +14,28 @@ but usable token counts is priced from the selected endpoints: prompt
 tokens at the highest of the prompt and cache-write rates, or, when the
 response reports cache read or write counts, with those counts at the
 endpoints' cache rates (a missing read rate uses the prompt rate, and a missing
-write rate uses the reservation's input rate). A model with a reasoning
-rate and a response that reports no reasoning-token count stays
-unpriced. That missing-cost case is a non-finite
-`Decimal`, which the tracker keeps at the worst case, as are an
-unreadable upstream charge, a BYOK call with no upstream charge, and a
-turn with neither a readable cost nor usable token counts. A readable
-cost is used as reported, including when the reasoning-token count is
-missing. This module does not touch that tracker's rules, and it does
-not reserve on the one-shot `ReviewBudget` (that budget's ceiling is
-the one-shot 3 calls and $3).
+write rate uses the reservation's input rate). The output count is
+priced as one token, one rate (issue #750): a reported reasoning count
+is the subset of the completion count it sits in -- OpenRouter's
+reasoning-tokens guide, fetched 2026-11-18, says to subtract it from
+`completion_tokens` to get the visible tokens -- so the split prices the
+rest at the completion rate and the reasoning tokens at the reasoning
+rate, or, when the catalog lists no reasoning rate, at the completion
+rate a missing rate stands for. With no reported count the whole
+completion count is priced at the higher of the two rates, so a response
+that omits the count still settles instead of keeping its full
+reservation as spent -- the keep that held the review at its dollar
+ceiling after a few calls on a large pull request. A count that claims
+to sit outside the completion count is not a usable split and keeps the
+reservation, the way the prompt split treats counts that sum past
+`prompt_tokens`. A readable cost is used as reported, including when the
+reasoning-token count is missing. A cost that is still unreadable is a
+non-finite `Decimal`, which the tracker keeps at the worst case, as are
+an unreadable upstream charge, a BYOK call with no upstream charge, and
+a turn with neither a readable cost nor usable token counts. This module
+does not touch that tracker's rules, and it does not reserve on the
+one-shot `ReviewBudget` (that budget's ceiling is the one-shot 3 calls
+and $3).
 
 When the loop hands the adapter a shared prefix (D65), the request opens
 with it: the prefix's system text, then one user message whose first
@@ -244,7 +256,10 @@ class OpenRouterLensModel:
         for this request stays within `budget_usd`. Below 1 when the input
         alone does not fit. The input bound is taken with the resolved cap
         in the payload, and a smaller cap is never more bytes, so the worst
-        case of the returned cap is within the budget at these prices."""
+        case of the returned cap is within the budget at these prices. The
+        rate is the per-token worst case `budget.worst_case_usd` prices:
+        the higher of the completion and reasoning rates, one rate per
+        token, not their sum (issue #750)."""
         terms, _, selected = self._ready()
         uncapped = replace(request, max_output_tokens=None)
         bounds = _bounds(self.per_call, terms, uncapped)
@@ -252,10 +267,10 @@ class OpenRouterLensModel:
         fixed = input_token_bound(json.dumps(payload)) * terms.input_rate
         left = budget_usd - fixed - terms.request_fee
         # The rate is positive by parse: `parse_model_terms` refuses a zero
-        # completion rate (`PricingUnknownError`), and a zero reasoning
-        # rate leaves the completion rate -- no zero-division and no
-        # free-output branch to reach here.
-        rate = terms.completion_rate + terms.reasoning_rate
+        # completion rate (`PricingUnknownError`), so the higher of the two
+        # rates is positive -- no zero-division and no free-output branch
+        # to reach here.
+        rate = max(terms.completion_rate, terms.reasoning_rate)
         return min(bounds.max_output_tokens, math.floor(left / rate))
 
     def turn(self, request: TurnRequest) -> ModelTurn:

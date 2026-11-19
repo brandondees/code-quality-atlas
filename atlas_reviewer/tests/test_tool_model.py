@@ -675,6 +675,38 @@ def test_token_counts_without_a_cost_are_priced_from_the_catalog():
     assert lens.turn(request()).cost_usd == Decimal("0.00825")
 
 
+def test_a_missing_reasoning_count_settles_instead_of_keeping_the_reservation():
+    """Issue #750 through the loop adapter: a model with a reasoning rate
+    whose response reports no reasoning-token count used to stay unpriced,
+    and the settle kept the call's full reservation as spent -- the keep
+    that held a large review at its dollar ceiling after a few calls. The
+    missing count now prices the whole completion count at the higher of
+    the two rates, which cannot exceed the reservation's own per-token
+    worst case, so the settle frees what the reservation held."""
+    lens, _fake = model(
+        reply(
+            completion(
+                "done",
+                usage={"prompt_tokens": 1000, "completion_tokens": 100},
+            )
+        ),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    spend = Spend(AgenticLimits().resolve())
+    ask = request()
+    worst = lens.worst_case_usd(ask)
+    assert spend.reserve(worst) is None
+    turn = lens.turn(ask)
+    assert turn.cost_usd.is_finite()
+    # 1000 x 0.000006 + 100 x 0.00005 -- the reasoning rate is the higher
+    # of the two rates, so the 100 output tokens price there, not also at
+    # the completion rate the old sum added.
+    assert turn.cost_usd == Decimal("0.0110")
+    spend.settle(worst, turn.cost_usd)
+    assert spend.committed_usd == Decimal("0.0110")
+    assert spend.committed_usd < worst
+
+
 def test_a_missing_cost_with_no_cache_counts_uses_the_reservation_input_rate():
     usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
     lens, _fake = model(

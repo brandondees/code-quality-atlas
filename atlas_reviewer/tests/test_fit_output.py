@@ -9,19 +9,26 @@ from decimal import Decimal
 import pytest
 
 from atlas_reviewer.agentic_config import load_agentic_limits
-from atlas_reviewer.attestation import Cause, LensState
+from atlas_reviewer.attestation import AttemptOutcome, Cause, LensState
+from atlas_reviewer.coordinator import render_draft, synthesize
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
+    FinalReply,
     Spend,
+    TurnRequest,
+    UserText,
+    _place_call,
+    _Progress,
     _reserve_call,
     _Reserved,
     default_reasoning_tokens,
 )
 from atlas_reviewer.ports import BoundaryError, TransportTimeoutError
 from atlas_reviewer.pricing import PricingUnknownError
+from atlas_reviewer.redact import Redactor
 
-from .agentic import LIMITS, READ_ALL, final
+from .agentic import COST, LIMITS, READ_ALL, final
 from .helpers import FakeClock
 from .test_lens_loop import attempt
 from .test_openrouter import catalog, completion, reply, zdr_payload
@@ -246,6 +253,27 @@ def test_the_live_model_fits_a_cap_whose_worst_case_is_in_the_budget():
     assert cap - hint > 1
 
 
+def test_the_fit_fits_the_same_per_token_rate_the_reservation_prices():
+    """Issue #750: the fit priced an output token at the completion rate
+    PLUS the reasoning rate while the reservation (amended by the same
+    issue) prices the higher of the two, so a fitted cap came back
+    smaller than the budget could cover and one more token of cap still
+    fit -- failing the maximality pins below on a route whose reasoning
+    rate differs from its completion rate. The fixture's reasoning rate
+    ($50/M) sits above its completion rate ($22.5/M), so only the
+    per-token maximum fits both pins."""
+    lens, _fake = model(
+        reply(completion("ok")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    full = lens.worst_case_usd(request())
+    budget = full / 2
+    cap = lens.output_tokens_within(request(), budget)
+    assert 0 < cap < FULL
+    assert lens.worst_case_usd(replace(request(), max_output_tokens=cap)) <= budget
+    assert lens.worst_case_usd(replace(request(), max_output_tokens=cap + 1)) > budget
+
+
 def test_the_live_model_never_fits_past_the_resolved_cap_or_under_the_input():
     lens, _ = model()
     assert lens.output_tokens_within(request(), Decimal(1000)) == FULL
@@ -257,3 +285,133 @@ def test_the_live_model_never_fits_past_the_resolved_cap_or_under_the_input():
 
 def _free_output():
     return catalog(completion="0", overrides=None)
+
+
+_PLACE_SYSTEM = "You are one lens. Read the change with the tools."
+
+
+def _placed(model, spend, clock, request=None):
+    """One placed call through `_place_call`, the loop's own price, reserve,
+    send and settle path."""
+    clock.advance(0.001)
+    return _place_call(
+        request or TurnRequest(_PLACE_SYSTEM, (), (UserText("Review the change."),)),
+        model,
+        spend,
+        _Progress(),
+        clock,
+        clock.monotonic() + 600,
+        None,
+        clock.monotonic() + 600,
+        clock.monotonic() + 600,
+    )
+
+
+def test_a_large_reviews_settles_free_the_ceiling_and_its_keeps_stop_it():
+    """Issue #750's recorded shape, pinned with fakes. On the #702 heads
+    every turn reserved about a quarter of the $10 per-review ceiling (a
+    near-cap input bound plus the whole output cap at the modeled rates),
+    so four kept worst cases filled the ceiling and the fifth lens's
+    first call stopped the review on `reservation_usd` while the real
+    spend stayed far under it. Pinned both ways at the loop's own
+    price-reserve-send-settle path: settles that price free the room and
+    the review keeps placing calls; settles that cannot price keep the
+    full reservation as spent (D43, unchanged) and the fifth call is the
+    recorded `reservation_usd` stop, named for the ceiling it passed."""
+    worst = Decimal("2.50")
+    ask = TurnRequest(_PLACE_SYSTEM, (), (UserText("Review the change."),))
+
+    priced = Spend(replace(LIMITS, reservation_usd=Decimal("10.00")).resolve())
+    clock = FakeClock()
+    model = ScriptedLensModel([final()] * 5, worst_usd=worst)
+    for _ in range(5):
+        turn = _placed(model, priced, clock, ask)
+        assert isinstance(turn, FinalReply), turn
+    assert priced.calls == 5
+    assert priced.committed_usd == 5 * COST
+    assert priced.settled_usd == 5 * COST
+
+    keeps = Spend(replace(LIMITS, reservation_usd=Decimal("10.00")).resolve())
+    clock = FakeClock()
+    unpriced = ScriptedLensModel(
+        [FinalReply("x", Decimal("Infinity"))] * 5, worst_usd=worst
+    )
+    for _ in range(4):
+        turn = _placed(unpriced, keeps, clock, ask)
+        assert isinstance(turn, FinalReply), turn
+    assert keeps.calls == 4
+    assert keeps.committed_usd == Decimal("10.00")
+    outcome = _placed(unpriced, keeps, clock, ask)
+    assert isinstance(outcome, AttemptOutcome)
+    assert Cause.BUDGET in outcome.causes
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "reservation_usd"
+    assert "$12.50" in outcome.limit_hit.observed
+
+
+def test_a_reservation_projecting_exactly_to_the_ceiling_is_accepted():
+    """Round-1 review of #757, Nit: spend never passes the cap, and a
+    projection equal to it is not past it -- D68's ceiling is a ceiling,
+    not an exclusive bound. Kills the `>` to `>=` mutant, which would
+    spuriously stop a review whose reservations fit its ceiling
+    exactly."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.60")) is None
+    assert spend.reserve(Decimal("0.40")) is None
+    assert spend.committed_usd == Decimal("1.00")
+    stop = spend.reserve(Decimal("0.01"))
+    assert stop is not None
+    assert stop.limit == "reservation_usd"
+
+
+def test_a_settle_above_its_worst_case_is_recorded_as_an_overrun():
+    """Round-1 review of #757, Minor 1: D82's subset assumption can fail
+    on a route that bills reasoning tokens outside its output cap, and
+    the one event that would reveal it -- a settle whose reported cost
+    exceeds the worst case reserved for the call -- must leave a trace.
+    The accounting moves committed spend to the reported actual, which
+    can sit above the reservation; the
+    overrun note is the draft-visible signal and the condition D82's
+    revisit trigger names. A settle at the worst case, and an unpriced
+    settle, record nothing."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle(Decimal("0.50"), Decimal("0.75"))
+    assert spend.committed_usd == Decimal("0.75")
+    assert spend.overruns == ["settled $0.7500 above its $0.5000 worst case"]
+
+    at_bound = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert at_bound.reserve(Decimal("0.50")) is None
+    at_bound.settle(Decimal("0.50"), Decimal("0.50"))
+    assert at_bound.overruns == []
+
+    unpriced = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert unpriced.reserve(Decimal("0.50")) is None
+    unpriced.settle(Decimal("0.50"), None)
+    assert unpriced.overruns == []
+
+
+def test_the_overrun_rides_the_drafts_cost_line():
+    """Round-1 review of #757, Minor 1: the tripwire is only observable
+    when the draft carries it. The overrun notes join the one
+    `Model calls:` cost line -- the line the posted Cost section renders
+    and the cost event parses -- not the limit stops, which a settle
+    above its reservation is not."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle(Decimal("0.50"), Decimal("0.75"))
+    review = synthesize([], spend=spend)
+    assert review.settle_overruns == ("settled $0.7500 above its $0.5000 worst case",)
+    line = next(
+        line
+        for line in render_draft(review, Redactor()).splitlines()
+        if line.startswith("Model calls:")
+    )
+    assert (
+        "1 settle(s) reported a cost above their reservation (D82's tripwire): "
+        "settled $0.7500 above its $0.5000 worst case" in line
+    )
+    clean = synthesize(
+        [], spend=Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
+    )
+    assert "settle(s)" not in render_draft(clean, Redactor())

@@ -103,7 +103,8 @@ percentage does not say when compaction will run.
 
 The one-shot path is unchanged in its ceilings: 3 calls, $3.00, and a
 200,000 input cap (D25). Its reservation now prices the whole output
-cap at the completion rate plus the reasoning rate, because
+cap at the higher of the completion and reasoning rates -- one rate per
+token, not their sum (D82 amends D43's Update) -- because
 OpenRouter's `reasoning.max_tokens` is a hint. The agentic path sends
 the same kind of hint and does not price from it.
 

@@ -15,8 +15,10 @@ calls either from the CLI. The 2026-11-12 probe is recorded in D41. Brandon
 set provisional defaults for the five phase-3 limits on 2026-11-11 (see
 [Open numeric decisions](#open-numeric-decisions-pending-brandon)). D43
 (2026-11-12) keeps the $5 per-review reservation and the one-token-per-byte
-input bound. The reservation prices the whole output cap at the completion
-rate plus the reasoning rate, so it does not depend on the reasoning hint.
+input bound. The reservation prices the whole output cap at the higher of
+the completion and reasoning rates -- one rate per token, not their sum
+(D82 amends D43's Update: a reasoning token is one of the turn's output
+tokens, billed once) -- so it does not depend on the reasoning hint.
 The other four limits stay headroom, configurable, and
 to be revisited after live runs. The other rows in that table are unchanged.
 This doc carries no live-run approval. No model call, Sprite run, merge or
@@ -291,7 +293,8 @@ Brandon set provisional defaults for the five phase-3 limits on
 2026-11-11, for headroom, configurable, and to be revisited after live
 runs. D43 (2026-11-12) settles the dollar reservation: it stays $5, and
 the one-token-per-byte input bound stays. The reservation prices the
-whole output cap at the completion rate plus the reasoning rate. The other four limits
+whole output cap at the higher of the completion and reasoning rates --
+one rate per token, not their sum (D82 amends D43's Update). The other four limits
 stay provisional. A run with those defaults is accepted. Clearing one back to unset
 makes `coordinator.review_lens` refuse before any model, runner or ledger
 work (`LimitsUnsetError`, naming each unset field). An override must be
@@ -309,7 +312,7 @@ the call.
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | $5 per lens (D43's figure, re-scoped per lens by D68); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`; on a multi-lens review the review-wide reservation is derived from it and clamped to the D68 ceiling. |
+| Agentic per-review dollar reservation | $5 per lens (D43's figure, re-scoped per lens by D68); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the higher of the completion and reasoning rates, one rate per token, not their sum (D82 amends D43's Update). Headroom is this per-review reservation. Still configurable through `AgenticLimits`; on a multi-lens review the review-wide reservation is derived from it and clamped to the D68 ceiling. |
 | OpenRouter key hard limit for agentic runs | the preflight requires at most the key ceiling: $5 unless `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it (D44) | Must cover the agentic spend. The derived reservation can now reach the D68 ceiling ($10 default), so a deployment that expects to run at the ceiling raises both. |
 | Agentic per-review model-call cap | derived (D68): the per-lens call budget times the planned lenses plus the picker's calls; per-lens default 50 | Headroom, configurable through `--per-lens-calls`. An explicit `--max-calls` sets the review total outright. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than the derived total. |
 | Agentic per-review dollar ceiling | $10, absolute (`--review-ceiling-usd` or `ATLAS_REVIEW_CEILING_USD`; D68) | The runaway guard the derived reservation clamps to — with the clamp's one qualification (round-1 review of #717, M-1): a pool of concurrent first turns projects several worst-case reservations at once, so the clamp can be smaller than one wave's projections; a reservation blocked only by other calls' in-flight worst cases waits, bounded by the review wall, for a settle instead of stopping its lens — the wait's real-time backstop arms only when the review clock itself stops moving across wakeups, so on a healthy clock the wall is the bound however long a turn takes — and stops only when the settled spend plus its own worst case cannot fit even with nothing in flight. Spend never passes the ceiling. Never a throttle on thoroughness. The reviewed repo's merge-base `REVIEW.md` may set it with a `review_ceiling_usd:` line. A later per-run policy adjusts it through `review_wide.resolve_ceiling`, the documented seam. |

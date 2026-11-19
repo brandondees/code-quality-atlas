@@ -443,7 +443,12 @@ from the end (the draft lists them most severe first) and names the
 drops in the Findings section, rather than slicing a finding mid-span --
 then the lenses
 that ran, the lenses that did not,
-the controller's file-coverage note, the limit stops, and the cost. The
+the controller's file-coverage note, the limit stops, and the cost. A
+review whose coverage is not complete -- or that the draft's status line
+cannot show complete -- carries a "REVIEW INCOMPLETE -- not a clean
+review" banner above the findings, and its empty Findings section names
+the incompleteness instead of the bare "None." (issue #750): a
+budget-stopped review cannot be mistaken for a clean one. The
 draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
 and is not sent. A retry of the same commit does not post a second time:
 the key `repo#pr#sha` is stored after GitHub accepts the review, and a
@@ -947,7 +952,9 @@ budget (12k), and reserves the call's worst case at the highest listed
 price tier. A reservation is refused if it would be the fourth call in the
 review (retries included), or if it could push the review past $3.00 or
 past the key's remaining credit. The draft's **Model usage** section
-records each call's reservation and its actual cost and tokens. The call cap
+records each call's reservation and its actual cost and tokens; a cost
+above the call's own reservation is flagged on that record's usage line
+(D82's tripwire, round-1 review of #757). The call cap
 (`--max-model-calls`, at most 3) is shared by every diff part and every
 retry: a retry on part 1 can leave part 3 refused, and that part's files are
 then listed as unreviewed.
@@ -1521,8 +1528,11 @@ D41 records the 2026-11-12 probe that did.
   reserve, and the output cap is the model's completion limit. An
   override can tighten either and cannot exceed the model. The
   reasoning hint defaults to half the output cap, so the reply has the
-  other half. The reservation prices the whole output cap at the
-  completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
+  other half. The reservation prices the whole output cap at the higher
+  of the completion and reasoning rates -- one rate per token, not their
+  sum, which double-billed every reasoning token and about doubled the
+  output term that dominates a large-context call's worst case (D82,
+  amending D43's Update). `diff_prefix_share` (D65) is
   the share of the model's resolved input cap the shared diff prefix may
   take; 0 pages every review, as before the prefix existed. When the
   reservation cannot cover that whole cap, the call is sent with the
@@ -1722,11 +1732,26 @@ D41 records the 2026-11-12 probe that did.
   reservation's input rate. A response that reports cache reads but no
   write count charges its uncached tokens at the input rate, since a
   write could be among them. Counts that sum past the prompt tokens leave
-  the turn unpriced. A model with a reasoning rate and a response that
-  reports no reasoning-token count also stays unpriced. That missing-cost
+  the turn unpriced. The output count is priced as one token, one rate
+  (D82): a reported reasoning count is the subset of the completion count
+  it sits in (OpenRouter's reasoning-tokens guide, fetched 2026-11-18),
+  so the split prices the rest at the completion rate and the reasoning
+  tokens at the reasoning rate -- or at the completion rate when the
+  catalog lists no reasoning rate, which is what a missing rate stands
+  for -- and a response that reports no reasoning count prices the whole
+  completion count at the higher of the two rates, so it settles instead
+  of staying unpriced. A reasoning count that claims to sit outside the
+  completion count still leaves
+  the turn unpriced. That missing-cost
   case stays at the reserved worst case, as do
   an unreadable upstream charge, a BYOK call with no upstream charge, and
-  a turn with neither a readable cost nor usable token counts. A readable
+  a turn with neither a readable cost nor usable token counts. A settle
+  whose reported cost came in above the worst case reserved for the call
+  moves committed spend to that reported actual -- which can sit above
+  the reservation -- and is recorded as an overrun on
+  the draft's `Model calls:` cost line (D82's tripwire, round-1 review of
+  #757) -- the observable signal that a provider billed past the priced
+  worst case. A readable
   cost is used as reported, including when the reasoning-token count is
   missing and when the response also reports cache tokens. The catalog is
   fetched once per provider for the review and reused, to confirm the
@@ -1853,7 +1878,7 @@ D41 records the 2026-11-12 probe that did.
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
 | `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. The `agentic-review` command builds the path at `<state dir>/rounds.jsonl` unless `--round-log` names another one (D67, D74) | writes the log file |
-| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route plus the explicit part-level breakpoint on a shared prefix's fenced diff, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route plus the explicit part-level breakpoint on a shared prefix's fenced diff, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them, and the output count priced as one token, one rate -- the reported reasoning count split out of the completion count, the whole completion count at the higher rate when the count is missing, so it settles rather than keeping the reservation -- D82), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `cache_stats.py` | per-session prompt-cache accounting from a model's reported usage (#695): sessions bounded by the system prompt, the miss rule (cached tokens below the previous turn's prompt, or unreported), each session's opening-turn cache read — the shared diff prefix's read (D65) — and the run summary's session and total lines. Pure; no I/O | no |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
