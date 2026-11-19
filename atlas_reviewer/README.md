@@ -201,8 +201,10 @@ on one delivery — the admission read and, when a review is running, the
 classification — share one overall read budget, so however many run they
 cannot together hold the handler past GitHub's response window.
 
-Only these three keys are read at admission. The file's review-side
-settings (`review_ceiling_usd:`, `review_lens_include:`,
+Only these three keys are read at admission. The repo's two post settings
+(`review_severity_floor:`, `review_post_verbosity:` — the next section)
+are read from the same default branch, at post time. The file's
+review-side settings (`review_ceiling_usd:`, `review_lens_include:`,
 `review_lens_exclude:`) are the review child's, read from the merge-base
 tree it already fetches through the shared parse module
 (`repo_config.py`, config slice S1); an unknown key — including a
@@ -211,6 +213,82 @@ here. On the review-side reads the shared parser names unsupported keys
 itself: a `review_`-namespaced line its schema does not carry is ignored
 fail-open with a named note. This admission read keeps its own narrower
 parse until the two reads unify on one module.
+
+### What the service posts: the repo's severity floor and post verbosity
+
+Two more `REVIEW.md` lines are the repo's say over what the service
+posts — config slice S3, read from the **default branch** like the
+admission keys above, and for the same reason: the floor decides which
+findings reach the post and the dial decides which sections it carries,
+so a config read from a surface the PR's author controls — the PR head,
+or the merge-base a same-repo or stacked PR can carry lines onto — would
+let the PR quiet or suppress its own review on the only surface a human
+reads. The default branch changes only through reviewed merges. The
+value that governed a post is the one the default branch carried when
+the post was written, fetched at post time and parsed through the shared
+parse module's schema (`repo_config.parse_post_config`, D84). The read
+costs **two uncached read-only calls per post attempt** — the
+default-branch lookup plus the file read — under the App installation
+token, bounded by the same 8-second read budget the admission read uses;
+the source is read after the poster's dedupe checks, so an
+already-posted head spends none, and there is no per-repo cache between
+posts (r1 review of #770, Nit 3).
+
+```text
+review_severity_floor: <severity>    # blocker | major | minor | nit — post findings at or above this severity
+review_post_verbosity: <dial>        # full (the default body) | brief — the one position below it
+```
+
+**The floor's default posts everything.** The service posts one COMMENT
+per head, not converging rounds, so with no floor line every verified
+finding is posted. A repo may raise its floor. Findings below it from
+preference-tier lenses are held in the draft and named by the count the
+post's Findings section carries — never silently — and the post names
+the `review_severity_floor:` key and the level that took effect.
+
+**A floor-tier lens's finding is never held, whatever its severity.**
+The manifest's `tier: floor` split carries over unchanged (D81 Q3): the
+five floor-tier lenses' findings post at any severity under any floor —
+the same protection the merge-base lens preference's exclude cannot
+cross. The team-preferences overlay's `acknowledge` rule carries over
+with it: the service reads no overlay today, so the floor is the only
+suppression this post path applies, and it applies only to
+preference-tier findings.
+
+**The verbosity dial may be lowered only.** `brief` drops the lens
+bookkeeping (Lenses run, Lenses not run, Lens decisions) and the Cost
+section, and keeps the Findings section, the coverage note, the Limit
+stops, and a delta review's resolved and carried sections. One
+exception, from the #757 composition (r1 review of #770): on an
+**incomplete** review the brief post keeps `Lenses not run` too, because
+the REVIEW INCOMPLETE banner and the Findings section's incomplete note
+point the reader at that section by name — the pointer resolves, never
+dangles. The Findings section and the coverage note are never
+suppressible at any verbosity; there is no value above `full`, so no
+setting can make the post more verbose than the body the service already
+sends.
+
+**An unusable line fails open to its key's default and is named.** A
+`review_severity_floor:` line that is not one of the four severity names
+(lowercase — the enum's own spelling, not the protocol prose's
+capitalization), a `review_post_verbosity:` line that is not `brief` or
+`full`, or a key that appears twice is ignored — the keys independent,
+each with its own default — with a note on a `post config` telemetry
+event that names the key, the condition and the default that stands and
+never the rejected value; the post itself carries the note. A read that
+fails, or a file over the same 64 KiB bound, also leaves the default
+standing — the protective direction, since a lost read can only make
+the post more complete, never less — with the gap on the telemetry; the
+post is never held for it. A repository whose default branch carries no
+`REVIEW.md` is the ordinary unconfigured case: the defaults stand,
+silently.
+
+**A floor is a coverage-reducing choice, and the repo owner is the one
+choosing it** — stated the same way `review_skip_events`' cost is
+stated: a below-floor preference-tier finding lands in the draft only,
+so a human reading only the post does not see it. The draft — the
+record the service keeps on its volume — carries every finding either
+way.
 
 ### A push that lands mid-review (#702, D79)
 
@@ -1092,8 +1170,10 @@ list of lens names, or a key that appears twice, is ignored fail-open
 with a note in the draft, exactly like an unusable ceiling line; a name
 that matches no bundle lens is not silently dropped -- its include shows
 up as a NOT RUN line. Any other `review_`-namespaced line in the file --
-a key the build's two reads (this parse and the admission read) do not
-carry -- is also ignored fail-open and named: the note says the key,
+a key the build's reads (this parse, the admission read, and the
+service's post-config read of the repo's severity floor and post
+verbosity, S3) do not carry -- is also ignored fail-open and named: the
+note says the key,
 that this build does not support it, and that the default stands, and
 never quotes the rejected value (S1); the scan knows the
 admission-class keys by name (`review_base_include:`,
@@ -1894,7 +1974,7 @@ D41 records the 2026-11-12 probe that did.
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
-| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line and the D69 lens-preference lines, read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows | no |
+| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line and the D69 lens-preference lines, read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base | no |
 | `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. The `REVIEW.md` reads behind it live in `repo_config.py` (S1) | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
@@ -1919,8 +1999,8 @@ D41 records the 2026-11-12 probe that did.
 | `head_change.py` | the keep-or-cancel decision for a push that lands mid-review (#702, D79): the range's classification, the progress read back from the run's events file, the pure decision, and the live classification reads | GitHub (classification reads) |
 | `delta.py` | the delta review a kept head's follow-up runs (#702, D83): the delta scope — what is new and the resolution gate, not a lens scope — the coordinator's per-lens re-run/reuse decision, the incremental-diff highlight block, the prior findings parsed from the round record, the carry-forward turn's pieces and the composition | GitHub (the range comparison) |
 | `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head; hold a kept head back as the pull request's pending follow-up (#702) | the queue file |
-| `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74) | the review child |
-| `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
+| `service_run.py` | one queued commit through the service mode's command (`agentic-review` by default, `review` in oneshot mode; D70), with the per-pull-request `--round-log` the agentic child takes (D74); the finding-line classifier and the severity-floor partition the post applies (S3) | the review child |
+| `service_post.py` | one COMMENT review, idempotent; no other event can be sent; the repo's post settings (S3) lower only — a severity floor that holds below-floor preference-tier findings out of the Findings section, named, and a brief body that keeps the findings, the coverage note and the stops | GitHub |
 | `service.py` | webhook HTTP server and the review worker; after the operator's envelope passes, reads the repo's default-branch `REVIEW.md` (the branch that changes only through reviewed merges, never the PR head or the PR's own base branch) through a read-only App client built from the same credentials as the head-change classifier's, and applies the repo's own narrowing, logging every skip with its reason and every failed or unusable read as a recorded gap; the handler's GitHub reads share one overall budget | network |
 
 ## Trust boundaries

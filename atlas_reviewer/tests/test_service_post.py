@@ -3,6 +3,7 @@
 post a second review."""
 
 import contextvars
+import dataclasses
 import inspect
 import json
 import threading
@@ -21,6 +22,7 @@ from atlas_reviewer.github_auth import (
 )
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.repo_config import PostConfigRead
 from atlas_reviewer.service import (
     PostAuthError,
     PostNotCurrent,
@@ -482,11 +484,36 @@ def test_the_findings_reach_the_post_whole_with_the_recommended_line():
         findings=(FINDING, SECOND_FINDING),
     )
     cut = render_comment(huge, key, lambda item: item)
-    assert "[all 2 findings cut to fit the post limit]" in cut
+    # The review is incomplete (no status flag), so the incomplete note
+    # wins the emptied section (the #757 composition's precedence, the
+    # fix brief's call) and the cut count folds into it -- the section
+    # never reads as a plain cut note on an incomplete review.
+    assert "None -- the review is incomplete" in cut
+    assert "All 2 findings were cut to fit the post limit." in cut
     assert FINDING not in cut and "L1-F2" not in cut
     assert "[comment cut to fit the post limit]" in cut
     assert cut.endswith(marker_for(key))
     assert len(cut) <= 65_000
+
+
+def test_the_cut_note_stands_alone_on_a_complete_review():
+    """The same overflow on a complete review keeps the cut note as
+    #757's Findings section wrote it: incompleteness only ever displaces
+    the cut note, it does not reshape the complete review's."""
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        tuple(f"stop-{i:04d}" for i in range(6000)),
+        (),
+        "COMMENT",
+        findings=(FINDING, SECOND_FINDING),
+        coverage_complete=True,
+    )
+    cut = render_comment(report, post_key(EVENT), lambda item: item)
+    assert "[all 2 findings cut to fit the post limit]" in cut
+    assert "the review is incomplete" not in cut
 
 
 def test_a_long_non_finding_item_is_still_cut_at_the_two_hundred_default():
@@ -1538,3 +1565,348 @@ def report_event(old: str, new: str):
     from atlas_reviewer.domain import PrEvent
 
     return PrEvent("example-org/example-app", 42, new, delta_from=old)
+
+
+# --------------------------------------------- the repo's post settings (S3)
+
+
+def _findings_report(findings: tuple[str, ...]) -> ReviewReport:
+    return dataclasses.replace(REPORT, findings=findings)
+
+
+def _floor(**overrides: object) -> PostConfigRead:
+
+    fields: dict[str, object] = {
+        "floor": None,
+        "verbosity": "full",
+        "notes": (),
+        **overrides,
+    }
+    return PostConfigRead(**fields)  # type: ignore[arg-type]
+
+
+_BLOCKER = (
+    "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
+    "(reviewing-api-contract-safety): breaks callers"
+)
+_MAJOR = (
+    "**L1-F2** [major, defect, route: eng, introduced] `a.py:2` "
+    "(checking-restraint): overbuilt"
+)
+_MINOR = (
+    "**L1-F3** [minor, defect, route: eng, introduced] `a.py:3` "
+    "(checking-restraint): naming"
+)
+_NIT = (
+    "**L1-F4** [nit, defect, route: eng, introduced] `a.py:4` "
+    "(checking-restraint): wording"
+)
+_FLOOR_TIER_NIT = (
+    "**L1-F5** [nit, defect, route: eng, introduced] `a.py:5` "
+    "(hunting-silent-failures): the swallowed OSError hides the refusal"
+)
+
+
+def test_a_post_without_the_post_config_is_the_unchanged_body():
+    """None and the parsed default render the body the service has always
+    sent: the floor's default posts everything and the full body stands."""
+    from atlas_reviewer.repo_config import DEFAULT_POST_CONFIG
+
+    body = render_comment(REPORT, "k", lambda text: text)
+    assert (render_comment(REPORT, "k", lambda text: text, post=None) == body) and (
+        render_comment(REPORT, "k", lambda text: text, post=DEFAULT_POST_CONFIG) == body
+    )
+
+
+def test_the_floor_holds_below_floor_findings_and_names_the_key():
+    """The repo's floor took effect and the post says so: the key and the
+    level in the head, the held count in the Findings section."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_BLOCKER, _MAJOR, _MINOR, _NIT))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("major"))
+    )
+    assert "`review_severity_floor: major`" in body
+    assert "held in the draft, not this post" in body
+    assert _BLOCKER in body and _MAJOR in body
+    assert _MINOR not in body and _NIT not in body
+    assert "[2 below-floor finding(s) from preference-tier lenses" in body
+
+
+def test_an_emptied_findings_section_cannot_read_clean():
+    """A floor above every finding leaves no bullet -- and no plain
+    `None.`. The fixture report's coverage flag is absent, so the review
+    is incomplete and the incomplete note wins the empty section (the
+    #757 composition's precedence), with the held count folded into it:
+    both truths, in one section."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_MINOR, _NIT))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert "the review is incomplete" in findings
+    assert "not a clean bill" in findings
+    assert "The repo's severity floor also held 2 below-floor finding(s)" in findings
+    assert findings.strip() != "None."
+
+
+def test_an_emptied_findings_section_on_a_complete_review_names_the_hold():
+    """The same floor on a complete review -- coverage flag true -- gets
+    the hold note as its own: the incompleteness note is the incomplete
+    review's, not the complete review's."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = dataclasses.replace(
+        _findings_report((_MINOR, _NIT)), coverage_complete=True
+    )
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert "no finding at or above the repo's severity floor" in findings
+    assert "2 below-floor finding(s)" in findings
+    assert "the review is incomplete" not in findings
+
+
+def test_a_floor_tier_lens_finding_survives_any_floor_in_the_post():
+    """The tier rule carries over unchanged (D81 Q3): the post never
+    holds a floor-tier lens's finding, whatever the repo raised its
+    floor to."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = _findings_report((_FLOOR_TIER_NIT, _MINOR))
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    assert _FLOOR_TIER_NIT in body
+    assert _MINOR not in body
+
+
+def test_a_fail_open_post_line_is_named_and_never_echoes_the_value():
+    """An unusable floor line took nothing down with it -- the default
+    stands, every finding posts -- and the post names the condition
+    without echoing the rejected value."""
+    report = _findings_report((_MINOR,))
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        post=_floor(
+            notes=(
+                (
+                    "the reviewed repo's default-branch REVIEW.md carries a "
+                    "review_severity_floor: line that is not one of the "
+                    "severity names; it is ignored and the default "
+                    "(post every finding) stands"
+                ),
+            )
+        ),
+    )
+    assert "review_severity_floor:" in body
+    assert "ignored and the default" in body
+    assert _MINOR in body
+
+
+def test_the_brief_post_drops_the_bookkeeping_and_keeps_the_protected():
+    """The verbosity dial's one lower position: the lens bookkeeping and
+    the cost lines go; the Findings section, the coverage note, the
+    limit stops and the delta's carried record stay. The fixture
+    report's coverage flag is made complete so this pins the dial alone;
+    the incomplete interaction has its own test."""
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = dataclasses.replace(REPORT, coverage_complete=True)
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(verbosity=POST_VERBOSITY_BRIEF)
+    )
+    assert "## Lenses run" not in body
+    assert "## Lenses not run" not in body
+    assert "## Cost" not in body
+    for kept in ("## Findings", "## Files read", "## Limit stops"):
+        assert kept in body, kept
+    assert REPORT.files_note in body
+    assert "`review_post_verbosity: brief`" in body
+
+
+def test_an_incomplete_brief_post_keeps_lenses_not_run():
+    """The #757 composition's brief-aware pointer (the fix brief's
+    call): an incomplete review's banner and its Findings note point the
+    reader at "Lenses not run" by name, so an incomplete brief post
+    keeps that section -- the pointer resolves, never dangles. Kills the
+    mutant that drops it from the incomplete brief post."""
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = dataclasses.replace(
+        REPORT,
+        coverage_complete=False,
+        lenses_not_run=("reviewing-concurrency-and-async: over the budget",),
+    )
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(verbosity=POST_VERBOSITY_BRIEF)
+    )
+    assert "## Lenses not run" in body
+    assert "reviewing-concurrency-and-async: over the budget" in body
+    assert "REVIEW INCOMPLETE" in body
+    # The bookkeeping the dial still drops on the incomplete post.
+    assert "## Lenses run" not in body
+    assert "## Cost" not in body
+
+
+def test_the_floor_on_an_incomplete_review_never_hides_the_incompleteness():
+    """Held-count does not beat the incomplete note (the fix brief's
+    call): a floor above every finding on an incomplete review renders
+    the incomplete note, with the held count folded into it. Kills the
+    mutant that lets the held note win the section."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = dataclasses.replace(
+        _findings_report((_MINOR, _NIT)), coverage_complete=False
+    )
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("blocker"))
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert findings.startswith("None -- the review is incomplete")
+    assert "not a clean bill" in findings
+    assert "The repo's severity floor also held 2 below-floor finding(s)" in findings
+
+
+def test_the_floor_and_the_brief_dial_compose_on_an_incomplete_review():
+    """All three at once: incomplete, every finding held by a blocker
+    floor, and the brief dial. The banner and the incomplete note stand,
+    the held count is named, and both pointed-at sections render."""
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = dataclasses.replace(
+        _findings_report((_MINOR, _NIT)),
+        coverage_complete=False,
+        lenses_not_run=("reviewing-concurrency-and-async: over the budget",),
+    )
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        post=_floor(floor=Severity("blocker"), verbosity=POST_VERBOSITY_BRIEF),
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert findings.startswith("None -- the review is incomplete")
+    assert "The repo's severity floor also held 2 below-floor finding(s)" in findings
+    assert "## Lenses not run" in body
+    assert "## Limit stops" in body
+    assert "## Files read" in body
+    assert "## Lenses run" not in body
+    assert "## Cost" not in body
+
+
+def test_the_brief_post_keeps_the_delta_sections_and_decisions_go():
+    """A delta review's resolved and carried sections are finding-bearing
+    and stay in the brief body; the per-lens decisions are bookkeeping
+    and go."""
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = dataclasses.replace(
+        REPORT,
+        resolved=("**L1-F1** [major, defect] resolved by the new commit",),
+        carried_unverified=("**L1-F2** [carried, minor] not re-verified",),
+        lens_decisions=("reused L1: the delta touched none of its paths",),
+    )
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        delta_from="a" * 40,
+        post=_floor(verbosity=POST_VERBOSITY_BRIEF),
+    )
+    assert "## Resolved by the new commits" in body
+    assert "## Carried, not re-verified" in body
+    assert "## Lens decisions" not in body
+
+
+def test_the_floor_and_the_brief_dial_compose():
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import POST_VERBOSITY_BRIEF
+
+    report = _findings_report((_MAJOR, _MINOR, _NIT))
+    body = render_comment(
+        report,
+        "k",
+        lambda text: text,
+        post=_floor(floor=Severity("major"), verbosity=POST_VERBOSITY_BRIEF),
+    )
+    assert "`review_severity_floor: major`" in body
+    assert "`review_post_verbosity: brief`" in body
+    assert _MAJOR in body and _MINOR not in body
+    assert "## Cost" not in body and "## Limit stops" in body
+
+
+def test_the_poster_reads_its_post_config_source(tmp_path):
+    """The r1 Minor's seam: the poster's `post` reads the source it is
+    handed -- the floor reaches the rendered body through the poster
+    itself, not only through `render_comment`. Kills the mutant that
+    ignores the source."""
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import PostConfigRead
+
+    poster, github = _poster(tmp_path)
+    source_calls: list[int] = []
+
+    def source() -> PostConfigRead:
+        source_calls.append(1)
+        return PostConfigRead(Severity("major"), "full", ())
+
+    poster.post(EVENT, _findings_report((_BLOCKER, _MINOR)), post_config=source)
+    body = _posted_body(github)["body"]
+    assert "`review_severity_floor: major`" in body
+    assert _BLOCKER in body
+    assert _MINOR not in body
+    assert "[1 below-floor finding(s) from preference-tier lenses" in body
+    assert source_calls == [1]
+
+
+def test_an_already_posted_head_never_reads_the_post_config_source(tmp_path):
+    """The source is lazy on purpose: the poster reads it after its own
+    dedupe checks, so an already-posted head spends no read."""
+    from atlas_reviewer.lens_contract import Severity
+    from atlas_reviewer.repo_config import PostConfigRead
+
+    poster, _github = _poster(tmp_path)
+    source_calls: list[int] = []
+
+    def source() -> PostConfigRead:
+        source_calls.append(1)
+        return PostConfigRead(Severity("major"), "full", ())
+
+    poster.post(EVENT, REPORT, post_config=source)
+    poster.post(EVENT, REPORT, post_config=source)
+    assert source_calls == [1]
+
+
+def test_the_cut_and_the_hold_compose_and_both_are_named():
+    """Nit 1 (r1 review of #770): a post that overflowed and cut every
+    kept finding, on a complete review with a floor that also held
+    findings, names both -- the cut note carries the held count, so the
+    corner cannot hide what the floor kept out."""
+    from atlas_reviewer.lens_contract import Severity
+
+    report = ReviewReport(
+        (),
+        (),
+        "note",
+        (),
+        tuple(f"stop-{i:04d}" for i in range(6000)),
+        (),
+        "COMMENT",
+        findings=(_BLOCKER, _MAJOR, _MINOR, _NIT),
+        coverage_complete=True,
+    )
+    body = render_comment(
+        report, "k", lambda text: text, post=_floor(floor=Severity("major"))
+    )
+    findings = body.split("## Findings\n\n", 1)[1].split("\n\n## ", 1)[0]
+    assert "[all 2 findings cut to fit the post limit]" in findings
+    assert "The repo's severity floor also held 2 below-floor finding(s)" in findings
+    assert findings.strip() != "None."

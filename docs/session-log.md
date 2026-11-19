@@ -4065,3 +4065,150 @@ reviewer's F4 direction, now dead), the tilde alternative removed, the
 closing rule reduced to "any marker line", and the no-info-string check
 dropped. The unbalanced-fence hide vector stays as the r2 review
 assessed it: disclosed, fail-open, and never a wrong value.
+
+## 2026-11-19 — Config slice S3: the severity floor and the post's verbosity (issue #763, stacked on #769)
+
+Config slice S3 of the user-configuration plan, implemented on the branch
+stacked on #769 (the S1 parse module it consumes). The repo's `REVIEW.md`
+can now say two more things the service honors: `review_severity_floor:`
+raises the severity floor for posted findings (the default posts
+everything — the service posts one COMMENT per head, not converging
+rounds), and `review_post_verbosity:` lowers the post to its brief body.
+D84 records the implementation decisions the plan left open — the read
+source, the key names and the brief body's section set.
+
+**The read source is the default branch, at post time (D84).** The floor
+decides which verified findings reach the post and the dial decides
+which sections it carries; a config read from a surface the PR's author
+controls — the PR head, or the merge-base a same-repo or stacked PR can
+carry lines onto — would let the PR suppress or quiet its own review on
+the only surface a human reads. So both keys sit in the admission-class
+window: the service fetches the default-branch `REVIEW.md` at post time
+(the payload that named the branch is long gone by then, so the fetch
+recovers the branch with one read-only lookup), bounded by the same
+64 KiB, and parses it through `repo_config.parse_post_config` — the S1
+module's schema, so the file's grammar lives in one place. The
+merge-base reads neither honor nor name the two keys, and the
+unsupported scan knows them (the known set grows to eight), so a repo
+that sets them draws no false unsupported note — the same cohesion the
+admission keys' cross-check pins.
+
+**The floor's tier rule carries over unchanged (D81 Q3).** A
+below-floor finding from a preference-tier lens is held in the draft
+and named by the count the post's Findings section carries — the
+section names the hold the way it names the 65,000-character cut, so an
+emptied list cannot read as a clean review. A finding from one of the
+manifest's five `tier: floor` lenses (`picker.FLOOR_TIER`) is posted at
+any severity under any floor, and a line the finding-line parse cannot
+classify is kept — the floor suppresses only what it can see. The
+overlay's `acknowledge` rule carries over with it; the service reads no
+overlay today, so the floor is the only suppression this post path
+applies. The floor's coverage cost is stated in the README the way
+`review_skip_events`' is (D81's 4:54 PM CT context): a below-floor
+preference-tier finding lands in the draft only, and a human reading
+only the post does not see it.
+
+**The brief body lowers only.** `review_post_verbosity: brief` drops
+the lens bookkeeping (Lenses run, Lenses not run, Lens decisions) and
+the Cost section, and keeps the Findings section, the coverage note,
+the Limit stops, and a delta review's resolved and carried sections —
+the finding-bearing record a brief post must not silently drop. The
+Findings section and the coverage note are never suppressible at any
+verbosity, and the dial's closed set (`full`, `brief`) is what pins
+lowering-only: there is no value above `full`, so no setting can make
+the post more verbose than the body the service already sends.
+
+**The post is honest about its own shape.** When a floor or a brief
+dial took effect — or a line failed open — the post names the key that
+did it, and every value a line of the post names is schema-validated.
+An unusable line fails open per key (the keys independent, the way the
+admission read's are), its note naming the key, the condition and the
+default that stands and never the rejected value; a fetch that fails,
+times out or reads a file over the bound leaves the default standing —
+the protective direction, since a lost read can only make the post more
+complete, never less — with the gap on a `post config` telemetry event,
+and the post is never held for it. The source the wrapped publisher
+hands the poster is lazy, so an already-posted head spends no read.
+
+**Tests** (`atlas_reviewer/tests/test_repo_config.py`,
+`test_service_run.py`, `test_service_post.py`,
+`test_service_receive.py`; each behavior a test that fails when
+reverted, each mutant applied by hand and killed): the closed sets and
+fail-open notes (per key, the independence, the scan cohesion, the
+never-echoed value), the finding-line parse on the real `render_draft`
+output (the tags bracket's severity — first tag, or the tag after the
+carried tag's word — and the lens parenthesis, with the decoy-anchor
+pin over a location and a finding text that both carry `(word):`
+sequences), the floor's partition (at-or-above kept, the tier
+exemption, the unclassifiable kept, the held count), the post (the key
+named, the held count in the section, the emptied section not clean,
+the brief body's drops and keeps, the unchanged default body), and the
+service wiring (the fetcher's branch recovery and bound, the source's
+fail-open and gap telemetry, the timeout, the lazily wrapped
+publisher). The three S1 tests that used `review_severity_floor:` as
+their example unknown key move to `review_round_cap:` — the key is
+supported now, which is the point.
+
+**Overlap.** #757 (D82) touches `service_post.py`, which this slice
+also edits — `render_comment` (a new optional `post` parameter, the
+settings lines appended to the head, the tail's brief selection),
+`_findings_section` (a new optional `held` parameter and its
+named-hold branches) and `ReviewPoster.post` (the lazy source read
+after the dedupe checks) — kept additive for the rebase; `service.py`
+gains the post-config fetcher, the per-post source and the publisher
+wrapper beside the admission reader's. The plan's S3 row named
+`service_run.py` and `service_post.py`; the read lands in `service.py`
+because the parent's GitHub-reading machinery (the read-only client,
+the bounded call, the telemetry) already lives there — disclosed here
+rather than claimed away.
+
+## 2026-11-19 (same day) — #770 round 1: the layer restacked onto #757, and the two post-truths composed
+
+PR #757 (D82) merged six minutes after the S3 head was committed, and #769
+was rebased onto it (new head `538d1e53`); the restack
+(`git rebase --onto`, per the fix brief) conflicts exactly where the r1
+review said it would — `service_post.py`, where #757's `incomplete`
+parameter and `elif` branch meet the S3 `held` parameter and branch in
+`_findings_section`. docs auto-merged (the decisions log's and the
+session log's appends landed cleanly; D84 sits after D82/D83 in number
+order and the decision guard passes against the new base).
+
+**The composition, the fix brief's calls (recorded as a Correction after
+D84).** The Findings section carries both parameters, and **incompleteness
+wins the empty section**: the stronger claim is never hidden, so on an
+incomplete review the incomplete note displaces the bare cut and hold
+notes and the cut count and the held count fold into it — no combination
+of cut, hold and incompleteness leaves the section reading as a plain
+`None.` — while a complete review's cut and hold notes stand as each
+slice wrote them. And the brief dial's "Lenses not run" drop is
+**brief-aware**: an incomplete brief post keeps the section, because
+PR #757's banner and its Findings note point the reader there by name; a
+complete brief post still drops it as bookkeeping.
+
+**Tests** (`test_service_post.py`, `test_service_receive.py`): the three
+interaction tests the brief named — brief+incomplete (the section kept,
+the banner present, the bookkeeping still dropped), floor+incomplete with
+every finding held (the incomplete note first, the held count folded in),
+floor+incomplete+brief (all three at once, both pointed-at sections
+render) — plus the complete-review twins (the cut note alone; the hold
+note alone), so the precedence is pinned from both sides. The r1 Minor's
+two surviving mutants are dead: `test_serve_installs_the_post_config_
+wrapper_and_the_post_honors_it` drives serve → worker → poster end to end
+with a fetcher and kills the wrapper-installation deletion;
+`test_the_poster_reads_its_post_config_source` (and the already-posted
+laziness pin) kills the source-ignoring `post`. **Mutants applied by
+hand this round, all killed:** the two r1 survivors, the incomplete-brief
+"Lenses not run" drop, the held-beats-incomplete order, the cut-then-hold
+fold dropped, and the held_clause dropped from the incomplete note.
+
+**The nits.** Nit 1 — the cut-and-hold corner names the held count (the
+held clause folds into the cut note). Nit 2 — the wrapper's
+three-argument call is typed: `PostPublisher`, a protocol whose third
+parameter is optional, so a strict two-argument publisher passed to
+`serve` with a fetcher is a type error at the call site, not a
+`TypeError` on every post. Nit 3 — the README names the per-post cost:
+two uncached read-only calls per post attempt under the App installation
+token, bounded by the same 8-second read budget, spent after the poster's
+dedupe checks.
+
+Offline only, same rules as the entries above.

@@ -2335,7 +2335,7 @@ def test_a_dry_run_names_an_unsupported_config_key_without_its_value(
     default that stands, never the raw rejected value."""
     fixtures = _fixture_copy(tmp_path)
     (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
-        "review_severity_floor: <untrusted-data>REJECTEDVALUE123</untrusted-data>\n",
+        "review_round_cap: <untrusted-data>REJECTEDVALUE123</untrusted-data>\n",
         encoding="utf-8",
     )
 
@@ -2353,7 +2353,7 @@ def test_a_dry_run_names_an_unsupported_config_key_without_its_value(
         str(FIXTURE / "scenarios" / "approve.json"),
     )
     assert code == cli.EXIT_OK, err
-    assert "review_severity_floor:" in out
+    assert "review_round_cap:" in out
     assert "does not support" in out
     assert "REJECTEDVALUE123" not in out
     assert "untrusted-data" not in out

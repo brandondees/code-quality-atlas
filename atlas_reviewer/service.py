@@ -25,7 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
@@ -47,6 +47,11 @@ from atlas_reviewer.head_change import (
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.repo_config import (
+    DEFAULT_POST_CONFIG,
+    PostConfigRead,
+    parse_post_config,
+)
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
@@ -146,6 +151,36 @@ _MAX_HTTP_HANDLERS = 16
 
 Publisher = Callable[[PrEvent, ReviewReport], bool | None]
 Runner = Callable[[PrEvent, threading.Event], ReviewRun]
+
+
+class PostPublisher(Protocol):
+    """A publisher ``serve`` may hand the optional post-config source to:
+    the poster's own ``post``, whose third parameter is optional and read
+    after the poster's own dedupe checks. The protocol names the contract
+    the wrapper relies on, so passing a strict two-argument publisher
+    together with a ``post_config_fetcher`` is a type error at the
+    ``serve`` call site, not a ``TypeError`` on every post (r1 review of
+    #770, Nit 2). A publisher used without a fetcher is never called with
+    the third argument, so the plain ``Publisher`` shape keeps working."""
+
+    def __call__(
+        self,
+        event: PrEvent,
+        report: ReviewReport,
+        post_config: PostConfigSource | None = ...,
+    ) -> bool | None: ...
+
+
+# The default-branch ``REVIEW.md`` fetch behind the repo's own post
+# settings (config slice S3, D84): one repo name in, the file's bytes or
+# None when there is no file there. The same shape the admission read's
+# reader has, minus the default-branch argument -- at post time no
+# payload carries it, so the fetcher recovers the branch itself.
+PostConfigFetcher = Callable[[str], bytes | None]
+# The per-post source the wrapped publisher hands the poster: called
+# lazily, after the poster's own dedupe checks, so an already-posted
+# head spends no read. It never raises; a gap reads as the default.
+PostConfigSource = Callable[[], PostConfigRead]
 
 
 class ServiceError(Exception):
@@ -1306,11 +1341,13 @@ def serve(
     env: Mapping[str, str],
     *,
     runner: Runner | None = None,
-    publisher: Publisher | None = None,
+    publisher: PostPublisher | None = None,
     classifier: PushClassifier | None = None,
     classifier_reason: str = "",
     admission_reader: AdmissionReader | None = None,
     admission_reason: str = "",
+    post_config_fetcher: PostConfigFetcher | None = None,
+    post_config_reason: str = "",
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
     secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
@@ -1346,8 +1383,16 @@ def serve(
                 env,
                 deadline_s=deadline,
             )
+        posting_publisher = _post_config_publisher(
+            publisher, post_config_fetcher, telemetry
+        )
         worker = Worker(
-            board, runner, telemetry, publisher, config.concurrency, config.state_dir
+            board,
+            runner,
+            telemetry,
+            posting_publisher,
+            config.concurrency,
+            config.state_dir,
         )
         server = ReviewServer(config, board, log)
         server.worker = worker
@@ -1378,6 +1423,17 @@ def serve(
             log(
                 "atlas-reviewer: repo admission narrowing is off: the"
                 f" default-branch {REVIEW_MD} will not be read ({admission_reason})"
+            )
+        if post_config_fetcher is None and post_config_reason:
+            # The repo's own post settings -- the severity floor and the
+            # verbosity dial (config slice S3, D84) -- cannot be read
+            # without the App credentials; that is a gap named at boot,
+            # and every post then runs on the default: everything
+            # posted, the full body.
+            log(
+                "atlas-reviewer: the repo's post settings are off: the"
+                f" default-branch {REVIEW_MD} will not be read"
+                f" ({post_config_reason})"
             )
         worker.start()
         log(
@@ -1588,6 +1644,113 @@ def _default_branch_via_api(client: GitHubClient, repo: str) -> str:
     return branch
 
 
+def _post_config_fetcher(
+    config: ServiceConfig, env: Mapping[str, str]
+) -> tuple[PostConfigFetcher | None, str]:
+    """The default-branch ``REVIEW.md`` reader behind the repo's own post
+    settings (config slice S3, D84): the severity floor for posted
+    findings and the post's verbosity dial, built from the same
+    read-only App client the admission reader's is, and the reason there
+    is none.
+
+    The read source is the **default branch**, for the reason the
+    admission read's is (round-1 review of #756, Major 1): the floor
+    decides which findings reach the post and the dial decides which
+    sections it carries, so a config read from a surface the PR's author
+    controls -- the PR head, or the merge-base a same-repo or stacked PR
+    can carry lines onto -- would let the PR quiet or suppress its own
+    review; the default branch changes only through reviewed merges. At
+    post time the webhook payload that named the default branch is long
+    gone, so the fetch recovers the branch with one read-only lookup
+    (`_default_branch_via_api`), then reads the file under the same
+    64 KiB bound the admission read uses. A missing file is the ordinary
+    unconfigured repo (``None``; the default stands, silently); any
+    other failure raises, and the caller treats it as a gap with the
+    default standing."""
+    client, reason = _read_client(config, env)
+    if client is None:
+        return None, reason
+
+    def read(repo: str) -> bytes | None:
+        # Like the admission read: only the file read catches
+        # NotFoundError -- no REVIEW.md on the default branch is the
+        # ordinary unconfigured repo -- and the fallback lookup's own
+        # 404 propagates as the gap, not a silent stand-down.
+        ref = _default_branch_via_api(client, repo)
+        try:
+            return client.get_file(repo, ref, REVIEW_MD, MAX_ADMISSION_BYTES)
+        except NotFoundError:
+            return None
+
+    return read, ""
+
+
+def _post_config_source(
+    fetcher: PostConfigFetcher, event: PrEvent, telemetry: Telemetry | None
+) -> PostConfigSource:
+    """One post's post-configuration source: called lazily, after the
+    poster's own dedupe checks, so an already-posted head spends no
+    read. The fetch runs bounded and fail-open -- a failure, a timeout
+    or a file over the read bound leaves the default standing
+    (`DEFAULT_POST_CONFIG`: post every finding, the full body -- the
+    protective direction; a lost read can only make the post *more*
+    complete, never less) -- and the gap is on the telemetry, the way
+    the admission read's is. An unusable line's own fail-open note is
+    recorded the same way; the post itself carries it."""
+
+    def read() -> PostConfigRead:
+        started = telemetry.elapsed() if telemetry is not None else 0.0
+        raw, gap, timed_out = _call_bounded(
+            fetcher, event.repo, budget_s=_READ_BUDGET_S, what="post config read"
+        )
+        if raw is None:
+            if gap:
+                _record(
+                    telemetry,
+                    "post config",
+                    _fields(event),
+                    start_s=started,
+                    error=gap,
+                    timed_out=timed_out,
+                )
+            return DEFAULT_POST_CONFIG
+        config = parse_post_config(raw.decode("utf-8", errors="replace"))
+        if config.notes:
+            _record(
+                telemetry,
+                "post config",
+                _fields(event),
+                start_s=started,
+                error="; ".join(config.notes),
+            )
+        return config
+
+    return read
+
+
+def _post_config_publisher(
+    publisher: PostPublisher | None,
+    fetcher: PostConfigFetcher | None,
+    telemetry: Telemetry | None,
+) -> Publisher | None:
+    """The publisher wrapped to resolve the repo's post configuration for
+    each post (config slice S3, D84) and hand it to the poster as a lazy
+    source. A publisher or a fetcher that is None passes through
+    unchanged: a deployment that posts nothing needs no config, and one
+    without the App credentials posts the default -- the boot log names
+    the lost read. The publisher this wraps must accept the optional
+    post-config source (`PostPublisher`) -- the type system pins that at
+    the ``serve`` call site, because the wrapper calls it with three
+    arguments."""
+    if publisher is None or fetcher is None:
+        return publisher
+
+    def posted(event: PrEvent, report: ReviewReport) -> bool | None:
+        return publisher(event, report, _post_config_source(fetcher, event, telemetry))
+
+    return posted
+
+
 def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
     """Values the review child is allowed to hold. The service log has to
     scrub them, because the child's stderr is recorded here."""
@@ -1619,6 +1782,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         return 2
     classifier, classifier_reason = _head_change_classifier(config, env)
     admission_reader, admission_reason = _repo_admission_reader(config, env)
+    post_config_fetcher, post_config_reason = _post_config_fetcher(config, env)
     try:
         return serve(
             config,
@@ -1628,6 +1792,8 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
             classifier_reason=classifier_reason,
             admission_reader=admission_reader,
             admission_reason=admission_reason,
+            post_config_fetcher=post_config_fetcher,
+            post_config_reason=post_config_reason,
             secret_sources=(
                 lambda: _child_secrets(env),
                 publisher.credential_secrets,
