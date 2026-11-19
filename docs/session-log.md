@@ -5025,6 +5025,7 @@ D86 sits on main beside D87. D87's parenthetical is reworded in place to
 say so — its entry is still the current record — and this note is the
 log's append-only stand-in for the same fact; the S6 entry's "which open
 S9 PR #773 holds" wording above is the stale text the correction covers.
+
 ## 2026-11-19 — Config slice S10, part A: the BYOK core — the encrypted installation store, the tenant endpoint's own code path, and the pinned-IP egress guard (issue #768)
 
 The user-configuration plan's S10 (`docs/plans/2026-11-18-user-configuration.md`
