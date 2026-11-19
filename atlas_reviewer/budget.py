@@ -559,18 +559,95 @@ class DailySpend:
         the gap."""
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
-        if calls < 0:
+        self._append(
+            repo,
+            {
+                "recorded_at": (
+                    at if at is not None else datetime.now(UTC)
+                ).isoformat(),
+                "calls": calls,
+                "committed_usd": str(amount_usd),
+            },
+        )
+
+    def record_once(
+        self,
+        repo: str,
+        amount_usd: Decimal,
+        calls: int,
+        key: str,
+        *,
+        at: datetime | None = None,
+    ) -> tuple[bool, str]:
+        """Append one attempt's committed spend to the day's file **once
+        per key**, as `(appended, gap)`.
+
+        The key is the caller's identity for one attempt's spend -- for
+        the crash backfill, the progress evidence's content hash. A key
+        already present in the day's file is not appended again, so a
+        recovery that runs twice against the same crashed attempt adds
+        nothing, while a different attempt's evidence hashes differently
+        and is recorded on its own; the dedupe lives in the ledger
+        itself, so no crash between an append and a bookkeeping step can
+        double-count. An unreadable ledger is not appended to -- its
+        total is unknown and the refusal already holds -- and the gap is
+        returned so the caller can name it."""
+        if not key:
+            raise ValueError("a once-only record needs a key")
+        if amount_usd < 0:
+            raise ValueError("a settled spend cannot be negative")
+        total, gap = self.committed(repo)
+        if total is None:
+            return False, gap
+        if self._has_key(repo, key):
+            return False, ""
+        self._append(
+            repo,
+            {
+                "recorded_at": (
+                    at if at is not None else datetime.now(UTC)
+                ).isoformat(),
+                "calls": calls,
+                "committed_usd": str(amount_usd),
+                "key": key,
+            },
+        )
+        return True, ""
+
+    def _has_key(self, repo: str, key: str) -> bool:
+        """True when some record in the day's file already carries
+        `key`. Lines that do not parse are skipped, not fatal: they are
+        the unreadable-record case `committed` refuses on, and a
+        half-written line cannot hide a key this module wrote whole."""
+        try:
+            text = self.file(repo).read_text(encoding="utf-8")
+        except OSError:
+            return False
+        for line in text.splitlines():
+            try:
+                data = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                continue
+            if isinstance(data, dict) and data.get("key") == key:
+                return True
+        return False
+
+    def _append(self, repo: str, record: dict[str, str | int]) -> None:
+        """Write one ledger line: the whole line in one `os.write` under
+        `O_APPEND`, and a partial write -- a short count is possible on
+        a signal -- is written to completion before the file is closed,
+        so a truncated line (which `committed` would fail closed on)
+        cannot be left behind."""
+        if int(record["calls"]) < 0:
             raise ValueError("a call count cannot be negative")
-        record = {
-            "recorded_at": (at if at is not None else datetime.now(UTC)).isoformat(),
-            "calls": calls,
-            "committed_usd": str(amount_usd),
-        }
         path = self.file(repo)
         make_private_dirs(path.parent)
+        data = (json.dumps(record) + "\n").encode("utf-8")
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
-            os.write(fd, (json.dumps(record) + "\n").encode("utf-8"))
+            written = 0
+            while written < len(data):
+                written += os.write(fd, data[written:])
         finally:
             os.close(fd)
 

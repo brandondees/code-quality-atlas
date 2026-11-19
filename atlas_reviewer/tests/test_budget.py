@@ -328,3 +328,67 @@ def test_the_same_bound_holds_past_an_installations_cap(tmp_path):
 def test_the_fixed_reason_label_is_the_skips_one():
     assert SKIP_BUDGET_REASON == "daily-budget"
     assert no_installation_cap("anything") is None
+
+
+# ------------------------------------------------- the once-only record (M1)
+
+
+def test_record_once_appends_once_per_key(tmp_path):
+    spend = _spend(tmp_path)
+    assert spend.record_once("o/r", Decimal("1.00"), 1, "attempt-1") == (True, "")
+    assert spend.record_once("o/r", Decimal("1.00"), 1, "attempt-1") == (False, "")
+    # A different attempt's key is a different spend and is recorded.
+    assert spend.record_once("o/r", Decimal("2.00"), 1, "attempt-2") == (True, "")
+    total, gap = spend.committed("o/r")
+    assert total == Decimal("3.00")
+    assert gap == ""
+
+
+def test_record_once_does_not_append_to_an_unreadable_ledger(tmp_path):
+    path = spend_file(tmp_path, "o/r", DAY)
+    path.parent.mkdir(parents=True)
+    path.write_text("garbage\n", encoding="utf-8")
+    appended, gap = _spend(tmp_path).record_once("o/r", Decimal("1.00"), 1, "k")
+    assert appended is False
+    assert "unreadable record" in gap
+
+
+def test_record_once_needs_a_key(tmp_path):
+    with pytest.raises(ValueError):
+        _spend(tmp_path).record_once("o/r", Decimal("1.00"), 1, "")
+
+
+def test_the_ledger_write_completes_a_partial_write(tmp_path, monkeypatch):
+    """N6: a short `os.write` count is written to completion before the
+    file is closed, so a truncated line -- which the reader would fail
+    closed on -- cannot be left behind."""
+    import os as _os
+
+    from atlas_reviewer import budget
+
+    real_write = _os.write
+    writes: list[int] = []
+
+    def short_then_whole(fd, data):
+        if not writes:
+            writes.append(len(data))
+            return real_write(fd, data[: len(data) // 2])
+        return real_write(fd, data)
+
+    monkeypatch.setattr(budget.os, "write", short_then_whole)
+    _spend(tmp_path).record("o/r", Decimal("1.0000"), 1)
+    total, gap = _spend(tmp_path).committed("o/r")
+    assert gap == ""
+    assert total == Decimal("1.0000")
+    assert len(writes) == 1
+
+
+# ----------------------------------------------- the bounds' check order (M2)
+
+
+def test_when_both_bounds_are_spent_the_record_names_the_budget(tmp_path):
+    """D86's ordering call, pinned: the budget is checked first, so a
+    total at or over both bounds reads as the budget's refusal."""
+    spend = _spend(tmp_path, cap={"1234": Decimal("10.00")})
+    spend.record("o/r", Decimal("100.0000"), 1)
+    assert spend.refusal("o/r", "1234") == (BUDGET_REACHED, "")

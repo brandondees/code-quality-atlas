@@ -14,6 +14,7 @@ review child is started without either.
 from __future__ import annotations
 
 import contextvars
+import hashlib
 import math
 import os
 import random
@@ -630,6 +631,100 @@ def _progress_paths(state_root: Path, running: PrEvent) -> tuple[Path, ...]:
     return (events.with_name(events.name + ".1"), events)
 
 
+def _progress_evidence_key(paths: tuple[Path, ...]) -> str | None:
+    """The progress evidence's content hash -- the dedupe key one
+    crashed attempt's backfill carries in the ledger (r1 review of #773,
+    M1). The files are read whole and hashed together; the child is dead
+    by the time a recovery runs, so the same crashed attempt hashes the
+    same on every recovery pass, while a retry that writes its own
+    progress hashes differently and is backfilled on its own. No
+    readable evidence hashes to None, and a None means there is nothing
+    to backfill."""
+    hasher = hashlib.sha256()
+    seen = False
+    for path in paths:
+        try:
+            hasher.update(path.read_bytes())
+            seen = True
+        except OSError:
+            continue
+    return hasher.hexdigest() if seen else None
+
+
+def _backfill_crashed_spend(
+    spend: DailySpend | None,
+    state_root: Path,
+    event: PrEvent,
+    telemetry: Telemetry | None,
+) -> None:
+    """Backfill one crashed attempt's committed spend onto the day's
+    ledger (r1 review of #773, M1).
+
+    A review whose process died before the worker could settle it never
+    reached the settle-time spend recording, so its committed spend --
+    the child's own token-counts-times-price-table accounting, from the
+    progress records the crash left in the run directory -- is appended
+    before that attempt's evidence is overwritten, exactly once: the
+    ledger's own `record_once` dedupes on the evidence's content hash, so
+    a second recovery or a second pre-run pass over the same crashed
+    attempt adds nothing, while a retry that writes its own progress
+    hashes differently and is recorded on its own.
+
+    No run directory at all is the ordinary first run of a head -- or a
+    pending head that was re-queued without ever having run -- and is
+    silent. A directory left behind with no readable progress figure is
+    the crash the child died too early to record anything in; nothing is
+    appended, and the gap is named on the telemetry, where the
+    unrecorded possibility stays visible -- the overshoot bound carries
+    it the way it carries the race."""
+    if spend is None:
+        return
+    paths = _progress_paths(state_root, event)
+    if not run_dir(state_root, event).is_dir():
+        return
+    progress = read_progress(*paths)
+    key = _progress_evidence_key(paths)
+    fields: dict[str, str | int] = dict(_fields(event))
+    if progress is None or key is None:
+        _record(
+            telemetry,
+            "crashed spend",
+            fields,
+            error=(
+                "the crashed attempt's run directory holds no progress "
+                "figure; its spend, if any, is unrecorded (the overshoot "
+                "bound carries it)"
+            ),
+        )
+        return
+    fields.update(
+        {
+            "calls": progress.calls,
+            "committed_usd": str(progress.committed_usd),
+            "measured": "backfilled",
+        }
+    )
+    try:
+        appended, gap = spend.record_once(
+            event.repo, progress.committed_usd, progress.calls, key
+        )
+    except OSError as exc:
+        _record(
+            telemetry,
+            "crashed spend",
+            fields,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return
+    if gap:
+        fields["measured"] = "unknown"
+        _record(telemetry, "crashed spend", fields, error=gap)
+        return
+    if not appended:
+        fields["measured"] = "already recorded"
+    _record(telemetry, "crashed spend", fields)
+
+
 def _header(headers: Mapping[str, str], name: str) -> str | None:
     lowered = {key.lower(): value for key, value in headers.items()}
     return lowered.get(name.lower())
@@ -760,9 +855,18 @@ class Worker:
         and a redelivery of that
         head is answered duplicate, so without the recovery it is never
         reviewed. Runs on every worker pass; it installs only when there
-        is something to install."""
+        is something to install. Before each head is re-queued, the
+        crashed attempt's own committed spend is backfilled onto the
+        day's ledger once (r1 review of #773, M1) -- a pending head that
+        never ran has no run directory and is passed over silently; the
+        pre-runner pass in `_execute` covers the head a plain crash left
+        running, which the queue's own reload re-queues without ever
+        reaching this loop."""
         try:
             for event in self._board.recover_pending():
+                _backfill_crashed_spend(
+                    self._spend, self._state_root, event, self._telemetry
+                )
                 self._telemetry.record("service", "follow-up queued", _fields(event))
         except Exception as exc:  # noqa: BLE001 -- recovery must not kill the worker
             self._telemetry.record(
@@ -811,6 +915,13 @@ class Worker:
     def _execute(self, job: Job) -> None:
         fields = _fields(job.event)
         if self._spend is not None:
+            # The crash backfill runs before the preflight check, so a
+            # crashed attempt's spend counts against the bounds the retry
+            # is admitted under, and before the runner starts, so the
+            # evidence it reads is still the crashed attempt's.
+            _backfill_crashed_spend(
+                self._spend, self._state_root, job.event, self._telemetry
+            )
             refusal, gap = self._spend.refusal(job.event.repo, self._installation)
             if refusal:
                 # The preflight re-check (config slice S9): the delivery
@@ -911,7 +1022,11 @@ class Worker:
         accounting -- reported token counts priced at the operator's price
         table, never a tenant-reported dollar figure -- from the finished
         draft's cost line, or from the last progress record when the
-        review did not finish. A review with no figure in either records
+        review did not finish; the final-over-partial precedence is
+        `_cost_event`'s by construction, which reads the progress record
+        only when the draft's cost line is absent, so this method never
+        sees both figures for one review. A review with no figure in
+        either records
         nothing: the amount is never guessed, and the gap the cost event
         carries is where the miss stays visible. A write failure is a
         named gap and leaves the total short rather than wrong."""
@@ -1542,6 +1657,7 @@ def serve(
         # runs, and the same recovery runs on the worker's idle passes.
         try:
             for event in board.recover_pending():
+                _backfill_crashed_spend(spend, config.state_dir, event, telemetry)
                 telemetry.record("service", "follow-up queued", _fields(event))
         except Exception as exc:  # noqa: BLE001 -- a failed boot recovery is the worker loop's problem
             log(f"atlas-reviewer: pending-head recovery failed: {exc}")

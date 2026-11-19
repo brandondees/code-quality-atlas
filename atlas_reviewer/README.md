@@ -583,7 +583,12 @@ taken from the finished draft's cost line, or from the last progress
 record when a review did not finish; a review with no figure in either
 records nothing and the gap stays on the cost telemetry, because the
 amount is never guessed. No tenant-reported dollar figure is ever
-consumed.
+consumed. A review whose process crashed before the worker could settle
+it is backfilled from the progress figure its run directory left behind —
+once, deduplicated in the ledger itself by the evidence's content hash —
+before the retry runs and overwrites that evidence; a crash whose run
+directory holds no readable progress figure records nothing, and the gap
+is named on the recovery's telemetry.
 
 **Where the total lives.** One append-only
 `<state dir>/spend/<owner>-<repo>-<UTC date>.jsonl` file per repo per
@@ -591,7 +596,11 @@ UTC day, where the owner and repo segments are percent-encoded with every
 byte outside `[A-Za-z0-9]` escaped — so `a-b/c` and `a/b-c` are distinct
 files, and the joining `-` is unambiguous because a literal `-` inside a
 segment always reads `%2D`. The date in the file name makes the UTC reset
-structural, and a lost file loses only that day's total. A file the
+structural, and a lost file loses only that day's total. The files are
+kept indefinitely — there is no retention or cleanup, one file per repo
+per day accumulating for as long as the deployment runs — the same
+append-only pattern as the per-PR round logs, and the same trade: the
+operator can prune old days by hand when the volume matters. A file the
 service cannot parse holds the budget (the total reads unknown and the
 refusal stands) until it is repaired, with the gap named on the record —
 a ledger the service cannot read never opens the budget.

@@ -4650,6 +4650,7 @@ Offline only, same rules as the entries above; the full gate re-run on
 the rebased tree (both suites with the coverage floors, ruff, mypy,
 drift, markdownlint), and the r1 mutant set re-run plus the new
 overlap-wording mutant, all killed.
+
 ## 2026-11-19 — Config slice S9: the per-tenant spend bounds — the operator max per review, the per-repo daily budget, and the per-installation daily cap (issue #767)
 
 The user-configuration plan's S9 (`docs/plans/2026-11-18-user-configuration.md`
@@ -4739,14 +4740,107 @@ the boot validation dropped, the preflight's settle state changed, the
 unknown-total fail-closed dropped, and the child-allowlist ride-along
 dropped.
 
-**Overlap.** The shared files were kept additive for exactly this
-rebase: #752/#753 (D80) merged first and this branch rebased onto their
-main, composing with their coordinator and lens-loop changes with no
-conflict outside this log; #772 (S5) remains open and touches
-`repo_config.py`'s `_KNOWN_KEYS`, `diffs.py` and the README, none of
-which this slice edits beyond the two new variable rows' neighbors. The
+**Overlap.** The shared files were kept additive for exactly the two
+rebases this entry's history now records: #752/#753 (D80) merged first
+and the branch rebased onto their main, then #772 (S5, D85) merged and
+the branch rebased again onto `3fed73d2` -- four conflicts, each one
+mechanical hunk, resolved by keeping both sides: the `path_ranks` and
+`operator_ceiling_max` parameter lines in `cli.py` and `coordinator.py`
+compose beside each other, and D85 precedes D86, closing the gap. The
 decisions the plan left open are recorded as **D86** in
 `docs/open-questions.md`: the clamp's scoping, the budget always-on
 default, the fail-closed unreadable ledger, the refusal records' shape
 and the preflight location, the spend-recording sources, and the cap
 interface's id resolution.
+
+## 2026-11-19 (same day) — #773 round 1: the crashed attempt's spend is backfilled, and the check order and the overlap text are pinned
+
+The r1 review of #773 approved with three Minors and six Nits; the fixes
+land in one commit on the branch rebased onto `3fed73d2` (#772 merged,
+D85 on main). The rebase's four conflicts were each one mechanical hunk,
+resolved by keeping both sides: the `path_ranks` and
+`operator_ceiling_max` parameter lines in `cli.py` and `coordinator.py`
+(the reviewer's trial rebase predicted exactly these), D85 before D86 in
+the decisions log -- closing the D85 gap -- and the S5 entry before the
+S9 entry in this log. Offline only, same rules as the entries above.
+
+**M1 — the crash under-count is backfilled (the owner's call:
+safety-first).** A review whose process died before the worker could
+settle it never reached the settle-time spend recording, so its
+committed spend read low. The fix backfills it from the progress figure
+the crashed attempt's run directory left behind -- the child's own
+token-counts-times-price-table accounting, the same source class the
+settle path uses -- at two hook points, because the two re-queue paths
+are different machinery: the recovery points (`Worker._recover` and the
+boot loop's `recover_pending`, before the head is re-queued) and the
+pre-runner pass in `Worker._execute`, which covers the head a plain
+crash left running -- that one is re-queued by the queue's own reload
+(`running` loads back as `queued`) and never passes through
+`recover_pending` at all. The backfill runs before the preflight check,
+so the crashed spend counts against the bounds the retry is admitted
+under, and before the runner starts, so the evidence it reads is still
+the crashed attempt's. The once is the ledger's own, not a marker file:
+`budget.DailySpend.record_once` dedupes on the evidence's content hash
+(`service._progress_evidence_key`), so a recovery that runs twice
+against the same crashed attempt -- a failed queue save puts the head
+back -- appends nothing the second time, while a retry that writes its
+own progress hashes differently and is recorded on its own; no crash
+between an append and a bookkeeping step can double-count, because the
+append is the only act. An attempt with no run directory at all is the
+ordinary first run (or a pending head re-queued without ever having
+run) and stays silent; a directory left behind with no readable
+progress figure records nothing and names the gap on the recovery's
+telemetry -- the remaining under-count, carried by the overshoot bound
+the way the race is, named in D86 and the README's "What is counted"
+section as the brief directed.
+
+**M2 — the check order is pinned.** `test_when_both_bounds_are_spent_
+the_record_names_the_budget` holds a total at or over both bounds and
+asserts the budget's text; the reviewer's swap-the-check-order mutant
+dies on it.
+
+**M3 — the overlap wording.** D86's and this entry's Overlap paragraphs
+now say what is true after the rebase: #772 merged, D85 precedes D86,
+and the four conflicts were the four mechanical hunks the reviewer's
+trial rebase found.
+
+**The nits.** N1 -- `_record_spend`'s docstring and D86's sentence no
+longer claim a precedence the method cannot exercise: the
+final-over-partial precedence is `_cost_event`'s by construction (the
+progress record is read only when the draft's cost line is absent), and
+the wording now says so; the behavior pin is unchanged. N2 --
+`test_a_boolean_installation_id_is_not_an_installation_id` pins the
+bool-id guard (the reviewer's mutant dies there). N3 --
+`test_a_queued_review_is_refused_at_preflight_by_the_installation_cap`
+exercises the cap double at the preflight re-check. N4 -- the README's
+spend-bounds section states that ledger files are kept indefinitely,
+with no retention, the same trade the per-PR round logs make. N5 --
+D86 records the placement call: the refusal rides S4's surface in
+`service.py`, not `service_admit.py` as the plan's file column named.
+N6 -- `DailySpend._append` writes the whole line to completion (a short
+`os.write` count is written again until the line is whole), and
+`test_the_ledger_write_completes_a_partial_write` drives a short first
+write through a patched `os.write` to pin it.
+
+**Tests** (`test_budget.py`, `test_service_receive.py`; each behavior a
+test that fails when reverted): the backfill and the retry's own spend
+(one test, the runner overwriting the evidence the way the real child
+does), the repeat recovery's no-op and its "already recorded" record,
+the no-figure gap and the ordinary first run's silence, the preflight
+cap refusal, the bool-id guard, the both-bounds ordering, the
+`record_once` key semantics at the ledger level (once per key, a
+different key recorded, no append onto an unreadable ledger, the key
+required), and the partial-write completion. Eight mutants applied by
+hand, all killed: the pre-runner backfill dropped, the backfill moved
+after the runner (the evidence read is then the retry's, and the total
+over-counts), the no-figure branch disabled (which crashes on the
+missing figure) and re-pointed at the gap text's absence, the
+`record_once` dedupe check dropped, the dedupe key dropped from the
+written record, the budget/cap check order swapped, the bool-id guard
+dropped, and the partial-write loop reduced to a single `os.write`.
+
+**Overlap.** The rebase's four conflicts are described above; the
+`coordinator.py` and `cli.py` hunks compose S5's `path_ranks` parameter
+beside this slice's `operator_ceiling_max` with no semantic
+interaction, and the decisions log now reads D80 through D86 with no
+gap.
