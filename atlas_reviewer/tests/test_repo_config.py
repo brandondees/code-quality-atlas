@@ -5,6 +5,7 @@ named fail-open notes that never echo a rejected value, and the 64 KiB
 read bound stands. Offline: fakes only, no model, network or secret."""
 
 from decimal import Decimal
+from pathlib import Path
 
 from atlas_reviewer.diffs import PathRanks
 from atlas_reviewer.picker import LensPreferences
@@ -88,6 +89,25 @@ def test_an_oversized_review_md_is_not_parsed_cut():
     assert "read bound" in read.note
 
 
+def test_this_repos_own_review_md_parses_to_the_decided_25():
+    """This repo's own root `REVIEW.md` carries `review_ceiling_usd: 25`
+    (D91, 2026-11-19): the repo raised its own per-review ceiling because
+    recent live reviews stopped at the $10 default with coverage marked
+    incomplete. The real file is read through the real merge-base parse,
+    so an edit that breaks or removes the line fails loudly here instead
+    of silently dropping this repo back to the default. The value equals
+    S9's operator max (`ATLAS_REPO_CEILING_MAX_USD` default), so the
+    clamp never bites it."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "REVIEW.md").read_text(encoding="utf-8")
+    read = review_md_ceiling(
+        source_tarball({"REVIEW.md": text.encode("utf-8")}, top="code-quality-atlas")
+    )
+    assert read.value == Decimal(25)
+    assert read.note == ""
+
+
+# -------------------------------------------------------- lens preferences
 # -------------------------------------------------------- lens preferences
 
 

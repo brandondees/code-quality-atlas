@@ -236,6 +236,24 @@ Filing issues (`file-followup`) needs write access to the repo's issues; if the
 reviewing session doesn't have it, the reviewer says so and falls back to
 `note` for that round rather than skipping silently.
 
+## Per-review ceiling
+
+Beside the prose policy, this file carries one machine setting the reviewer
+service parses (see `atlas_reviewer/repo_config.py`): a `review_ceiling_usd:`
+line sets the repo's per-review dollar ceiling for the agentic review,
+overriding the deployment's `$10` default in either direction, up to the
+operator's max per review (`ATLAS_REPO_CEILING_MAX_USD`). Like everything
+else here, the line is read from the **base ref**, so a PR cannot raise its
+own ceiling.
+
+The value below is **this repo's own setting** (decided 2026-11-19), not a
+recommended default for copies: this repo's recent live reviews stopped at
+the default with coverage marked incomplete, so this repo raises its own
+ceiling to $25. A repo copying this file should set its own value or delete
+the line to take the deployment's default.
+
+review_ceiling_usd: 25   # this repo's own setting; not a default for copies
+
 ## Scope discipline
 
 - Review only the files in the PR's diff, never the whole repo (that's what the
