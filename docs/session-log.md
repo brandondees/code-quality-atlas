@@ -5637,3 +5637,48 @@ and markdownlint run before the push; the guard's seven mutants are the
 round's only new ones (no product behavior changed -- the refusal phrases
 are user-visible strings, and their pins are the tests that moved with
 them).
+
+## 2026-11-19 — This repo's own per-review ceiling raised to $25 in REVIEW.md (D90)
+
+Brandon decided at 2:08 PM CT on 2026-11-19 to raise the live reviewer's
+per-review ceiling to $25 for this repo only: recent live reviews (PRs #769
+through #776) all stopped at the $10 default (`DEFAULT_REVIEW_CEILING_USD`,
+D68) after 4 to 6 model calls with coverage marked incomplete, and a review
+that stops early cannot approve, so the parity gate failed on every round.
+Offline only: the change is documentation plus one parse test; no live
+model, Sprite or GitHub call was made, no secret was read, and no deployed
+service setting, Fly config value or secret changed.
+
+**What changed.** The root `REVIEW.md` gains a "Per-review ceiling" section
+carrying the live line `review_ceiling_usd: 25   # this repo's own setting;
+not a default for copies`, placed after "Unresolved findings at merge" so
+the file's machine-read settings sit together before the prose-only
+"Scope discipline" section; `templates/REVIEW.md` carries the byte-identical
+section (`tests/test_review_template_sync.py` holds the two files equal).
+The prose says on the file itself what the comment says: the value is this
+repo's own setting, decided 2026-11-19, **not** a recommended default for
+copies — a repo copying the file (the root copy doubles as the template the
+suite ships) sets its own value or deletes the line and takes the
+deployment's default. The parse itself is untouched: `review_ceiling_usd:`
+is D68's line, read from the merge-base by
+`atlas_reviewer/repo_config.py`'s `CEILING_LINE`, fail-open with a named
+note on anything unusable, and the value wins over the operator's
+configured ceiling in either direction (D81 Q2). The operator default
+(`ATLAS_REVIEW_CEILING_USD`, $10) and `DEFAULT_REVIEW_CEILING_USD` are
+unchanged, and $25 equals S9's operator max per review
+(`ATLAS_REPO_CEILING_MAX_USD` default, D86), so the clamp never bites the
+value.
+
+**The pin.** `test_this_repos_own_review_md_parses_to_the_decided_25`
+(`atlas_reviewer/tests/test_repo_config.py`) reads the real root `REVIEW.md`
+through the real merge-base parse (`review_md_ceiling` over a source
+tarball built from the file's own bytes) and asserts exactly
+`Decimal("25")` with an empty note, so a future edit that breaks or removes
+the line fails loudly instead of silently lowering this repo back to the
+$10 default. The line grammar the pin rides on — a `#` comment allowed,
+whitespace stripped — is the already-pinned
+`test_a_commented_or_spaced_ceiling_line_is_honored` shape.
+
+**Gates.** Both suites with their coverage floors, ruff check, ruff format
+--check, mypy and the drift check run before the push; the only new test is
+the pin above, and no product behavior changed.
