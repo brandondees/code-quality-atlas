@@ -23,6 +23,26 @@ class BoundaryError(RuntimeError):
     returned something this service cannot use."""
 
 
+class KeyRefusedError(BoundaryError):
+    """The model endpoint refused the key: credit exhausted (HTTP 402) or
+    authentication refused (401/403). A review error, not a spend (D92):
+    the review stops at once, the refusal is never retried, and no later
+    model call is made. `review_error` is the fixed cause text the draft
+    and the posted error name -- no key material and no response body in
+    it."""
+
+    def __init__(self, message: str, *, review_error: str) -> None:
+        super().__init__(message)
+        self.review_error = review_error
+
+
+# The fixed cause texts a refused key's review error carries (D92):
+# controller-made, so the draft and the posted error name the cause
+# without echoing anything the endpoint sent.
+KEY_OUT_OF_CREDIT = "model key out of credit"
+KEY_AUTH_REFUSED = "model key refused"
+
+
 class ByokRefusedError(BoundaryError):
     """The key does not count BYOK spend, and this model response is not
     an explicit non-BYOK call. A caller that turns some other

@@ -5572,7 +5572,7 @@ smaller findings; all fixed here, offline throughout.
 
 **The Blocker — the marker, and why every gate missed it.** The rebase's
 fixture-docstring resolution replaced the two sides' overlapping text but
-left the `<<<<<<< HEAD` line itself sitting in the module docstring --
+left the ` line itself sitting in the module docstring --
 syntactically invisible (it is string content), so the gate, ruff, mypy
 and both suites stayed green over an unfinished conflict resolution. The
 line is deleted; the merged text around it was already the correct
@@ -5683,6 +5683,7 @@ whitespace stripped — is the already-pinned
 --check, mypy and the drift check run before the push; the only new test is
 the pin above, and no product behavior changed.
 
+<<<<<<< HEAD
 **Update (2026-11-19, fix round 1 of #778).** The round-1 review's Major
 made the template's copy of the line inert: `templates/REVIEW.md` now ships
 the line commented out inside a fenced code block —
@@ -5717,3 +5718,72 @@ asserts exactly `Decimal("25")` with an empty note.
 `test_review_template_sync.py`, `test_decision_updates_are_appended.py`),
 both full suites with their coverage floors, ruff, ruff format --check,
 mypy and the drift check run before the push.
+
+## 2026-11-19 — D92 part 1: a refused key is a review error, posted as one
+
+The launch brief's read-only analysis of the v9 agentic service's runs on
+the exhausted pilot OpenRouter key: each review made 4–7 model calls that
+all refused (presumably HTTP 402), every refused call booked its full
+worst-case reservation ($1.40–$2.40 at the pinned route's caps, D43's
+failed-call rule), so the review projected to the $10 ceiling (D68),
+stopped on `reservation_usd`, and posted "Agentic coverage incomplete"
+with "Findings: None" — a review that never ran, billed $0, reading as a
+clean, incomplete one. The brief's four fixes are decided as D92; part 1
+lands here (the classification and the error post), part 2 (the
+failed-call accounting and the up-front credit check) is the stacked PR
+on top of this one. Offline only: fakes, recorded HTTP and scripted
+models; no live model call, network call or secret read; no deployed
+service setting, Fly config value or secret changed.
+
+**The classification.** `ports.KeyRefusedError` — a `BoundaryError`
+carrying the fixed cause text on `review_error`. The OpenRouter one-shot
+client's non-retryable branch and the agentic adapter's `turn` classify
+401/402/403 by status (`openrouter.key_refusal_or_boundary`); the tenant
+path's auth and quota refusals raise the same class with the same causes.
+The message is controller text — a status and a safe URL — never a
+response body, never key material. In the lens loop the refusal is not
+retried (D49's retry is for a call a provider may yet serve), the spend
+halts at once with the fixed cause (`Spend.halt` grew its optional cause
+record; `halted_cause` is empty for every other halt), every later lens
+runs NOT RUN on the halted spend, and the bounded re-assessment call
+halts the same way. The two fixed causes are `model key out of credit`
+(402) and `model key refused` (401/403).
+
+**The error draft and the error post.** `synthesize` reads the spend's
+halt cause into the review's `review_error`; the draft's headline and
+status line name the cause, the coverage ledger and the cost line stay,
+and the Findings section is not rendered at all — an error report, not a
+review with an empty findings list. The service's draft summarizer
+carries the cause (`ReviewReport.review_error`), and `render_comment`
+returns the error body for such a report: the not-a-review banner, the
+fixed cause, and the idempotency marker, so a retry dedupes as before.
+The exit code is unchanged (`EXIT_INCOMPLETE`, postable), and the queue's
+follow-up logic keys on the report's incomplete coverage as before, so
+the pull request is retried as a full review when the key is served
+again. The delta review's own pre-lens calls (the D83 decision call and
+the carry-forward call) keep their boundary-failure fallbacks: a refusal
+there surfaces through the fallback and the lenses' own classification,
+and the review still ends in the error post.
+
+**Mutants, each applied by hand and killed** (the mutated module's
+bytecode cache deleted first): the lens loop's key-refusal clause dropped
+— the refusal retried as a model error and never halted
+(`test_a_refused_key_stops_the_review_and_never_retries`); the
+provider's classification dropped — a 402 stays a plain `BoundaryError`
+(`test_a_refused_key_is_a_review_error_and_never_retried`, the adapter's
+`test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal`, the
+tenant path's `test_a_refused_key_classifies_as_a_review_error`); the
+halt cause dropped (`test_a_refused_key_stops_the_review_and_never_
+retries`'s `halted_cause` pin); the error draft's findings-section gate
+dropped (`test_a_halted_spend_with_a_refused_key_renders_the_error_
+draft`); the error post's early return dropped
+(`test_the_error_report_posts_the_error_not_a_review`); the status
+line's `review_error` field dropped (`test_an_error_draft_summarizes_to_
+the_error_report`); `synthesize` stopped reading the spend's halt cause
+(the same coordinator draft test); and the re-assessment call's
+key-refusal clause dropped (`test_a_refused_key_on_the_reassessment_
+halts_the_spend_with_the_cause`).
+
+**Gates.** Both suites with their coverage floors, ruff check, ruff
+format, mypy, drift and the generated-tree sync run before the push; the
+eight mutants above are the round's only new ones.

@@ -24,7 +24,13 @@ from atlas_reviewer.lens_loop import (
     UserText,
     resolve_per_call,
 )
-from atlas_reviewer.ports import BoundaryError, TransportError
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    KeyRefusedError,
+    TransportError,
+)
 from atlas_reviewer.prompt import Prompt
 from atlas_reviewer.tenant_provider import (
     ENV_TENANT_BASE_URL,
@@ -318,6 +324,24 @@ def test_an_auth_error_names_itself_and_never_the_key():
         provider.complete(PROMPT)
     assert "auth error (HTTP 401" in str(exc.value)
     assert CREDENTIALS.key not in str(exc.value)
+
+
+def test_a_refused_key_classifies_as_a_review_error():
+    """D92: the tenant path's auth and quota refusals raise
+    `KeyRefusedError` with the fixed cause text, so the agentic loop
+    stops the review instead of retrying and booking the worst case.
+    Kills the plain-boundary mutant, which would leave the refusal
+    retryable in the loop."""
+    provider, _transport = _provider([(402, b'{"error": "no credits"}')])
+    provider.preflight()
+    with pytest.raises(KeyRefusedError) as quota:
+        provider.complete(PROMPT)
+    assert quota.value.review_error == KEY_OUT_OF_CREDIT
+    auth, _transport = _provider([(403, b'{"error": "forbidden"}')])
+    auth.preflight()
+    with pytest.raises(KeyRefusedError) as refused:
+        auth.complete(PROMPT)
+    assert refused.value.review_error == KEY_AUTH_REFUSED
 
 
 def test_a_quota_error_names_itself():

@@ -4,7 +4,8 @@
 The request body is built in ``comment_payload``, which has no event
 argument and always sends COMMENT. ``comment_only`` refuses APPROVE and
 REQUEST_CHANGES for any caller that tries to name one. A failed review
-never reaches this module.
+never reaches this module; a review that stopped on a refused key (D92)
+does, and posts the error that cause names, not a review.
 
 The idempotency key is ``repo#pr#sha``. It is stored after GitHub accepts
 the review, and it is also the HTML marker at the end of the body. A retry
@@ -85,6 +86,15 @@ _INCOMPLETE = (
     "verified before the review stopped, not that the change is clean. "
     "See Lenses not run and Limit stops for what did not finish."
 )
+# What a refused key's review posts instead of a review (D92): the cause
+# in fixed controller text, no findings section, no coverage claim. It
+# must never read as a review of any kind.
+_ERROR_HEAD = (
+    "> **REVIEW ERROR -- not a review.** The review could not run, so "
+    "nothing here is a review finding and no coverage is claimed. This is "
+    "an error report about the reviewer's own model endpoint, not a "
+    "judgment of this pull request."
+)
 _FILES = (
     "The controller's coverage note is the record of files a model call "
     "covered. A path named after it is a file the draft says was not "
@@ -151,9 +161,24 @@ def render_comment(
     lines and keeps the Findings section, the coverage note, the limit
     stops and the delta's carried record -- and on an incomplete review
     it keeps "Lenses not run" too, because the banner and the Findings
-    note point the reader there by name. When a floor or a brief dial
+    note point the reader there by name.     When a floor or a brief dial
     took effect -- or a line failed open -- the post names the key that
-    did it; every value a line of the post names is schema-validated."""
+    did it; every value a line of the post names is schema-validated.
+
+    A report whose `review_error` is set (D92) renders the error post
+    instead: the fixed cause, the banner that says this is not a review,
+    and the idempotency marker -- no findings section, no coverage claim,
+    and none of the repo's post configuration applies, because there is
+    no finding for a floor to hold and no bookkeeping for a dial to
+    lower."""
+    if report.review_error:
+        return "\n\n".join(
+            (
+                _ERROR_HEAD,
+                f"Cause: {scrub(report.review_error)}.",
+                marker_for(key),
+            )
+        )
     config = post or DEFAULT_POST_CONFIG
     kept, held = apply_severity_floor(report.findings, config.floor)
     settings: list[str] = [*config.notes]

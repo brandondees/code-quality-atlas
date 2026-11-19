@@ -74,8 +74,11 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
     BoundaryError,
     Json,
+    KeyRefusedError,
     ResponseTooLargeError,
     TransportError,
     TransportTimeoutError,
@@ -541,12 +544,14 @@ def _refuse_status(resp: HttpResponse, model_id: str) -> None:
             f"(HTTP {resp.status}); redirects are refused"
         )
     if resp.status in AUTH_STATUSES:
-        raise BoundaryError(
-            f"the tenant endpoint refused the key: auth error (HTTP {resp.status})"
+        raise KeyRefusedError(
+            f"the tenant endpoint refused the key: auth error (HTTP {resp.status})",
+            review_error=KEY_AUTH_REFUSED,
         )
     if resp.status in QUOTA_STATUSES:
-        raise BoundaryError(
-            f"the tenant endpoint refused the call: quota error (HTTP {resp.status})"
+        raise KeyRefusedError(
+            f"the tenant endpoint refused the call: quota error (HTTP {resp.status})",
+            review_error=KEY_OUT_OF_CREDIT,
         )
     raise BoundaryError(
         f"the tenant endpoint failed: HTTP {resp.status} for model {model_id}"
@@ -629,15 +634,17 @@ def _response(
         )
     if resp.status in AUTH_STATUSES:
         ReviewBudget.settle(record, f"HTTP {resp.status} (auth error)")
-        raise BoundaryError(
+        raise KeyRefusedError(
             f"the tenant endpoint refused the key: auth error (HTTP {resp.status} "
-            f"for {safe_url(url)})"
+            f"for {safe_url(url)})",
+            review_error=KEY_AUTH_REFUSED,
         )
     if resp.status in QUOTA_STATUSES:
         ReviewBudget.settle(record, f"HTTP {resp.status} (quota error)")
-        raise BoundaryError(
+        raise KeyRefusedError(
             f"the tenant endpoint refused the call: quota error (HTTP {resp.status} "
-            f"for {safe_url(url)})"
+            f"for {safe_url(url)})",
+            review_error=KEY_OUT_OF_CREDIT,
         )
     if resp.status in RETRYABLE:
         ReviewBudget.settle(record, f"HTTP {resp.status} (retryable)")

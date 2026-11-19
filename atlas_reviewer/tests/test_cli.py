@@ -2762,6 +2762,68 @@ def test_a_live_agentic_review_renders_the_prompt_cache_section(tmp_path, monkey
     assert all(isinstance(adapter, OpenRouterLensModel) for adapter in made)
 
 
+def test_a_key_refused_mid_review_ends_the_review_as_the_error_it_is(
+    tmp_path, monkeypatch
+):
+    """D92: a 402 during the lenses stops the review at once -- the
+    refused call is sent once, settles at $0, the spend halts with the
+    fixed cause, the second lens never starts, and the child exits
+    incomplete with the error draft instead of a review whose empty
+    Findings read clean. Kills the retry mutant (a second send), the
+    keep-the-worst settle mutant, and the dropped-halt mutant."""
+    from contextlib import ExitStack
+
+    from atlas_reviewer.local_runner import LocalSprites, LocalTasks
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, key_status, reply
+
+    refusal = reply(
+        json.dumps({"error": {"message": "Insufficient credits"}}).encode(),
+        status=402,
+    )
+    fake = OpenRouterFake(
+        refusal,
+        refusal,
+        refusal,
+        refusal,
+        key=reply(key_status(limit=5, remaining=5)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as claims:
+        tasks = claims.enter_context(LocalTasks(state / "tasks.sock"))
+        monkeypatch.setattr(cli, "SOCKET_PATH", str(tasks.path))
+        monkeypatch.setattr(cli, "BRIDGE_ROOT", str(tmp_path / "bridge"))
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(
+            ["--state-dir", str(state), "agentic-review", "--event", EVENT,
+             "--provider", "openrouter", "--allow-live-inference", "--depth",
+             "triage", "--pool-size", "1", "--max-turns", "2"],
+            env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+            out=out, err=err, sprites_factory=lambda _env: LocalSprites(),
+            openrouter_factory=lambda key, limits: OpenRouterProvider(
+                fake, key, limits=limits
+            ),
+        )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    # The refusal was sent once, not retried (D49 does not apply to a key
+    # refusal), and the second lens made no call on the halted spend.
+    assert len(fake.chat_requests()) == 1
+
+
 def test_agentic_review_validates_the_diff_prefix_share_flag(tmp_path):
     """D65: the share is a limit flag like the others -- a value outside
     0 to 1 is a usage error, and 0 is accepted (it pages every review)."""

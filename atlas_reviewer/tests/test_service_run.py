@@ -29,7 +29,12 @@ from atlas_reviewer.lens_contract import (
 from atlas_reviewer.quotes import QuoteSource
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import ServiceError, config_from_env
-from atlas_reviewer.service_post import comment_payload, post_key, render_comment
+from atlas_reviewer.service_post import (
+    comment_payload,
+    marker_for,
+    post_key,
+    render_comment,
+)
 from atlas_reviewer.service_run import (
     APP_KEY_ENV,
     CLEANUP_WAIT_S,
@@ -671,6 +676,56 @@ def test_a_recovered_not_run_is_visible_in_the_posted_comment():
     assert "## Lenses not run\n\nNone." in body
     assert "Sprites HTTP 502" in body
     assert "recovered by L3's clean run" in body
+
+
+def _error_draft():
+    """A draft from the real `coordinator.render_draft` in D92's state:
+    the review a refused key stopped before it could run, rendered as the
+    error report it is."""
+    from atlas_reviewer.coordinator import AgenticReview, LensResult, Verdict
+
+    lens = LensResult(
+        "tracing-correctness-and-invariants",
+        1,
+        None,
+        None,
+        reason="not started: model key out of credit",
+    )
+    review = AgenticReview(
+        lenses=(lens,),
+        findings=(),
+        verdict=Verdict.APPROVE,
+        review_error="model key out of credit",
+    )
+    return render_draft(review, Redactor())
+
+
+def test_an_error_draft_summarizes_to_the_error_report():
+    """D92: an error draft's status line carries the refused-key cause,
+    and the report keeps it with no findings and no coverage claim. Kills
+    the dropped-status-field mutant in the draft summarizer."""
+    report = summarize_draft(_error_draft(), expect=MODE_AGENTIC)
+    assert report.review_error == "model key out of credit"
+    assert report.findings == ()
+    assert report.lenses_run == ()
+    assert report.coverage_complete is False
+
+
+def test_the_error_report_posts_the_error_not_a_review():
+    """D92: the posted result of a refused key names the fixed cause and
+    carries no Findings section -- it is clearly an error, not a COMMENT
+    review with 'Findings: None'. Kills the dropped-cause mutant, the
+    findings-section mutant, and the dropped-marker mutant (the
+    idempotency marker must still end the error post, so a retry
+    dedupes)."""
+    key = post_key(PrEvent("example-org/example-app", 7, "a" * 40))
+    report = summarize_draft(_error_draft(), expect=MODE_AGENTIC)
+    body = render_comment(report, key, lambda item: item)
+    assert "REVIEW ERROR -- not a review" in body
+    assert "Cause: model key out of credit." in body
+    assert body.endswith(marker_for(key))
+    assert "## Findings" not in body
+    assert "REVIEW INCOMPLETE" not in body
 
 
 def test_a_not_run_without_a_clean_run_is_still_not_run_in_the_report():

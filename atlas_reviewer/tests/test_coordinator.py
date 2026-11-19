@@ -50,7 +50,12 @@ from atlas_reviewer.lens_contract import (
     Severity,
     Valence,
 )
-from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError, UserText
+from atlas_reviewer.lens_loop import (
+    AssistantText,
+    LimitsUnsetError,
+    Spend,
+    UserText,
+)
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
@@ -1879,6 +1884,31 @@ def test_findings_of_an_unattested_attempt_are_never_reported():
     result = synthesize([lens_result(misack)])
     assert result.findings == ()
     assert result.verdict is Verdict.APPROVE
+
+
+def test_a_halted_spend_with_a_refused_key_renders_the_error_draft():
+    """D92: a spend a refused key halted with its fixed cause synthesizes
+    into an error review -- the draft's headline names the cause, the
+    status line carries it for the service, and the draft carries no
+    Findings section to mistake for a clean bill. Kills the
+    dropped-cause mutant (synthesize ignoring the spend's halt cause),
+    the dropped-status-field mutant, and the findings-section mutant
+    that would render the empty Findings block under the error
+    headline."""
+    spend = Spend(LIMITS.resolve())
+    spend.halt("model key out of credit")
+    review = synthesize([], spend=spend)
+    assert review.review_error == "model key out of credit"
+    assert review.event is ReviewEvent.COMMENT
+    draft = render_draft(review, Redactor())
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    fields = json.loads(
+        draft.split("-->", 1)[0].removeprefix("<!-- atlas-review-status: ")
+    )
+    assert fields["review_error"] == "model key out of credit"
+    assert fields["coverage_complete"] is False
 
 
 OTHER = "sweeping-for-security"

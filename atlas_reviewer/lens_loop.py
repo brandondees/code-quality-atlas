@@ -158,6 +158,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
     Clock,
+    KeyRefusedError,
     TransportError,
     TransportTimeoutError,
 )
@@ -1184,6 +1185,7 @@ class Spend:
     _halted: threading.Event = field(
         default_factory=threading.Event, init=False, repr=False, compare=False
     )
+    _halted_cause: str = field(default="", init=False, repr=False, compare=False)
     _settled: threading.Condition = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -1195,8 +1197,19 @@ class Spend:
         No further model call is made in this review after that."""
         return self._halted.is_set()
 
-    def halt(self) -> None:
+    @property
+    def halted_cause(self) -> str:
+        """The fixed cause a key refusal halted the review with (D92),
+        empty for every other halt: a BYOK refusal or a crash halts
+        without a cause, and the review's own failure names it, so a
+        non-empty cause at synthesis time is a refused key and the draft
+        and the post carry it as the review error."""
+        return self._halted_cause
+
+    def halt(self, cause: str | None = None) -> None:
         with self._lock:
+            if cause:
+                self._halted_cause = cause
             self._halted.set()
             self._settled.notify_all()
 
@@ -1715,6 +1728,18 @@ def _place_call(
         # reservation.
         spend.settle(worst, None)
         return p.cut(*_stopped(exc.hit))
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause and the refusal is never
+        # retried (D49's retry is for calls a provider may yet serve, not
+        # for one the key itself refused). The cut ends this lens; every
+        # later lens runs NOT RUN on the halted spend, and the review
+        # renders and posts as the error it is, never as an incomplete
+        # review. The failed call keeps its reservation as spent (D43's
+        # settle rule, which the failed-call accounting change amends).
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        return p.cut(Cause.MODEL_ERROR, str(exc))
     except ByokRefusedError as exc:
         # The refusal still leaves the loop. The turns and tool calls
         # already completed travel with it, so the ledger records them.

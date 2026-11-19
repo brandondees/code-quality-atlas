@@ -396,6 +396,12 @@ class ReviewReport:
     which it reused, each with the coordinator's reason -- so the posted
     comment shows the judgment, not only its outcome. Empty on a full
     review."""
+    review_error: str = ""
+    """The fixed cause a refused key halted the review with (D92), read
+    from the draft status line: `model key out of credit` or `model key
+    refused`. Non-empty means the post is the error that cause names, not
+    a review -- no findings section, no coverage claim. Empty on every
+    review that ran on a served key."""
 
 
 @dataclass(frozen=True)
@@ -772,6 +778,7 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         lens_decisions=tuple(_bullets(section(draft, "Lens decisions (delta review)"))),
         coverage_complete=_status_flag(status, "coverage_complete"),
         delta_note=_status_flag(status, "delta_note"),
+        review_error=_status_flag(status, "review_error"),
     )
 
 

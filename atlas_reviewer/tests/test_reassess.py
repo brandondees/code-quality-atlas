@@ -34,7 +34,7 @@ from atlas_reviewer.evidence import Remark
 from atlas_reviewer.gather import Collected
 from atlas_reviewer.lens_contract import ContractError, Severity
 from atlas_reviewer.lens_loop import FinalReply
-from atlas_reviewer.ports import ByokRefusedError
+from atlas_reviewer.ports import ByokRefusedError, KeyRefusedError
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.quotes import SourceText
 from atlas_reviewer.reassess import (
@@ -543,6 +543,43 @@ def test_a_settled_result_that_never_attested_earns_no_reassessment(tmp_path):
     assert model.requests == []
     assert again.lenses[0].state is LensState.FAILED
     assert again.lenses[0].reassess_note == ""
+
+
+def test_a_refused_key_on_the_reassessment_halts_the_spend_with_the_cause(tmp_path):
+    """D92: the bounded re-assessment call can meet the same refused key
+    the lenses met. The outcome is the MODEL_ERROR cut with the fixed
+    detail, the spend halts with the fixed cause, and the review carries
+    it as its review error -- never as an incomplete review. Kills the
+    dropped-clause mutant (the refusal falling to the generic boundary
+    handler, which neither halts with the cause nor stops the review)."""
+
+    class Refused:
+        name = "refused"
+
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        def worst_case_usd(self, request):
+            self.requests.append(request)
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise KeyRefusedError(
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            )
+
+    # The settled first run stores no digest of its own, so the second
+    # run's digest check re-earns the one bounded call.
+    review(tmp_path, [READ_ALL, final(finding())])
+    again, _, _ = review(tmp_path, [], model=Refused(), evidence_digest=NEWER)
+    assert again.review_error == "model key out of credit"
+    # The settled result stands; the failed re-assessment is the review
+    # error, named in the lens's own note.
+    assert again.lenses[0].state is LensState.CLEAN
+    assert "the latest re-assessment was not accepted" in (
+        again.lenses[0].reassess_note
+    )
 
 
 # ------------------------------------------------------------ the composition

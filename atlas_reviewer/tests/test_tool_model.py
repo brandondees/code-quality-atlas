@@ -40,6 +40,7 @@ from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    KeyRefusedError,
     TransportError,
     TransportTimeoutError,
 )
@@ -374,6 +375,27 @@ def test_a_model_error_after_a_response_is_not_retried():
     lens, fake = model(reply(completion(), status=503))
     with pytest.raises(BoundaryError, match="503"):
         lens.turn(request())
+    assert len(fake.chat_requests()) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "cause"),
+    [
+        (401, "model key refused"),
+        (402, "model key out of credit"),
+        (403, "model key refused"),
+    ],
+)
+def test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal(status, cause):
+    """D92: the agentic adapter classifies a 401/402/403 as
+    `KeyRefusedError` with the fixed cause text, the message carrying a
+    status and a safe URL only -- no key material, no response body.
+    Kills the generic-boundary mutant, which would route the refusal into
+    the lens loop's D49 retry and book it at its full worst case."""
+    lens, fake = model(reply(completion(), status=status))
+    with pytest.raises(KeyRefusedError) as caught:
+        lens.turn(request())
+    assert caught.value.review_error == cause
     assert len(fake.chat_requests()) == 1
 
 
