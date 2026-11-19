@@ -28,11 +28,17 @@ ACCEPTED_ACTIONS = frozenset({"opened", "synchronize", "ready_for_review"})
 # body edit carries no ``changes.base`` and is ignored, so the widening
 # stays one event shape, not the whole ``edited`` family.
 RETARGET_ACTION = "edited"
+# The events a repo's own ``review_skip_events`` may name: the three
+# accepted actions and the retarget's ``edited``, which suppresses the
+# retarget-triggered review only. Skipping every one of the four is the
+# documented "never reviewed" floor.
+
+SKIPPABLE_EVENTS = ACCEPTED_ACTIONS | {RETARGET_ACTION}
 
 # The repo-narrowed admission surface (config slice S4 of the
 # user-configuration plan): a repo may narrow when the service reviews
-# it -- base-branch include/exclude, and which of the three accepted
-# events to skip -- via lines in the ``REVIEW.md`` on its **default
+# it -- base-branch include/exclude, and which of the skippable events
+# to skip -- via lines in the ``REVIEW.md`` on its **default
 # branch**, read from the default branch the payload names (one
 # read-only lookup recovers it when the payload omits it), never the PR
 # head or the PR's own base branch: in a same-repo or stacked PR the
@@ -41,8 +47,9 @@ RETARGET_ACTION = "edited"
 # include/exclude match still runs against the delivery's base branch --
 # which the author chose -- but the patterns it matches come from the
 # default branch. A repo may only narrow the operator's admission
-# envelope (non-draft, those three events, the allowlisted repos), never
-# widen it: every check below can only remove a review, and a value
+# envelope (non-draft, the skippable events, the allowlisted repos),
+# never widen it: every check below can only remove a review, and a
+# value
 # that is unusable falls back to the default -- no narrowing of that
 # kind -- with a named note. "Only removes" is not "safe": an event
 # skip is a coverage-reducing opt-out the repo owner chooses, and what
@@ -105,7 +112,7 @@ def admit(payload: Mapping[str, Any], allowlist: frozenset[str]) -> Admitted | I
     PR moved onto another base branch re-runs admission against that
     base instead of waiting for its next push (#758). Every other edit
     stays outside the envelope, and the retarget runs the same checks
-    as any delivery: non-draft, same-repo, allowlisted."""
+    as any delivery: open, non-draft, same-repo, allowlisted."""
     action = payload.get("action")
     if action == RETARGET_ACTION:
         if not base_changed(payload):
@@ -116,6 +123,11 @@ def admit(payload: Mapping[str, Any], allowlist: frozenset[str]) -> Admitted | I
     repository = payload.get("repository")
     if not isinstance(pull, dict) or not isinstance(repository, dict):
         return Ignored("shape")
+    if action == RETARGET_ACTION and pull.get("state") != "open":
+        # GitHub sends a base change only for an open PR's retarget, so
+        # this is defense-in-depth, not a documented shape: an anomalous
+        # closed-PR delivery costs no review and posts no comment.
+        return Ignored("state")
     if pull.get("draft") is not False:
         return Ignored("draft")
     repo = repository.get("full_name")
@@ -213,8 +225,9 @@ class RepoAdmission:
     ``REVIEW.md`` on its default branch.
 
     ``base_include`` is the base branches review is for, ``base_exclude``
-    the ones it is not -- exclude wins; ``skip_events`` the accepted
-    events the repo does not want a review on. ``skip_events`` is a
+    the ones it is not -- exclude wins; ``skip_events`` the skippable
+    events -- the three accepted actions and the retarget's ``edited``
+    -- the repo does not want a review on. ``skip_events`` is a
     coverage-reducing opt-out, not a safety feature: the coverage the
     skipped event alone would have provided is lost and can land
     unreviewed. Skipping ``synchronize`` means the reviews that do run
@@ -227,7 +240,12 @@ class RepoAdmission:
     never reviewed; skipping ``opened`` defers a non-draft PR's first
     review to its first push (that review covers the whole diff, not
     just the delta), and a draft-opened PR's first review lands at the
-    ready transition; skipping all three means the repository is never
+    ready transition; skipping ``edited`` means a retarget never
+    re-enters admission -- a PR moved onto an included base is not
+    reviewed for the retarget and waits for its next push, which arrives
+    as ``synchronize``, so a PR that retargets and merges with no
+    further push is never reviewed on its new base; skipping all four
+    means the repository is never
     reviewed. The draft state and the
     head branch are never narrowable here: the PR author controls both,
     and a rule on either would let an author opt their own PR out of
@@ -324,7 +342,7 @@ def _entry_ok(key: str, entry: str) -> bool:
     if not entry or len(entry) > _MAX_ENTRY_CHARS or not entry.isprintable():
         return False
     if key == "review_skip_events":
-        return entry in ACCEPTED_ACTIONS
+        return entry in SKIPPABLE_EVENTS
     return _BRANCH_PATTERN.fullmatch(entry) is not None
 
 
@@ -368,14 +386,18 @@ def base_ref(payload: Mapping[str, Any]) -> str:
 
 
 def base_changed(payload: Mapping[str, Any]) -> bool:
-    """True when the payload is an ``edited`` delivery that carries
-    ``changes.base`` -- the PR was retargeted onto another base branch.
-    On such a payload ``pull_request.base`` already names the new base,
+    """True when the payload is an ``edited`` delivery that carries a
+    non-empty ``changes.base`` object -- the PR was retargeted onto
+    another base branch. GitHub's own payload always carries ``ref.from``
+    under it, so a ``changes.base`` that is not a non-empty object is
+    not a documented retarget shape and fails closed. On such a payload
+    ``pull_request.base`` already names the new base,
     so the narrowing that follows matches the branch the PR now
     targets; ``changes.base.from`` is the branch it left and is never
     read."""
     changes = payload.get("changes")
-    return isinstance(changes, dict) and isinstance(changes.get("base"), dict)
+    base = changes.get("base") if isinstance(changes, dict) else None
+    return isinstance(base, dict) and bool(base)
 
 
 def default_branch(payload: Mapping[str, Any]) -> str:

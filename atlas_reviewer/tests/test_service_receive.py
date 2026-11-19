@@ -3985,6 +3985,7 @@ def _retarget_body(
     body["action"] = "edited"
     body["changes"] = {"base": {"ref": {"from": from_ref}}}
     body["pull_request"]["updated_at"] = updated_at
+    body["pull_request"]["state"] = "open"
     return json.dumps(body).encode()
 
 
@@ -4166,3 +4167,92 @@ def test_a_retarget_of_a_draft_is_still_ignored(tmp_path):
     result = _deliver(config, board, json.dumps(body).encode())
     assert result.detail == "ignored:draft"
     assert board.states() == ()
+
+
+def test_a_retarget_of_a_closed_pr_is_ignored(tmp_path):
+    """GitHub sends a base change only for an open PR's retarget; the
+    state guard is defense-in-depth, so an anomalous closed-PR delivery
+    costs no review and posts no comment."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    body = json.loads(_retarget_body(from_ref="main", base_ref="main").decode())
+    body["pull_request"]["state"] = "closed"
+    result = _deliver(config, board, json.dumps(body).encode())
+    assert result.detail == "ignored:state"
+    assert board.states() == ()
+
+
+def test_a_repo_can_opt_out_of_retarget_reviews(tmp_path):
+    """``edited`` is a legal ``review_skip_events`` value, so the
+    documented invariant holds: a repo that skips every skippable event
+    is never reviewed. Skipping ``edited`` suppresses the
+    retarget-triggered review only -- the delivery is skipped with the
+    usual reason -- and a skip set that does not name it leaves the
+    retarget queued."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    opt_out = _admission_reader("review_skip_events: edited\n")
+    result = _deliver(
+        config,
+        board,
+        _retarget_body(from_ref="feature/x", base_ref="main"),
+        admission_reader=opt_out,
+        telemetry=telemetry,
+    )
+    assert result.detail == "ignored:repo-skip-event"
+    assert board.states() == ()
+    skips = [e for e in telemetry.events if e.step == "review skipped"]
+    assert [e.fields["reason"] for e in skips] == ["repo-skip-event"]
+    # A skip set that does not name `edited` leaves the retarget queued.
+    other = _admission_reader("review_skip_events: synchronize\n")
+    queued = _deliver(
+        config,
+        board,
+        _retarget_body(from_ref="feature/x", base_ref="main"),
+        admission_reader=other,
+    )
+    assert queued.body == b"queued\n"
+    assert len(board.states()) == 1
+
+
+def test_a_settled_review_is_not_re_run_by_a_retarget(tmp_path):
+    """The settled half of the dedupe: once the head's review has settled
+    and posted, a retarget of the same head is a duplicate -- the queue's
+    key remembers the head -- and nothing is posted twice."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    posted: list[str] = []
+
+    def runner(event, cancel):
+        return ReviewRun(True, REPORT)
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+
+    worker = _worker(board, runner, publish, tmp_path)
+    worker.start()
+    try:
+        assert (
+            _deliver(
+                config,
+                board,
+                _labeled_body(base_ref="main", sha=SHA_A),
+                admission_reader=_admission_reader("review_base_include: main\n"),
+            ).body
+            == b"queued\n"
+        )
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not posted:
+            time.sleep(0.01)
+        assert posted == [SHA_A]
+        result = _deliver(
+            config,
+            board,
+            _retarget_body(from_ref="feature/x", base_ref="main"),
+            admission_reader=_admission_reader("review_base_include: main\n"),
+        )
+        assert result.body == b"duplicate\n"
+        assert posted == [SHA_A]
+    finally:
+        worker.stop()

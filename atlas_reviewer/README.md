@@ -104,7 +104,9 @@ is stripped, so a BOM'd first key line still parses or is still named.
 These are this schema's
 own bounds, not GitHub's: an entry is at most 64 characters, a line
 carries at most 32 entries, and a `review_skip_events:` entry must be one
-of the three accepted event names.
+of the four skippable event names — the three accepted actions
+(`opened`, `synchronize`, `ready_for_review`) plus `edited`, the
+retarget.
 
 **`review_skip_events` is a coverage-reducing opt-out, and the repo owner
 is the one opting out.** A skipped event's deliveries produce no review,
@@ -123,7 +125,12 @@ consequence differs per event:
 - skipping `opened` defers a non-draft PR's first review to its first
   push (that review covers the whole diff, not just the delta); a
   draft-opened PR's first review lands at the ready transition;
-- skipping all three means the repository is never reviewed.
+- skipping `edited` suppresses the retarget-triggered review only: a PR
+  moved onto an included base is not reviewed for the retarget and waits
+  for its next push, which arrives as `synchronize` — a PR that
+  retargets and merges with no further push is never reviewed on its new
+  base;
+- skipping all four means the repository is never reviewed.
 
 The owner decides; the service records every skip with its reason so the
 decision's effect is visible in the telemetry.
@@ -156,9 +163,11 @@ excluded base is skipped with the usual `repo-base-branch` reason, and
 the skip acts on the delivery only: a review already running for the
 head was admitted under the base it was reviewed against and is
 advisory, so it finishes and posts, and nothing new is queued or
-posted. A retarget can no longer move a PR out of review without a
-record: every retarget delivery is either reviewed, deduplicated, or
-logged with its skip reason.
+posted. A retarget is also a skippable event: `review_skip_events:
+edited` suppresses the retarget-triggered review (see the opt-out's
+coverage note above). A retarget can no longer move a PR out of review
+without a record: every retarget delivery is either reviewed,
+deduplicated, or logged with its skip reason.
 
 There are deliberately no label-based or head-branch-based filters: the
 PR author controls both, so a skip rule matching either would let an
