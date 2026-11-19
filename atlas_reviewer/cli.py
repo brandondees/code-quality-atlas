@@ -154,12 +154,8 @@ from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, snapshot_digest
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
-from atlas_reviewer.review_wide import (
-    LensPreferencesRead,
-    derive_review_wide,
-    review_md_ceiling,
-    review_md_lens_preferences,
-)
+from atlas_reviewer.repo_config import RepoConfig, read_repo_config
+from atlas_reviewer.review_wide import derive_review_wide
 from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -933,20 +929,22 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
         diff, delta = _delta_input(event, github, diff)
+        # S1: the merge-base REVIEW.md is parsed once, against the closed
+        # schema -- the ceiling, the lens preference, and the unsupported
+        # keys' named notes.
+        config = read_repo_config(trees.base)
         # The derivation's refusals are planned-count independent (D68;
         # round-1 review of #717, m-3): validate them here, before the
         # picker can spend, so a misconfiguration is a clean usage error
         # and not a traceback after a billed picker call.
         try:
-            derive_review_wide(
-                limits, 1, repo_ceiling=review_md_ceiling(trees.base).value
-            )
+            derive_review_wide(limits, 1, repo_ceiling=config.ceiling.value)
         except ValueError as exc:
             raise UsageError(str(exc)) from exc
         # D69: the reviewed repo's lens-selection preference, read from the
         # same merge-base tree the ceiling is read from, so a PR cannot
         # move its own override either.
-        lens_preferences = review_md_lens_preferences(trees.base)
+        lens_preferences = config.lenses
         library = LensLibrary()
         depth = Depth(args.depth)
         conversation_budget = ConversationBudget()
@@ -1018,7 +1016,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     preferences=lens_preferences.preferences,
                     shapes=shapes,
                 )
-                selection = _with_preference_note(selection, lens_preferences)
+                selection = _with_preference_note(selection, config)
                 names = tuple(loaded.name for loaded in plan.loaded)
                 budget = getattr(picker_provider, "budget", None)
                 picker_spend = (
@@ -1170,16 +1168,20 @@ def _delta_input(
 
 
 def _with_preference_note(
-    selection: LensSelection, read: LensPreferencesRead
+    selection: LensSelection, config: RepoConfig
 ) -> LensSelection:
-    """The selection with a seen-but-unusable preference line's note
-    appended (D69): "lines present but ignored" is recorded, the way the
-    ceiling's unusable line is, so it can be told apart from no lines."""
-    if not read.note:
+    """The selection with the config parse's notes appended (D69; S1): a
+    seen-but-unusable preference line's note, and the unsupported keys'
+    named notes, so "lines present but ignored" is recorded the way the
+    ceiling's unusable line is, and can be told apart from no lines. The
+    notes are controller text that never echoes a rejected value."""
+    notes = [config.lenses.note, *config.unsupported_notes]
+    extra = " ".join(note for note in notes if note)
+    if not extra:
         return selection
     return LensSelection(
         selection.choices,
-        f"{selection.note} {read.note}",
+        f"{selection.note} {extra}",
         selection.used_call,
         selection.skipped,
     )

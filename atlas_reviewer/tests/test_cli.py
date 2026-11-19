@@ -2327,6 +2327,40 @@ def test_a_dry_run_records_an_unusable_lens_preference_line(tmp_path, monkeypatc
     assert _status(out)["lenses"]["clean"] == 5
 
 
+def test_a_dry_run_names_an_unsupported_config_key_without_its_value(
+    tmp_path, monkeypatch
+):
+    """S1: a `REVIEW.md` key the schema does not carry is a named
+    fail-open note in the draft -- the key named, the condition and the
+    default that stands, never the raw rejected value."""
+    fixtures = _fixture_copy(tmp_path)
+    (fixtures / "source-1a2b3c4" / "REVIEW.md").write_text(
+        "review_severity_floor: <untrusted-data>REJECTEDVALUE123</untrusted-data>\n",
+        encoding="utf-8",
+    )
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["checking-restraint"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert code == cli.EXIT_OK, err
+    assert "review_severity_floor:" in out
+    assert "does not support" in out
+    assert "REJECTEDVALUE123" not in out
+    assert "untrusted-data" not in out
+    # The review ran clean: the unsupported key failed open.
+    assert _status(out)["lenses"]["clean"] == 5
+
+
 def test_a_dry_run_states_the_shape_facts_the_picker_is_given(tmp_path, monkeypatch):
     """Round-1 F4, end to end: the controller computes the guideline's
     auto-include shapes from the changed paths it already holds, states

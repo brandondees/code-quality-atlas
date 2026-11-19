@@ -9,6 +9,7 @@ import pytest
 from atlas_reviewer.lenses import LensLibrary, LensStatus, plan_lenses
 from atlas_reviewer.picker import (
     CRITICAL_TIER,
+    FLOOR_TIER,
     PICKER_PATH,
     PR_HYGIENE,
     Depth,
@@ -551,6 +552,70 @@ def test_a_repo_preference_never_touches_the_critical_tier():
     assert "added: reviewing-threat-model." in chosen.note
     assert chosen.choices[-1].why == (
         "included by the reviewed repo's merge-base REVIEW.md (D69)"
+    )
+
+
+def test_a_repo_preference_exclude_never_touches_the_manifest_floor_tier():
+    """D69's 5:13 PM CT update: the protection set is the manifest's whole
+    `tier: floor`, not the critical tier alone -- `hunting-silent-failures`
+    is refused the way the critical four are, on the picks and in the
+    record, so a repo preference cannot silently suppress a floor lens."""
+    preferences = LensPreferences(exclude=("hunting-silent-failures",))
+    library = small_bundle("reviewing-test-quality")
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("hunting-silent-failures", "reviewing-test-quality"),
+        library,
+        scrub=str,
+        preferences=preferences,
+    )
+    names = [c.name for c in chosen.choices]
+    assert names == [
+        *CRITICAL_TIER,
+        "hunting-silent-failures",
+        "reviewing-test-quality",
+    ]
+    # The record must not claim a drop that did not happen.
+    assert "dropped from the picks" not in chosen.note
+
+    from atlas_reviewer.picker import _apply_preferences
+
+    applied = _apply_preferences(
+        ("hunting-silent-failures", "reviewing-test-quality"),
+        (),
+        preferences,
+    )
+    assert applied.kept == ("hunting-silent-failures", "reviewing-test-quality")
+    assert applied.dropped == ()
+
+
+def test_a_fallback_exclude_never_touches_the_floor_tier_either():
+    """The fallback path's protection set is the floor tier too (D69's
+    5:13 PM CT update), pinned directly: a fallback selection that names
+    a floor lens keeps it whatever the exclude says."""
+    from atlas_reviewer.lenses import LensChoice
+    from atlas_reviewer.picker import LensSelection, _preferenced_fallback
+
+    selection = LensSelection(
+        (LensChoice("hunting-silent-failures", "picker rank 1"),), "note", True
+    )
+    out = _preferenced_fallback(
+        selection, LensPreferences(exclude=("hunting-silent-failures",)), Depth.REVIEW
+    )
+    assert [c.name for c in out.choices] == ["hunting-silent-failures"]
+
+
+def test_the_floor_tier_is_the_manifests_tier_floor_set():
+    """The protection set is the manifest's, not a second hand-kept copy:
+    a tier change in `skills/manifest.yaml` fails here instead of silently
+    widening what a merge-base exclude may drop."""
+    from tooling.manifest import load_manifest
+
+    from .test_lenses import _REPO
+
+    manifest = load_manifest(str(_REPO / "skills/manifest.yaml"))
+    assert sorted(FLOOR_TIER) == sorted(
+        s.name for s in manifest.skills if s.tier == "floor"
     )
 
 

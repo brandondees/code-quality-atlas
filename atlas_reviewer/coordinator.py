@@ -178,7 +178,8 @@ from atlas_reviewer.reassess import (
     reassess_turn,
 )
 from atlas_reviewer.redact import Redactor
-from atlas_reviewer.review_wide import derive_review_wide, review_md_ceiling
+from atlas_reviewer.repo_config import review_md_ceiling
+from atlas_reviewer.review_wide import derive_review_wide
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
     RECORD_CHARS,
