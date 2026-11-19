@@ -226,7 +226,13 @@ let the PR quiet or suppress its own review on the only surface a human
 reads. The default branch changes only through reviewed merges. The
 value that governed a post is the one the default branch carried when
 the post was written, fetched at post time and parsed through the shared
-parse module's schema (`repo_config.parse_post_config`, D84).
+parse module's schema (`repo_config.parse_post_config`, D84). The read
+costs **two uncached read-only calls per post attempt** — the
+default-branch lookup plus the file read — under the App installation
+token, bounded by the same 8-second read budget the admission read uses;
+the source is read after the poster's dedupe checks, so an
+already-posted head spends none, and there is no per-repo cache between
+posts (r1 review of #770, Nit 3).
 
 ```text
 review_severity_floor: <severity>    # blocker | major | minor | nit — post findings at or above this severity
@@ -252,10 +258,15 @@ preference-tier findings.
 **The verbosity dial may be lowered only.** `brief` drops the lens
 bookkeeping (Lenses run, Lenses not run, Lens decisions) and the Cost
 section, and keeps the Findings section, the coverage note, the Limit
-stops, and a delta review's resolved and carried sections. The Findings
-section and the coverage note are never suppressible at any verbosity;
-there is no value above `full`, so no setting can make the post more
-verbose than the body the service already sends.
+stops, and a delta review's resolved and carried sections. One
+exception, from the #757 composition (r1 review of #770): on an
+**incomplete** review the brief post keeps `Lenses not run` too, because
+the REVIEW INCOMPLETE banner and the Findings section's incomplete note
+point the reader at that section by name — the pointer resolves, never
+dangles. The Findings section and the coverage note are never
+suppressible at any verbosity; there is no value above `full`, so no
+setting can make the post more verbose than the body the service already
+sends.
 
 **An unusable line fails open to its key's default and is named.** A
 `review_severity_floor:` line that is not one of the four severity names

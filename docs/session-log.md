@@ -4161,3 +4161,54 @@ wrapper beside the admission reader's. The plan's S3 row named
 because the parent's GitHub-reading machinery (the read-only client,
 the bounded call, the telemetry) already lives there — disclosed here
 rather than claimed away.
+
+## 2026-11-19 (same day) — #770 round 1: the layer restacked onto #757, and the two post-truths composed
+
+#757 (D82) merged six minutes after the S3 head was committed, and #769
+was rebased onto it (new head `538d1e53`); the restack
+(`git rebase --onto`, per the fix brief) conflicts exactly where the r1
+review said it would — `service_post.py`, where #757's `incomplete`
+parameter and `elif` branch meet the S3 `held` parameter and branch in
+`_findings_section`. docs auto-merged (the decisions log's and the
+session log's appends landed cleanly; D84 sits after D82/D83 in number
+order and the decision guard passes against the new base).
+
+**The composition, the fix brief's calls (recorded as a Correction after
+D84).** The Findings section carries both parameters, and **incompleteness
+wins the empty section**: the stronger claim is never hidden, so on an
+incomplete review the incomplete note displaces the bare cut and hold
+notes and the cut count and the held count fold into it — no combination
+of cut, hold and incompleteness leaves the section reading as a plain
+`None.` — while a complete review's cut and hold notes stand as each
+slice wrote them. And the brief dial's "Lenses not run" drop is
+**brief-aware**: an incomplete brief post keeps the section, because
+#757's banner and its Findings note point the reader there by name; a
+complete brief post still drops it as bookkeeping.
+
+**Tests** (`test_service_post.py`, `test_service_receive.py`): the three
+interaction tests the brief named — brief+incomplete (the section kept,
+the banner present, the bookkeeping still dropped), floor+incomplete with
+every finding held (the incomplete note first, the held count folded in),
+floor+incomplete+brief (all three at once, both pointed-at sections
+render) — plus the complete-review twins (the cut note alone; the hold
+note alone), so the precedence is pinned from both sides. The r1 Minor's
+two surviving mutants are dead: `test_serve_installs_the_post_config_
+wrapper_and_the_post_honors_it` drives serve → worker → poster end to end
+with a fetcher and kills the wrapper-installation deletion;
+`test_the_poster_reads_its_post_config_source` (and the already-posted
+laziness pin) kills the source-ignoring `post`. **Mutants applied by
+hand this round, all killed:** the two r1 survivors, the incomplete-brief
+"Lenses not run" drop, the held-beats-incomplete order, the cut-then-hold
+fold dropped, and the held_clause dropped from the incomplete note.
+
+**The nits.** Nit 1 — the cut-and-hold corner names the held count (the
+held clause folds into the cut note). Nit 2 — the wrapper's
+three-argument call is typed: `PostPublisher`, a protocol whose third
+parameter is optional, so a strict two-argument publisher passed to
+`serve` with a fetcher is a type error at the call site, not a
+`TypeError` on every post. Nit 3 — the README names the per-post cost:
+two uncached read-only calls per post attempt under the App installation
+token, bounded by the same 8-second read budget, spent after the poster's
+dedupe checks.
+
+Offline only, same rules as the entries above.

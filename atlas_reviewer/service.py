@@ -25,7 +25,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
@@ -151,6 +151,26 @@ _MAX_HTTP_HANDLERS = 16
 
 Publisher = Callable[[PrEvent, ReviewReport], bool | None]
 Runner = Callable[[PrEvent, threading.Event], ReviewRun]
+
+
+class PostPublisher(Protocol):
+    """A publisher ``serve`` may hand the optional post-config source to:
+    the poster's own ``post``, whose third parameter is optional and read
+    after the poster's own dedupe checks. The protocol names the contract
+    the wrapper relies on, so passing a strict two-argument publisher
+    together with a ``post_config_fetcher`` is a type error at the
+    ``serve`` call site, not a ``TypeError`` on every post (r1 review of
+    #770, Nit 2). A publisher used without a fetcher is never called with
+    the third argument, so the plain ``Publisher`` shape keeps working."""
+
+    def __call__(
+        self,
+        event: PrEvent,
+        report: ReviewReport,
+        post_config: PostConfigSource | None = ...,
+    ) -> bool | None: ...
+
+
 # The default-branch ``REVIEW.md`` fetch behind the repo's own post
 # settings (config slice S3, D84): one repo name in, the file's bytes or
 # None when there is no file there. The same shape the admission read's
@@ -1321,7 +1341,7 @@ def serve(
     env: Mapping[str, str],
     *,
     runner: Runner | None = None,
-    publisher: Publisher | None = None,
+    publisher: PostPublisher | None = None,
     classifier: PushClassifier | None = None,
     classifier_reason: str = "",
     admission_reader: AdmissionReader | None = None,
@@ -1363,9 +1383,16 @@ def serve(
                 env,
                 deadline_s=deadline,
             )
-        publisher = _post_config_publisher(publisher, post_config_fetcher, telemetry)
+        posting_publisher = _post_config_publisher(
+            publisher, post_config_fetcher, telemetry
+        )
         worker = Worker(
-            board, runner, telemetry, publisher, config.concurrency, config.state_dir
+            board,
+            runner,
+            telemetry,
+            posting_publisher,
+            config.concurrency,
+            config.state_dir,
         )
         server = ReviewServer(config, board, log)
         server.worker = worker
@@ -1702,7 +1729,7 @@ def _post_config_source(
 
 
 def _post_config_publisher(
-    publisher: Callable[..., bool | None] | None,
+    publisher: PostPublisher | None,
     fetcher: PostConfigFetcher | None,
     telemetry: Telemetry | None,
 ) -> Publisher | None:
@@ -1711,10 +1738,10 @@ def _post_config_publisher(
     source. A publisher or a fetcher that is None passes through
     unchanged: a deployment that posts nothing needs no config, and one
     without the App credentials posts the default -- the boot log names
-    the lost read. The publisher this wraps is the poster's own ``post``
-    (its third parameter is the optional source), which ``Publisher``'s
-    two-argument shape assigns to; the wrapper keeps that shape for the
-    worker."""
+    the lost read. The publisher this wraps must accept the optional
+    post-config source (`PostPublisher`) -- the type system pins that at
+    the ``serve`` call site, because the wrapper calls it with three
+    arguments."""
     if publisher is None or fetcher is None:
         return publisher
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime
 from http.client import HTTPConnection
 from pathlib import Path
@@ -4433,3 +4434,135 @@ def test_the_wrapped_publisher_resolves_the_config_and_hands_the_source():
     # No publisher, or no fetcher: pass-through, the same object.
     assert service_module._post_config_publisher(None, fetcher, None) is None
     assert service_module._post_config_publisher(publisher, None, None) is publisher
+
+
+def test_serve_installs_the_post_config_wrapper_and_the_post_honors_it(
+    tmp_path, monkeypatch
+):
+    """The r1 Minor's seam, driven end to end: `serve` wraps the
+    publisher with the post-config source when a fetcher is configured,
+    the worker posts through the wrapped publisher, and the real poster
+    reads the source after its dedupe checks -- a below-floor
+    preference-tier finding never reaches the body, the blocker does,
+    and the floor key is named. Kills the mutant that deletes the
+    wrapper's installation in `serve`."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.http import HttpResponse
+    from atlas_reviewer.repo_config import PostConfigRead
+    from atlas_reviewer.service_post import PostLedger, ReviewPoster
+
+    class _ConfigClient:
+        def get_repository(self, repo: str):
+            return {"default_branch": "main"}
+
+        def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes:
+            return b"review_severity_floor: major\n"
+
+    monkeypatch.setattr(
+        service_module, "_read_client", lambda config, env: (_ConfigClient(), "")
+    )
+
+    findings = (
+        "**L1-F1** [blocker, defect, route: eng, introduced] `a.py:1` "
+        "(reviewing-api-contract-safety): breaks callers",
+        "**L1-F2** [minor, defect, route: eng, introduced] `a.py:3` "
+        "(checking-restraint): naming",
+    )
+    report = dataclass_replace(
+        REPORT,
+        findings=findings,
+        coverage_complete=True,
+        lenses_run=("tracing-correctness-and-invariants",),
+    )
+
+    class _GitHub:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, bytes | None]] = []
+            self.reviews: list[dict[str, object]] = []
+
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            self.calls.append((method, url, body))
+            if method == "GET":
+                return HttpResponse(200, {}, json.dumps(self.reviews).encode())
+            payload = json.loads(body)
+            self.reviews.append(
+                {
+                    "id": 9,
+                    "body": payload["body"],
+                    "commit_id": payload["commit_id"],
+                    "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
+                }
+            )
+            return HttpResponse(200, {}, b'{"id": 9}')
+
+    class _Tokens:
+        def token(self) -> str:
+            return "ghs_test"
+
+    github = _GitHub()
+    poster = ReviewPoster(
+        github,
+        _Tokens(),
+        PostLedger(tmp_path / "posted.json"),
+        lambda text: text,
+        bot_login="code-quality-atlas[bot]",
+    )
+    config = ServiceConfig(
+        secret=SECRET,
+        allowlist=frozenset({REPO}),
+        state_dir=tmp_path,
+        host="127.0.0.1",
+        port=0,
+    )
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    board.enqueue(event)
+
+    def serve_forever(self, poll_interval=0.5):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if github.reviews:
+                return
+            time.sleep(0.02)
+
+    monkeypatch.setattr(service_module.ReviewServer, "serve_forever", serve_forever)
+    assert (
+        serve(
+            config,
+            {},
+            runner=lambda _event, _cancel: ReviewRun(True, report),
+            publisher=poster.post,
+            post_config_fetcher=service_module._post_config_fetcher(config, {})[0],
+            log=lambda line: None,
+        )
+        == 0
+    )
+    posts = [call for call in github.calls if call[0] == "POST"]
+    assert len(posts) == 1
+    body = json.loads(posts[0][2] or b"")["body"]
+    assert "`review_severity_floor: major`" in body
+    assert findings[0] in body
+    assert findings[1] not in body
+    assert "[1 below-floor finding(s) from preference-tier lenses" in body
+
+
+def test_the_wrapped_publisher_hands_the_poster_a_post_config_read():
+    """The wrapper's own contract at the composition seam: the lazy
+    source it hands the poster parses the fetcher's bytes, so the poster
+    never sees the raw file."""
+    import atlas_reviewer.service as service_module
+    from atlas_reviewer.repo_config import PostConfigRead
+
+    seen: list[object] = []
+
+    def publisher(event, report, source):
+        seen.append(source())
+        return None
+
+    def fetcher(repo: str) -> bytes | None:
+        return b"review_post_verbosity: brief\n"
+
+    wrapped = service_module._post_config_publisher(publisher, fetcher, None)
+    assert wrapped is not None
+    wrapped(PrEvent(REPO, 7, SHA_A), REPORT)
+    assert seen == [PostConfigRead(None, "brief", ())]
