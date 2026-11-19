@@ -1493,7 +1493,7 @@ def test_the_guidelines_room_subtracts_the_delta_highlight(tmp_path, monkeypatch
     monkeypatch.setattr(cli, "guidelines_block", guidelines_spy)
     Recording.room = 120_000
     try:
-        code, _draft, err = _run(
+        _code, _draft, _err = _run(
             tmp_path,
             "--depth", "review",
             "--fixtures", str(fixtures),
@@ -1557,9 +1557,7 @@ def test_the_prior_rounds_lose_the_room_the_guidelines_block_takes(
     monkeypatch.setattr(cli, "review_lenses", review_spy)
 
     def used_bytes():
-        return sum(
-            len(block.content.text.encode("utf-8")) for block in seen["context"]
-        )
+        return sum(len(block.content.text.encode("utf-8")) for block in seen["context"])
 
     def guidelines_bytes():
         return next(
@@ -1591,7 +1589,7 @@ def test_the_prior_rounds_lose_the_room_the_guidelines_block_takes(
     room = round((target_fit - offset) / slope)
     Recording.room = room
     try:
-        code, draft, err = _run(
+        code, _draft, err = _run(
             tmp_path, "--depth", "review", "--fixtures", str(fixtures)
         )
     finally:

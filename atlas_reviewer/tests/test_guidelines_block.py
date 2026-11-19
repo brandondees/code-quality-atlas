@@ -209,8 +209,7 @@ def test_a_directory_named_agents_md_is_refused_and_named():
     assert omissions[0].source == GUIDELINES_SOURCE
     assert omissions[0].limit == "not a file"
     assert omissions[0].detail == (
-        "the default-branch AGENTS.md is a directory, not a file; "
-        "nothing was delivered"
+        "the default-branch AGENTS.md is a directory, not a file; nothing was delivered"
     )
 
 
