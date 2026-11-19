@@ -61,6 +61,20 @@ CRITICAL_TIER = (
     "reviewing-migration-and-data-safety",
     "reviewing-concurrency-and-async",
 )
+# The manifest's `tier: floor` set (D69's 5:13 PM CT update): the five
+# lenses a merge-base `review_lens_exclude:` can never drop. The critical
+# tier -- the four that also always run first -- is four of them;
+# `hunting-silent-failures` completes the floor. Pinned against
+# `skills/manifest.yaml` by `test_the_floor_tier_is_the_manifests_tier_floor_set`,
+# so a tier change in the manifest surfaces here instead of silently
+# widening what a repo preference may exclude.
+FLOOR_TIER = (
+    "tracing-correctness-and-invariants",
+    "sweeping-for-security",
+    "reviewing-migration-and-data-safety",
+    "reviewing-concurrency-and-async",
+    "hunting-silent-failures",
+)
 # The process-hygiene lens, added ahead of the picks when the PR body
 # itself states verification results (D58): a body that claims test
 # counts, coverage or CI outcomes is exactly the surface that lens checks
@@ -194,10 +208,11 @@ class LensPreferences:
     already fetched. `include` names lenses the review runs whether or not
     the picker ranked them; `exclude` names lenses the picks never run --
     including the controller-added process-hygiene lens, which is neither
-    critical-tier nor a cap (D69 round-1 F1) -- and exclude wins over
-    include on every path. The critical tier is neither: it is the
-    controller's own floor, not the guideline's, so a preference neither
-    adds to it nor removes from it. Every name is lens-shaped (validated
+    floor-tier nor a cap (D69 round-1 F1) -- and exclude wins over
+    include on every path. The manifest's floor tier (`FLOOR_TIER`, D69's
+    5:13 PM CT update) is neither: it is the controller's own floor, not
+    the guideline's, so a preference neither adds to it nor removes from
+    it. Every name is lens-shaped (validated
     at parse), so the directive below cannot carry injection into the
     instructions."""
 
@@ -583,10 +598,11 @@ def _apply_preferences(
     """The ranked names and the controller-added hygiene choices after a
     repo preference override (D69; round-1 F1/F2). An exclude drops its
     names from the picks and, naming `PR_HYGIENE`, also removes the
-    controller-added hygiene lens -- hygiene is neither critical-tier nor
+    controller-added hygiene lens -- hygiene is neither floor-tier nor
     a cap, so the repo may decline it -- and exclude wins over include on
-    every path. The critical tier is neither list's to touch: a name it
-    carries stays in the tier whatever either list says, and is not
+    every path. The manifest's floor tier (`FLOOR_TIER`) is neither
+    list's to touch: a name it carries stays in the picks whatever either
+    list says, and is not
     reported as dropped from the picks it would have been re-added to
     anyway. The include choices cover every include name the kept picks,
     the critical tier and the kept hygiene do not already carry, so an
@@ -594,8 +610,8 @@ def _apply_preferences(
     if preferences is None:
         return _Applied(names, (), hygiene, False, ())
     drop = set(preferences.exclude)
-    dropped = tuple(n for n in names if n in drop and n not in CRITICAL_TIER)
-    kept = tuple(n for n in names if n not in drop)
+    dropped = tuple(n for n in names if n in drop and n not in FLOOR_TIER)
+    kept = tuple(n for n in names if n not in drop or n in FLOOR_TIER)
     hygiene_dropped = PR_HYGIENE in drop and bool(hygiene)
     kept_hygiene = () if hygiene_dropped else hygiene
     covered = {*kept, *CRITICAL_TIER, *(c.name for c in kept_hygiene)}
@@ -615,7 +631,7 @@ def _preferenced_fallback(
 ) -> LensSelection:
     """A fallback selection with the controller's shape facts and the
     repo's preference applied (D69; round-1 F2/F4/F6/F7): an exclude
-    drops its non-critical choices here too -- on the fallback paths the
+    drops its non-floor choices here too -- on the fallback paths the
     only excludable choice is the controller-added hygiene lens -- and an
     include is appended even when the picker fell back or made no call,
     with exclude winning over include. The note records the override
@@ -629,7 +645,7 @@ def _preferenced_fallback(
     note = selection.note + _shapes_note(shapes)
     if preferences is None:
         return _with_note(selection, note)
-    drop = set(preferences.exclude) - set(CRITICAL_TIER)
+    drop = set(preferences.exclude) - set(FLOOR_TIER)
     # A fallback has no picks, so the only excludable choice here is the
     # controller-added hygiene lens: it is recorded once, as the
     # controller-added drop (`hygiene_dropped`), never as a dropped pick

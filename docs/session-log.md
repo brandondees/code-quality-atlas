@@ -3915,3 +3915,153 @@ the two open tool PRs. **N3** — `Spend._reserve`'s genuine-stop
 pre-check stays: the review's own mutant showed it behaviorally
 equivalent to the wait's re-check, it is pre-existing defense-in-depth
 in money code, and the review requested no change; left as is.
+
+## 2026-11-19 — Config slice S1: the merge-base `REVIEW.md` parse moves onto `repo_config.py`, and the lens preference protects the whole floor tier
+
+The user-configuration plan's first slice (`docs/plans/2026-11-18-user-configuration.md`
+§5 S1, after S4 landed as #756; the decisions are D81's Q1/Q2 and D69's
+5:13 PM CT update in `open-questions.md`). Offline only: the tests use
+fakes, the shipped fixture and the real CLI's dry run; no live model,
+Sprite or GitHub call was made, no secret was read, and no deployed
+service setting, Fly config value or secret changed.
+
+**What moved.** The D68/D69 `REVIEW.md` reads — the tarball walk, the
+64 KiB bound, the two line grammars, the fail-open notes — left
+`review_wide.py` for a new `atlas_reviewer/repo_config.py`, the parse
+module the plan named, with `REVIEW.md` one constant (`REVIEW_MD`) so a
+`.atlas.yml`-style rename stays the alternative the key set can grow
+into rather than a second file (D81 Q1). `read_repo_config` parses the
+file once against the closed schema; `review_md_ceiling` and
+`review_md_lens_preferences` are its windows, byte-for-byte the old
+semantics, so both existing lines parse identically and no behavior
+changed. `review_wide.py` keeps only the derivation (`derive_review_wide`,
+`resolve_ceiling`, the defaults) and points at the parse module; the
+agentic path's ceiling note is unchanged. `cli.py` parses once where it
+previously walked the tarball twice, and appends the parse's notes to
+the selection note where D69's unusable-line note already surfaced.
+
+**New keys are named, not silent.** A `review_`-namespaced line the
+schema does not carry — the namespace every setting line in this file
+lives in — is ignored fail-open with a named note (the key, the
+condition, the default that stands; at most eight distinct keys named,
+the remainder counted), the generalization of D68's unusable-line note
+the plan's §2 called for. The note never echoes the raw rejected value:
+the value is unvalidated author-controlled input, only schema-validated
+numbers are ever named, and the key a note carries is validated
+markup-free at parse (`review_[a-z0-9_]{1,80}`), the same trust boundary
+D69's lens-shaped validation draws. Prose outside the namespace and
+uppercase variants stay unremarked, exactly as they read today.
+
+**The floor tier is protected.** `picker.py`'s preference application
+now protects `FLOOR_TIER` — the manifest's whole `tier: floor` set —
+instead of `CRITICAL_TIER` alone (D69's 5:13 PM CT update): an exclude
+naming `hunting-silent-failures` keeps the lens on the picks, is not
+recorded as dropped, and is refused on the fallback paths the same way.
+The set is pinned against `skills/manifest.yaml` by a test, so a tier
+change surfaces as a failure instead of silently widening what a
+merge-base exclude may drop.
+
+**Tests** (`atlas_reviewer/tests/test_repo_config.py` — the parse tests
+moved beside the module they test — plus `test_picker.py` and
+`test_cli.py`; each behavior a test that fails when reverted, each
+mutant applied by hand and killed): both lines parse identically through
+the module (the moved tests, unchanged); the unsupported keys' named
+notes at the unit level (the key named, the value never echoed, the cap
+and the dedup, the known keys never misnamed, prose outside the
+namespace silent, notes composing with the unusable notes) and end to
+end in the dry-run draft (`test_a_dry_run_names_an_unsupported_config_key_without_its_value`);
+the floor-tier protection on the picks, in the record, on the fallback
+path, and against the manifest
+(`test_a_repo_preference_exclude_never_touches_the_manifest_floor_tier`,
+`test_a_fallback_exclude_never_touches_the_floor_tier_either`,
+`test_the_floor_tier_is_the_manifests_tier_floor_set`); the 64 KiB bound
+preserved (the moved over-bound tests, plus the combined read's
+over-bound case parsing nothing). Ten mutants applied by hand, all
+killed: the protection set reverted to the critical four, the
+picks-guard reverted, the dropped-record filter reverted, the fallback
+set reverted, the unsupported scan disabled, the note echoing the
+rejected value, the named-keys cap removed, the known-key exclusion
+removed, the dedup removed, and the draft note dropped.
+
+**Overlap.** The open #757 (D82) touches `budget.py`, `openrouter.py`,
+`service_post.py` and `tool_model.py` — disjoint from this slice's
+`repo_config.py`, `review_wide.py`, `picker.py` and `cli.py`; #752/#753
+(D80) touch the bridge files, not these. `coordinator.py` is touched
+only by its import line (the ceiling read now comes from
+`repo_config.py`); no behavior there changed. The admission-side
+default-branch read keeps S4's own narrow parse (its README sentence now
+points at the shared parser's review-side naming); unifying the two
+reads on one module is a candidate follow-up, not this slice.
+
+## 2026-11-19 (same day) — #769 round 1: the scan learns the admission keys, and the trust boundary gets its pin
+
+The r1 protocol review's fixes, applied on the branch and rebased onto
+main (`66a33b31`; #760's delta redesign and #761's retarget admission
+merged under this PR's base — `coordinator.py`'s conflict resolved by
+taking #760's import simplification beside the moved
+`review_md_ceiling` import, `docs/session-log.md`'s by keeping both
+sides' entries in date order).
+
+**Major 1 — the false unsupported note on the S4 admission keys.** The
+scan's known set carried only the three review-side keys, so a repo
+whose `REVIEW.md` carries `review_base_include:`, `review_base_exclude:`
+or `review_skip_events:` — honored by `service_admit.py` from the
+default branch since #756/#761 — drew a draft note falsely saying the
+build does not support the key and ignores it, on every review. The
+known set now carries all six keys (the scan stays silent about a key
+the build supports, which is also main's behavior for every key), and a
+test checks the set against `service_admit._ADMISSION_KEYS`, so a key
+added to the admission read without this set fails the suite instead of
+drawing a false note (`test_the_admission_class_keys_draw_no_unsupported_note`;
+killed by the admission keys removed from the known set).
+
+**Minor 1 — the markup-free-key boundary is now pinned.** The claim that
+a note's key is validated markup-free at parse had no failing-when-
+reverted test — the reviewer's loosened-charset mutant survived the
+whole suite. `test_a_markup_bearing_key_is_never_named` pins that a key
+outside the `[a-z0-9_]` shape (`review_<img src=x>:`, backtick, pipe,
+space) draws no note, and the loosened-charset mutant dies on it.
+
+**Nit 3 — fenced examples are not configuration attempts.** The scan now
+skips lines inside a fenced code block and toggles the fence state back
+off, so a policy file documenting a future key in an example draws no
+note while a real unknown key after the fence still does
+(`test_a_fenced_example_key_draws_no_unsupported_note`; killed by the
+fence walk removed). The known keys' own parsers stay line-based and
+unchanged — main's behavior — so an unbalanced fence can only shift
+which unsupported notes appear, never a parsed value.
+
+**Nit 1** — `_preferenced_fallback`'s docstring says "non-floor" where it
+said "non-critical"; the protection set changed under it. **Nit 2**
+(session-log rotation) is pre-existing debt, left alone as the fix brief
+directs. Full local gate re-run on the rebased tree; three new mutants
+applied by hand, all killed.
+
+## 2026-11-19 (same day) — #769 round 2: the fence walk is CommonMark's edge subset, and the docstring stops overclaiming
+
+The r2 protocol review (verdict APPROVE) left two Minors, fixed in one
+commit. **Minor 1** — the module docstring's fence sentence ("lines
+inside a fenced code block ... are skipped") overclaimed: unqualified,
+it is false for the known keys, whose parsers are line-based and
+fence-blind by design (main's behavior, deliberately unchanged), so a
+fenced `review_ceiling_usd: 20` still configures the ceiling. The
+docstring now scopes the skip to the unsupported scan and states the
+asymmetry the way the README and this log already did; no code change.
+
+**Minor 2** — the fence walk's edges were unpinned (the reviewer's
+`lstrip()`-removed mutant survived the suite) and the "every fence
+marker" claim was broader than the code. The walk now implements
+CommonMark's fence-edge subset and the claim matches it: up to three
+leading spaces, then at least three backticks or tildes, opens a fence;
+the same character at at least the open fence's length, carrying no
+info string, closes it; a four-space-indented marker is an indented
+code block, not a fence. `test_the_fence_walk_follows_the_commonmark_subset`
+pins each edge — an indented (≤3 spaces) fence skips a column-0 key
+inside it, a 4-space marker does not fence, a `~~~` example is skipped
+like a ``` one, a shorter or crossed-character marker does not close,
+and a closing fence with an info string does not close. Four mutants
+applied by hand, all killed: the indent bound dropped to column 0 (the
+reviewer's F4 direction, now dead), the tilde alternative removed, the
+closing rule reduced to "any marker line", and the no-info-string check
+dropped. The unbalanced-fence hide vector stays as the r2 review
+assessed it: disclosed, fail-open, and never a wrong value.

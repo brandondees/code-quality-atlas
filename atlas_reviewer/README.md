@@ -204,9 +204,13 @@ cannot together hold the handler past GitHub's response window.
 Only these three keys are read at admission. The file's review-side
 settings (`review_ceiling_usd:`, `review_lens_include:`,
 `review_lens_exclude:`) are the review child's, read from the merge-base
-tree it already fetches; an unknown key — including a label-filter line
-from an earlier draft of this surface — is not named here. Naming those
-is the shared config parser's surface, not this slice's.
+tree it already fetches through the shared parse module
+(`repo_config.py`, config slice S1); an unknown key — including a
+label-filter line from an earlier draft of this surface — is not named
+here. On the review-side reads the shared parser names unsupported keys
+itself: a `review_`-namespaced line its schema does not carry is ignored
+fail-open with a named note. This admission read keeps its own narrower
+parse until the two reads unify on one module.
 
 ### A push that lands mid-review (#702, D79)
 
@@ -1071,17 +1075,34 @@ review_lens_exclude: <lens-name>[, <lens-name>...]   # never runs: exclude wins 
 
 The controller applies the override to the picker's picks itself -- an
 exclude drops a ranked pick and also declines the controller-added
-process-hygiene lens (D58), which is neither critical-tier nor a cap, so
+process-hygiene lens (D58), which is neither floor-tier nor a cap, so
 the repo may turn it off; an include runs even when the picker fell back
 or made no call; a name in both lists does not run, because **exclude
 wins on every path**; and no lens is ever planned twice -- a repeated
-choice is one load and a named NOT RUN line. The critical tier is the
-controller's own floor, not the guideline's, so neither line touches it;
-triage is never widened. A line that is present but not a comma-separated
+choice is one load and a named NOT RUN line. The manifest's **floor
+tier** is the controller's own floor, not the guideline's, so neither
+line touches it: all five `tier: floor` lenses are protected from the
+exclude (D69's 5:13 PM CT update) -- the four critical-tier lenses
+(`tracing-correctness-and-invariants`,
+`sweeping-for-security`, `reviewing-migration-and-data-safety`,
+`reviewing-concurrency-and-async`) and `hunting-silent-failures` --
+so a repo preference cannot silently suppress a floor lens; triage is
+never widened. A line that is present but not a comma-separated
 list of lens names, or a key that appears twice, is ignored fail-open
 with a note in the draft, exactly like an unusable ceiling line; a name
 that matches no bundle lens is not silently dropped -- its include shows
-up as a NOT RUN line. The override is recorded in the Lens selection
+up as a NOT RUN line. Any other `review_`-namespaced line in the file --
+a key the build's two reads (this parse and the admission read) do not
+carry -- is also ignored fail-open and named: the note says the key,
+that this build does not support it, and that the default stands, and
+never quotes the rejected value (S1); the scan knows the
+admission-class keys by name (`review_base_include:`,
+`review_base_exclude:`, `review_skip_events:` -- honored by the service
+from the default branch), so a repo that narrows its admission draws no
+false note, and it skips fenced code blocks, so a policy file's
+documented example of a future key is not read as an attempt to
+configure it. The
+override is recorded in the Lens selection
 note whenever it is present, "nothing needed changing" when the picks
 already satisfy it, so an operator can tell applied-and-satisfied from
 ignored. `agentic-review` reads these lines; the one-shot `review`
@@ -1873,7 +1894,8 @@ D41 records the 2026-11-12 probe that did.
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
-| `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. Also reads the same merge-base `REVIEW.md`'s lens-preference lines (D69: `review_lens_include:` / `review_lens_exclude:`), fail-open with a note when unusable | no |
+| `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line and the D69 lens-preference lines, read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows | no |
+| `review_wide.py` | D68's review-wide derivation for a multi-lens review: the call cap, reservation and review wall derived from the per-lens budgets and the planned lens count, clamped to the absolute per-review dollar ceiling; the ceiling's resolution order (repo `REVIEW.md`, configured, default) is the seam a later per-run policy plugs into. The `REVIEW.md` reads behind it live in `repo_config.py` (S1) | no |
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
