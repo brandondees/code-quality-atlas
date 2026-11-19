@@ -18,6 +18,7 @@ network, no credential.
 
 from __future__ import annotations
 
+import json
 import secrets
 import shutil
 from pathlib import Path
@@ -173,6 +174,56 @@ def test_a_repository_without_a_branch_name_is_a_named_omission():
     assert len(omissions) == 1
     assert omissions[0].limit == "default branch"
     assert "names no default branch" in omissions[0].detail
+
+
+def test_a_repo_level_404_at_the_lookup_is_a_named_gap():
+    """A 404 from the default-branch *lookup* -- a repository that
+    vanished, or a token-visibility blip -- is a named gap, never the
+    silent-absence path: silence is only for a genuine file-level 404 on
+    a branch that resolved (the mutant that swallows `NotFoundError`
+    around the lookup call fails here)."""
+    block, omissions = _block_at(
+        _Source(branch=NotFoundError("GitHub 404 for /repos/o/r")), None
+    )
+    assert block is None
+    assert len(omissions) == 1
+    assert omissions[0].source == GUIDELINES_SOURCE
+    assert omissions[0].limit == "default branch"
+    assert "could not be resolved" in omissions[0].detail
+    assert "GitHub 404" in omissions[0].detail
+
+
+def test_a_directory_named_agents_md_is_refused_and_named():
+    """The contents API answers a *directory* named `AGENTS.md` with a
+    JSON array of entries, the raw accept ignored there: that body is
+    refused and named with a fixed phrase -- a directory listing is never
+    delivered as guideline text, and the listing's entries are never
+    echoed into the note (the mutant that drops the refusal ships the
+    listing under the guideline header and fails here)."""
+    body = json.dumps(
+        [{"name": "src", "path": "src", "type": "dir"}], separators=(",", ":")
+    ).encode()
+    block, omissions = _block_at(_Source(raw=body), None)
+    assert block is None
+    assert len(omissions) == 1
+    assert omissions[0].source == GUIDELINES_SOURCE
+    assert omissions[0].limit == "not a file"
+    assert omissions[0].detail == (
+        "the default-branch AGENTS.md is a directory, not a file; "
+        "nothing was delivered"
+    )
+
+
+def test_a_markdown_file_merely_opening_with_a_bracket_is_still_delivered():
+    """The positive control for the directory refusal: a guideline file
+    whose first character is a `[` (a badge link) does not parse as a
+    JSON array, so it is delivered whole -- the refusal is for a body
+    that *is* a JSON array, not for a shape."""
+    text = b"[![CI](badge.svg)](https://example.test/ci) # Guidelines\n\nBe terse.\n"
+    block, omissions = _block_at(_Source(raw=text), None)
+    assert block is not None
+    assert "Be terse." in block.content.text
+    assert omissions == ()
 
 
 def test_a_failed_fetch_is_a_named_omission_with_the_error_quoted():

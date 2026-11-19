@@ -600,7 +600,18 @@ def _fetch_guidelines(
     no `AGENTS.md` on the default branch is the ordinary unconfigured
     repo -- and the branch lookup's own failure propagates as the named
     gap it is, the way the service's default-branch readers treat it
-    (#756, D84)."""
+    (#756, D84).
+
+    Two limits, named rather than papered over. The rename window: a
+    default branch renamed or deleted between the lookup and the file
+    read answers the read with the same 404 an absent file does, so it
+    reads as the silent absence; the window is one read wide and the
+    consequence is lost context, never injected context, and telling the
+    two 404s apart would cost a second lookup per review, so the limit is
+    documented (D87) instead of machinated away. A body that parses as a
+    JSON array -- what the contents API answers for a *directory* named
+    `AGENTS.md`, the raw accept ignored there -- is refused and named:
+    a directory listing is never delivered as guideline text."""
     try:
         repository = github.get_repository(repo)
     except BoundaryError as exc:
@@ -626,7 +637,7 @@ def _fetch_guidelines(
             ),
         )
     try:
-        return github.get_file(repo, branch, AGENTS_MD, GUIDELINE_MAX_BYTES), ()
+        raw = github.get_file(repo, branch, AGENTS_MD, GUIDELINE_MAX_BYTES)
     except NotFoundError:
         return None, ()
     except ResponseTooLargeError:
@@ -647,3 +658,23 @@ def _fetch_guidelines(
                 f"(error, quoted: {quote_untrusted(str(exc), scrub=scrub)})",
             ),
         )
+    if raw.lstrip()[:1] == b"[":
+        # The contents API answers a directory with a JSON array of
+        # entries, the raw accept ignored there: a body that parses as
+        # one is a directory listing, never guideline text. A markdown
+        # file that merely opens with a `[` (a badge link) fails the
+        # parse and is delivered.
+        try:
+            listing = json.loads(raw)
+        except ValueError:
+            listing = None
+        if isinstance(listing, list):
+            return None, (
+                Omission(
+                    GUIDELINES_SOURCE,
+                    "not a file",
+                    f"the default-branch {AGENTS_MD} is a directory, not a "
+                    "file; nothing was delivered",
+                ),
+            )
+    return raw, ()

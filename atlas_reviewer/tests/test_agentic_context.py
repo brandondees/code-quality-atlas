@@ -81,7 +81,9 @@ class Recording(LensScriptModel):
         return super().turn(request)
 
 
-def _run(tmp_path: Path, *extra: str, picks=None) -> tuple[int, str, str]:
+def _run(
+    tmp_path: Path, *extra: str, picks=None, event: str = EVENT
+) -> tuple[int, str, str]:
     if Recording.room is not None:
         room = Recording.room
 
@@ -108,7 +110,7 @@ def _run(tmp_path: Path, *extra: str, picks=None) -> tuple[int, str, str]:
                 "agentic-review",
                 "--dry-run",
                 "--event",
-                EVENT,
+                event,
                 "--pool-size",
                 "1",
                 *extra,
@@ -1458,3 +1460,148 @@ def test_the_guidelines_block_takes_the_room_the_other_blocks_leave(
         assert fenced is not None, label
         spent += len(fenced.group(1).encode("utf-8"))
     assert seen["room"] == seen["fit"] - spent
+
+
+DELTA_FIXTURE = FIXTURE.parent / "sample-pr-delta"
+DELTA_EVENT = str(DELTA_FIXTURE / "event.json")
+
+
+def test_the_guidelines_room_subtracts_the_delta_highlight(tmp_path, monkeypatch):
+    """On a delta review the room passed to the guidelines block is the
+    fit minus the conversation, CI *and delta-highlight* bytes -- the
+    mutant that drops `highlight_bytes` hands the block room the
+    highlight occupies, lets the two together exceed the fit, and fails
+    here (the full-review composition is pinned by
+    `test_the_guidelines_block_takes_the_room_the_other_blocks_leave`;
+    this is its delta twin)."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(DELTA_FIXTURE, fixtures)
+    (fixtures / "agents-md.txt").write_text("# Guidelines\n\nBe terse.\n")
+    seen = {}
+    real_fit = cli._input_room_chars
+    real_guidelines = cli.guidelines_block
+
+    def fit_spy(*args, **kwargs):
+        seen["fit"] = real_fit(*args, **kwargs)
+        return seen["fit"]
+
+    def guidelines_spy(repo, github, scrub, room):
+        seen["room"] = room
+        return real_guidelines(repo, github, scrub, room)
+
+    monkeypatch.setattr(cli, "_input_room_chars", fit_spy)
+    monkeypatch.setattr(cli, "guidelines_block", guidelines_spy)
+    Recording.room = 120_000
+    try:
+        code, _draft, err = _run(
+            tmp_path,
+            "--depth", "review",
+            "--fixtures", str(fixtures),
+            event=DELTA_EVENT,
+        )  # fmt: skip
+    finally:
+        Recording.room = None
+    assert Recording.first_turns
+    turn = Recording.first_turns[0]
+    spent = 0
+    for label in ("pull-request", "ci-evidence", "delta-diff"):
+        fenced = re.search(
+            rf'label="{label}">\n(.*?)\n</untrusted-data id="', turn, re.DOTALL
+        )
+        assert fenced is not None, label
+        spent += len(fenced.group(1).encode("utf-8"))
+    assert seen["room"] == seen["fit"] - spent
+
+
+def test_the_prior_rounds_lose_the_room_the_guidelines_block_takes(
+    tmp_path, monkeypatch
+):
+    """The derived `prior` budget counts the guidelines block's bytes:
+    `prior = min(PRIOR_ROUND_CHARS, max(1, fit - used))` sums every
+    context block, so the round log's prior blocks cannot claim room the
+    guidelines block occupies (the mutant that excludes the block from
+    the sum computes a `prior` clamped at 16,384 where the real one is
+    smaller, and fails here). The run is sized so the boundary is
+    discriminating: the room is calibrated from two probe runs (the fit
+    is affine in the room at `int((1 - share) * room) - K`), then set so
+    the block-free remainder sits just above the prior cap while the
+    true remainder sits below it."""
+    fixtures = _agents_md_fixtures(tmp_path, "# Guidelines\n\nBe terse.\n")
+    log = tmp_path / "state" / "rounds.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    RoundLog(log).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            HEAD_SHA,
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            (f"L1-F1 blocker calc.py:4 {REMARK}",),
+            False,
+        )
+    )
+    seen = {}
+    real_fit = cli._input_room_chars
+    real_review = cli.review_lenses
+
+    def fit_spy(*args, **kwargs):
+        seen["fit"] = real_fit(*args, **kwargs)
+        return seen["fit"]
+
+    def review_spy(*args, **kwargs):
+        seen["context"] = kwargs.get("context")
+        seen["prior_chars"] = kwargs.get("prior_chars")
+        return real_review(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "_input_room_chars", fit_spy)
+    monkeypatch.setattr(cli, "review_lenses", review_spy)
+
+    def used_bytes():
+        return sum(
+            len(block.content.text.encode("utf-8")) for block in seen["context"]
+        )
+
+    def guidelines_bytes():
+        return next(
+            len(block.content.text.encode("utf-8"))
+            for block in seen["context"]
+            if block.label == "agents-md"
+        )
+
+    # Two probe runs fix the affine fit(room) = int((1 - share) * room) - K.
+    Recording.room = 100_000
+    try:
+        _run(tmp_path, "--depth", "review", "--fixtures", str(fixtures))
+    finally:
+        Recording.room = None
+    fit_low, used = seen["fit"], used_bytes()
+    g = guidelines_bytes()
+    Recording.room = 104_096
+    try:
+        _run(tmp_path, "--depth", "review", "--fixtures", str(fixtures))
+    finally:
+        Recording.room = None
+    fit_high = seen["fit"]
+    slope = (fit_high - fit_low) / 4_096
+    offset = fit_low - slope * 100_000
+    # Target: the block-free remainder above the prior cap, the true
+    # remainder below it -- the only band where the mutant's `prior`
+    # differs from the real one.
+    target_fit = used - g + PRIOR_ROUND_CHARS + g // 2 + 4
+    room = round((target_fit - offset) / slope)
+    Recording.room = room
+    try:
+        code, draft, err = _run(
+            tmp_path, "--depth", "review", "--fixtures", str(fixtures)
+        )
+    finally:
+        Recording.room = None
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    fit, used = seen["fit"], used_bytes()
+    assert fit == target_fit, (fit, target_fit)
+    # The discrimination precondition: without the block the remainder
+    # clears the prior cap, so the mutant clamps at 16,384.
+    assert fit - (used - g) > PRIOR_ROUND_CHARS
+    # And the real `prior` is what the full sum leaves -- below the cap.
+    assert seen["prior_chars"] == max(1, fit - used)
+    assert seen["prior_chars"] < PRIOR_ROUND_CHARS

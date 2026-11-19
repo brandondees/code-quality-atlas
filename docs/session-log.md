@@ -5017,3 +5017,11 @@ budget order, the named/silent split); the service README's module table
 gains the guidelines block on `conversation.py`'s row and the agentic
 prompt bullet names the fourth context block, its read source and its
 data-only status. The plan document is untouched, as the issue directs.
+
+**Correction (2026-11-19, round-1 review of #774).** The entry above and
+D87's own parenthetical described S9's PR #773 (D86) as open, which was
+true when they were written; #773 has since merged (main 81d70ebb) and
+D86 sits on main beside D87. D87's parenthetical is reworded in place to
+say so — its entry is still the current record — and this note is the
+log's append-only stand-in for the same fact; the S6 entry's "which open
+S9 PR #773 holds" wording above is the stale text the correction covers.
