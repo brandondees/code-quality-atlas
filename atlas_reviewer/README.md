@@ -1747,7 +1747,8 @@ D41 records the 2026-11-12 probe that did.
   an unreadable upstream charge, a BYOK call with no upstream charge, and
   a turn with neither a readable cost nor usable token counts. A settle
   whose reported cost came in above the worst case reserved for the call
-  keeps the reservation it was held at and is recorded as an overrun on
+  moves committed spend to that reported actual -- which can sit above
+  the reservation -- and is recorded as an overrun on
   the draft's `Model calls:` cost line (D82's tripwire, round-1 review of
   #757) -- the observable signal that a provider billed past the priced
   worst case. A readable

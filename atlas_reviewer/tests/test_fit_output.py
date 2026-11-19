@@ -369,7 +369,8 @@ def test_a_settle_above_its_worst_case_is_recorded_as_an_overrun():
     on a route that bills reasoning tokens outside its output cap, and
     the one event that would reveal it -- a settle whose reported cost
     exceeds the worst case reserved for the call -- must leave a trace.
-    The accounting keeps the reservation (the bound that was held); the
+    The accounting moves committed spend to the reported actual, which
+    can sit above the reservation; the
     overrun note is the draft-visible signal and the condition D82's
     revisit trigger names. A settle at the worst case, and an unpriced
     settle, record nothing."""

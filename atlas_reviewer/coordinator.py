@@ -2397,6 +2397,11 @@ def _compose_carry(
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
         committed_usd=str(spend.committed_usd),
+        # The carry call settles after `synthesize` captured the overruns,
+        # so the tripwire line is refreshed here with it (round-3 review
+        # of #757) -- an overrun on a post-synthesis settle is counted in
+        # committed spend and must reach the draft's cost line too.
+        settle_overruns=tuple(spend.overruns),
     )
 
 
@@ -2690,6 +2695,10 @@ def _with_reused_reassessment(
             ),
             model_calls=spend.calls,
             committed_usd=str(spend.committed_usd),
+            # The re-assessment call settles after `synthesize` captured
+            # the overruns, so the tripwire line is refreshed here with it
+            # (round-3 review of #757), the way the totals are.
+            settle_overruns=tuple(spend.overruns),
         ),
         tuple(new_decisions),
     )

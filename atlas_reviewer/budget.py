@@ -353,8 +353,9 @@ class ReviewBudget:
         ):
             # D82's tripwire (round-1 review of #757): the reported cost
             # came in above the worst case the reservation priced. The
-            # accounting keeps the reservation; the note makes the overrun
-            # visible in the usage report.
+            # accounting moves committed spend to the reported actual --
+            # which can sit above the reservation -- and the note makes
+            # the overrun visible in the usage report.
             record.usage = (record.usage + " " if record.usage else "") + (
                 f"(settled ${actual:.4f} above its "
                 f"${record.reserved_usd:.4f} reservation; D82's tripwire)"

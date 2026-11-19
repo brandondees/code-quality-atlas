@@ -4853,3 +4853,122 @@ def test_a_settle_above_its_reservation_reaches_the_drafts_cost_line(tmp_path):
         "1 settle(s) reported a cost above their reservation (D82's tripwire)" in line
     )
     assert "settled $0.0200 above its $0.0100 worst case" in line
+
+
+def test_the_post_synthesis_overruns_reach_the_drafts_tripwire_line(tmp_path):
+    """Round-3 review of #757, Minor: `synthesize` captures the spend's
+    overrun notes before the delta path's post-synthesis calls settle, so
+    an overrun on the carry-forward call or on a reused lens's
+    re-assessment call was counted in committed spend but never reached
+    the draft's tripwire line -- D82's choice-(e) promise unmet for
+    exactly those calls on a delta review. Both compositions'
+    `replace(...)` now refresh `settle_overruns` from the spend, the way
+    they refresh `model_calls` and `committed_usd`. Mutants: dropping
+    either refresh alone leaves one of the two overruns uncaptured, the
+    count reads 1 instead of 2, and the test dies."""
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    class Overrunning(ScriptedLensModel):
+        placed: int = 0
+
+        def worst_case_usd(self, request):
+            self.placed += 1
+            # The decision call prices its reply's cost safely; the
+            # carry-forward and the re-assessment each reserve under the
+            # cost their replies report, so each settles above its own
+            # worst case after `synthesize` has already captured the
+            # overruns.
+            return Decimal("0.15") if self.placed == 1 else Decimal("0.01")
+
+    _round_log_with_prior(tmp_path)
+    path = tmp_path / "rounds.jsonl"
+    RoundLog(path).append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            OLD,
+            LENS,
+            "COMMENT",
+            (f"L1-F1 major calc.py:2 {PRIOR_TEXT}",),
+            False,
+            0,
+            "",
+            (),
+            (LENS,),
+            (LENS,),
+            "a" * 64,
+        )
+    )
+    model = Overrunning(
+        [
+            _carry_reply((_restated(),)),
+            _reassess_reply(
+                finding(
+                    location="calc.py:1",
+                    evidence="def total(xs):",
+                    finding="the rounding silently drops negative quantities",
+                    fix="guard the sign before rounding",
+                ),
+                withdrawn=(("P1", "the newer CI run shows the rounding holds"),),
+            ),
+        ],
+        decisions=(_decided(lens=LENS, decision="reuse", reason="docs only"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        model,
+        round_log=RoundLog(path),
+        delta=_delta_scope(),
+        evidence_digest="b" * 64,
+    )
+    assert len(model.requests) == 3
+    draft = render_draft(result, Redactor())
+    line = next(l for l in draft.splitlines() if l.startswith("Model calls:"))
+    assert (
+        "2 settle(s) reported a cost above their reservation (D82's tripwire)" in line
+    )
+    assert line.count("settled $0.0200 above its $0.0100 worst case") == 2
+
+
+def test_a_carry_calls_overrun_reaches_the_drafts_tripwire_line(tmp_path):
+    """Round-3 review of #757, Minor, the carry-only half: a delta review
+    with no reused lens runs no re-assessment, so the carry-forward call's
+    overrun has no later composition to re-capture it -- only the carry
+    composition's own refresh puts it on the draft's tripwire line.
+    Mutant: the carry composition's refresh dropped, which leaves the
+    overrun uncaptured (synthesize ran before the carry settled) and the
+    line reads no overrun at all."""
+
+    class Overrunning(ScriptedLensModel):
+        placed: int = 0
+
+        def worst_case_usd(self, request):
+            self.placed += 1
+            # The decision call and the lens's two turns price their
+            # replies' costs safely; the carry-forward reserves under the
+            # cost its reply reports, so it settles above its own worst
+            # case after `synthesize` has already captured the overruns.
+            return Decimal("0.15") if self.placed <= 3 else Decimal("0.01")
+
+    log = _round_log_with_prior(tmp_path)
+    model = Overrunning(
+        [READ_ALL, final(), _carry_reply(())],
+        decisions=(_decided(lens=LENS, decision="review", reason="code changed"),),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    # Decision call, the lens's two turns, then the carry-forward call.
+    assert len(model.requests) == 4
+    draft = render_draft(result, Redactor())
+    line = next(l for l in draft.splitlines() if l.startswith("Model calls:"))
+    assert (
+        "1 settle(s) reported a cost above their reservation (D82's tripwire)" in line
+    )
+    assert "settled $0.0200 above its $0.0100 worst case" in line
+    # The overrun is accounted: committed spend carries every call's
+    # reported actual (the decision call's scripted reply prices at
+    # $0.10), and the carried section still renders.
+    assert "committed: $0.16." in line
+    assert "## Carried, not re-verified" in draft

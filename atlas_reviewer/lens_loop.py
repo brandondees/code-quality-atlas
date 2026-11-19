@@ -1149,8 +1149,10 @@ class Spend:
     """Per-settle notes for calls whose reported cost came in above the
     worst case reserved for them (D82's tripwire, round-1 review of
     #757): the observable signal that a provider billed past the
-    reservation's priced worst case. The accounting keeps the
-    reservation; only the record grows."""
+    reservation's priced worst case. The accounting moves `committed_usd`
+    to the reported actual -- which can sit above the reservation and
+    pass the ceiling (D82's Cost paragraph) -- and the note is what makes
+    that visible."""
     _lock: threading.Lock = field(
         default_factory=threading.Lock, init=False, repr=False, compare=False
     )
