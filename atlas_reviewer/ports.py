@@ -152,6 +152,10 @@ class GitHubReader(Protocol):
 
     def get_compare(self, repo: str, base: str, head: str) -> Json: ...
 
+    def get_repository(self, repo: str) -> Json: ...
+
+    def get_file(self, repo: str, ref: str, path: str, max_bytes: int) -> bytes: ...
+
 
 class SpritesApi(Protocol):
     """The outside (control-plane) Sprites API. Only the controller holds

@@ -5334,3 +5334,85 @@ belongs to part B's intake validation, not to the store.
 **Tests** (`test_installation_store.py` extended by the m2' test).
 **One fix-round mutant applied by hand and killed:** the parse moved
 back outside the skip (the new record-shaped-name test).
+
+## 2026-11-19 — Config slice S7: the #734 allow-list's proposals and the in-run operator approval (issue #766)
+
+The user-configuration plan's S7 (`docs/plans/2026-11-18-user-configuration.md`
+§5 S7, §3's "#734 tool allow-lists" row; the decisions are D80's allow-list
+paragraph and D81's Q5). Offline only: the tests use `LocalSprites`, scripted
+approval channels, fakes, and the real CLI's dry run; no live model, Sprite or
+GitHub call was made, no secret was read, and no deployed service setting, Fly
+config value or secret changed. D88 records the implementation decisions the
+plan left open; the open #774 (S6) holds D87, so the entry takes D88 and the
+decision guard tolerates the gap.
+
+**What an addition is.** The shape D80's revisit and the 2026-11-13 plan both
+point at: the repo's declared test command, beside the built-in pytest entry.
+A repo's default-branch `REVIEW.md` proposes them with
+`review_test_commands:` (comma-separated commands, one program token plus at
+most seven fixed argument tokens each, closed charset, the program held to
+the bridge's own workspace-relative path rule, at most 8 commands of 8
+tokens); the canonical name — the tokens joined by single spaces — is the
+exact string a `run_tests` call names. The whole read fails open to deny on
+any unusable line or a repeated key, with a note that counts and never
+echoes; the merge-base scan knows the key, so no false unsupported note
+draws and a merge-base copy is silently not honored (the S3 keys' cohesion).
+
+**The port.** `approval.ApprovalChannel.request(proposal, deadline)` is the
+whole operator-approval surface built: the plan does not specify the channel
+or who the operator is for a non-allowlisted installation, so nothing is
+invented and the production default is `NeverApproved` — every blocked
+command is denied and named as an unapproved gap. The channel must answer by
+its deadline; an exception is a no-answer, fail-closed. `RunApprovals` grants
+only an explicit approval, keeps denials sticky for the run, bounds the wait
+by the shorter of the run's remaining wall and 30 s (provisional, pending the
+owner), and checks the wall and the dollar bound before and after the wait —
+an approval that arrives after either ran out denies with its own reason.
+The wait counts against the run's wall because it is the calling lens's own
+elapsed time. The gate is built per lens run in `_review_one` and dies with
+that run's runner — the narrow reading of "within the same run": a grant is
+never carried into another lens's staged runner, another run, or any state
+on the volume.
+
+**The bridge surface.** `run_tests` gains an optional `command` argument: an
+exact-match lookup against the run's allow-list, refused as `unknown-command`
+with no echo when it names no proposal, combined with no selector
+(`conflicting-argument`), and — when approved — run as the proposal's own
+tokens, each shell-quoted, from the same disposable staged copy under the
+same `timeout`, output cap and environment as the built-in entry, with no
+interpreter requirement. The token charset is the primary control (no
+proposal can carry a metacharacter at all); shlex quoting is
+defense-in-depth whose drop-mutant is unobservable under the charset and is
+recorded rather than claimed killed. An unapproved proposed command refuses
+as `unavailable` — a tool gap the review cannot approve over — with the
+fixed reason and the counts; the telemetry records `run approvals` /
+`configured` with the proposals count per lens run, so a run that proposed
+nothing and a run whose proposals never reached the coordinator can be told
+apart. `mutate` never takes a command: its verdict needs pytest's own
+summary line.
+
+**The glue.** The CLI's agentic-review path fetches the default-branch
+`REVIEW.md` (one read-only repository lookup recovering the branch, the file
+under the same 64 KiB bound; a missing file is the silent unconfigured repo;
+a failed lookup, fetch or over-bound file is a named note with nothing
+proposed — a lost read can only narrow what the run may execute) and passes
+the proposals into `review_lenses`/`review_lens`; the coordinator builds the
+per-lens gate with the run's own wall and dollar bounds as the wait's
+limits. The fixture `GitHubReader` gains `get_repository`/`get_file` (the
+same methods S6's fetch adds; the rebase is mechanical), and the shipped
+fixtures gained `repository.json` each, `sample-pr` an unusable proposals
+line (the dry run pins the named note end to end) and `sample-pr-delta` a
+valid one (the dry run pins the telemetry record the plumb feeds).
+
+**Tests** (`atlas_reviewer/tests/test_run_approvals.py`, 62 tests; the
+reader-coverage list in `test_instrumented.py`): the grammar and fail-open
+notes, the merge-base scan's silence, the gate's every outcome and bound,
+the bridge surface's rejections and the approved command end to end through
+`LocalSprites`, the lens loop's ledger over both, the coordinator plumb, the
+CLI fetch's five shapes, and the two dry-run pins. **27 mutants applied by
+hand, all killed** on their named tests (the list is in D88), plus the one
+unobservable quoting mutant recorded above. **Overlap:** the shared-file
+changes are additive and narrow for the open #774 rebase — `cli.py` gains
+one helper, two kwargs and the notes' ride-along; the fixture, ports and
+instrumented changes are the two reader methods; the plan document is
+untouched.

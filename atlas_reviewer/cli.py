@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import TextIO, cast
 
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
+from atlas_reviewer.approval import CommandProposal
 from atlas_reviewer.attestation import AttemptLedger
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, fetch_sources
 from atlas_reviewer.budget import (
@@ -154,14 +155,22 @@ from atlas_reviewer.ports import (
     Clock,
     GitHubReader,
     ModelProvider,
+    NotFoundError,
     PickRequest,
+    ResponseTooLargeError,
     SpritesApi,
 )
 from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, snapshot_digest
 from atlas_reviewer.redact import TRUNCATION_MARKER, Redactor
-from atlas_reviewer.repo_config import RepoConfig, read_repo_config
+from atlas_reviewer.repo_config import (
+    MAX_CHECKED_BYTES,
+    REVIEW_MD,
+    RepoConfig,
+    parse_run_proposals,
+    read_repo_config,
+)
 from atlas_reviewer.review_wide import (
     derive_review_wide,
     operator_repo_ceiling_max,
@@ -999,6 +1008,12 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # schema -- the ceiling, the lens preference, the path ranking,
         # and the unsupported keys' named notes.
         config = read_repo_config(trees.base)
+        # S7 (D88): the repo's proposed additions to the #734
+        # execution-tool allow-list, read from the default-branch
+        # REVIEW.md -- proposals that only ever become operator-approval
+        # requests, never grants, so a failed read leaves nothing
+        # proposed and names the gap.
+        proposals, proposal_notes = _run_proposals(github, event)
         # S5 (D81 Q6): the repo's ordering-only path ranking, applied to
         # the changed-file listing the lenses are read in the order of,
         # and recorded in the draft. The patterns never reach a model;
@@ -1092,7 +1107,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     preferences=lens_preferences.preferences,
                     shapes=shapes,
                 )
-                selection = _with_preference_note(selection, config)
+                selection = _with_preference_note(selection, config, proposal_notes)
                 names = tuple(loaded.name for loaded in plan.loaded)
                 budget = getattr(picker_provider, "budget", None)
                 picker_spend = (
@@ -1207,6 +1222,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     delta=delta,
                     path_ranks=path_ranks,
                     operator_ceiling_max=ceiling_max,
+                    run_proposals=proposals,
                 )
                 review = replace(
                     review,
@@ -1264,16 +1280,81 @@ def _delta_input(
     return diff, delta_scope(github, event)
 
 
+# The fixed notes the default-branch proposal read can leave (S7, D88).
+# Each names the condition and the default that stands -- nothing is
+# proposed, the built-in pytest entry runs -- and never a rejected value
+# or an error's text: the proposals are untrusted config, and a note that
+# echoed a fetch error would carry unvalidated text into the draft.
+_PROPOSAL_LOOKUP_NOTE = (
+    "the reviewed repo's default branch could not be resolved, so its "
+    "review_test_commands: line, if any, was not read; nothing is "
+    "proposed and the execution tools run the built-in pytest entry only"
+)
+_PROPOSAL_FETCH_NOTE = (
+    "the reviewed repo's default-branch REVIEW.md could not be fetched, "
+    "so its review_test_commands: line, if any, was not read; nothing is "
+    "proposed and the execution tools run the built-in pytest entry only"
+)
+_PROPOSAL_OVERBOUND_NOTE = (
+    "the reviewed repo's default-branch REVIEW.md is over the "
+    f"{MAX_CHECKED_BYTES}-byte read bound, so its review_test_commands: "
+    "line, if any, was not read; nothing is proposed and the execution "
+    "tools run the built-in pytest entry only"
+)
+
+
+def _run_proposals(
+    github: GitHubReader, event: PrEvent
+) -> tuple[tuple[CommandProposal, ...], tuple[str, ...]]:
+    """The reviewed repo's proposed additions to the #734 execution-tool
+    allow-list (config slice S7, D88): the `review_test_commands:` line
+    of the `REVIEW.md` on the repo's **default branch** -- the D84 read
+    source, never the PR head and never the merge-base, because a
+    proposal a same-repo or stacked PR could carry would name commands
+    into its own review's execution surface. A proposal is a request the
+    operator approves within the run, never a grant, so the read fails
+    open to deny in every direction that matters: no file reads as the
+    ordinary unconfigured repo, silently; a default branch that cannot
+    be resolved, a fetch that failed, or a file over the read bound
+    leaves nothing proposed with the fixed note that says so -- a lost
+    read can only narrow what the run may execute, never widen it."""
+    try:
+        repository = github.get_repository(event.repo)
+    except BoundaryError:
+        return (), (_PROPOSAL_LOOKUP_NOTE,)
+    branch = repository.get("default_branch") if isinstance(repository, dict) else None
+    if not isinstance(branch, str) or not branch:
+        return (), (_PROPOSAL_LOOKUP_NOTE,)
+    try:
+        data = github.get_file(event.repo, branch, REVIEW_MD, MAX_CHECKED_BYTES)
+    except NotFoundError:
+        # No REVIEW.md on the default branch: the ordinary unconfigured
+        # repo, silent, exactly as no proposal at all.
+        return (), ()
+    except ResponseTooLargeError:
+        return (), (_PROPOSAL_OVERBOUND_NOTE,)
+    except BoundaryError:
+        return (), (_PROPOSAL_FETCH_NOTE,)
+    read = parse_run_proposals(data.decode("utf-8", errors="replace"))
+    return read.proposals, read.notes
+
+
 def _with_preference_note(
-    selection: LensSelection, config: RepoConfig
+    selection: LensSelection, config: RepoConfig, extra_notes: Sequence[str] = ()
 ) -> LensSelection:
-    """The selection with the config parse's notes appended (D69; S1; S5):
-    a seen-but-unusable preference line's note, a seen-but-unusable
-    path-ranking line's note, and the unsupported keys' named notes, so
-    "lines present but ignored" is recorded the way the ceiling's unusable
-    line is, and can be told apart from no lines. The notes are controller
-    text that never echoes a rejected value."""
-    notes = [config.lenses.note, config.ranks.note, *config.unsupported_notes]
+    """The selection with the config parse's notes appended (D69; S1; S5;
+    S7): a seen-but-unusable preference line's note, a seen-but-unusable
+    path-ranking line's note, the unsupported keys' named notes, and the
+    default-branch proposal read's own notes, so "lines present but
+    ignored" is recorded the way the ceiling's unusable line is, and can
+    be told apart from no lines. The notes are controller text that
+    never echoes a rejected value."""
+    notes = [
+        config.lenses.note,
+        config.ranks.note,
+        *config.unsupported_notes,
+        *extra_notes,
+    ]
     extra = " ".join(note for note in notes if note)
     if not extra:
         return selection

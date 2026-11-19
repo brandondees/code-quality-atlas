@@ -107,6 +107,8 @@ READS = [
     ("list_review_comments", (REPO, 42)),
     ("list_reviews", (REPO, 42)),
     ("get_compare", (REPO, "main", HEAD)),
+    ("get_repository", (REPO,)),
+    ("get_file", (REPO, "main", "REVIEW.md", 64 * 1024)),
 ]
 
 
