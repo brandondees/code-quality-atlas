@@ -4382,3 +4382,38 @@ M-E now dies). F12: the two comments claiming git verifies a loose
 object on read are corrected to name what actually protects the
 content — the re-stage and the re-created-id check. No live model,
 Sprite or GitHub call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 3 fix (part two): the regex `grep` mode stays on the runner
+
+The round-3 daemon fix moved all three content tools controller-side in
+one stroke, and the round-3 review's Major showed what that overreach
+broke. Python `re` in-process on the controller has no wall-clock bound —
+the tool's `timeout_s` stopped applying to anything, and a
+catastrophic-backtracking pattern over PR-controlled bytes (the PR
+controls both the haystack and, by injection, the pattern) stalls the
+review unboundedly; `re.compile("(")` crashes the call on a common model
+typo, where the runner path had turned a bad pattern into git's exit
+status and a gap; and the dialect silently changed — `git grep -E` is
+POSIX extended, `re` is Perl-style, so the same `regex: true` pattern
+matches different text than every grep before the local path served.
+
+The fix is the review's fourth option: only the fixed-string mode is
+answered controller-side (a substring scan is linear, cannot crash, and
+means exactly what `git grep -F` means), and the regex mode is
+dispatched back to the runner's `git grep -E` exec — where `timeout -k`
+bounds the engine, a bad pattern is git's exit status with the reason in
+the redacted stderr (`FAILED`, a gap — pinned by
+`test_an_invalid_regex_grep_is_a_gap_not_a_crash`), and the dialect is
+unchanged. The regex exec rides
+the same protections the diff trio rides — the sweep precedes the
+re-stage `_exec` runs on a suspect session, and a finding quoting its
+output still verifies against controller-held head content — so
+"nothing read back from the runner is trusted as content" now scopes to
+the fixed-string content tools, and the runner-reading channels rest on
+the sweep plus the quote gate. Killed mutant: the routing revert dies on
+`test_a_regex_grep_stays_on_the_runner_and_keeps_its_dialect` (`to.al`
+matches under `git grep -E` but not as a literal substring; two grep
+execs counted; the runner script's `timeout` asserted). The tool
+schema's `regex` description names the dialect (in the stacked #753).
+No live model, Sprite or GitHub call; no secret read; no deployed
+setting changed.

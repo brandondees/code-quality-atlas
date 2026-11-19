@@ -2028,10 +2028,12 @@ def test_the_live_sweep_script_excludes_its_own_ancestry():
 
 
 def test_the_content_tools_answer_without_the_runner(tmp_path):
-    """The round-2 decision's structural half: `read_file`, `grep` and
-    `list_files` are answered from the controller's own copy and never
-    exec -- a runner that refuses every exec still serves them, and a
-    diff call (which still reads the runner) is the `unavailable` gap."""
+    """The round-2 decision's structural half: `read_file`, the
+    fixed-string `grep` and `list_files` are answered from the
+    controller's own copy and never exec -- a runner that refuses every
+    exec still serves them, and a diff call (which still reads the
+    runner) is the `unavailable` gap. The regex `grep` mode is not part
+    of this: it stays on the runner (D80 round 3)."""
 
     class NoExec(LocalSprites):
         def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
@@ -2071,6 +2073,53 @@ def test_the_content_tools_answer_without_the_runner(tmp_path):
     # The runner-reading tools fail closed when their exec is refused.
     assert collected["diff"].status is Status.UNAVAILABLE
     assert "must not be exec'd" in collected["diff"].error.text
+
+
+def test_a_regex_grep_stays_on_the_runner_and_keeps_its_dialect(tmp_path):
+    """Round 3's major: only the fixed-string mode moved controller-side
+    -- a substring scan is linear, cannot crash and cannot change
+    meaning. The regex mode is dispatched to the runner's `git grep -E`,
+    where `timeout` still bounds it and a bad pattern is git's exit
+    status; its dialect is git's (POSIX extended), the one every regex
+    grep before the local path served."""
+    seen: list[str] = []
+
+    class Counting(LocalSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            seen.append(argv[-1])
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    results, _ = calls(
+        tmp_path,
+        ("grep", {"pattern": "to.al", "regex": True}),
+        ("grep", {"pattern": "return|total", "regex": True}),
+        ("grep", {"pattern": "sum(xs)"}),
+        sprites=Counting(),
+    )
+    # The regex mode really exec'd -- and the fixed-string mode did not.
+    assert sum("grep -z" in script for script in seen) == 2
+    matched, alternation, fixed = results
+    # `to.al` matches "total" only under regex semantics; the local
+    # fixed-string scan would find no literal "to.al" and answer empty.
+    assert matched.status is Status.OK
+    assert "def total(xs):" in matched.content.text
+    assert alternation.status is Status.OK
+    assert "return 0" in alternation.content.text
+    assert fixed.status is Status.OK
+    assert "sum(xs)" in fixed.content.text
+    # The runner script carries the timeout the controller cannot impose
+    # on an in-process regex engine.
+    grep_script = next(script for script in seen if "grep -z" in script)
+    assert "timeout -k" in grep_script
+
+
+def test_an_invalid_regex_grep_is_a_gap_not_a_crash(tmp_path):
+    """A common model typo in the regex mode reaches git, whose exit
+    status and stderr become the result -- `FAILED`, a gap, with the
+    reason surfaced -- not an uncaught `re.error` out of `Bridge.call`."""
+    result = one(tmp_path, "grep", {"pattern": "(", "regex": True})
+    assert result.status is Status.FAILED
+    assert "unmatched" in (result.error.text if result.error else "").lower()
 
 
 def test_the_controller_splice_matches_the_runner_script(tmp_path):

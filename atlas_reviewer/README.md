@@ -1592,24 +1592,34 @@ a `Bridge` to the caller.
   shows plainly reads back through `read_file` (the rest are marked).
   `diff_file` shows a renamed file as a rename from either path.
 - **Execution (D80, corrected 2026-11-18 rounds 1-2; amended for the
-  between-call daemon).** Executed PR code runs as the same user that owns
+  between-call daemon; the regex `grep` mode kept runner-side in round
+  3).** Executed PR code runs as the same user that owns
   the runner's state, and git does **not** re-verify a loose object on
   read -- so nothing the runner holds is trusted as content after PR code
   has run. Three layers hold the line:
-  - **The file-content reads are controller-side.** `read_file`, `grep`
-    and `list_files` answer from the controller's own copy of the staged
-    trees (extracted in memory from the tarballs it already holds) and,
-    for MUTANT, from the recorded mutation's splice applied to that copy
-    -- the same span splice the runner's script applies, parity pinned.
-    They never exec and never trust anything read back from the runner; a
-    runner that refuses every exec still serves them.
+  - **The file-content reads are controller-side.** `read_file`, the
+    fixed-string `grep` and `list_files` answer from the controller's
+    own copy of the staged trees (extracted in memory from the tarballs
+    it already holds) and, for MUTANT, from the recorded mutation's
+    splice applied to that copy -- the same span splice the runner's
+    script applies, parity pinned. They never exec and never trust
+    anything read back from the runner; a runner that refuses every exec
+    still serves them. The `grep` regex mode is deliberately **not**
+    controller-side: it stays on the runner, where `timeout` bounds the
+    engine (an in-process `re` scan would run unbounded, and the PR
+    controls both the haystack and, by injection, the pattern), a bad
+    pattern is git's exit status (a gap, not an uncaught `re.error`),
+    and the dialect is `git grep -E`'s POSIX extended regex, unchanged
+    from before the local path existed. It rides the same sweep,
+    re-stage and quote-gate protections as the diff trio.
   - **A stray-process sweep precedes every re-stage and every execution**
     (`Session.sweep`): the live sweep kills every process of the
     execution user except the exec chain's own ancestors (walked by
     `PPid` to init; zombies skipped), waits, then verifies with a second
     scan; a survivor, a failed sweep, or no answer is fail-closed
     (`unavailable`, a gap). This is what the diff trio's runner reads
-    (`diff_stat`, `diff_file`, renames) rest on -- after a verified
+    (`diff_stat`, `diff_file`, renames -- and the regex mode of `grep`,
+    which stays runner-side) rest on -- after a verified
     sweep, no process is alive to write between the rebuild and the read
     -- together with the finding gate, whose quotes verify against
     controller-held head content a forged diff cannot mint. The sweep's

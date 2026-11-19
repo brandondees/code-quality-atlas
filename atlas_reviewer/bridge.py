@@ -141,10 +141,16 @@ _CONTINUATION = bytes(range(0x80, 0xC0))
 # returns.
 RUN_TOOLS = frozenset({"run_tests", "mutate"})
 
-# The file-content tools (D80 round 2): answered from the controller's own
-# copy of the trees and the deterministic splice, never from the runner's
-# state -- executed code can start a process no sweep can name, so nothing
-# read back from the runner is trusted as content.
+# The file-content tools answered from the controller's own copy of the
+# trees and the deterministic splice (D80 round 2): executed code can
+# start a process no sweep can name, so nothing read back from the
+# runner is trusted as content. `read_file` and `list_files` are always
+# local; `grep` is local only in its fixed-string mode -- a substring
+# scan is linear and cannot crash -- while the regex mode stays on the
+# runner, where `timeout` bounds it, where a bad pattern is git's exit
+# status (a gap, not a `re.error`), and where the dialect is git grep's
+# POSIX basic regex, unchanged since before the local path existed
+# (D80 round 3).
 LOCAL_TOOLS = frozenset({"read_file", "grep", "list_files"})
 
 # The tools that still read the runner's repository (the diff trio): their
@@ -802,11 +808,14 @@ def _local_grep(
     """`grep` from the controller's copy, in the records shape the runner's
     `git grep -z -n -I --max-count=50` produced: `<staged id>:<path>`,
     the line number, the line; binary files (a NUL in the first 8,000
-    bytes, git's `-I` heuristic) are skipped; fifty matches a file; the
-    fixed-string and regex modes keep their meaning."""
+    bytes, git's `-I` heuristic) are skipped; fifty matches a file. Only
+    the fixed-string mode lives here: a substring scan is linear, cannot
+    crash and means exactly what `git grep -F` means. The regex mode is
+    dispatched to the runner, where `timeout` bounds it, a bad pattern is
+    git's exit status rather than a `re.error`, and the dialect is POSIX
+    extended regex (`git grep -E`; D80 round 3)."""
     pattern = call.get("pattern")
     prefix = call.get("prefix")
-    compiled = re.compile(pattern) if call.get("regex") else None
     needle = pattern.encode("utf-8")
     chunks: list[bytes] = []
     for path in sorted(files):
@@ -820,11 +829,7 @@ def _local_grep(
             split = split[:-1]
         count = 0
         for number, line in enumerate(split, 1):
-            hit = (
-                compiled.search(line.decode("utf-8", errors="replace"))
-                if compiled is not None
-                else needle in line
-            )
+            hit = needle in line
             if hit:
                 chunks.append(
                     f"{rev_id}:{path}\0{number}\0".encode("utf-8", "surrogateescape")
@@ -1718,7 +1723,7 @@ class Bridge:
         started = self.clock.monotonic()
         if call.tool in RUN_TOOLS:
             return self._run_exec(call, limits, started)
-        if call.tool in LOCAL_TOOLS:
+        if call.tool in LOCAL_TOOLS and not (call.tool == "grep" and call.get("regex")):
             return self._run_local(call, limits, started)
         try:
             paths = self._diff_paths(call)
@@ -1734,14 +1739,16 @@ class Bridge:
     def _run_local(
         self, call: Call, limits: ToolLimits, started: float
     ) -> BridgeResult:
-        """`read_file`, `grep` and `list_files` are answered from the
-        controller's own copy of the trees and the recorded mutation's
-        splice (D80 round 2's decision): executed PR code can leave a
-        process no sweep can name alive in the runner, so nothing read
-        back from the runner is trusted as content -- these tools serve
-        the controller-held bytes and never exec. The result then runs
-        through the same rendering, capping, secret scan and ledger the
-        runner-served results use."""
+        """`read_file`, fixed-string `grep` and `list_files` are answered
+        from the controller's own copy of the trees and the recorded
+        mutation's splice (D80 round 2's decision): executed PR code can
+        leave a process no sweep can name alive in the runner, so nothing
+        read back from the runner is trusted as content -- these tools
+        serve the controller-held bytes and never exec. The regex mode of
+        `grep` is not among them: it stays on the runner (D80 round 3),
+        inside the re-staged, swept, timeout-bounded exec the diff trio
+        rides. The result then runs through the same rendering, capping,
+        secret scan and ledger the runner-served results use."""
         rev = call.get("rev")
         files = self._contents.get(rev)
         if files is None:  # pragma: no cover - validate gates the revisions
