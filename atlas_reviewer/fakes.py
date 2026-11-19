@@ -23,7 +23,13 @@ from atlas_reviewer.delta import DECISION_TARGET_PREFIX
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.lens_loop import FinalReply, ModelTurn, TurnRequest, UserText
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
-from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
+from atlas_reviewer.runner import (
+    EXIT_MARKER,
+    EXIT_NOT_FOUND,
+    PROBE_TAG,
+    START_MARKER,
+    SWEEP_TAG,
+)
 
 _HANG_LIMIT_S = 10.0
 _FEED_RE = re.compile(r"head -c (\d+) \| \{ ")
@@ -158,6 +164,10 @@ class FakeSprites:
             return self._probe(script), 0
         if PYTHON_TAG in script:
             return "\n".join(f"{PYTHON_TAG}:{p}:{v}" for p, v in self.pythons), 0
+        if SWEEP_TAG in script:
+            # The fake runner has no processes of its own, so its sweep is
+            # always clean (D80 round 2).
+            return f"{SWEEP_TAG}:clean", 0
         if "wc -c" in script and _FEED_RE.search(script):
             return str(len(stdin)), 0
         if "atlas-task-hold" in script:

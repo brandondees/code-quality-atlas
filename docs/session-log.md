@@ -4212,3 +4212,208 @@ token, bounded by the same 8-second read budget, spent after the poster's
 dedupe checks.
 
 Offline only, same rules as the entries above.
+
+## 2026-11-18 — #734 part 1: the bridge can execute — structured `run_tests` and `mutate` (D80)
+
+Part B of the 2026-11-13 plan's phase 2, the slice the parity gate's four
+execution-Minors (#661 m3/m4, #640 m1/m2) were waiting on. The model now
+names a test selector or a mutant spec — a path, a line and one of two
+closed-set operators — and the bridge builds the argv: `<trusted
+interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
+<selector>`. The interpreter is resolved before any PR content is
+unpacked by probing the pyenv versions and the system python for one
+whose pytest imports, accepted only on `interpreter.trusted_path`'s
+shapes or a literal candidate the caller named (the tests name this
+machine's venv as that candidate). Every call stages a fresh disposable
+copy of the HEAD tree, runs in it, and removes it, so the BASE/HEAD
+trees stay read-only whatever the tests write; a `mutate` call runs the
+baseline first, applies the mutation with one fixed AST script, commits
+the mutated copy at the moving `refs/tags/atlas-mutant` ref — the
+mutated tree is reachable at exactly one new revision, and MUTANT
+resolves *at the ref*, which is what made the `update-ref`-dropped
+mutant die — then runs the mutated copy. The verdict is the
+controller's, from the runs' exits and its own parse of the final
+pytest summary lines: survived only on a baseline that ran a test and
+passed plus a mutated run that passed; every other shape is
+inconclusive with its reason, and an inconclusive mutant is never a
+survived one. Caps: 8 run and 8 mutant calls per attempt (below the 64
+call cap), 60s per run, 16 KiB of tail-shown output per run — all
+provisional pending the owner. The operator-approval allow-list is
+designed as a seam (the bridge-owned argv table) and not built, per the
+owner's call. Tool schemas ship with the tools (`tool_schemas` builds
+from the bridge's table, so `rev`'s enum gained MUTANT); the
+instructions sentence, the attempt counters and the status line's runs
+and survivors counts are the next slice, then the parity rerun. Tests
+in `test_bridge_runs.py` run the tools for real through `LocalSprites`
+against a fixture suite executed by this machine's interpreter, plus
+scripted framing tests and pure verdict tests; thirteen hand-applied
+mutants each die on a named test (listed in D80). No live model, Sprite
+or GitHub call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 1: execution copies come from the object store, and MUTANT reads are hash-checked
+
+The round's Major (the routine's Blocker) was real and the review's
+probes proved it end to end: executed PR code — the same user that owns
+the review state — re-pointed `refs/tags/atlas-mutant` at a forged
+commit (the next `read_file` at MUTANT served the attacker's file),
+replaced `trees/head` wholesale (the next `mutate` staged, mutated,
+committed and quoted the attacker's content as the head file's), and
+deleted `trees` (the next call mislabeled the shell's exit as a test
+result). The round-1 fix then leaned on what the probe read as
+survival: forging a loose object **at its SHA** looked rejected by git's
+read-path hash check, so commit-id-addressed reads looked sound.
+*(Rejected by the round-2 entry below — git does not re-verify a loose
+object on read — and the re-stage from the controller-held tarballs is
+what closes it.)* The fix takes the
+strongest option that fits the fakes and the `LocalSprites` seam — no
+new users, mounts or binaries, only git plumbing the staging already
+trusts. Every execution copy is now staged **from the bare repository's
+objects** (`read-tree <recorded HEAD commit>` + `checkout-index
+--prefix`; the invocation names the bridge root as its work tree only to
+satisfy the bare-repository check, and writes nothing there), so `trees`
+is never read after staging and nothing executed code replaced can
+change what a later call stages; each staging step's exit is its own
+`__ATLAS_STAGE__` block, and a copy that could not be built is an
+`unavailable` gap, never a test result. MUTANT resolves at the
+**recorded commit id** — the ref stays as bookkeeping and is honestly
+demoted: the `update-ref`-dropped mutant is no longer observable and
+left the mutant list. A `mutate` call stages a fresh copy between the
+baseline and the mutation (the baseline's writes carry into neither the
+mutated run nor the mutant commit), and the mutation edit is a span
+splice (the rest of the file stays byte-identical; the record quotes the
+mutated span). Owned rather than hidden: executed code can still take
+the session's availability hostage (recorded as gaps), and a
+process-group-escaping daemon could race the edit→commit pair inside one
+exec — the same in-band trust boundary the exits already carry. The
+round's other findings: exit 0 with no summary line is inconclusive on
+both verdict sides; shape errors are gaps, not a latent `ValueError`;
+the mutation step's stderr is surfaced redacted; rejected calls spend no
+execution slot; exit 4's reason is honest; the chmod test skips under
+uid 0. The review's two probes became regression tests
+(`test_executed_code_cannot_tamper_with_what_later_calls_trust`,
+`test_the_baseline_runs_writes_do_not_carry_into_the_mutant`); seven new
+mutants, each dead on a named test. No live model, Sprite or GitHub
+call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 2: the object store is not a source of truth — the re-stage from the tarballs
+
+The round-2 routine review rejected the round-1 fix's premise with a
+re-run: **git does not re-verify a loose object on read** — `cat-file`
+inflates and serves it; only `fsck` and the transfer paths check ids —
+so the round-1 probe's in-place overwrite of the `calc.py` blob under
+its recorded name still served attacker content at `rev=HEAD`, and, once
+staging had been moved onto the object store, reached the next execution
+copy too. (`read_file HEAD` verified locally: overwrite the blob file
+`objects/e7/1172…` in place, and the commit-id-addressed read serves the
+forged bytes.) The one source of truth executed code cannot touch is the
+controller's own copy of the trees. So: every execution call — and every
+read that follows one (`_suspect`, set by any execution, cleared by a
+clean re-stage) — now **re-stages the runner's repository, trees, scratch
+and staging indexes from freshly re-uploaded, digest-checked tarballs**
+(`restage_script`): the staged commits are deterministic (fixed identity
+and date), so the recorded BASE/HEAD ids must come back exactly, and a
+mismatch is a gap; a recorded mutation re-applies deterministically on a
+fresh copy and the mutant commit is re-created with the same id, checked
+against the record, so MUTANT keeps serving the mutation the record
+names. The digest checks close the upload-to-verify window (a daemon
+rewriting the uploaded tarball stops the staging — pinned against a
+recompressed-equivalent tarball only the digest can see); the
+re-created-id check turns a daemon winning the edit→commit race into a
+refused read, not a forged record (pinned with a scripted daemon that
+writes into the copy between the edit and the commit). The stale-index
+trap this uncovered on the way: a re-stage that kept the staging index
+files let `git add`'s cached stat entries (the tarballs' fixed mtimes)
+skip re-hashing, and `write-tree` then failed on blobs the fresh
+repository had never received — the rebuild removes them. Executed code
+deleting the repository no longer takes the session hostage: the next
+call rebuilds and runs the real tree. Both review rounds' attacks live
+in one regression fixture (the forged ref, the replaced `trees`, the
+in-place object overwrite, twice); six more mutants die on named tests.
+No live model, Sprite or GitHub call; no secret read; no deployed
+setting changed.
+
+## 2026-11-18 — #752 round 2 fix: the between-call daemon loses — controller-side content reads, and a verified sweep before every re-stage and execution
+
+The round-2 review's Blocker (Brandon's round-3 thread, reproduced
+independently by the reviewer's probe): a PR test spawns a daemon
+detached from its exec's process group (`start_new_session=True`); the
+daemon outlives every exec and every re-stage and re-forges the
+`calc.py` loose blob every 20ms, so a read that came after its own
+successful re-stage still served the forgery, and the next execution ran
+the daemon's tree. The re-stage closes every timestamped tamper; it
+cannot close a window against a process still alive when the rebuild
+ends. The owner's decision: both halves, no owned residual. (1) The
+file-content reads moved to the controller: `read_file`, `grep` and
+`list_files` answer from the controller's own extraction of the tarballs
+it already holds (`_tree_files`), MUTANT from the recorded mutation's
+splice applied to that copy (`_splice`, the controller-side form of
+`MUTATION_SCRIPT`, parity pinned by
+`test_the_controller_splice_matches_the_runner_script`); they never exec
+(`test_the_content_tools_answer_without_the_runner` pins it against a
+runner that refuses every exec). The diff trio still reads the runner's
+repository — its integrity rests on the sweep plus the finding gate's
+controller-held quotes, and that reliance is recorded, not hidden. (2) A
+stray-process sweep (`Session.sweep`) precedes every re-stage and every
+execution: the live sweep kills every process of the execution user
+except the exec chain's own ancestors (a `/proc` walk of `PPid` to init;
+zombies skipped), waits, verifies with a second scan, and fails closed
+on a survivor (`parse_sweep` → `BoundaryError` → `unavailable`). The
+uid scope on a real Sprite is reasoned from the single-review
+disposable-runner model and has NOT been observed on a live Sprite (the
+offline rules forbid the observation); the LOCAL sweep is the testable
+stand-in and is scoped differently of necessity — the test machine's
+other work shares the uid — so `LocalSprites` sets
+`PR_SET_CHILD_SUBREAPER` (every orphan its execs leave becomes a direct
+child of the runner process), reaps, kills its descendants, reaps again,
+and fails closed (`test_the_sweep_kills_a_runner_descendant`,
+`test_the_sweep_fails_closed_on_a_survivor`). Neither sweep keys on the
+environment, so a daemon that scrubs its own environment is inside the
+live sweep's uid scope and outside no layer. The daemon probe is the
+regression test
+(`test_a_detached_daemon_cannot_reach_a_later_read_or_run`): reads, the
+diff and the next execution all genuine after the daemon's run — and it
+fails at the pre-sweep head (`85c101ed`, three consecutive runs) and
+passes at the fixed head (six). The sweep mutants die on it (the
+executions' sweep dropped, the re-stage's sweep dropped — the diff then
+serves the daemon's forgery); the controller-side dispatch's mutant dies
+on the no-exec test; and F2's second staging finally has a carrier that
+flips the verdict (the old one was satisfiable by the detection path;
+M-E now dies). F12: the two comments claiming git verifies a loose
+object on read are corrected to name what actually protects the
+content — the re-stage and the re-created-id check. No live model,
+Sprite or GitHub call; no secret read; no deployed setting changed.
+
+## 2026-11-18 — #752 round 3 fix (part two): the regex `grep` mode stays on the runner
+
+The round-3 daemon fix moved all three content tools controller-side in
+one stroke, and the round-3 review's Major showed what that overreach
+broke. Python `re` in-process on the controller has no wall-clock bound —
+the tool's `timeout_s` stopped applying to anything, and a
+catastrophic-backtracking pattern over PR-controlled bytes (the PR
+controls both the haystack and, by injection, the pattern) stalls the
+review unboundedly; `re.compile("(")` crashes the call on a common model
+typo, where the runner path had turned a bad pattern into git's exit
+status and a gap; and the dialect silently changed — `git grep -E` is
+POSIX extended, `re` is Perl-style, so the same `regex: true` pattern
+matches different text than every grep before the local path served.
+
+The fix is the review's fourth option: only the fixed-string mode is
+answered controller-side (a substring scan is linear, cannot crash, and
+means exactly what `git grep -F` means), and the regex mode is
+dispatched back to the runner's `git grep -E` exec — where `timeout -k`
+bounds the engine, a bad pattern is git's exit status with the reason in
+the redacted stderr (`FAILED`, a gap — pinned by
+`test_an_invalid_regex_grep_is_a_gap_not_a_crash`), and the dialect is
+unchanged. The regex exec rides
+the same protections the diff trio rides — the sweep precedes the
+re-stage `_exec` runs on a suspect session, and a finding quoting its
+output still verifies against controller-held head content — so
+"nothing read back from the runner is trusted as content" now scopes to
+the fixed-string content tools, and the runner-reading channels rest on
+the sweep plus the quote gate. Killed mutant: the routing revert dies on
+`test_a_regex_grep_stays_on_the_runner_and_keeps_its_dialect` (`to.al`
+matches under `git grep -E` but not as a literal substring; two grep
+execs counted; the runner script's `timeout` asserted). The tool
+schema's `regex` description names the dialect (in the stacked #753).
+No live model, Sprite or GitHub call; no secret read; no deployed
+setting changed.

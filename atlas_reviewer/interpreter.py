@@ -91,7 +91,7 @@ def choose_python(text: str) -> TrustedPython | None:
     candidates = [
         (path, (int(a), int(b), int(c)))
         for path, a, b, c in _CANDIDATE_RE.findall(text)
-        if _trusted_path(path)
+        if trusted_path(path)
     ]
     pyenv = sorted((c for c in candidates if c[0] != SYSTEM_PYTHON), key=_newest)
     system = [c for c in candidates if c[0] == SYSTEM_PYTHON]
@@ -99,12 +99,16 @@ def choose_python(text: str) -> TrustedPython | None:
     return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
 
 
+def trusted_path(path: str) -> bool:
+    """Whether `path` is an interpreter location this controller trusts:
+    the system one, or a pyenv versions directory. Shared with the bridge's
+    pytest probe (D80), which accepts the same shapes plus the literal
+    candidates its own caller named."""
+    return path == SYSTEM_PYTHON or bool(_PYENV_PATH_RE.fullmatch(path))
+
+
 def _newest(candidate: tuple[str, tuple[int, int, int]]) -> tuple[int, ...]:
     return tuple(-n for n in candidate[1])
-
-
-def _trusted_path(path: str) -> bool:
-    return path == SYSTEM_PYTHON or bool(_PYENV_PATH_RE.fullmatch(path))
 
 
 def with_python(command: str, python: TrustedPython) -> str:

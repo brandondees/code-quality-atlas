@@ -21,15 +21,18 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Self
 
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
+from atlas_reviewer.runner import EXIT_MARKER, SWEEP_TAG
 
 REAP_TIMEOUT_S = 5.0
 
@@ -42,8 +45,31 @@ class LocalSprites(FakeSprites):
     raises `StreamTimeoutError`, the same failure a live runner reports,
     not a crash."""
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # Adopt the orphans this runner's execs leave behind (the daemon
+        # shape: a test process that detached from its exec's group and
+        # outlived it), so the sweep can find them by ancestry instead of
+        # by a uid scope that on this machine would reach processes that
+        # are not the runner's.
+        try:
+            import ctypes
+
+            ctypes.CDLL(None).prctl(36, 1, 0, 0, 0)  # PR_SET_CHILD_SUBREAPER
+        except (OSError, ImportError):  # pragma: no cover - non-Linux
+            pass
+
     def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
-        self._record("exec", name, argv[-1])
+        script = argv[-1]
+        if SWEEP_TAG in script:
+            # The sweep script's uid scope is what holds on a real Sprite;
+            # on this machine it would kill processes that are not the
+            # runner's, so the local runner answers the sweep with its own
+            # scoped implementation instead of executing it.
+            self._record("exec", name, script)
+            self.sweep(name)
+            return b"\x01" + f"{SWEEP_TAG}:clean\n{EXIT_MARKER}0\n".encode()
+        self._record("exec", name, script)
         self._get(name)
         self.argv_seen.append(tuple(argv))
         self.timeouts_seen.append(timeout_s)
@@ -68,6 +94,84 @@ class LocalSprites(FakeSprites):
                 first_byte=False,
             ) from exc
         return b"\x01" + stdout
+
+    def sweep(self, name: str) -> None:
+        """The local sweep (D80 round 2), scoped to this runner's own
+        processes: the machine running the tests has other work under the
+        same user, and the live sweep's uid scope would kill it, so the
+        local sweep kills only what this runner spawned or adopted -- the
+        subreaper flag in `__init__` makes every orphan its execs leave
+        (the detached-daemon shape) a direct child of this process. It
+        reaps, kills the surviving runner descendants, reaps again, and
+        fails closed -- `BoundaryError`, the gap a live sweep's survivor
+        count produces -- when any of them remains. The live sweep's uid
+        scope is what holds on a real Sprite; this is its testable
+        stand-in, and the difference is recorded in D80."""
+        self._reap()
+        for pid in self._stray_descendants():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        # SIGKILL is asynchronous: give the kernel a beat before the
+        # reaping scan, then reap what died.
+        time.sleep(0.05)
+        self._reap()
+        survivors = self._stray_descendants()
+        if survivors:
+            raise BoundaryError(
+                f"the stray-process sweep left {len(survivors)} survivor(s)"
+            )
+
+    def _reap(self) -> None:
+        while True:
+            try:
+                pid, _status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return
+            if pid == 0:
+                return
+
+    def _stray_descendants(self) -> set[int]:
+        """Every live, non-zombie process whose parent chain reaches this
+        process -- the runner's own exec tree and whatever its execs left
+        behind -- except this process itself. `/proc/<pid>/status`'s
+        `PPid` is the chain; a detached daemon's chain reaches here
+        because the subreaper adopted it. A zombie is skipped: it is
+        dead, holds no code, and the reaping is this process's job."""
+        me = os.getpid()
+        strays: set[int] = set()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if pid == me:
+                continue
+            try:
+                status = (entry / "status").read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                continue
+            state = re.search(r"^State:\s+(\S)", status, re.MULTILINE)
+            if state is not None and state.group(1) == "Z":
+                continue
+            hop, hops = pid, 0
+            while hop != me and hop != 0 and hop != -1 and hops < 64:
+                try:
+                    ancestor = (entry.parent / str(hop) / "status").read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except OSError:
+                    break
+                match = re.search(r"^PPid:\s+(\d+)", ancestor, re.MULTILINE)
+                if match is None:
+                    break
+                hop = int(match.group(1))
+                hops += 1
+            if hop == me:
+                strays.add(pid)
+        return strays
 
 
 def _kill_process_group(proc: subprocess.Popen) -> None:

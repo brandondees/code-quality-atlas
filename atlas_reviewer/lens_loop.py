@@ -130,7 +130,13 @@ from atlas_reviewer.bridge import (
     Status,
     render,
 )
-from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
+from atlas_reviewer.bridge_args import (
+    MUTANT_OPERATORS,
+    TOOLS,
+    Rev,
+    arg_names,
+    required_args,
+)
 from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.call_facts import (
     note_call_retry,
@@ -818,12 +824,15 @@ _ARG_SCHEMA: Mapping[str, Mapping[str, Any]] = MappingProxyType(
     {
         "path": {"type": "string", "description": "repository-relative path"},
         "offset": {"type": "integer", "minimum": 0, "description": "byte offset of the page"},
-        "rev": {"type": "string", "enum": [r.value for r in Rev], "description": "staged revision"},
+        "rev": {"type": "string", "enum": [r.value for r in Rev], "description": "staged revision; MUTANT exists once a mutate call has applied one"},
         "prefix": {"type": "string", "description": "directory prefix, empty for all"},
         "start": {"type": "integer", "minimum": 1},
         "end": {"type": "integer", "minimum": 1},
         "pattern": {"type": "string"},
         "regex": {"type": "boolean", "description": "pattern is a regex, not a fixed string"},
+        "line": {"type": "integer", "minimum": 1, "description": "the line the statement to mutate starts at"},
+        "operator": {"type": "string", "enum": list(MUTANT_OPERATORS), "description": "the one mutation to apply"},
+        "tests": {"type": "string", "description": "test selector for both runs: a file, a directory or file.py::node_id, empty for the whole suite"},
     }
 )  # fmt: skip
 _DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
@@ -833,6 +842,8 @@ _DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
         "list_files": "files at a revision under a prefix",
         "read_file": "lines of a file at a revision, at most 400 a call",
         "grep": "search a revision for a pattern",
+        "run_tests": "run the head tree's pytest suite, or the named test selector, on a disposable copy; the result is evidence at the head SHA",
+        "mutate": "apply one mutant (an operator at one line of one file) to a disposable copy of the head tree and report whether the selected tests still pass after it: survived means the guard the mutant stands for is unpinned",
     }
 )
 

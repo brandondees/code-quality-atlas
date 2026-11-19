@@ -480,7 +480,12 @@ def test_the_model_sees_exactly_the_bridges_tools_and_arguments():
         assert set(props) == {a.name for a in TOOLS[name]}
         assert schema.parameters["additionalProperties"] is False
         required = schema.parameters["required"]
-        sample = {"path": "calc.py", "pattern": "total"}
+        sample = {
+            "path": "calc.py",
+            "pattern": "total",
+            "line": 1,
+            "operator": "negate-condition",
+        }
         validate(name, {a: sample[a] for a in required}, frozenset(Rev))
         for arg in required:
             with pytest.raises(RejectedError) as exc:
