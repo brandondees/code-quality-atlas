@@ -5637,3 +5637,127 @@ and markdownlint run before the push; the guard's seven mutants are the
 round's only new ones (no product behavior changed -- the refusal phrases
 are user-visible strings, and their pins are the tests that moved with
 them).
+
+## 2026-11-19 — Config slice S10, part B1: the BYOK settings page — the operator-hosted intake surface outside the package (issue #768)
+
+Part B1 of S10 (D90 records the decisions): the operator-hosted settings
+page an installation's admin signs into with GitHub, running as its own
+process beside the review service on the same state volume. The package
+is `atlas_settings/`, outside `atlas_reviewer`, on the standard library
+alone — `http.server`, `urllib`, `hmac`, `secrets` — after the
+dependency evaluation weighed a web framework against a six-route,
+server-rendered, no-client-JS surface and D89's prefer-the-lock
+precedent. Every write goes through part A's store API under its
+per-installation `flock`, so the two processes cannot lose an update
+under each other; the page additionally refuses every write on a store
+that is not `configured`, because part A's unconfigured-`delete` no-op
+(the webhook path's semantics) must never read as a page success.
+
+The sign-in is the App's user-authorization web flow with `state` **and
+PKCE** (S256; GitHub's 2025-07-14 changelog): state and verifier bound
+server-side to a 10-minute pre-login session, the code exchanged
+server-side, the user token used for exactly one identity read and then
+dropped — never stored, logged, or kept in the session. The admin rule
+follows the issue: id match for a user-account installation; for an
+org, membership role `admin` and state `active` under the App's
+installation token minted for Organization "Members: read" — the
+permission named as the operator setup step that is **not done**, with
+the page refusing org installations until it is granted rather than
+working around it. The admin check and the `ATLAS_REVIEW_REPOS`
+invite-only gate are re-verified on every write and every settings-page
+read, fail closed; the gate's repository read stops at ten pages of one
+hundred and treats an exhausted bound as unproven.
+
+The page itself: signed-cookie sessions (HMAC-SHA256 under
+`ATLAS_SETTINGS_SESSION_KEY`; 30-minute idle TTL, 12-hour absolute cap;
+fresh id and CSRF token on the login upgrade), a CSRF token on every
+POST, POST-only state changes, 8 KiB bounded bodies with a content-type
+gate, rate limits (sign-in per IP; writes per session and per IP), the
+decided header set (`default-src 'none'` CSP, `X-Frame-Options: DENY`,
+HSTS, `Referrer-Policy: no-referrer`, `Cache-Control: no-store`), and
+logs that never carry a query string — the OAuth code and state are in
+no log line, and an unexpected exception answers a generic 500 so a bug
+cannot echo a submitted value. The key is write-only: the page shows
+that a key is stored, when it was last saved (from the audit's own
+store-credentials line, falling back to the record's `updated_at`), the
+endpoint, and the model — never the key again. Intake validates the
+endpoint through both halves of the egress guard (no test model call —
+that would spend the installation's money) and the model through the
+operator's price table (unknown refused, zero-priced allowed, D81's Q3
+answer). The consent statement is the plan §7 decision 3 sentence
+verbatim, acknowledged through a checkbox recorded via the store API
+before credentials are usable; a credentials save without it stores
+nothing and says why. The cap grammar is a plain decimal literal —
+positive, at most two decimals, at most $10,000, empty clears — refusing
+with one fixed phrase that never echoes the value, with the page stating
+S9's stricter-wins and the operator max as the outer bounds. Each
+accepted write appends one audit line (action, installation, GitHub user
+id, UTC time — no value is ever a parameter) to
+`<state dir>/settings-audit.jsonl`, outside the store's directory so the
+retention sweep is never fed a permanent stray; an audit failure after a
+successful write answers "the change was applied but could not be
+recorded", never a message that could read as if nothing happened. The
+B2 seam is the page's write-action dispatch table, which part B2's
+command-list actions join beside these.
+
+**Tests** (`atlas_settings/tests/`: `test_flows.py` for the full
+login/intake/consent/rotate/revoke/cap/delete flows and every decided
+refusal, `test_github_client.py` and `test_github_refusals.py` for the
+boundary and every fail-closed shape, `test_sessions.py`,
+`test_config.py` for the cap grammar and the refuse-to-start rule,
+`test_checks.py` for the intake validations against the real egress
+guard over network-free hosts, `test_audit.py`, `test_ratelimit.py`,
+`test_server.py` and `test_wiring.py` for the socket-level handler,
+`test_write_failures.py` for the store that reads but cannot write;
+159 tests, 100% line and branch coverage of the package; every behavior
+a test that fails when reverted).
+
+**The mutants applied by hand this round, all killed** (the killer tests
+named):
+
+- M1, the admin verdict ignored (`if not admin` dropped) —
+  `test_a_non_admin_is_refused_at_login`,
+  `test_admin_rights_lost_mid_session_refuse_every_write`,
+  `test_the_settings_page_refuses_when_rights_are_lost`.
+- M2, the per-write admin re-check dropped —
+  `test_admin_rights_lost_mid_session_refuse_every_write`.
+- M3, the gate accepting zero coverage (`covered == 0` → `< 0`) —
+  `test_a_non_allowlisted_installation_is_refused_at_login`,
+  `test_the_gate_is_re_checked_on_every_write`,
+  `test_the_settings_page_refuses_when_the_gate_is_lost`.
+- M4, the per-write gate re-check dropped —
+  `test_the_gate_is_re_checked_on_every_write`,
+  `test_the_gate_read_failing_mid_write_refuses_fail_closed`.
+- M5, the CSRF comparison disabled —
+  `test_a_csrf_failure_changes_nothing`,
+  `test_the_csrf_check_is_constant_time_against_a_matching_length`.
+- M6, the consent-before-credentials gate disabled —
+  `test_saving_credentials_without_consent_stores_nothing`.
+- M7, the cap's positive bound opened (`<= 0` → `< 0`) — the `[0]` and
+  `[0.00]` parametrized refusals,
+  `test_an_unusable_cap_is_refused_with_the_fixed_phrase`.
+- M8, the cap's two-decimal bound opened (`{1,2}` → `{1,3}`) — the
+  `[1.999]` refusal.
+- M9, the cap's upper bound dropped — the `[10000.01]` refusal.
+- M10, the session cookie's HMAC check disabled —
+  `test_a_forged_or_truncated_cookie_is_an_expired_session`.
+- M11, the OAuth state binding disabled —
+  `test_a_state_mismatch_at_the_callback_refuses`.
+- M12, the egress guard's URL-level half skipped at intake —
+  `test_the_url_level_half_refuses_before_any_resolution` (built for
+  exactly this mutant after the first attempt survived: the flow-level
+  non-https refusal was being answered by a resolver failure wearing
+  the same clothes, so the test now runs a permissive resolver and
+  makes the URL check's own refusal deterministic).
+- M13, the egress guard's resolution half skipped at intake — the
+  real-guard hostile-shape refusals (loopback, link-local, ULA,
+  IPv4-mapped loopback).
+
+**The two tests that caught real bugs during the build** (recorded
+because each shaped the code): the harness's first full-suite run
+exposed the exchange and API reads re-raising raw `TimeoutError`s past
+the `BoundaryError` catch — every transport failure now lands in the
+named `GitHubRefused` refusal — and the absolute session lifetime was
+computed from `created` with no sliding window at all, so "refreshed on
+use" was words without code; the TTL is idle time since the last use,
+capped by the absolute lifetime, and both are pinned.
