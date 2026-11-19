@@ -74,7 +74,12 @@ from atlas_reviewer.coordinator import (
     render_draft,
     review_lenses,
 )
-from atlas_reviewer.delta import CARRY_TARGET_PREFIX, DeltaScope, delta_scope
+from atlas_reviewer.delta import (
+    CARRY_TARGET_PREFIX,
+    DeltaScope,
+    delta_block,
+    delta_scope,
+)
 from atlas_reviewer.diffs import diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -1058,8 +1063,24 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     None if fit is None else fit - conversation_bytes,
                     collected=ci_collected,
                 )
-                context = tuple(b for b in (block, ci) if b is not None)
-                context_omissions = (*context_omissions, *ci_omissions)
+                ci_bytes = len(ci.content.text.encode("utf-8")) if ci else 0
+                # The delta highlight block (D83) takes the room the
+                # conversation and CI blocks left, sized like the CI
+                # block: truncated at its cap with the cut named, omitted
+                # whole -- and named -- when the room cannot hold it. A
+                # full review builds none.
+                highlight, delta_omissions = (
+                    delta_block(delta, None if fit is None else
+                                fit - conversation_bytes - ci_bytes, redactor)
+                    if delta is not None
+                    else (None, ())
+                )  # fmt: skip
+                context = tuple(b for b in (block, ci, highlight) if b is not None)
+                context_omissions = (
+                    *context_omissions,
+                    *ci_omissions,
+                    *delta_omissions,
+                )
                 if fit is None:
                     prior = PRIOR_ROUND_CHARS
                 else:
@@ -1130,23 +1151,22 @@ def _delta_input(
     event: PrEvent, github: FixtureGitHub | GitHubClient, diff: str
 ) -> tuple[str, DeltaScope | None]:
     """The diff to review and the delta review's scope from the event
-    (#702, D79); the scope is None on a full review.
+    (#702, D83); the scope is None on a full review.
 
-    A delta review's diff is the pull request's diff at this head,
-    restricted to the paths the range `delta_from..head` touched -- the
-    range diff with merge-from-base content excluded, which the pull
-    request's diff never carries anyway. The scope also carries the
-    resolution gate: empty whenever the delta could not actually be
-    established, so no resolution is accepted on evidence the delta
-    cannot back. A delta base equal to the head is a usage error: it
-    reviews nothing."""
+    The review's subject is the whole pull request at this head, so the
+    diff is the pull request's diff at this head, unrestricted: the
+    scope is what is NEW (`delta_from..head`'s touched paths, removed
+    lines and per-file patches -- the incremental diff the payload
+    highlights), and the resolution gate, empty whenever the delta could
+    not actually be established, so no resolution is accepted on
+    evidence the delta cannot back. A delta base equal to the head is a
+    usage error: it reviews nothing."""
     delta_from = event.delta_from
     if not delta_from:
         return diff, None
     if delta_from == event.head_sha:
         raise UsageError("the event's delta_from equals its head_sha")
-    scope = delta_scope(github, event, diff)
-    return scope.diff, scope
+    return diff, delta_scope(github, event)
 
 
 def _with_preference_note(

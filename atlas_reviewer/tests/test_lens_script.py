@@ -95,7 +95,9 @@ def test_the_shipped_default_scenario_loads_and_names_a_blocker():
 def test_an_unknown_top_level_key_is_refused(tmp_path):
     with pytest.raises(
         LensScriptError,
-        match="keys outside findings, unread, reassessment and carryforward",
+        match=(
+            "keys outside findings, unread, reassessment, carryforward and decisions"
+        ),
     ):
         script(tmp_path, {"findings": {}, "unread": [], "depth": 2})
 

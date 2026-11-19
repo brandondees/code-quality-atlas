@@ -1,25 +1,38 @@
 # SPDX-License-Identifier: MIT
-"""The delta review: what a kept head's follow-up reviews (#702, D79).
+"""The delta review: what a kept head's follow-up reviews (#702, D79, D83).
 
 When the keep side of the head-change decision holds a push back and the
-running review finishes, the follow-up review is a **delta review**: it
-reviews only what the commits between the reviewed head and the new head
-changed, carries the earlier review's findings forward, and marks the
-ones the new commits fixed as resolved.
+running review finishes, the follow-up review is a **delta review**. Its
+subject is still the whole pull request at the new head -- the earlier
+review's verdict covered the whole changeset, and so does this one's --
+but the payload carries only the **incremental diff**: what the commits
+between the reviewed head (`delta_from`) and the new head changed, the
+new material since the earlier review. Context the earlier review
+already established is not re-sent, which keeps D68's cost goals.
 
-Three pieces live here; the coordinator wires them.
+Five pieces live here; the coordinator wires them.
 
-- **The delta's scope.** A pull request's diff never contains
-  merge-from-base content -- merging the base moves the merge base
-  forward, so the base's changes drop out of `base...head` -- so the
-  delta diff is simply the pull request's diff at the new head,
-  restricted to the paths the range `delta_from..head` touched (the
-  comparison's aggregate file list). A merge-only push yields an empty
-  delta: the review then exists to carry the earlier findings forward
-  and re-anchor them to the moved tree. A path the base merge and a
-  delta commit both touched stays in scope -- over-inclusive is the safe
-  direction, and the earlier hunks of such a file were worth re-reading
-  anyway.
+- **The delta's scope.** `DeltaScope` is what is new and what a
+  resolution may be accepted for -- not a lens scope. The review's
+  lenses run on the whole pull request's diff at the new head; the
+  range's own per-file patches (`range_diff`) are the incremental diff
+  the payload highlights. A merge-only push yields an empty delta: the
+  review then exists to carry the earlier findings forward and re-anchor
+  them to the moved tree.
+- **The coordinator's per-lens decision (D83).** For each planned lens
+  the coordinator judges, from the incoming changes, whether to re-run
+  the lens or reuse the earlier review's settled result. The decision is
+  the coordinator's judgment -- one bounded, tool-less call over the
+  incremental diff and the lens names -- not a fixed path-intersection
+  rule. A re-run lens sees the whole pull request through its tools and
+  may report findings anywhere in it, including on content the
+  incremental diff does not touch. A reused lens does not run: its
+  earlier findings stand, carried forward and re-assessed against the
+  new evidence (D73), and its files still count as covered.
+- **The highlight block.** `delta_block` renders the incremental diff
+  as one bounded block of a re-run lens's first turn -- the new
+  material, highlighted ahead of the whole diff the lens reads through
+  its tools, sized like the CI block within D67's input-room budgeting.
 - **The prior findings.** They come from the round log, the one durable
   per-pull-request record (D74): the records at `delta_from`, their
   finding lines parsed back into findings. A line that does not parse is
@@ -27,7 +40,7 @@ Three pieces live here; the coordinator wires them.
   shown in the draft and re-recorded, so the next review re-offers it.
 - **The carry-forward call.** One bounded, tool-less model call, built
   like D73's re-assessment: the prior findings labeled `P1`, `P2`, ...
-  and the delta diff travel fenced; the reply re-states every prior
+  and the incremental diff travel fenced; the reply re-states every prior
   finding that still applies (`revises`, with a re-anchored location and
   quote) and proposes the ones the new commits fixed (`withdrawn`, with
   the reason and the evidence). Every re-statement is quote-checked
@@ -47,10 +60,13 @@ Three pieces live here; the coordinator wires them.
   finding -- carried in its original wording, re-offered to the next
   review -- so nothing is silently dropped.
 
-The carry-forward call spends against the review's shared `Spend` (D68's
-derived limits and dollar ceiling) like every other call, and its reply
-shape is validated with the same finding-contract parsers the
-re-assessment reply uses.
+Both calls -- the coordinator's decision and the carry-forward -- spend
+against the review's shared `Spend` (D68's derived limits and dollar
+ceiling) like every other call. The carry-forward's reply shape is
+validated with the same finding-contract parsers the re-assessment reply
+uses; the decision's reply shape is validated against the planned lens
+names, and any contract failure falls back to re-running every lens --
+the safe direction, never a silent reuse.
 """
 
 from __future__ import annotations
@@ -62,8 +78,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from atlas_reviewer.attestation import CheckedFinding
-from atlas_reviewer.diffs import diff_paths, scope_text
-from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.domain import Omission, PrEvent
 from atlas_reviewer.lens_contract import (
     MAX_FINDINGS,
     MAX_TEXT_CHARS,
@@ -89,10 +104,18 @@ from atlas_reviewer.reassess import (
     PRIOR_LABEL_CHARS,
     ReassessFinding,
     ReassessReply,
+    Withdrawn,
     reassess_finding,
 )
 from atlas_reviewer.reassess import (
     judge as judge_reply,
+)
+from atlas_reviewer.redact import (
+    MIN_FIT_CHARS,
+    TRUNCATION_MARKER,
+    TRUNCATION_MARKER_CHARS,
+    RedactedText,
+    Redactor,
 )
 
 CARRY_TARGET_PREFIX = "Carry-forward target (from the controller):"
@@ -102,42 +125,43 @@ D73 re-assessment turn by it."""
 
 CARRY_INSTRUCTIONS = """\
 You are the carry-forward assessor of an automated code review. The pull
-request's head moved after an earlier review finished; you are reviewing
-the delta -- only what the commits between the earlier review's head and
-the current head changed, fenced below -- and deciding what becomes of
-the earlier review's findings. Nothing you write is posted anywhere; the
-operator reads the controller's draft first.
+request's head moved after an earlier review finished; this review's
+subject is the whole pull request at the current head, and the
+incremental diff -- what the commits between the earlier review's head
+and the current head changed -- is fenced below as the new material.
+You are deciding what becomes of the earlier review's findings. Nothing
+you write is posted anywhere; the operator reads the controller's draft
+first.
 
 The earlier review's findings are listed in the first turn's
 prior-findings block, each labeled P1, P2, ..., with its location. Judge
-each against the delta:
+each against the incremental diff:
 
-- A prior finding the delta did not affect: re-state it in `findings`
-  with a `revises` key naming its label, its location and evidence
-  re-anchored to the current files, and a `reason` key stating what, if
-  anything, moved. A re-statement is quote-checked against the current
-  files exactly like an ordinary finding's quote; one that does not
-  verify is not carried as verified. A re-statement cannot lower the
+- A prior finding the new commits did not affect: re-state it in
+  `findings` with a `revises` key naming its label, its location and
+  evidence re-anchored to the current files, and a `reason` key stating
+  what, if anything, moved. A re-statement is quote-checked against the
+  current files exactly like an ordinary finding's quote; one that does
+  not verify is not carried as verified. A re-statement cannot lower the
   recorded severity, or move the finding off defect-introduced: the
   controller keeps the recorded severity and shape, with your
   re-anchored location and wording, and names what you proposed.
 - A prior finding the new commits fixed: name its label in `withdrawn`
   with a `reason` key stating what fixed it, and an `evidence` key
   quoting the line or lines of the prior finding's code that the
-  commits between the two heads removed -- the `-` lines of the delta
-  diff's patches for that file, at a position within the finding's
-  cited lines. The controller accepts a resolution only when every line
-  you quote is among those removed lines, near where the finding
-  cited: that is the evidence the new commits took the cited code out.
-  Anywhere else -- a file the delta never touched, a quote that is not
-  among the removed lines or not near the citation -- the resolution is
-  recorded as your proposal and the finding stands.
+  commits between the two heads removed -- the `-` lines of the
+  incremental diff's patches for that file, at a position within the
+  finding's cited lines. The controller accepts a resolution only when
+  every line you quote is among those removed lines, near where the
+  finding cited: that is the evidence the new commits took the cited
+  code out. Anywhere else -- a file the new commits never touched, a
+  quote that is not among the removed lines or not near the citation --
+  the resolution is recorded as your proposal and the finding stands.
 - A prior finding you cannot judge: say nothing about it. It is carried
   in its original wording, never silently dropped.
 
-Report nothing else in `findings`: new findings on the delta are the
-lenses' work, not yours, and an entry with no `revises` key is not a
-re-statement.
+Report nothing else in `findings`: new findings are the lenses' work,
+not yours, and an entry with no `revises` key is not a re-statement.
 
 When you are done, reply with exactly one JSON object and nothing else:
 {"findings": [...], "withdrawn": [...]}. Each entry of `findings` has
@@ -268,14 +292,15 @@ def _parse_location(text: str) -> Location | None:
 
 @dataclass(frozen=True)
 class DeltaScope:
-    """What the delta review runs on, and what a resolution may be
-    accepted for.
+    """What is new since the earlier review, and what a resolution may
+    be accepted for -- not a lens scope (D83).
 
-    `diff` is the diff the review's lenses run on. `resolution_paths` is
-    the set of paths a resolution proposal may be accepted for -- empty
-    whenever the delta could not actually be established (an unfetchable
-    range, a diverged history, a cut or malformed comparison), because
-    the resolution gate must fail closed, never open: with no established
+    The review's lenses run on the whole pull request's diff at the new
+    head; the scope never narrows them. `resolution_paths` is the set of
+    paths a resolution proposal may be accepted for -- empty whenever
+    the delta could not actually be established (an unfetchable range,
+    a diverged history, a cut or malformed comparison), because the
+    resolution gate must fail closed, never open: with no established
     delta there is no evidence the new commits changed anything, so
     nothing is resolvable and every prior finding is carried. `note` is
     controller text naming the fallback or gap, empty when the delta is
@@ -284,7 +309,6 @@ class DeltaScope:
     file it cites" applies."""
 
     delta_from: str
-    diff: str
     resolution_paths: frozenset[str]
     note: str = ""
     gate_reason: str = ""
@@ -298,24 +322,26 @@ class DeltaScope:
     and a delta commit's deletion of PR-added code is (round-2 review of
     #748, Major A). Empty whenever the delta is not established."""
     range_diff: str = ""
-    """The range's own per-file patches, rendered for the carry-forward
-    turn: what the commits between the heads actually changed, which the
-    restricted pull-request diff cannot show (a delta commit deleting
+    """The range's own per-file patches, rendered: what the commits
+    between the heads actually changed -- the incremental diff the
+    payload highlights and the carry-forward turn carries, which the
+    pull request's net diff cannot show (a delta commit deleting
     PR-added code is invisible in a net diff where the line exists at
-    neither end). Empty when the delta is not established."""
+    neither end). Empty when the delta is not established, and when it
+    is established but its comparison carried no readable patch."""
 
 
-def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScope:
-    """The delta review's scope, from one range comparison and the pull
-    request's diff at the new head.
+def delta_scope(github: GitHubReader, event: PrEvent) -> DeltaScope:
+    """The delta review's scope, from one range comparison.
 
-    The pull request's diff never carries merge-from-base content (the
-    merge moves the base forward and the base's changes drop out of the
-    three-dot diff), so restricting it to the range's touched paths is
-    the range diff with that content excluded, with no per-commit reads.
-    A path the range touched that the pull request's diff no longer
-    shows was changed and changed back, or its change came and went with
-    the base merge; there is nothing left on it to review.
+    The scope is what is new (`delta_from..head`'s touched paths, the
+    range's own removed lines and per-file patches) and what a
+    resolution may be accepted for. It is not the review's diff: the
+    lenses run on the whole pull request's diff at the new head, whose
+    three-dot form never carries merge-from-base content anyway (the
+    merge moves the base forward and the base's changes drop out of it),
+    so the whole-changeset subject and the incremental payload need no
+    per-commit reads to reconcile.
 
     Three conditions refuse the delta as the resolution gate's evidence,
     each named on the scope's note and each leaving `resolution_paths`
@@ -324,35 +350,29 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
     which the comparison's file list is measured from the wrong base and
     is not the range's; and a file list that is missing, malformed, or
     cut at GitHub's comparison cap, which cannot prove what the range
-    touched. The last two also decline to BOUND the review: a list that
-    cannot prove what the range touched must not narrow the lens diff to
-    itself, or files the pull request changed that the list omits would
-    reach no lens while the coverage read complete -- so the review then
-    runs on the full pull request diff, as the unfetchable case always
-    has (round-5 review of #748)."""
+    touched. On any of the three the review is an ordinary full review
+    of the pull request -- there is no incremental diff to carry, so no
+    lens payload narrows and no lens is reused (D83) -- and no resolution
+    is accepted."""
     try:
         compare = github.get_compare(event.repo, event.delta_from, event.head_sha)
         names, complete = _range_paths(compare)
     except BoundaryError as exc:
         return DeltaScope(
             event.delta_from,
-            pr_diff,
             frozenset(),
             f"the delta range could not be fetched ({type(exc).__name__}); "
             "the review ran on the full pull request diff, and no "
             "resolution is accepted",
             "the delta range could not be established",
         )
-    shown = set(diff_paths(pr_diff))
-    paths = tuple(path for path in names if path in shown)
     if _diverged(compare, event.delta_from):
         # A wrong-base list cannot prove what the range touched, so it
-        # must not bound the review either: a file the pull request
-        # changed that the list omits would reach no lens while the
-        # review claimed complete coverage (round-5 review of #748).
+        # bounds nothing: the review runs on the whole pull request and
+        # no lens is reused on evidence it cannot back (round-5 review
+        # of #748; D83).
         return DeltaScope(
             event.delta_from,
-            pr_diff,
             frozenset(),
             "the range comparison shows the histories diverged (a rebase or "
             "a force-push); the review ran on the full pull request diff, "
@@ -361,12 +381,11 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
         )
     if not complete:
         # Same rule as the diverged case: a cut or malformed list cannot
-        # prove what the range touched, so the review does not narrow to
-        # it -- the files past the cap would reach no lens while the
-        # coverage read complete (round-5 review of #748).
+        # prove what the range touched, so nothing narrows to it -- the
+        # files past the cap would reach no lens while the coverage read
+        # complete (round-5 review of #748).
         return DeltaScope(
             event.delta_from,
-            pr_diff,
             frozenset(),
             "the range comparison's file list was cut or malformed, so the "
             "delta's touched paths are not fully known; the review ran on "
@@ -376,14 +395,12 @@ def delta_scope(github: GitHubReader, event: PrEvent, pr_diff: str) -> DeltaScop
     removed, range_diff = _range_removals(compare)
     return DeltaScope(
         event.delta_from,
-        scope_text(pr_diff, paths),
-        # The gate is the range's own touched paths, not the lens diff's
-        # intersection with them: a follow-up that DELETES a file the
-        # earlier head added takes that file out of the pull request's
-        # net diff entirely, while the range's patch holds the cited
-        # removal -- the one case where the resolution is real (round-5
-        # review of #748). A path the range touched without a patch
-        # still refuses on evidence, the safe direction.
+        # The gate is the range's own touched paths: a follow-up that
+        # DELETES a file the earlier head added takes that file out of
+        # the pull request's net diff entirely, while the range's patch
+        # holds the cited removal -- the one case where the resolution
+        # is real (round-5 review of #748). A path the range touched
+        # without a patch still refuses on evidence, the safe direction.
         frozenset(names),
         removed=removed,
         range_diff=range_diff,
@@ -522,6 +539,319 @@ def _diverged(compare: Json, delta_from: str) -> bool:
     base = compare.get("merge_base_commit")
     sha = base.get("sha") if isinstance(base, dict) else None
     return not (isinstance(sha, str) and sha == delta_from)
+
+
+DELTA_DIFF_CHARS = 32_768
+"""The incremental diff's cap, wherever it travels: the coordinator's
+decision turn, the lenses' delta highlight block and the carry-forward
+turn all carry the range's own per-file patches cut to this size with
+the truncation marker, rather than costing the call or the first turn
+its evidence to the per-call token check (#702, D83)."""
+
+# ------------------------------------------ the coordinator's decision (D83)
+
+
+DECISION_TARGET_PREFIX = "Lens decisions target (from the controller):"
+"""The coordinator-decision turn's first line, controller-written. The
+   scripted dry-run reviewer tells this turn from an ordinary first turn,
+   from a D73 re-assessment turn and from the carry-forward turn by it."""
+
+DECISION_INSTRUCTIONS = """\
+You are the coordinator of an automated code review's follow-up round.
+The pull request's head moved after an earlier review finished; this
+follow-up's subject is the whole pull request at the current head, and
+the incremental diff -- what the commits between the earlier review's
+head and the current head changed -- is fenced below as the new
+material, next to the fresh evidence around the pull request (newer CI
+results, newer comments) that the lenses this round will also see. You
+are deciding, for each lens named below, whether this follow-up re-runs
+it or reuses the earlier review's settled result. Nothing you write is
+posted anywhere; the operator reads the controller's draft first.
+
+- Re-run the lens when the incoming changes could affect its concern:
+  it runs again on the whole pull request, with the incremental diff
+  highlighted, and may report findings anywhere in the pull request,
+  including on content the incremental diff does not touch.
+- Reuse the earlier result when the incoming changes could not affect
+  its concern: the lens does not run; its earlier findings stand,
+  carried forward and re-assessed against the new evidence, and a
+  resolution of one of them still needs the controller's evidence gate.
+
+The decision is your judgment over the incoming changes -- there is no
+fixed rule tying it to which files the incremental diff touched. Judge
+each lens on its own concern -- the one-line concern summary under each
+name -- and say in the reason what in the incoming changes drove the
+call. A lens marked as citing the incremental diff is the highest-
+stakes reuse: its earlier findings sit on code the new commits touched.
+
+When you are uncertain, re-run. A reuse the incoming changes would have
+contradicted silently shrinks this round's evaluation; an unnecessary
+re-run costs bounded calls under the review's ceiling, and a missed
+defect does not.
+
+When you are done, reply with exactly one JSON object and nothing else:
+{"decisions": [{"lens": ..., "decision": ..., "reason": ...}, ...]}.
+Cover every lens named below exactly once. `decision` is exactly
+"rerun" or "reuse". The reason is one sentence. Do not call a tool;
+this turn has none."""
+
+
+@dataclass(frozen=True)
+class LensDecision:
+    """The coordinator's decision for one planned lens of a delta review
+    (D83): re-run it on the whole pull request, or reuse the earlier
+    review's settled result. Every planned lens has exactly one.
+
+    `flagged` marks a reuse-eligible lens whose earlier findings cite
+    files the incremental diff touches -- the signal the decision turn
+    carries so the judgment weighs it, recorded with the decision. The
+    re-assessment fields (D73, round-1 review of #760) record what the
+    reused lens's bounded re-assessment against the newer CI and
+    conversation evidence decided: `reassessed` whether one ran,
+    `reassess_note` the controller note, `withdrawn` the annotations --
+    a withdrawal removes nothing, and a revision that would lower a
+    Blocker's or a Major's severity is annotation-only, exactly as the
+    ledger-reuse path's re-assessments compose."""
+
+    lens: str
+    reuse: bool
+    reason: str
+    flagged: bool = False
+    reassessed: bool = False
+    reassess_note: str = ""
+    withdrawn: tuple[Withdrawn, ...] = ()
+    gained_findings: bool = False
+    """True when the reused lens's D73 re-assessment ADDED findings this
+    round (round-2 review of #760): its settled result changed, so it is
+    not recorded in the round record's `clean_lenses` and the next delta
+    re-runs it. A reused lens the re-assessment left unchanged stays
+    recorded, and the reuse chain does not decay."""
+
+
+def decision_system(nonce: str) -> str:
+    """The decision call's system prompt: the instructions and the fence
+    rule for the review's one nonce. There is no finding contract to
+    attest: the reply names decisions, not findings."""
+    return "\n\n".join((DECISION_INSTRUCTIONS, fence_rule(nonce)))
+
+
+def decision_turn(
+    event: PrEvent,
+    offered: Sequence[tuple[str, str | None, bool]],
+    delta: UntrustedBlock | None,
+    context: Sequence[UntrustedBlock],
+    nonce: str,
+) -> str:
+    """The decision call's one user turn: the controller's subject, the
+    lenses a reuse is available for -- each with its one-line concern
+    summary from the bundle, so the judgment weighs the concern and not
+    the name alone, and flagged when its earlier findings cite files the
+    incremental diff touches (D83, round-1 review of #760) -- then the
+    incremental diff and the fresh evidence around the pull request (the
+    conversation and CI blocks the lenses get, D73), each fenced with
+    the review's one nonce."""
+    subject = f"{event.repo}#{event.pr_number} at {event.head_sha}"
+    lines = []
+    for name, concern, flagged in offered:
+        line = f"- {name}"
+        if concern:
+            line += f" -- {concern}"
+        if flagged:
+            line += " (its earlier findings cite files the incremental diff touches)"
+        lines.append(line)
+    parts = [
+        f"{DECISION_TARGET_PREFIX}{subject}",
+        ("Lenses with a settled result from the earlier review, each to be decided:"),
+        "\n".join(lines),
+    ]
+    if delta is not None:
+        parts.append(fence(delta, nonce))
+    parts.extend(fence(block, nonce) for block in context)
+    return "\n\n".join(parts)
+
+
+DECISION_REASON_CHARS = 600
+"""A decision reason's cap, matched to the draft's quoting default: a
+reason the model cannot state in one sentence is not one sentence, and
+the draft quotes it with the same bound."""
+
+
+def validated_decision(index: int, raw: Any, known: set[str]) -> LensDecision:
+    """One decision entry, validated: an object with exactly the keys
+    `lens`, `decision` and `reason`, all strings; a lens the offered set
+    holds; a decision of exactly `rerun` or `reuse`; a non-blank reason
+    within `DECISION_REASON_CHARS`. Shared by the reply's parser and the
+    scenario loader, so a scripted scenario cannot load a reply shape
+    the live parser would refuse mid-run."""
+    if not isinstance(raw, dict) or set(raw) != {"lens", "decision", "reason"}:
+        raise ContractError(
+            f"decision entry {index}: must be an object with exactly "
+            "the keys lens, decision and reason"
+        )
+    lens, decision, reason = raw["lens"], raw["decision"], raw["reason"]
+    if not all(isinstance(value, str) for value in (lens, decision, reason)):
+        raise ContractError(
+            f"decision entry {index}: lens, decision and reason must be strings"
+        )
+    if len(lens) > MAX_LENS_CHARS or lens not in known:
+        raise ContractError(
+            f"decision entry {index}: the lens named is not one the earlier review ran"
+        )
+    if decision not in ("rerun", "reuse"):
+        raise ContractError(
+            f"decision entry {index}: decision must be exactly 'rerun' or 'reuse'"
+        )
+    if not reason.strip():
+        raise ContractError(
+            f"decision entry {index}: a decision states what in the "
+            "incoming changes drove it"
+        )
+    if len(reason) > DECISION_REASON_CHARS:
+        raise ContractError(
+            f"decision entry {index}: the reason is over "
+            f"{DECISION_REASON_CHARS} characters"
+        )
+    return LensDecision(lens, decision == "reuse", reason)
+
+
+def parse_decision_reply(text: str, offered: Sequence[str]) -> tuple[LensDecision, ...]:
+    """The decision reply: one JSON object `{"decisions": [...]}`, bare
+    or as the last fenced object, covering every offered lens exactly
+    once.
+
+    The reply is judged strictly: an entry whose keys, decision value,
+    reason or lens name breaks the contract, a lens named twice, a lens
+    never offered -- a name the plan does not hold -- and a lens left
+    out all raise `ContractError`, and the caller falls back to
+    re-running every lens, the safe direction (D83). A reuse can never
+    be invented: only a lens the earlier review actually ran is offered,
+    and the offer itself is the controller's, read from the round
+    record."""
+    stripped = text.strip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError:
+        data = last_fenced_object(stripped)
+        if data is NO_OBJECT:
+            raise ContractError("the reply is not one JSON object") from None
+    if not isinstance(data, dict) or set(data) != {"decisions"}:
+        raise ContractError("the reply must be an object with the key decisions")
+    entries = data["decisions"]
+    if not isinstance(entries, list):
+        raise ContractError("decisions must be a list")
+    known = set(offered)
+    decided: dict[str, LensDecision] = {}
+    for index, raw in enumerate(entries, 1):
+        decision = validated_decision(index, raw, known)
+        if decision.lens in decided:
+            raise ContractError(
+                f"decision entry {index}: {decision.lens!r} is decided twice"
+            )
+        decided[decision.lens] = decision
+    missing = sorted(known - set(decided))
+    if missing:
+        raise ContractError("the reply left undecided: " + ", ".join(missing))
+    return tuple(decided[lens] for lens in offered)
+
+
+MAX_LENS_CHARS = 200
+"""A decision entry's lens-name bound: a name longer than any bundled
+lens's name is not a lens, and capping before the membership test keeps
+an oversized injected string out of the refusal's text."""
+
+
+def fallback_decisions(offered: Sequence[str], why: str) -> tuple[LensDecision, ...]:
+    """The decision call's fallback (D83): every offered lens re-runs.
+    Re-running is the safe direction -- a reuse the incoming changes
+    would have contradicted never happens on a failed or refused
+    judgment; the only cost is the calls the reuse would have saved."""
+    return tuple(LensDecision(lens, False, why) for lens in offered)
+
+
+def capped(text: str, cap: int) -> str:
+    """The incremental diff as a turn or block carries it: cut with the
+    truncation marker when it is over the cap, the marker inside the cap,
+    so the per-call token check is never the reason a call loses its
+    evidence. A truncated delta still judges resolutions safely: the
+    evidence pool is the scope's own structured record, and an assessor
+    that cannot see a removed line cannot quote it, so its resolution is
+    refused either way (round-2 a4)."""
+    if len(text) <= cap:
+        return text
+    return text[: cap - TRUNCATION_MARKER_CHARS] + TRUNCATION_MARKER
+
+
+# ------------------------------------------------------ the highlight block
+
+
+DELTA_BLOCK_SOURCE = "delta diff"
+DELTA_BLOCK_LABEL = "delta-diff"
+
+
+def delta_block(
+    delta: DeltaScope, room: int | None, redactor: Redactor
+) -> tuple[UntrustedBlock | None, tuple[Omission, ...]]:
+    """The incremental diff as one bounded block for an agentic first
+    turn (D83): what the commits between the reviewed head and this head
+    changed -- the new material -- highlighted ahead of the whole pull
+    request's diff the lens reads through its tools.
+
+    Sized like the CI block (D73) within D67's input-room budgeting: the
+    caller passes what the conversation and CI blocks left of the room,
+    so the context blocks together cannot exceed the fit. A block over
+    its cap is truncated with the marker and the cut named; one whose
+    bytes still overflow the room is omitted whole and named -- never
+    silently truncated, never sent to overflow the per-call token check.
+    An empty delta -- a merge-only push, or an established comparison
+    whose files carry no readable patch -- builds no block: there is no
+    new material to highlight, and the changed-files listing already
+    shows the whole pull request. So does a delta that could not be
+    established: the review is then an ordinary full review, with no
+    incremental payload to send."""
+    if delta.note or not delta.range_diff:
+        return None, ()
+    if room is not None and room < MIN_FIT_CHARS:
+        return None, (_left_out(room),)
+    budget = (
+        DELTA_DIFF_CHARS
+        if room is None
+        else min(DELTA_DIFF_CHARS, room - TRUNCATION_MARKER_CHARS)
+    )
+    # The one controller-written line in the block: which base the
+    # incremental diff is measured from (D25's tag), so the block cannot
+    # be read against another commit later in the same conversation.
+    text = (
+        f"The incremental diff: what the commits between the earlier "
+        f"review's head {delta.delta_from} and the reviewed head changed:\n\n"
+        f"{delta.range_diff}"
+    )
+    content = redactor(text, budget)
+    if room is not None and len(content.text.encode("utf-8")) > room:
+        return None, (_left_out(room),)
+    return UntrustedBlock(DELTA_BLOCK_LABEL, content), _truncation_omissions(
+        content, budget
+    )
+
+
+def _left_out(room: int) -> Omission:
+    return Omission(
+        DELTA_BLOCK_SOURCE,
+        "model input room",
+        f"the model's input room cannot hold the delta-diff block ({room} "
+        "characters left for the context blocks), so it was left out",
+    )
+
+
+def _truncation_omissions(content: RedactedText, cap: int) -> tuple[Omission, ...]:
+    if content.truncated_from is None:
+        return ()
+    return (
+        Omission(
+            DELTA_BLOCK_SOURCE,
+            f"{cap}-character cap",
+            f"kept {cap} of {content.truncated_from} characters",
+        ),
+    )
 
 
 # ------------------------------------------------- the reply and its judge

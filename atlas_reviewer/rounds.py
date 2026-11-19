@@ -63,6 +63,34 @@ class RoundRecord:
     # budget stop from a model failure. Empty when no limit stopped
     # anything.
     limit_stop: str = ""
+    # A delta review's per-lens decisions (D83), one line per lens:
+    # `<lens> reuse|rerun: <reason>`, and one line per reused lens its
+    # D73 re-assessment recorded: `<lens> re-assessed: <note>`. The
+    # record keeps them for the chain -- the next delta review reads the
+    # lens lists to know what a reuse can build on, and the operators
+    # read the judgments -- but they are metadata, not findings:
+    # `prior_blocks` renders them into no lens's context, so a lens is
+    # never primed by an earlier coordinator's decisions.
+    decisions: tuple[str, ...] = ()
+    # Per finding line, the lens that produced it -- parallel to
+    # `findings`, written from this release on. A delta review's
+    # per-lens re-assessment (D73) needs to know whose findings it is
+    # re-judging; a record without the field leaves its lines
+    # unattributed, and the fallbacks (the `L<n>` id's entry index, the
+    # single-lens record) read them as far as they can.
+    attributions: tuple[str, ...] = ()
+    # The lenses of this round whose outcome settled clean (D76's rule:
+    # some entry of the lens ran clean), when the record carries the
+    # field. A delta review offers a reuse only for these -- a lens the
+    # earlier review ran to a failure has no settled result to reuse.
+    # None (absent) on a record from before the field; empty means the
+    # round settled nothing clean, which is a real answer.
+    clean_lenses: tuple[str, ...] | None = None
+    # The evidence snapshot's digest (D73) this round's reuse judgments
+    # settled under, when the caller gathered one. A later delta review
+    # compares its own digest against it: a moved digest is newer
+    # evidence, and a reused lens earns its bounded re-assessment.
+    evidence_digest: str = ""
 
 
 @dataclass(frozen=True)
@@ -216,19 +244,35 @@ def fit_record(record: RoundRecord) -> RoundRecord:
     A record that does not fit stores no finding text and names how many
     lines were left out. The next round is told that, and the omission
     that carries it blocks approval. A fitting record is returned as it
-    is, including one that was already partial for another reason."""
+    is, including one that was already partial for another reason.
+
+    The overflow's order is decisions first (round-1 review of #760,
+    Minor F): the decisions are metadata -- the lens list, the draft, the
+    post and the telemetry each carry them, and the chain's reuse reads
+    the lens list, not the decision lines -- while the finding lines are
+    the payload the whole carry-forward chain builds on, so a record too
+    big for both gives the findings the room."""
     if len(json.dumps(_dump(record), sort_keys=True)) <= RECORD_CHARS:
         return record
+    trimmed = replace(record, decisions=())
+    if len(json.dumps(_dump(trimmed), sort_keys=True)) <= RECORD_CHARS:
+        return trimmed
     return RoundRecord(
-        record.repo,
-        record.pr_number,
-        record.head_sha,
-        record.lens,
-        record.event,
+        trimmed.repo,
+        trimmed.pr_number,
+        trimmed.head_sha,
+        trimmed.lens,
+        trimmed.event,
         (),
-        record.context_partial,
-        record.findings_omitted + len(record.findings),
-        record.limit_stop,
+        trimmed.context_partial,
+        trimmed.findings_omitted + len(trimmed.findings),
+        trimmed.limit_stop,
+        trimmed.decisions,
+        # The attributions are parallel to the finding lines; with the
+        # lines gone they name nothing, so they go with them.
+        (),
+        trimmed.clean_lenses,
+        trimmed.evidence_digest,
     )
 
 
@@ -349,6 +393,18 @@ def _dump(record: RoundRecord) -> dict[str, object]:
         "context_partial": record.context_partial,
         "findings_omitted": record.findings_omitted,
         "limit_stop": record.limit_stop,
+        "decisions": list(record.decisions),
+        "attributions": list(record.attributions),
+        **(
+            {}
+            if record.clean_lenses is None
+            else {"clean_lenses": list(record.clean_lenses)}
+        ),
+        **(
+            {}
+            if not record.evidence_digest
+            else {"evidence_digest": record.evidence_digest}
+        ),
     }
 
 
@@ -382,6 +438,29 @@ def _parse(line: str) -> RoundRecord | None:
     stop = data.get("limit_stop", "")
     if not isinstance(stop, str):
         return None
+    decisions = data.get("decisions", [])
+    if not isinstance(decisions, list) or not all(
+        isinstance(item, str) for item in decisions
+    ):
+        return None
+    attributions = data.get("attributions", [])
+    if not isinstance(attributions, list) or not all(
+        isinstance(item, str) for item in attributions
+    ):
+        return None
+    # `clean_lenses` absent reads as None (a record from before the
+    # field); present-but-malformed reads as absent too, falling back to
+    # the lens list, because refusing the whole record over a damaged
+    # optional field would lose its findings for every later round.
+    raw_clean = data.get("clean_lenses")
+    clean_lenses = (
+        tuple(raw_clean)
+        if isinstance(raw_clean, list) and all(isinstance(item, str) for item in raw_clean)
+        else None
+    )  # fmt: skip
+    digest = data.get("evidence_digest", "")
+    if not isinstance(digest, str):
+        digest = ""
     return RoundRecord(
         data["repo"],
         pr,
@@ -392,6 +471,10 @@ def _parse(line: str) -> RoundRecord | None:
         data["context_partial"],
         omitted,
         stop,
+        tuple(decisions),
+        tuple(attributions),
+        clean_lenses,
+        digest,
     )
 
 

@@ -55,7 +55,12 @@ from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
 
-from atlas_reviewer.delta import CARRY_TARGET_PREFIX, parse_carry_reply
+from atlas_reviewer.delta import (
+    CARRY_TARGET_PREFIX,
+    DECISION_TARGET_PREFIX,
+    parse_carry_reply,
+    validated_decision,
+)
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lens_loop import (
     AssistantCalls,
@@ -111,6 +116,17 @@ class CarryScript:
 
 
 @dataclass(frozen=True)
+class DecisionScript:
+    """The scenario's coordinator-decision reply (D83): one entry per
+    lens the decision turn offers, each with its `lens`, `decision`
+    (`rerun` or `reuse`) and `reason`. The controller-level reply is
+    validated entry by entry at load; the lens names resolve at run
+    time, when the turn names the lenses a reuse is available for."""
+
+    entries: tuple[Mapping[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class LensScript:
     """`findings` maps a lens name to the finding objects it reports, in
     reply order. `unread` names changed files no lens ever reads.
@@ -122,6 +138,7 @@ class LensScript:
         MappingProxyType({}), MappingProxyType({})
     )
     carryforward: CarryScript = CarryScript()
+    decisions: DecisionScript = DecisionScript()
 
     def findings_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
         return self.findings.get(lens, ())
@@ -144,17 +161,25 @@ def load_lens_script(path: Path) -> LensScript:
         raise LensScriptError(f"cannot read lens script {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise LensScriptError(f"lens script {path} must hold a JSON object")
-    unknown = set(raw) - {"findings", "unread", "reassessment", "carryforward"}
+    unknown = set(raw) - {
+        "findings",
+        "unread",
+        "reassessment",
+        "carryforward",
+        "decisions",
+    }
     if unknown:
         raise LensScriptError(
             f"lens script {path} has keys outside findings, unread, "
-            f"reassessment and carryforward: {', '.join(sorted(unknown))}"
+            f"reassessment, carryforward and decisions: "
+            f"{', '.join(sorted(unknown))}"
         )
     return LensScript(
         _findings(path, raw.get("findings", {})),
         _unread(path, raw),
         _reassessment(path, raw.get("reassessment", {})),
         _carryforward(path, raw.get("carryforward", {})),
+        _decisions(path, raw.get("decisions", [])),
     )
 
 
@@ -349,6 +374,29 @@ def _carryforward(path: Path, raw: object) -> CarryScript:
     )
 
 
+def _decisions(path: Path, raw: object) -> DecisionScript:
+    """The scenario's coordinator-decision reply (D83), validated entry
+    by entry with the real decision parser's entry validator. The
+    offered lens names resolve at run time, so each entry is checked
+    against a known-set of its own name: the membership rule cannot
+    refuse a scenario's own lens, and every other rule -- keys, types,
+    the decision value, the reason -- is refused at load, not discovered
+    as a contract refusal mid-run."""
+    if not isinstance(raw, list):
+        raise LensScriptError(f"lens script {path}: decisions must be a list")
+    for i, entry in enumerate(raw, 1):
+        try:
+            validated_decision(
+                i, entry, {entry["lens"]} if isinstance(entry, dict) else set()
+            )
+        except (ContractError, TypeError, KeyError) as exc:
+            raise LensScriptError(
+                f"lens script {path}: decisions entry {i} breaks the "
+                f"decision reply's shape: {exc}"
+            ) from exc
+    return DecisionScript(tuple(MappingProxyType(dict(entry)) for entry in raw))
+
+
 class LensScriptModel:
     """The scripted reviewer one lens run talks to. Each run gets a fresh
     instance, so a continuation starts with its own coverage state and
@@ -380,6 +428,15 @@ class LensScriptModel:
         return 0
 
     def turn(self, request: TurnRequest) -> ModelTurn:
+        if _is_decision(request.messages):
+            # The delta review's coordinator-decision turn (D83): the
+            # controller offers no tools and asks for one reply, which
+            # the scenario's `decisions` section holds (an empty section
+            # replies with no decisions, which the controller's
+            # validation refuses -- every lens re-runs). Checked first:
+            # the decision system prompt carries no lens body, because
+            # the deciding coordinator is the controller's own.
+            return self._decision_final()
         if _is_carryforward(request.messages):
             # The delta review's carry-forward turn (#702): the controller
             # offers no tools and asks for one reply, which the scenario's
@@ -447,6 +504,14 @@ class LensScriptModel:
         }
         return FinalReply(json.dumps(payload), self._cost)
 
+    def _decision_final(self) -> FinalReply:
+        """The scenario's coordinator-decision reply (D83): the entries
+        the scenario holds, verbatim."""
+        payload = {
+            "decisions": [dict(entry) for entry in self._script.decisions.entries],
+        }
+        return FinalReply(json.dumps(payload), self._cost)
+
     def _carry_final(self) -> FinalReply:
         """The scenario's carry-forward reply (#702): the prior labels it
         re-states, each with its re-anchored location, and the prior
@@ -504,6 +569,19 @@ class LensScriptModel:
             self._pages[path] = int(page.group(1)) if page is not None else None
         elif call.tool == "read_file" and _OK in first:
             self._read.add(path)
+
+
+def _is_decision(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the delta review's coordinator
+    decision turn (D83): its first message opens with the controller's
+    own decision subject, which no PR-written text can be the first line
+    of. Checked before the carry-forward and re-assessment turns,
+    because all three are one-message, tool-less turns."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(DECISION_TARGET_PREFIX)
+    )
 
 
 def _is_carryforward(messages: tuple[object, ...]) -> bool:

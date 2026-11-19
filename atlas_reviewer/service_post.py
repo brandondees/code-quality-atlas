@@ -136,6 +136,13 @@ def render_comment(
     tail = (
         _section("Lenses run", report.lenses_run, scrub),
         _section("Lenses not run", report.lenses_not_run, scrub),
+        # A delta review's per-lens decisions (D83); a full review's post
+        # carries no empty decisions section.
+        *(
+            (_section("Lens decisions", report.lens_decisions, scrub),)
+            if report.lens_decisions
+            else ()
+        ),
         _FILES + "\n\n" + _section("Files read", files, scrub),
         # A delta review's resolved and carried sections (#702); a full
         # review's post carries no empty delta sections.

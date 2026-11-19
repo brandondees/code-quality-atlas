@@ -2762,12 +2762,12 @@ def _delta_round_log(tmp_path) -> str:
 
 def test_a_delta_dry_run_carries_the_earlier_finding_forward(tmp_path):
     """The delta review end to end through the real CLI's dry run (#702):
-    the delta scope comes from the fixture's range comparison (calc.py
-    and the new test file, not settings.ini, which the range never
-    touched), the scripted lens reports the same finding the earlier
-    review recorded, the carry-forward re-anchors it, and the dedupe
-    keeps the carried copy alone -- the finding is posted once, under
-    its carried label, citing the review it builds on."""
+    the review's subject is the whole pull request at the new head --
+    every changed file, settings.ini included, whether or not the range
+    touched it (D83) -- the scripted lens reports the same finding the
+    earlier review recorded, the carry-forward re-anchors it, and the
+    dedupe keeps the carried copy alone -- the finding is posted once,
+    under its carried label, citing the review it builds on."""
     log = _delta_round_log(tmp_path)
     code, out, err = run_cli(
         "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
@@ -2788,7 +2788,9 @@ def test_a_delta_dry_run_carries_the_earlier_finding_forward(tmp_path):
     status = parse_status(out.splitlines()[0])
     assert status["carried"] == 1
     assert status["resolved"] == 0
-    assert status["changed_files"] == 2
+    # The whole pull request is the subject: three changed files,
+    # settings.ini among them, though the range never touched it (D83).
+    assert status["changed_files"] == 3
     # The record at the new head carries the line under its carried
     # label, so the next delta builds on it.
     record = _last_round_record(log)
@@ -2813,3 +2815,36 @@ def test_a_delta_dry_run_without_an_earlier_review_names_the_gap(tmp_path):
     assert code == cli.EXIT_OK, err
     assert "no findings are recorded for the review at 3f6c1e9b2a7d" in out
     assert "Delta review: builds on the review of `3f6c1e9b2a7d`" in out
+
+
+def test_a_delta_dry_run_can_reuse_a_lens_and_still_cover_the_whole_pr(tmp_path):
+    """The coordinator's reuse decision, end to end through the real CLI's
+    dry run (D83): the scripted decision reuses the earlier review's
+    lens, the lens makes no turn and starts no runner, the whole pull
+    request is still the subject -- three changed files covered by the
+    reused settled result -- and the carried finding stands. Mutant: the
+    reused lens counted as not covered, which would hold this review at
+    incomplete; or the review narrowed to the delta's files, which would
+    report fewer changed files than the pull request has."""
+    log = _delta_round_log(tmp_path)
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", DELTA_EVENT, "--depth", "review", "--pool-size", "1",
+        "--lens-script", str(DELTA_FIXTURE / "scenarios" / "reuse.json"),
+        "--round-log", log,
+    )  # fmt: skip
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
+    assert "## Lens decisions (delta review)" in out
+    assert "reused --" in out
+    assert "the rounding arithmetic the lens watches is untouched" in out
+    from atlas_reviewer.verdict import parse_status
+
+    status = parse_status(out.splitlines()[0])
+    assert status["reused"] == 1
+    assert status["coverage_complete"] is True
+    assert status["changed_files"] == 3
+    assert status["carried"] == 1
+    # The reused lens made no run: no ledger line carries it, while the
+    # three lenses the earlier review never ran do appear, re-run.
+    assert "tracing-correctness-and-invariants: **" not in out
+    assert "sweeping-for-security: **clean**" in out

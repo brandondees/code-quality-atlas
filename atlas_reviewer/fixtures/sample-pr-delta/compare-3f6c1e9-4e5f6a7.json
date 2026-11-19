@@ -25,10 +25,13 @@
   ],
   "files": [
     {
-      "filename": "calc.py"
+      "filename": "calc.py",
+      "patch": "@@ -1,5 +1,5 @@\n # SPDX-License-Identifier: MIT\n def line_total(price_cents: int, quantity: int, discount_pct: int) -> int:\n-    return price_cents * quantity * (100 - discount_pct) // 100\n+    gross = price_cents * quantity\n+    discount = round(gross * discount_pct / 100)\n+    return gross - discount\n"
     },
     {
-      "filename": "tests/test_calc.py"
+      "filename": "tests/test_calc.py",
+      "status": "added",
+      "patch": "@@ -0,0 +1,6 @@\n+# SPDX-License-Identifier: MIT\n+from calc import line_total\n+\n+\n+def test_line_total_rounds_once():\n+    assert line_total(1000, 3, 5) == 2850\n+    assert line_total(999, 1, 0) == 999\n"
     }
   ]
 }
