@@ -830,7 +830,7 @@ _ARG_SCHEMA: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         "start": {"type": "integer", "minimum": 1},
         "end": {"type": "integer", "minimum": 1},
         "pattern": {"type": "string"},
-        "regex": {"type": "boolean", "description": "pattern is a regex, not a fixed string"},
+        "regex": {"type": "boolean", "description": "pattern is a POSIX extended regex (git grep -E's dialect), not a fixed string; an invalid regex is a gap"},
         "line": {"type": "integer", "minimum": 1, "description": "the line the statement to mutate starts at"},
         "operator": {"type": "string", "enum": list(MUTANT_OPERATORS), "description": "the one mutation to apply"},
         "tests": {"type": "string", "description": "test selector for both runs: a file, a directory or file.py::node_id, empty for the whole suite"},

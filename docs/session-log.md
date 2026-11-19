@@ -4468,3 +4468,28 @@ execs counted; the runner script's `timeout` asserted). The tool
 schema's `regex` description names the dialect (in the stacked #753).
 No live model, Sprite or GitHub call; no secret read; no deployed
 setting changed.
+
+## 2026-11-18 — #753 round 2 fixes: the boolean-count rejections pinned, and the regex schema names its dialect
+
+The round-2 review approves the counting layer, with one Minor and one
+nit. The Minor: the round-1 entry said the duplicated assertion "became
+the check it was meant to be" — it was deleted, and the rule it
+gestured at (a mutate call is not a run_tests run) lives where it
+always did, in
+`test_a_survived_mutant_counts_and_is_not_a_gap`'s
+`outcome.test_runs == 0`; the entry now says that. The mutant the
+review named (M12, the ledger reader's explicit boolean-count check —
+needed because `True` is an `int` in Python, so the isinstance gate
+alone would pass a boolean) is now pinned:
+`test_a_boolean_count_in_the_ledger_is_abandoned` feeds a boolean
+ledger line for `test_runs`, `mutants_survived` and `changed_files`
+and asserts `ABANDONED` for each. The restack onto #752's round-3 fix
+keeps the counting layer in step with the controller-side content
+reads and the regex-grep split: the `BridgeResult` shape is unchanged
+and the lens contract held with no edits. And the tool schema's
+`regex` argument description now names the dialect the bridge pinned on
+the #752 branch — "a POSIX extended regex (git grep -E's dialect), not
+a fixed string; an invalid regex is a gap" — so the model's `regex:
+true` calls mean what the runner's git grep will do with them. No live
+model, Sprite or GitHub call; no secret read; no deployed setting
+changed.
