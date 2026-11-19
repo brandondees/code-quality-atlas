@@ -5638,7 +5638,7 @@ round's only new ones (no product behavior changed -- the refusal phrases
 are user-visible strings, and their pins are the tests that moved with
 them).
 
-## 2026-11-19 — This repo's own per-review ceiling raised to $25 in REVIEW.md (D90)
+## 2026-11-19 — This repo's own per-review ceiling raised to $25 in REVIEW.md (D91)
 
 Brandon decided at 2:08 PM CT on 2026-11-19 to raise the live reviewer's
 per-review ceiling to $25 for this repo only: recent live reviews (PRs #769

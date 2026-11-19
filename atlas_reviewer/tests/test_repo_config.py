@@ -91,7 +91,7 @@ def test_an_oversized_review_md_is_not_parsed_cut():
 
 def test_this_repos_own_review_md_parses_to_the_decided_25():
     """This repo's own root `REVIEW.md` carries `review_ceiling_usd: 25`
-    (D90, 2026-11-19): the repo raised its own per-review ceiling because
+    (D91, 2026-11-19): the repo raised its own per-review ceiling because
     recent live reviews stopped at the $10 default with coverage marked
     incomplete. The real file is read through the real merge-base parse,
     so an edit that breaks or removes the line fails loudly here instead
