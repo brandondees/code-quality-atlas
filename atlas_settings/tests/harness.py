@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 """The settings-page tests' harness: the shared fixture vocabulary the
 page's tests import — the obviously fake keys, tokens, ids, endpoints,
-and the base environment. The harness's later pieces (the fake clock,
-the fake GitHub transport, the resolver, and the world builder) land
-with their first user in the layers that need them.
+and the base environment. The vocabulary is declared here whole, at the
+bottom layer, because every value is inert data the whole stack's tests
+read; the harness's later pieces (the fake clock, the fake GitHub
+transport, the resolver, and the world builder) land with their first
+user in the layers that need them.
 
 Everything here is obviously fake: no credential is real, no network
 call is made, no deployed service setting is touched."""
