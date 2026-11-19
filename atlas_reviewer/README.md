@@ -609,9 +609,13 @@ deployment that never set the store key and has no records on disk is not
 a failure: no installation has credentials, so no tenant path exists and
 no cap applies. A key that is gone while records remain on disk **is** a
 failure, because the records it cannot read may hold credentials. The
-retention sweep skips a directory entry that is not one of its records —
-a crash's leftover `<id>.json.writing` temp, a stray file — naming the
-count instead of halting on it, and deletes only what it wrote.
+retention sweep skips any directory entry that is not a valid record
+name — a crash's leftover `<id>.json.writing` temp, a stray file, or a
+record-shaped name that fails the store's own id validation (`0.json`,
+an over-long digit string) — naming the count instead of halting on it,
+and deletes only what it wrote: the skip is the id's whole validation,
+so no name the store did not write can stop the sweep or be removed by
+it.
 
 **The routing rule.** An allowlisted repo whose installation has no
 tenant credentials is reviewed on the operator's key, as today. A repo

@@ -5285,3 +5285,51 @@ without locking (the blocking test).
 `service.py`, `service_run.py`, `service_post.py`,
 `installation_store.py`, `egress.py`, `tenant_provider.py`, their test
 files, and the three docs.
+
+## 2026-11-19 (same day) — #776 round 2: the sweep's skip becomes the id's whole validation, and the three nits are decided left with reasons
+
+The round-2 review of #776 (head `87c00b14`): **Approve**, with one
+Minor surviving — the residual of r1's sweep fix — and three nits. All
+fixed/decided on the branch in one commit. Offline only, same rules as
+the entries above.
+
+**m2' — the skip is now the id's whole validation.** The r1 fix's skip
+pre-checked only `stem.isascii() and stem.isdigit()`, and the
+`installation_id(stem)` call after it still sat outside any try: a digit
+stem that fails the id's other checks — `0.json` (a positive-integer
+failure) or an over-long digit string (over 64 digits) — still raised
+and still halted every future sweep, and the r1 wording ("the parse
+moved inside the per-file handling") overstated what the code did. The
+fix moves the whole validation into the skip: `installation_id` runs
+inside the per-entry `try`, and any entry that is not a valid record
+name is named and skipped, never halting the sweep and never deleted.
+Pinned by `test_the_sweep_skips_a_record_shaped_name_that_fails_the_ids_checks`
+(`0.json` and a 70-digit `<digits>.json` beside a live stale record:
+both survive, the sweep still removes the stale record, the count names
+both); the mutant moving the parse back out is killed. The README's
+sweep sentence is reworded to match the code exactly, and D89's r1
+Update is corrected by an appended dated Correction paragraph (the
+decisions log is append-only; the session log records the correction
+here the same way — the r1 entry above stands as written).
+
+**The three nits — all left as built, each with its reason.** (n-a) The
+per-installation lock file outlives its uninstall: deleting it inside
+`delete`'s locked section is the classic unlink-under-flock hazard — a
+second process blocked acquiring the lock can hold it on the unlinked
+inode while a later writer locks a fresh file at the same path, giving
+two writers locks on two different inodes; the clutter is harmless
+0-byte files bounded by the installations ever seen, and GitHub
+installation ids are never reused, so a stale lock is never wrongly
+contended. (n-b) The flock blocks without a timeout: accepted as
+designed — `flock` releases on process death, the critical sections are
+one read plus one small atomic write, and GitHub re-delivers an
+unanswered webhook; revisit with `LOCK_NB` + retry only if part B's page
+ever does long work under the lock. (n-c) Over-redaction is possible but
+bounded: a tenant key of ≥ 8 characters colliding with controller text
+redacts those words tenant-scoped — the child-side redactor has had the
+same exposure since the slice landed — and refusing colliding keys
+belongs to part B's intake validation, not to the store.
+
+**Tests** (`test_installation_store.py` extended by the m2' test).
+**One fix-round mutant applied by hand and killed:** the parse moved
+back outside the skip (the new record-shaped-name test).

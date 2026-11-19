@@ -452,11 +452,18 @@ class InstallationStore:
         removed = 0
         skipped = 0
         for path in self._record_paths():
-            stem = path.stem
-            if not stem.isascii() or not stem.isdigit():
+            # The entry's whole validation sits inside the skip: any
+            # name that is not a valid record name -- a crash's leftover
+            # `<id>.json.writing`, a stray file, `0.json`, or an
+            # over-long digit string -- is named and skipped, and never
+            # halts the sweep or gets deleted (r1 review of #776,
+            # Minor 2; the r2 review's residual, m2': a digit stem that
+            # fails the id's other checks raised here before this).
+            try:
+                ident = installation_id(path.stem)
+            except InstallationStoreError:
                 skipped += 1
                 continue
-            ident = installation_id(stem)
             with self._process_lock(ident):
                 try:
                     record = self._read(ident)

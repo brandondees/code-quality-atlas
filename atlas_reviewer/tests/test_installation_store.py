@@ -581,6 +581,40 @@ def test_the_sweep_skips_a_stray_or_temporary_file_and_still_sweeps(tmp_path):
     assert (root / "stray").exists()
 
 
+def test_the_sweep_skips_a_record_shaped_name_that_fails_the_ids_checks(
+    tmp_path,
+):
+    """The r2 residual (m2'): the skip is the id's *whole* validation,
+    not just its digit check -- `0.json` (a positive-integer failure)
+    and an over-long digit name both raise `installation_id`, and both
+    are named and skipped like any other stray, never halting the sweep
+    and never deleted."""
+    store = _store(tmp_path)
+    stale = store.store_credentials(
+        "11111", "https://stale.example.invalid", TENANT_KEY, "openai/gpt-4o"
+    )
+    store._write_record(
+        "11111",
+        lambda _current: InstallationRecord(
+            "11111",
+            stale.base_url,
+            stale.key,
+            stale.model,
+            None,
+            None,
+            NOW - timedelta(days=DEFAULT_RETENTION_DAYS + 1),
+        ),
+    )
+    root = store_root(tmp_path)
+    (root / "0.json").write_text("{}", encoding="utf-8")
+    (root / f"{'9' * 65}.json").write_text("{}", encoding="utf-8")
+    removed, skipped = store.sweep(NOW, DEFAULT_RETENTION_DAYS)
+    assert (removed, skipped) == (1, 2)
+    assert store.load("11111") is None
+    assert (root / "0.json").exists()
+    assert (root / f"{'9' * 65}.json").exists()
+
+
 def test_the_sweep_leaves_a_record_it_cannot_read(tmp_path):
     store = _store(tmp_path)
     _credentials_record(store)
