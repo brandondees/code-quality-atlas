@@ -242,3 +242,90 @@ def test_a_failing_coverage_read_is_the_named_refusal(tmp_path: Path) -> None:
     fake.api_error = TimeoutError("timed out")
     with pytest.raises(GitHubRefused):
         client.installation_repositories()
+
+
+# ---- the fix-round pins (r1 review of #788) -------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [True, 0, -1],
+)
+def test_a_boolean_zero_or_negative_account_id_refuses(
+    bad_id: object, tmp_path: Path
+) -> None:
+    client, fake = _client(tmp_path)
+    """A GitHub account id must be a non-bool int greater than 0: JSON
+    `true` is not an id (and `True == 1`, so accepting it would fail the
+    admin gate open onto user id 1), and `0` matches `0` the same way —
+    both are refused instead (kills the isinstance-int mutant)."""
+    fake.account = {"id": bad_id, "login": "octo-admin", "type": "User"}
+    with pytest.raises(GitHubRefused, match="account"):
+        client.admin_status(GitHubUser(1, "mojombo"))
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [True, 0, -1],
+)
+def test_a_boolean_zero_or_negative_user_id_refuses(
+    bad_id: object, tmp_path: Path
+) -> None:
+    client, fake = _client(tmp_path)
+    """The identity read applies the same rule (kills the isinstance-int
+    mutant in get_user)."""
+    fake.user = {"id": bad_id, "login": "octo-admin"}
+    with pytest.raises(GitHubRefused, match="identify"):
+        client.get_user("a-token")
+
+
+def test_the_admin_rule_is_the_id_not_the_login(tmp_path: Path) -> None:
+    client, fake = _client(tmp_path)
+    """Id matching is pinned apart from login matching: the same login
+    with a different id is not the admin, and the same id with a
+    different login is (kills the login-comparison mutant)."""
+    fake.account = {"id": ADMIN_ID, "login": ADMIN_LOGIN, "type": "User"}
+    same_login_other_id, _ = client.admin_status(GitHubUser(ADMIN_ID + 1, ADMIN_LOGIN))
+    assert same_login_other_id is False
+    same_id_other_login, _ = client.admin_status(GitHubUser(ADMIN_ID, "someone-else"))
+    assert same_id_other_login is True
+
+
+def _mint_bodies(fake: FakeGitHub) -> list[dict[str, object]]:
+    import json as json_module
+
+    bodies = []
+    for recorded in fake.requests:
+        if recorded.url.endswith("/access_tokens") and recorded.body:
+            bodies.append(json_module.loads(recorded.body.decode()))
+    return bodies
+
+
+def test_the_mint_bodies_are_exactly_the_narrow_permissions(tmp_path: Path) -> None:
+    client, fake = _client(tmp_path)
+    """The coverage read mints `metadata: read` — the permission that
+    lists repositories, not the one that reads files — and the org-admin
+    check mints exactly `members: read` (kills the mutant that requests
+    contents)."""
+    fake.account = {"id": 5, "login": ORG_ACCOUNT_LOGIN, "type": "Organization"}
+    client.admin_status(GitHubUser(ADMIN_ID, ADMIN_LOGIN))
+    client.installation_repositories()
+    bodies = _mint_bodies(fake)
+    assert {"permissions": {"members": "read"}} in bodies
+    assert {"permissions": {"metadata": "read"}} in bodies
+    for body in bodies:
+        assert set(body) == {"permissions"}
+        assert set(body["permissions"]) == {"members"} or set(body["permissions"]) == {
+            "metadata"
+        }
+
+
+def test_the_identity_read_happens_exactly_once(tmp_path: Path) -> None:
+    client, fake = _client(tmp_path)
+    """The exchanged token identifies the user with exactly one
+    `GET /user` (kills the mutant that reads it twice)."""
+    client.exchange_code(
+        "the-code", "verifier-value", "https://settings.example.com/callback"
+    )
+    identity_reads = [r for r in fake.requests if r.url.endswith("/user")]
+    assert len(identity_reads) == 1
