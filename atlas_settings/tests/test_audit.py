@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: MIT
 """The audit log: append-only lines carrying action, installation, user
 id, and time — and never a value; the read-back for the credentials
-timestamp; the unknown-action refusal."""
+timestamp; the unknown-action refusal; the bounded file; and the
+degradation contract (a missing file is silence, an unreadable file is
+a logged warning, a bad line is skipped)."""
 
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -25,12 +28,23 @@ def test_a_recorded_write_carries_no_value(tmp_path: Path) -> None:
     # The line's shape: time, action, installation, user id — nothing
     # else, and no key, endpoint, model or cap figure could be present
     # because `record` takes none of them.
-    parsed = raw
-    assert '"action": "store-credentials"' in parsed
-    assert '"installation_id": "42"' in parsed
-    assert '"github_user_id": 11' in parsed
-    assert '"at": "2026-11-19T12:00:00+00:00"' in parsed
-    assert entry.count(",") == 3
+    assert set(json.loads(entry)) == {
+        "at",
+        "action",
+        "installation_id",
+        "github_user_id",
+    }
+    assert '"action": "store-credentials"' in raw
+    assert '"installation_id": "42"' in raw
+    assert '"github_user_id": 11' in raw
+    assert '"at": "2026-11-19T12:00:00+00:00"' in raw
+
+
+def test_an_explicit_timestamp_is_the_one_recorded(tmp_path: Path) -> None:
+    log = _log(tmp_path)
+    moment = datetime(2026, 11, 19, 9, 30, 0, tzinfo=UTC)
+    log.record("store-credentials", "42", 11, at=moment)
+    assert log.last_credentials_at("42") == moment
 
 
 def test_an_unknown_action_refuses() -> None:
@@ -65,38 +79,65 @@ def test_other_actions_do_not_answer_the_credentials_timestamp(
     assert log.last_credentials_at("42") is None
 
 
-def test_a_missing_or_unreadable_audit_file_answers_none(tmp_path: Path) -> None:
+def test_a_missing_audit_file_answers_none_silently(tmp_path: Path) -> None:
     log = _log(tmp_path)
     assert log.last_credentials_at("42") is None
-    log.record("store-credentials", "42", 11)
-    path = tmp_path / "state" / "settings-audit.jsonl"
-    path.chmod(0o000)
-    try:
-        import os
 
-        if os.geteuid() == 0:  # root reads anything; skip the unreadable case
-            return
+
+def test_an_unreadable_audit_file_answers_none_and_names_itself(
+    tmp_path: Path,
+) -> None:
+    """The unreadable-file case runs everywhere (the OSError is raised
+    through a patched read, not a chmod, so the branch is covered under
+    uid 0 too), and it is not silent: one warning names the path and the
+    exception class."""
+    log = _log(tmp_path)
+    log.record("store-credentials", "42", 11)
+    assert log.last_credentials_at("42") is not None
+
+    def refuse(self: object) -> bytes:
+        raise PermissionError("refused")
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr("atlas_settings.audit.Path.read_bytes", refuse)
+    try:
         assert log.last_credentials_at("42") is None
     finally:
-        path.chmod(0o600)
+        monkey.undo()
 
 
-def test_every_action_name_is_listed() -> None:
-    assert set(ACTIONS) == {
-        "store-credentials",
-        "record-consent",
-        "revoke-credentials",
-        "set-cap",
-        "delete-installation",
-        "login",
-    }
+def test_the_unreadable_file_logs_one_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    log = _log(tmp_path)
+    log.record("store-credentials", "42", 11)
+
+    with mock.patch(
+        "atlas_settings.audit.Path.read_bytes", side_effect=OSError("disk trouble")
+    ):
+        assert log.last_credentials_at("42") is None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "settings-audit.jsonl" in warnings[0].getMessage()
+    assert "OSError" in warnings[0].getMessage()
+
+
+def test_one_undecodable_byte_does_not_blind_the_page(tmp_path: Path) -> None:
+    """A line that cannot be decoded is skipped the way a bad JSON line
+    is: the good credentials line after it is still read (the file is
+    shared by every installation)."""
+    log = _log(tmp_path)
+    log.record("store-credentials", "42", 11)
+    path = tmp_path / "state" / "settings-audit.jsonl"
+    with path.open("ab") as fh:
+        fh.write(b"\xff\xfe\n")
+    log.record("store-credentials", "42", 11)
+    assert log.last_credentials_at("42") is not None
 
 
 def test_corrupt_or_mistyped_entries_are_skipped_on_read_back(
     tmp_path: Path,
 ) -> None:
-    from datetime import UTC, datetime
-
     path = tmp_path / "state" / "settings-audit.jsonl"
     log = AuditLog(path, lambda: datetime(2026, 11, 19, 12, 0, tzinfo=UTC))
     log.record("store-credentials", "42", 11)
@@ -125,3 +166,55 @@ def test_corrupt_or_mistyped_entries_are_skipped_on_read_back(
             + "\n"
         )
     assert log.last_credentials_at("42") == datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
+
+
+def test_the_audit_file_is_bounded_and_keeps_the_newest_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the byte cap the oldest half is rotated away on the next
+    write: the file stays within its bound (plus the one write that
+    triggered the rotation), the newest entries survive, and the
+    read-back still answers."""
+    from atlas_settings import audit as audit_module
+
+    monkeypatch.setattr(audit_module, "_MAX_AUDIT_BYTES", 400)
+    log = _log(tmp_path)
+    for n in range(12):
+        log.record("store-credentials", str(40 + n), 11)
+    path = tmp_path / "state" / "settings-audit.jsonl"
+    assert path.stat().st_size <= 400 + 200
+    # The newest entry survived the rotation and still answers.
+    assert log.last_credentials_at("51") is not None
+    # The oldest entries are gone.
+    assert log.last_credentials_at("40") is None
+
+
+def test_every_action_name_is_listed() -> None:
+    assert set(ACTIONS) == {
+        "store-credentials",
+        "record-consent",
+        "revoke-credentials",
+        "set-cap",
+        "delete-installation",
+        "login",
+    }
+
+
+def test_a_short_append_is_the_recorded_failure_not_a_partial_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A short `os.write` raises rather than leaving a torn line in the
+    audit: the caller's own "applied but not recorded" answer is the
+    honest one (kills the mutant that ignores the written count)."""
+    import os
+
+    log = _log(tmp_path)
+
+    real_write = os.write
+
+    def short_write(fd: int, data: bytes) -> int:
+        return real_write(fd, data) - 1
+
+    monkeypatch.setattr("atlas_settings.audit.os.write", short_write)
+    with pytest.raises(OSError, match="not written whole"):
+        log.record("store-credentials", "42", 11)

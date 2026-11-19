@@ -26,9 +26,13 @@ from atlas_settings.phrases import REDACTION_GUARD_TEXTS
         "https://[fc00::1]/v1",
         "https://[fe80::1]/v1",
         "https://[::ffff:127.0.0.1]/v1",
-        "http://api.example.com/v1",
-        "https://user:pass@api.example.com/v1",
-        "https://api.example.com/v1?tracking=1",
+        # The lookalike loopback spellings a resolver might normalize:
+        # decimal, octal, hex, and shortened forms of 127.0.0.1 all
+        # resolve offline and are refused by the blocked set.
+        "https://2130706433/v1",
+        "https://0177.0.0.1/v1",
+        "https://0x7f000001/v1",
+        "https://127.1/v1",
     ],
 )
 def test_the_real_egress_check_refuses_the_hostile_shapes(url: str) -> None:
@@ -39,6 +43,26 @@ def test_the_real_egress_check_refuses_the_hostile_shapes(url: str) -> None:
 def test_the_real_egress_check_refuses_an_unresolvable_host() -> None:
     with pytest.raises(EgressRefused):
         checks.validate_endpoint("https://no-such-host.invalid/v1")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://api.example.com:99999/v1",
+        "https://api.example.com:abc/v1",
+        "https://exa..com/v1",
+    ],
+)
+def test_a_malformed_port_or_label_refuses_under_any_resolver(url: str) -> None:
+    """A port outside its range, a port that is not a number, and an
+    empty DNS label are the named refusal under any resolver — the fake
+    resolver stands in, so the refusal cannot be a resolver failure or
+    a DNS miss wearing the same clothes, and the URL's own text is in
+    no message."""
+    from .harness import default_resolve
+
+    with pytest.raises(EgressRefused):
+        checks.validate_endpoint(url, resolve=default_resolve)
 
 
 def test_the_real_egress_check_passes_a_public_numeric_host() -> None:
@@ -169,6 +193,43 @@ def test_a_missing_pricing_object_refuses() -> None:
     document = {"data": {"id": "vendor/x", "context_length": 8192}}
     with pytest.raises(PricingUnknownError):
         checks.validate_model("vendor/x", transport=_table(document))
+
+
+def test_a_model_that_is_not_a_visible_id_refuses_before_any_url() -> None:
+    """The store's own visible-character rule runs before the catalog
+    URL is built, so a newline or control character in the model can
+    never reach a URL or a request."""
+    for bad in ("vendor/bad\nmodel", "vendor\tmodel", "vendor model", ""):
+        with pytest.raises(PricingUnknownError, match="visible characters"):
+            checks.validate_model(bad, transport=_table(None))
+
+
+def test_the_model_and_catalog_ids_never_reach_a_message() -> None:
+    """Every model refusal is the fixed phrase: the submitted model and
+    the catalog's own id are untrusted input and appear in none of
+    them. The model here is shape-legal (the visible-character rule
+    refuses a newline first), so this test is the one that observes the
+    parse's own echo path."""
+    hostile = "vendor/asked-injected"
+    with pytest.raises(PricingUnknownError) as excinfo:
+        checks.validate_model(hostile, transport=_table(_terms("other-id", "3", "15")))
+    message = str(excinfo.value)
+    assert hostile not in message
+    assert "other-id" not in message
+    assert "the model is refused" in message
+
+
+def test_the_collision_threshold_is_the_redaction_floor() -> None:
+    """A 7-character prefix of a guard text is below the redaction
+    register's floor and is allowed; the 8-character prefix is refused
+    (kills the mutant that lowers the threshold to 1)."""
+    from atlas_settings import checks as checks_module
+
+    text = REDACTION_GUARD_TEXTS[0]
+    assert checks_module._MIN_REDACTION_CHARS == 8
+    checks.check_key_against_controller_text(text[:7])
+    with pytest.raises(InstallationStoreError, match="collide"):
+        checks.check_key_against_controller_text(text[:8])
 
 
 def test_a_key_matching_controller_text_is_refused() -> None:
