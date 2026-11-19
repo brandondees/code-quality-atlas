@@ -164,10 +164,11 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
 def test_a_refused_key_stops_the_review_and_never_retries():
     """D92: a 402/401/403 from the endpoint is a review error, not a
     spend. The lens cut carries the refusal's fixed detail, the spend
-    halts with the fixed cause, and the model is asked exactly once --
-    the D49 retry does not apply to a refusal the key itself made.
-    Kills the retry mutant (routing the refusal into the generic
-    boundary branch sends it again) and the dropped-halt mutant."""
+    halts with the fixed cause, the failed call settles at $0, and the
+    model is asked exactly once -- the D49 retry does not apply to a
+    refusal the key itself made. Kills the retry mutant (routing the
+    refusal into the generic boundary branch sends it again), the
+    keep-the-worst settle mutant, and the dropped-halt mutant."""
     calls = []
 
     class Refused:
@@ -196,20 +197,38 @@ def test_a_refused_key_stops_the_review_and_never_retries():
     assert spend.halted
     assert spend.halted_cause == "model key out of credit"
     assert spend.calls == 1
-    # The failed call keeps its reservation as spent (D43's settle rule,
-    # which the failed-call accounting change amends).
-    assert spend.committed_usd == Decimal("0.10")
-    assert spend.settled_usd == Decimal("0.10")
+    assert spend.committed_usd == Decimal("0.00")
+    assert spend.settled_usd == Decimal("0.00")
 
 
-def test_every_exception_path_after_a_reservation_settles_it_as_spent():
-    """Round-2 review of #717, m-6: a call that will never report an
-    actual settles at its reservation on every exit -- a turn that stops
-    at the output cap, a transport timeout and its retry, a transport
-    failure, a model error -- so the in-flight backpressure never waits on
-    a worst case that will never come down. Kills the dropped-settle
-    mutants on the turn-level output cap (C4) and the transport timeout
-    (C5)."""
+def test_a_failed_call_settles_at_the_cost_its_response_reported():
+    """D92: `settle_failure` releases the worst case a failed call held
+    only while in flight and settles at the reported cost -- $0 when the
+    response named none. Kills the keep-the-worst mutant (the old D43
+    booking a failed call inherited) and the dropped-release mutant."""
+    spend = Spend(LIMITS.resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle_failure(Decimal("0.50"), None)
+    assert spend.committed_usd == Decimal("0.00")
+    assert spend.settled_usd == Decimal("0.00")
+    # A failed response that does report a cost settles at it.
+    spend = Spend(LIMITS.resolve())
+    assert spend.reserve(Decimal("0.50")) is None
+    spend.settle_failure(Decimal("0.50"), Decimal("0.05"))
+    assert spend.committed_usd == Decimal("0.05")
+    assert spend.settled_usd == Decimal("0.05")
+
+
+def test_every_exception_path_after_a_reservation_settles_the_failed_call():
+    """D92 amends round-2 review of #717, m-6: a call that failed still
+    settles on every exit -- a transport timeout and its retry, a
+    transport failure, a model error -- but at the cost its response
+    reported, $0 when none is, releasing the reservation it held only
+    while in flight; a turn that stops at the output cap was served and
+    keeps its reservation as spent (D43). Kills the keep-the-worst
+    mutants on the model-error and transport settles, the transport
+    timeout's kept reservation (C5), and the dropped-settle mutant on the
+    turn-level output cap (C4)."""
 
     class Refused:
         name = "refused"
@@ -247,7 +266,10 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         def turn(self, request):
             raise BoundaryError("the model refused")
 
-    for model in (Refused(), TransportFails()):
+    for model, spent in (
+        (Refused(), Decimal("0.10")),
+        (TransportFails(), Decimal("0.00")),
+    ):
         spend = Spend(LIMITS.resolve())
         clock = FakeClock()
         outcome = run_attempt(
@@ -256,11 +278,16 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
             review_started=clock.monotonic(),
         )  # fmt: skip
         assert spend.calls == 1
-        assert spend.committed_usd == Decimal("0.10")
-        assert spend.settled_usd == Decimal("0.10"), model.name
-    # A model error is retried once (D49): the failed call keeps its full
-    # reservation as spent, and the retry is its own reserved, settled
-    # call before the lens fails.
+        # Served at the output cap: the reservation is spent (D43). A
+        # transport failure was never served: it releases and settles at
+        # $0 (D92).
+        assert spend.committed_usd == spent, model.name
+        assert spend.settled_usd == spent, model.name
+    # A model error is retried once (D49): each failed call releases its
+    # reservation and settles at $0 -- a refused call billed nothing
+    # (D92) -- so the committed spend stays at what was really served,
+    # and the retry is still its own reserved, settled call before the
+    # lens fails.
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
@@ -270,11 +297,12 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         sleep=clock.advance,
     )  # fmt: skip
     assert spend.calls == 2
-    assert spend.committed_usd == Decimal("0.20")
-    assert spend.settled_usd == Decimal("0.20")
+    assert spend.committed_usd == Decimal("0.00")
+    assert spend.settled_usd == Decimal("0.00")
     assert Cause.MODEL_ERROR in outcome.causes
-    # The timed-out request keeps its full reservation as spent (D58 item
-    # 5) and its retry is its own reserved, settled call.
+    # The timed-out call and its one retry (D58 item 5's retry, D92's
+    # booking) each release their reservation and settle at $0: no
+    # response arrived to bill from.
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
@@ -283,8 +311,8 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         review_started=clock.monotonic(),
     )  # fmt: skip
     assert spend.calls == 2
-    assert spend.committed_usd == Decimal("0.20")
-    assert spend.settled_usd == Decimal("0.20")
+    assert spend.committed_usd == Decimal("0.00")
+    assert spend.settled_usd == Decimal("0.00")
     assert Cause.TRANSPORT_ERROR in outcome.causes
 
 
@@ -1688,7 +1716,10 @@ def test_a_model_call_that_keeps_failing_fails_the_lens(tmp_path):
     assert outcome.state is LensState.FAILED
     assert not outcome.retryable
     assert len(model.requests) == 2
-    assert (spend.calls, spend.committed_usd) == (2, 2 * model.worst_usd)
+    # D92: each failed call releases its reservation and settles at $0 --
+    # a refused call billed nothing, so the lens fails with the review's
+    # committed spend unchanged.
+    assert (spend.calls, spend.committed_usd) == (2, Decimal("0.00"))
     assert clock.t == CALL_RETRY_BACKOFF_S
 
 

@@ -384,6 +384,36 @@ class OpenRouterLensModel:
             raise
         return terms, status.counts_byok, selected
 
+    def remaining_credit_usd(self) -> Decimal | None:
+        """The key's remaining credit as the preflight read it (D92), or
+        None when this adapter names no usable figure. The preflight ran
+        at wiring time and again on this adapter's first read, so the
+        figure is the key's own `/key` answer -- one read, never after
+        inference -- and it can lag a completion by about 90 seconds."""
+        try:
+            self._ready()
+        except BoundaryError:
+            # A credit figure this adapter cannot read refuses nothing:
+            # the per-call reservations and the refusals govern, and the
+            # calls' own classification is the loud failure.
+            return None
+        status = self.provider._key_status
+        return None if status is None else status.limit_remaining
+
+    def smallest_call_reservation(self) -> Decimal | None:
+        """The worst case the review's largest allowed call reserves (D92):
+        the per-call input cap priced at the endpoint's rates, output cap
+        included. This is the largest single reservation the plan holds
+        against the key before any settle, and the smallest credit the
+        review must be able to fund to start at all. None when the
+        endpoint's terms cannot be read."""
+        try:
+            terms, _, _selected = self._ready()
+        except BoundaryError:
+            return None
+        bounds = resolve_per_call(self.per_call, terms)
+        return worst_case_usd(bounds.max_input_tokens, terms, bounds)
+
 
 def _bounds(per_call: Limits, terms: ModelTerms, request: TurnRequest) -> ResolvedCall:
     """The resolved bounds, with the output cap tightened to the request's

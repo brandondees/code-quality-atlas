@@ -604,26 +604,16 @@ def test_a_changed_system_prompt_resets_the_meter():
 
 
 def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
-    """Review M2: the timed-out request keeps its full reservation as
-    spent -- it may still be billed -- and the retry is its own reserved
-    call against the shared budget, counted like any turn."""
-    from .test_lens_loop import CONTRACT, NONCE, job, lens_system
-
+    """Review M2: the retry is its own reserved call against the shared
+    budget, counted like any turn. D92 amends the booking the older form
+    of this test pinned: the timed-out request was never served a
+    response, so it releases its reservation and settles at $0, and only
+    the served calls' settled costs remain committed."""
     lens, fake = model(
         TransportTimeoutError("POST timed out"),
         reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
         reply(completion(final().text, usage={"cost": "0.01", "is_byok": False})),
     )
-    # The first request's worst case, measured on the exact conversation
-    # the loop's first turn sends.
-    ask = TurnRequest(
-        lens_system(
-            "tracing-correctness-and-invariants", BODY, CONTRACT, None, nonce=NONCE
-        ),
-        (UserText(job().first_turn),),
-        tool_schemas(),
-    )
-    first_worst = lens.worst_case_usd(ask)
     outcome, _model, spend = attempt(
         tmp_path,
         [],
@@ -634,9 +624,9 @@ def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
     )
     assert len(fake.chat_requests()) == 3
     assert spend.calls == 3
-    # committed = the timed-out request's reservation, kept as spent, plus
-    # the retry's and the nudge turn's settled costs.
-    assert spend.committed_usd == first_worst + Decimal("0.02")
+    # committed = the two served calls' settled costs; the timed-out
+    # request released its reservation (D92).
+    assert spend.committed_usd == Decimal("0.02")
     assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
 
 

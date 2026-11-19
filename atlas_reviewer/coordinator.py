@@ -172,6 +172,7 @@ from atlas_reviewer.limit_stop import LimitHit
 from atlas_reviewer.notes import quote_untrusted, recovered_note
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import (
+    KEY_OUT_OF_CREDIT,
     BoundaryError,
     ByokRefusedError,
     Clock,
@@ -604,6 +605,27 @@ def endpoint_class(model: LensModel) -> str:
     return ""
 
 
+def _credit_refusal(model: LensModel, per_lens_usd: Decimal) -> str:
+    """The up-front key-credit refusal (D92), or the empty string when
+    none applies. The planned review's minimum credit is the smaller of
+    the largest reservation one call holds -- the per-call input cap
+    priced at the endpoint's rates, the adapter's figure -- and the
+    per-lens dollar budget the plan itself prices one lens's work at: a
+    key that cannot fund that cannot start the review, whatever the
+    refits might shrink later. A model that carries no key-credit seam --
+    a dry run's scripted model, the tenant endpoint whose bounds are its
+    own caps and the operator's price table -- accepts, as does a key
+    that reports no credit limit to compare against."""
+    remaining = getattr(model, "remaining_credit_usd", None)
+    smallest = getattr(model, "smallest_call_reservation", None)
+    if not callable(remaining) or not callable(smallest):
+        return ""
+    left, one_call = remaining(), smallest()
+    if left is None or one_call is None or left >= min(one_call, per_lens_usd):
+        return ""
+    return KEY_OUT_OF_CREDIT
+
+
 def _rerank_note(
     files: Sequence[FileDiff], path_ranks: PathRanks | None, redactor: Redactor
 ) -> str:
@@ -872,6 +894,34 @@ def review_lenses(
             f"{read.note} {clamp_note}".strip() if clamp_note else read.note
         ),
     )
+    refusal = _credit_refusal(model, derivation.per_lens_usd)
+    if refusal:
+        # The key's remaining credit cannot fund the review's smallest
+        # call (D92): the review stops before any lens fans out, and the
+        # draft and the posted comment name the fixed cause instead of
+        # running a review that fails call after call into an
+        # incomplete-looking stop.
+        spend = Spend(
+            derived,
+            picker_spend[0],
+            picker_spend[1],
+            derivation=derivation,
+            settled_usd=picker_spend[1],
+        )
+        spend.halt(refusal)
+        stopped = tuple(
+            LensResult(
+                name, index, None, None, reason=f"not started: {refusal}"
+            )
+            for index, name in enumerate(lenses, start=1)
+        )  # fmt: skip
+        error = synthesize(
+            stopped,
+            spend=spend,
+            ceiling_note=derivation.ceiling_note,
+            endpoint_class=endpoint_class(model),
+        )
+        return _traced_review(event, trace, redactor, lambda active: error)
     return _traced_review(
         event,
         trace,
@@ -1789,10 +1839,9 @@ def _reassess_call(
     except KeyRefusedError as exc:
         # A refused key is a review error, not a spend (D92): the review's
         # spend halts with the fixed cause the draft and the post carry,
-        # and the refusal is never retried. The failed call keeps its
-        # reservation as spent (D43's settle rule, which the failed-call
-        # accounting change amends).
-        spend.settle(worst, None)
+        # and the refusal is never retried. The failed call settles at
+        # what its response reported -- $0 (D92).
+        spend.settle_failure(worst, None)
         spend.halt(exc.review_error)
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED, frozenset({Cause.MODEL_ERROR}), detail=str(exc)
@@ -2196,7 +2245,9 @@ def _decision_call(
         raise DecisionCallRefused(reserved[1])
     worst = reserved.worst
     if clock.monotonic() >= deadline:
-        spend.settle(worst, None)
+        # The reservation is released (D92): the call was never sent, so
+        # nothing was held in flight and nothing was billed.
+        spend.settle_failure(worst, None)
         raise DecisionCallRefused(
             "the review's deadline passed while the decision call "
             "reserved; the call was not sent"
@@ -2216,10 +2267,10 @@ def _decision_call(
         spend.halt()
         raise
     except TransportError:
-        spend.settle(worst, None)
+        spend.settle_failure(worst, None)
         raise
     except BoundaryError:
-        spend.settle(worst, None)
+        spend.settle_failure(worst, None)
         raise
     spend.settle(worst, reply.cost_usd)
     if not isinstance(reply, FinalReply):
@@ -2451,11 +2502,11 @@ def _carry_call(
         # The reservation fits immediately and never consults the clock,
         # so the wall check is ours (round-5 review of #748): the lens
         # loop ended at the deadline, and a billable call sent after it
-        # spends past the wall the review respects. The reservation
-        # stays accounted at its worst case -- the dollars were held --
-        # and the call is not sent; the carry fallback carries every
-        # prior finding as recorded.
-        spend.settle(worst, None)
+        # spends past the wall the review respects. The reservation is
+        # released (D92): the call was never sent, so nothing was held
+        # in flight and nothing was billed. The carry fallback carries
+        # every prior finding as recorded.
+        spend.settle_failure(worst, None)
         raise CarryCallRefused(
             "the review's deadline passed while the carry-forward "
             "reserved; the call was not sent"
@@ -2476,10 +2527,10 @@ def _carry_call(
         spend.halt()
         raise
     except TransportError:
-        spend.settle(worst, None)
+        spend.settle_failure(worst, None)
         raise
     except BoundaryError:
-        spend.settle(worst, None)
+        spend.settle_failure(worst, None)
         raise
     spend.settle(worst, reply.cost_usd)
     if not isinstance(reply, FinalReply):

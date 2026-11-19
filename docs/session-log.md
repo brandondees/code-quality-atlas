@@ -5787,6 +5787,40 @@ halts_the_spend_with_the_cause`).
 format, mypy, drift and the generated-tree sync run before the push; the
 eight mutants above are the round's only new ones.
 
+**Update (2026-11-19, part 2 — the failed-call accounting and the up-front
+credit check, on the stacked PR).** `Spend.settle_failure` settles a
+failed call at the cost its response reported — $0 when none is — and
+releases the reservation the call held only while in flight; the loop's
+transport, timeout and boundary failure paths settle through it, and so
+do the coordinator's own bounded calls (the re-assessment refusal, and
+the decision and carry-forward calls whose post-reservation wall check
+refuses to send — the never-sent reservation comes down, amending the
+round-5-of-#748 wording that kept the dollars held). A served call whose
+cost was never reported still keeps its reservation as spent (D43), and
+a settle above the worst case stays D82's tripwire. D50's refit path is
+unchanged, but a failed call no longer shrinks the next send's cap: the
+resend prices against the remainder the failure left, and the two
+refit-tracking tests now pin that the resend takes the model's cap again.
+The up-front check (`_credit_refusal` over the adapter's
+`remaining_credit_usd` and `smallest_call_reservation`) refuses before
+fan-out when the key's remaining credit is below the planned review's
+minimum — the smaller of one call's largest reservation and the per-lens
+dollar budget — with every planned lens NOT RUN on the fixed reason and
+the error draft and post from part 1 carrying the cause. A key with no
+credit figure to compare against, and a model with no key-credit seam,
+accepts. **Mutants, each applied by hand and killed** (bytecode cache
+deleted first): `settle_failure` keeping the worst case
+(`test_a_failed_call_settles_at_the_cost_its_response_reported`); the
+timeout handler keeping its reservation
+(`test_a_timeout_resend_takes_the_models_cap_again`); the pre-fan-out
+check dropped (the coordinator's
+`test_a_key_short_of_the_planned_minimum_refuses_before_any_lens_runs`
+and the CLI's test of the same behavior); the credit comparison closed
+at equality (`test_a_key_that_funds_the_planned_minimum_runs_the_
+review`'s at-the-boundary key); the decision call's and the carry call's
+never-sent releases dropped (their two wall-check tests); and the
+adapter's refusal text emptied (the CLI test).
+
 ## 2026-11-19 (same day) — #782/#783 fix round 1: the sites the first cut missed, the partial rule, the marker, and the waiter race
 
 The round-1 reviews on both PRs (the round-2 record on #782 names the two
