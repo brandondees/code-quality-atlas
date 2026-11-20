@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from atlas_reviewer.budget import (
     DEFAULT_REPO_DAILY_BUDGET_USD,
     DailySpend,
+    SourceNameError,
     repo_daily_budget_usd,
     skip_reason,
 )
@@ -803,7 +804,7 @@ def _backfill_crashed_spend(
             "measured": "backfilled",
         }
     )
-    named = progress.source
+    source_name = progress.source
     note = ""
     try:
         appended, gap = spend.record_once(
@@ -811,9 +812,9 @@ def _backfill_crashed_spend(
             progress.billed_usd,
             progress.calls,
             key,
-            source=named,
+            source=source_name,
         )
-    except ValueError:
+    except SourceNameError:
         try:
             appended, gap = spend.record_once(
                 event.repo, progress.billed_usd, progress.calls, key, source=""
@@ -827,7 +828,7 @@ def _backfill_crashed_spend(
             )
             return
         note = (
-            f"funding source {named!r} is not a source name; "
+            f"funding source {source_name!r} is not a source name; "
             "the bill was recorded without it"
         )
     except OSError as exc:
@@ -1353,10 +1354,10 @@ class Worker:
             return
         if cost is not None:
             amount, calls = Decimal(cost[1]), cost[0]
-            named = source
+            source_name = source
         elif isinstance(progress, Progress):
             amount, calls = progress.billed_usd, progress.calls
-            named = source or progress.source
+            source_name = source or progress.source
         else:
             return
         if attempt_key:
@@ -1376,15 +1377,15 @@ class Worker:
                 )
             return
         try:
-            self._spend.record(job.event.repo, amount, calls, source=named)
-        except ValueError:
+            self._spend.record(job.event.repo, amount, calls, source=source_name)
+        except SourceNameError:
             self._telemetry.record(
                 "service",
                 "spend source dropped",
                 fields,
                 status=ERROR,
                 error=(
-                    f"funding source {named!r} is not a source name; "
+                    f"funding source {source_name!r} is not a source name; "
                     "the bill was recorded without it"
                 ),
             )

@@ -580,6 +580,16 @@ per installation:
   store it cannot read refuses the check outright ("skipped: installation
   store unavailable") instead of reading as an unset cap.
 
+## funding-spend
+
+`python -m atlas_reviewer funding-spend --repo owner/name` prints one
+UTC day's settled model spend, grouped by the funding source that paid
+it. A line with no source prints as `(unset)`. `--day YYYY-MM-DD`
+selects another day; omitted, the command reads today. A missing file
+prints nothing and exits 0. An unreadable ledger exits 2, and a
+`--day` that is not a date exits 2. The command reads the ledger and
+does not write it, and it does not call a model.
+
 ## The installation store and the tenant-supplied endpoint (config slice S10, part A)
 
 A GitHub App installation (a user account or an org) can supply its own
