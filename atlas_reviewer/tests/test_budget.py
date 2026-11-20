@@ -374,6 +374,61 @@ def test_record_once_does_not_append_to_an_unreadable_ledger(tmp_path):
     assert "unreadable record" in gap
 
 
+def test_a_ledger_line_names_its_funding_source_only_when_it_has_one(tmp_path):
+    """A source is recorded and grouped. A line with no source omits the
+    field and groups as unattributed. The groups sum to the day's total.
+    A name that is not a source name is not written. Kills always writing
+    ``"source": ""``, and dropping the name."""
+    import json
+
+    from atlas_reviewer.budget import spend_file
+
+    spend = _spend(tmp_path)
+    spend.record("o/r", Decimal("0.40"), 1)
+    spend.record("o/r", Decimal("1.25"), 2, source="subs-a")
+    spend.record("o/r", Decimal("0.10"), 1, source="subs-b")
+    text = spend.file("o/r").read_text(encoding="utf-8")
+    lines = [json.loads(line) for line in text.splitlines()]
+    assert "source" not in lines[0]
+    assert lines[1]["source"] == "subs-a"
+    assert lines[2]["source"] == "subs-b"
+    groups, gap = spend.by_source("o/r")
+    assert gap == ""
+    assert groups == (
+        ("", Decimal("0.40")),
+        ("subs-a", Decimal("1.25")),
+        ("subs-b", Decimal("0.10")),
+    )
+    total, total_gap = spend.committed("o/r")
+    assert total_gap == ""
+    assert total == sum(amount for _name, amount in groups)
+    with pytest.raises(ValueError, match="source"):
+        spend.record("o/r", Decimal(1), 1, source="Not A Name")
+    assert spend.committed("o/r") == (total, "")
+    path = spend_file(tmp_path, "o/r", DAY)
+    path.write_text(path.read_text(encoding="utf-8") + "garbage\n", encoding="utf-8")
+    unreadable, why = spend.by_source("o/r")
+    assert unreadable is None
+    assert "unreadable" in why
+    missing, missing_gap = spend.by_source("no/file")
+    assert missing == ()
+    assert missing_gap == ""
+
+
+def test_record_once_keeps_the_source_on_the_one_line_it_writes(tmp_path):
+    spend = _spend(tmp_path)
+    assert spend.record_once(
+        "o/r", Decimal("1.10"), 2, "attempt-1", source="subs-a"
+    ) == (True, "")
+    assert spend.record_once("o/r", Decimal(9), 1, "attempt-1", source="subs-b") == (
+        False,
+        "",
+    )
+    groups, gap = spend.by_source("o/r")
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
+
+
 def test_record_once_needs_a_key(tmp_path):
     with pytest.raises(ValueError):
         _spend(tmp_path).record_once("o/r", Decimal("1.00"), 1, "")
