@@ -5038,23 +5038,24 @@ def test_config_from_env_parses_the_per_tenant_bounds(tmp_path):
 # ------------------------------------------------- the crash backfill (M1)
 
 
-def _progress_record(committed: str, calls: int, seq: int = 2) -> str:
-    return json.dumps(
-        {
-            "seq": seq,
-            "phase": "progress",
-            "step": "lens settled",
-            "status": "ok",
-            "lens": "tracing",
-            "lenses_done": 1,
-            "lenses_total": 4,
-            "calls": calls,
-            "settled_usd": "1.10",
-            "committed_usd": committed,
-            "reservation_usd": "10",
-            "reading": "src/x.py",
-        }
-    )
+def _progress_record(committed: str, calls: int, seq: int = 2, source: str = "") -> str:
+    fields: dict[str, object] = {
+        "seq": seq,
+        "phase": "progress",
+        "step": "lens settled",
+        "status": "ok",
+        "lens": "tracing",
+        "lenses_done": 1,
+        "lenses_total": 4,
+        "calls": calls,
+        "settled_usd": "1.10",
+        "committed_usd": committed,
+        "reservation_usd": "10",
+        "reading": "src/x.py",
+    }
+    if source:
+        fields["source"] = source
+    return json.dumps(fields)
 
 
 def _run_start_record(attempt: int = 1) -> str:
@@ -5127,6 +5128,39 @@ def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_pa
     assert backs and backs[0].fields["measured"] == "backfilled"
     assert backs[0].fields["committed_usd"] == "2.20"
     assert backs[0].fields["billed_usd"] == "1.10"
+
+
+def test_a_backfilled_crash_keeps_the_source_the_progress_named(tmp_path):
+    """The crash backfill attributes the bill to the source the progress
+    record named, and a record with no source writes no source field.
+    Kills dropping the name on the way into the ledger."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    _backfill_crashed_spend(spend, tmp_path, event, Telemetry(SystemClock()))
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
+    bare = PrEvent(OTHER, 9, SHA_B)
+    other = run_dir(tmp_path, bare)
+    other.mkdir(parents=True)
+    _append_events(
+        other / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3),
+    )
+    _backfill_crashed_spend(spend, tmp_path, bare, Telemetry(SystemClock()))
+    line = json.loads(spend.file(OTHER).read_text(encoding="utf-8").splitlines()[-1])
+    assert "source" not in line
+    assert spend.committed(OTHER) == (Decimal("1.10"), "")
 
 
 def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
@@ -6144,6 +6178,9 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("1.25")
+    groups, group_gap = spend.by_source(REPO)
+    assert group_gap == ""
+    assert groups == (("subs-a", Decimal("1.00")), ("subs-b", Decimal("0.25")))
 
 
 def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):

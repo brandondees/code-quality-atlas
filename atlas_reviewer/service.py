@@ -805,7 +805,11 @@ def _backfill_crashed_spend(
     )
     try:
         appended, gap = spend.record_once(
-            event.repo, progress.billed_usd, progress.calls, key
+            event.repo,
+            progress.billed_usd,
+            progress.calls,
+            key,
+            source=progress.source,
         )
     except OSError as exc:
         _record(
@@ -1124,7 +1128,7 @@ class Worker:
         # The first refusal this head advanced off. A later advance of
         # the same head does not replace it.
         self._head_causes.setdefault(job.key(), report.review_error)
-        self._cost_event(job, report)
+        self._cost_event(job, report, source=choice.name)
         self._telemetry.record(
             "service",
             "refusal advance",
@@ -1207,8 +1211,9 @@ class Worker:
         finally:
             if token is not None:
                 active_choice.reset(token)
+        source_name = choice.name if choice is not None else ""
         if job.superseded:
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.cancel.is_set():
@@ -1216,11 +1221,11 @@ class Worker:
             # again after the process starts. A newer head that landed
             # after the check above is SUPERSEDED, and that directory
             # still has to go.
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             self._stored_supersede(job, self._board.release_claim(job))
             return
         if not run.ok or run.report is None:
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             committed = self._settle(job, JobState.FAILED)
             if committed is JobState.SUPERSEDED:
                 self._note(job, committed, fields)
@@ -1235,13 +1240,15 @@ class Worker:
             return
         if self._advance_on_refusal(job, run.report, choice):
             return
-        self._cost_event(job, run.report)
+        self._cost_event(job, run.report, source=source_name)
         if not self._board.still_current(job):
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         self._publish(job, run.report)
 
-    def _cost_event(self, job: Job, report: ReviewReport | None) -> None:
+    def _cost_event(
+        self, job: Job, report: ReviewReport | None, *, source: str = ""
+    ) -> None:
         """The review's cost, logged when it settles (#702's measure-first
         rule): a finished review's cost comes from its draft's cost lines;
         a cancelled or failed one's from the progress figure of its own
@@ -1291,7 +1298,7 @@ class Worker:
                 )
             else:
                 fields["measured"] = "unknown"
-        self._record_spend(job, cost, progress, fields, attempt_key)
+        self._record_spend(job, cost, progress, fields, attempt_key, source)
         self._telemetry.record("service", "review cost", fields)
 
     def _record_spend(
@@ -1301,6 +1308,7 @@ class Worker:
         progress: object,
         fields: dict[str, str | int],
         attempt_key: str = "",
+        source: str = "",
     ) -> None:
         """Append the review's settled bill to the day's ledger (config
         slice S9, D81, D93). The figure is the review child's known bill
@@ -1326,14 +1334,16 @@ class Worker:
             return
         if cost is not None:
             amount, calls = Decimal(cost[1]), cost[0]
+            named = source
         elif isinstance(progress, Progress):
             amount, calls = progress.billed_usd, progress.calls
+            named = source or progress.source
         else:
             return
         if attempt_key:
             try:
                 _appended, gap = self._spend.record_once(
-                    job.event.repo, amount, calls, attempt_key
+                    job.event.repo, amount, calls, attempt_key, source=named
                 )
             except OSError as exc:
                 gap = f"{type(exc).__name__}: {exc}"
@@ -1347,7 +1357,7 @@ class Worker:
                 )
             return
         try:
-            self._spend.record(job.event.repo, amount, calls)
+            self._spend.record(job.event.repo, amount, calls, source=named)
         except OSError as exc:
             self._telemetry.record(
                 "service",
