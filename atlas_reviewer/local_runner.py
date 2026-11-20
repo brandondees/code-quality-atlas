@@ -27,6 +27,7 @@ import socket
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Self
 
@@ -99,7 +100,13 @@ class LocalSprites(FakeSprites):
             ) from exc
         return b"\x01" + stdout
 
-    def sweep(self, name: str) -> None:
+    def sweep(
+        self,
+        name: str,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         """The local sweep (D80 round 2), scoped to this runner's own
         processes: the machine running the tests has other work under the
         same user, and the live sweep's uid scope would kill it, so the
@@ -120,12 +127,12 @@ class LocalSprites(FakeSprites):
         # SIGKILL is asynchronous. One 50 ms sleep is not always enough
         # for a loaded runner to drop the process from the scan, so poll
         # until the deadline and then fail closed.
-        deadline = time.monotonic() + _SWEEP_REAP_S
+        deadline = monotonic() + _SWEEP_REAP_S
         while True:
-            time.sleep(0.05)
+            sleep(0.05)
             self._reap()
             survivors = self._stray_descendants()
-            if not survivors or time.monotonic() >= deadline:
+            if not survivors or monotonic() >= deadline:
                 break
         if survivors:
             raise BoundaryError(

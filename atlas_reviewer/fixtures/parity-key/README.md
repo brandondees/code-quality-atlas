@@ -55,7 +55,9 @@ enclosing function that misses the defect. For `pull_request.body` the
 quote has to contain one citation as an exact substring. A paraphrase is
 lost. Severity is compared case-insensitively. Partial does not count
 toward a pass. Anything else, including a finding that was not verified
-or a severity the record does not name, is **lost**. Each candidate is
-used at most once. Two lenses that report the same span count once. An
-unused major, in any capitalization, is an `extra_major`. An unused
-blocker is an extra and is not a major.
+or a severity the record does not name, is **lost**. `grade_findings`
+matches by candidate index. Each candidate is used at most once. Two
+candidates that cite one span for one key finding are two records: one
+matches, and the other is an extra. That extra counts in `extra_majors`
+when its severity is major. An unused blocker is an extra and is not a
+major.

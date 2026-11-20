@@ -524,3 +524,7 @@ def test_a_nonsense_pass_rule_is_refused():
         score_parity([], [], runs_required=1, found_in_at_least=0)
     with pytest.raises(EvalFormatError, match="positive integers"):
         score_parity([], [], runs_required="3", found_in_at_least=1)  # type: ignore[arg-type]
+    with pytest.raises(EvalFormatError, match="partial_counts_as_found"):
+        score_parity([], [], partial_counts_as_found="false")  # type: ignore[arg-type]
+    with pytest.raises(EvalFormatError, match="partial_counts_as_found"):
+        score_parity([], [], partial_counts_as_found=1)  # type: ignore[arg-type]

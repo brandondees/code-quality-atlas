@@ -18,6 +18,7 @@ from types import MappingProxyType
 
 import pytest
 
+from atlas_reviewer import local_runner
 from atlas_reviewer.bridge import (
     DEFAULT_LIMITS,
     MUTATION_SCRIPT,
@@ -46,7 +47,7 @@ from atlas_reviewer.bridge_staging import (
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, FakeSprites, MemoryLedger
-from atlas_reviewer.local_runner import LocalSprites
+from atlas_reviewer.local_runner import _SWEEP_REAP_S, LocalSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.telemetry import Telemetry
@@ -1984,25 +1985,42 @@ def test_the_sweep_kills_a_runner_descendant(tmp_path):
             daemon.wait()
 
 
-def test_the_sweep_waits_out_a_slow_sigkill():
-    """A process still listed after the first reap check is not a survivor.
+def test_the_sweep_waits_out_a_slow_sigkill(monkeypatch: pytest.MonkeyPatch):
+    """Three scans, on a clock the test owns.
 
-    One 50 ms sleep lost this race on a loaded CI runner. The sweep polls
-    until the process is gone, and only then fails closed.
+    The first two scans still list the process. The third finds it gone.
+    The reap window is half a second of the clock passed in. A wall clock
+    that jumps a second on each sleep used to fail the sweep while the
+    process was still listed.
     """
+    wall = {"t": 0.0}
+
+    def wall_now() -> float:
+        return wall["t"]
+
+    def wall_sleep(_seconds: float) -> None:
+        wall["t"] += 1.0
+
+    monkeypatch.setattr(local_runner.time, "monotonic", wall_now)
+    monkeypatch.setattr(local_runner.time, "sleep", wall_sleep)
+    clock = FakeClock()
 
     class Slow(LocalSprites):
         def __init__(self) -> None:
             super().__init__()
-            self.seen = 0
+            self.scans = 0
 
         def _stray_descendants(self) -> set[int]:
-            self.seen += 1
-            if self.seen < 3:
+            self.scans += 1
+            if self.scans < 3:
                 return {os.getpid() + 4_194_304}
             return set()
 
-    Slow().sweep("cqa-slow")
+    slow = Slow()
+    slow.sweep("cqa-slow", monotonic=clock.monotonic, sleep=clock.advance)
+    assert slow.scans == 3
+    assert clock.t < _SWEEP_REAP_S
+    assert wall["t"] == 0.0
 
 
 def test_the_sweep_fails_closed_on_a_survivor():

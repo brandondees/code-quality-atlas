@@ -483,14 +483,15 @@ def score_parity(
 
     A finding passes when the sample has ``runs_required`` runs and the
     finding was found in ``found_in_at_least`` of them. Partial counts only
-    when ``partial_counts_as_found`` is set. An automatic failure is recorded
+    when ``partial_counts_as_found`` is true. A value that is not a bool is
+    refused, as are the other two overrides. An automatic failure is recorded
     on its run and fails the gate on its own; it does not drop that run from
     the sample. A run whose ``head_sha`` is not that pull request's
     ``reviewed_commit`` is one of those failures. A repeated run name, a
     repeated pull request, model, and repetition, or two models in one pull
     request's sample is refused.
     """
-    _check_rule(runs_required, found_in_at_least)
+    _check_rule(runs_required, found_in_at_least, partial_counts_as_found)
     _check_sample(runs)
     grouped = _group(findings)
     failures: list[str] = []
@@ -591,7 +592,9 @@ def _check_sample(runs: Sequence[ParityRun]) -> None:
         models[run.pr] = run.model
 
 
-def _check_rule(runs_required: int, found_in_at_least: int) -> None:
+def _check_rule(
+    runs_required: int, found_in_at_least: int, partial_counts_as_found: bool
+) -> None:
     if (
         isinstance(runs_required, bool)
         or isinstance(found_in_at_least, bool)
@@ -600,10 +603,12 @@ def _check_rule(runs_required: int, found_in_at_least: int) -> None:
         or runs_required < 1
         or found_in_at_least < 1
         or found_in_at_least > runs_required
+        or not isinstance(partial_counts_as_found, bool)
     ):
         raise EvalFormatError(
             "runs_required and found_in_at_least must be positive integers, "
-            "and found_in_at_least cannot exceed runs_required"
+            "and found_in_at_least cannot exceed runs_required; "
+            "partial_counts_as_found must be true or false"
         )
 
 
