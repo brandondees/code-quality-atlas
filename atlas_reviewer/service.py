@@ -36,6 +36,7 @@ from atlas_reviewer.budget import (
 )
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.funding import configured_model, load_funding_sources, sources_cover
 from atlas_reviewer.head_change import (
     DECISION_CANCEL,
     DECISION_KEEP,
@@ -65,6 +66,7 @@ from atlas_reviewer.installation_store import (
     retention_days,
 )
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.openrouter import MODEL_ID
 from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.repo_config import (
@@ -1603,6 +1605,9 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         # Validated here so a mistyped per-tenant bound stops the service
         # at boot, not the first review that reads it in the child.
         operator_repo_ceiling_max(env)
+        sources = load_funding_sources(env)
+        if sources is not None:
+            sources_cover(sources, configured_model(env, MODEL_ID))
     except ValueError as exc:
         raise ServiceError(str(exc)) from exc
     return ServiceConfig(
