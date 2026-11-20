@@ -143,7 +143,7 @@ def _load_file(path: Path) -> tuple[KeyFinding, ...]:
     body = _object(_read_json(path), path.name)
     _unknown(body, _FILE_KEYS, path.name)
     pr = _positive(body.get("pr"), f"{path.name} pr")
-    commit = _commit(body.get("reviewed_commit"), path.name)
+    commit = _commit(body.get("reviewed_commit"), f"{path.name} reviewed_commit")
     _text(body.get("source"), f"{path.name} source")
     raw = body.get("findings")
     if not isinstance(raw, list) or not raw:
@@ -282,7 +282,7 @@ def _ident(value: object, name: str) -> str:
 
 def _commit(value: object, name: str) -> str:
     if not isinstance(value, str) or _COMMIT.fullmatch(value) is None:
-        raise EvalFormatError(f"{name} reviewed_commit must be 40 lowercase hex")
+        raise EvalFormatError(f"{name} must be 40 lowercase hex")
     return value
 
 
@@ -309,7 +309,7 @@ def _strings(value: object, name: str) -> tuple[str, ...]:
 def _read_json(path: Path) -> object:
     try:
         text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, OSError) as exc:
         raise EvalFormatError(f"{path.name} cannot be read: {exc}") from exc
     try:
         return json.loads(text)
@@ -716,8 +716,9 @@ def load_runs(path: Path) -> tuple[ParityRun, ...]:
     """Every ``*.json`` file in ``path``, in file name order.
 
     Two runs of one pull request may not share a repetition. ``verified``
-    is required and is not defaulted. Comparison fields may be null. A key
-    this schema does not name is refused.
+    is required and is not defaulted. ``head_sha`` is 40 lowercase hex.
+    Comparison fields may be null, and so may ``lens``. A key this schema
+    does not name is refused.
     """
     if not path.is_dir():
         raise EvalFormatError(f"parity runs are not a directory: {path}")
@@ -747,7 +748,7 @@ def _parse_run(path: Path) -> ParityRun:
         pr=_positive(body.get("pr"), f"{path.name} pr"),
         model=_text(body.get("model"), f"{path.name} model"),
         repetition=_positive(body.get("repetition"), f"{path.name} repetition"),
-        head_sha=_text(body.get("head_sha"), f"{path.name} head_sha"),
+        head_sha=_commit(body.get("head_sha"), f"{path.name} head_sha"),
         findings=tuple(
             _candidate(item, f"{path.name} findings[{index}]")
             for index, item in enumerate(raw)
@@ -788,7 +789,8 @@ def _candidate(value: object, name: str) -> CitedFinding:
     end = _optional_line(body.get("end_line"), f"{name} end_line")
     if end is not None and (line is None or end < line):
         raise EvalFormatError(f"{name} end_line must be at or after line")
-    lens = _text(body["lens"], f"{name} lens") if "lens" in body else None
+    lens_value = body.get("lens")
+    lens = None if lens_value is None else _text(lens_value, f"{name} lens")
     return CitedFinding(
         _text(body.get("path"), f"{name} path"),
         quote,

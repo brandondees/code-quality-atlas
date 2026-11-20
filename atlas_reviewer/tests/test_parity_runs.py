@@ -109,6 +109,10 @@ def test_a_run_directory_round_trips_and_optional_counts_may_be_null(tmp_path: P
         (lambda body: body["findings"][0].pop("line"), "end_line must be"),
         (lambda body: body["findings"][0].update(lens="  "), "lens must be"),
         (lambda body: body.update(model="  "), "model must be a non-empty string"),
+        (
+            lambda body: body.update(head_sha="72c56eb"),
+            "head_sha must be 40 lowercase hex",
+        ),
     ],
 )
 def test_a_malformed_run_is_refused(tmp_path: Path, mutate, message: str):
@@ -131,6 +135,49 @@ def test_a_repeated_repetition_and_an_empty_directory_are_refused(tmp_path: Path
     (tmp_path / "b.json").write_text(json.dumps(_payload()), encoding="utf-8")
     with pytest.raises(EvalFormatError, match="repeats repetition"):
         load_runs(tmp_path)
+
+
+def test_a_null_lens_is_absent(tmp_path: Path):
+    body = _payload()
+    body["findings"][0]["lens"] = None
+    (tmp_path / "one.json").write_text(json.dumps(body), encoding="utf-8")
+    assert load_runs(tmp_path)[0].findings[0].lens is None
+
+
+def test_an_unreadable_run_file_exits_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = tmp_path / "bad.json"
+    target.write_text("{}", encoding="utf-8")
+    original = Path.read_text
+
+    def deny(self: Path, *args: object, **kwargs: object) -> str:
+        if self == target:
+            raise PermissionError("denied")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny)
+    with pytest.raises(EvalFormatError, match="cannot be read"):
+        load_runs(tmp_path)
+    code, out, err = _cli("eval-parity", "--runs", str(tmp_path))
+    assert code == 2
+    assert out == ""
+    assert "cannot be read" in err
+
+
+def test_a_run_headed_at_the_merged_commit_does_not_pass(tmp_path: Path):
+    runs = tmp_path / "runs"
+    shutil.copytree(_OFFLINE, runs)
+    merged = "72c56eb24d16025719c4d58ba921eadef94bb8a8"
+    for name in ("640-1.json", "640-2.json", "640-3.json"):
+        path = runs / name
+        body = json.loads(path.read_text(encoding="utf-8"))
+        body["head_sha"] = merged
+        path.write_text(json.dumps(body), encoding="utf-8")
+    code, out, err = _cli("eval-parity", "--runs", str(runs))
+    assert code == 1
+    assert err == ""
+    assert f"head_sha {merged} is not the reviewed commit" in out
 
 
 def test_a_run_file_that_is_not_json_is_refused(tmp_path: Path):
