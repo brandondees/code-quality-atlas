@@ -1944,6 +1944,49 @@ def test_a_refused_carry_call_keeps_the_findings_and_names_the_partial_stop(tmp_
     assert "the stop came after the lenses ran" in draft
 
 
+def test_a_refused_decision_call_makes_no_later_lens_turn(tmp_path):
+    """D92's fix round 2: a refused key on the delta decision call halts
+    the spend with the fixed cause, and the fallback that follows runs on
+    a halted spend -- every lens NOT RUN, no lens turn made. Kills the
+    dropped-handler mutant (the refusal falling to the plain boundary
+    re-raise, which neither halts nor stops the fallback's lens turns)."""
+
+    class RefusesFirstCall:
+        """The decision call is the delta review's first model call; the
+        refusal lands there, and any later call is a lens turn the halted
+        spend must not make."""
+
+        name = "refused-decision"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def output_tokens_within(self, request, budget):
+            return 0
+
+        def turn(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                raise KeyRefusedError(
+                    "OpenRouter HTTP 402 for "
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    review_error="model key out of credit",
+                )
+            raise AssertionError("no lens turn follows a refused decision call")
+
+    model = RefusesFirstCall()
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=_round_log_with_prior(tmp_path),
+        delta=_delta_scope(),
+    )  # fmt: skip
+    assert result.review_error == "model key out of credit"
+    assert [lens.state for lens in result.lenses] == [LensState.NOT_RUN]
+    assert model.calls == 1
+
+
 OTHER = "sweeping-for-security"
 OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
 _MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")

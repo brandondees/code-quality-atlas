@@ -411,10 +411,12 @@ class AgenticReview:
     review_error: str = ""
     """The fixed cause a refused key halted the review with (D92):
     `model key out of credit` or `model key refused`, the spend's own
-    halt cause. Non-empty means this is an error report, not a review --
-    the draft and the posted comment render it as the error it is, with
-    no Findings section to mistake for a clean bill. Empty on every
-    review that ran on a served key."""
+    halt cause. Non-empty means this draft is an error or a partial
+    record, not an ordinary review: when no lens ran clean before the
+    halt the draft is the error report, with no Findings section to
+    mistake for a clean bill, and when a lens did run clean the review is
+    partial -- the verified findings stand and the headline names what
+    did not run. Empty on every review that ran on a served key."""
 
     @property
     def reused_lenses(self) -> frozenset[str]:

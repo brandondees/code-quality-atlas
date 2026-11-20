@@ -2809,15 +2809,15 @@ def test_a_refused_key_on_the_agentic_picker_is_the_error_not_a_fallback(
     assert len(fake.chat_requests()) == 1
 
 
-def test_a_key_refused_mid_review_ends_the_review_as_the_error_it_is(
-    tmp_path, monkeypatch
-):
+def test_a_key_refused_mid_review_halts_and_posts_the_error(tmp_path, monkeypatch):
     """D92: a 402 during the lenses stops the review at once -- the
-    refused call is sent once, settles at $0, the spend halts with the
-    fixed cause, the second lens never starts, and the child exits
-    incomplete with the error draft instead of a review whose empty
-    Findings read clean. Kills the retry mutant (a second send), the
-    keep-the-worst settle mutant, and the dropped-halt mutant."""
+    refused call is sent once, the spend halts with the fixed cause, the
+    second lens never starts, and the child exits incomplete with the
+    error draft instead of a review whose empty Findings read clean. This
+    layer keeps the refused call's reservation as spent (D43's settle
+    rule); the failed-call accounting that books the refusal at $0 is
+    part 2's. Kills the retry mutant (a second send) and the dropped-halt
+    mutant."""
     from contextlib import ExitStack
 
     from atlas_reviewer.local_runner import LocalSprites, LocalTasks
