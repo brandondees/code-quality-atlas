@@ -59,6 +59,7 @@ from pathlib import Path
 
 from atlas_reviewer.diffs import DOCS, TESTS, risk_tier
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.funding import accepted_source_name
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 
 PROGRESS_PHASE = "progress"
@@ -75,6 +76,7 @@ FIELD_SETTLED_USD = "settled_usd"
 FIELD_HELD_USD = "held_usd"
 FIELD_RESERVATION_USD = "reservation_usd"
 FIELD_READING = "reading"
+FIELD_SOURCE = "source"
 LENS_SETTLED_STEP = "lens settled"
 PROGRESS_REVIEW_STEP = "review progress"
 
@@ -232,6 +234,10 @@ class Progress:
     answered (D93). A served call with no usage is not in this figure.
     A progress record that omits the field reads as held $0, so its
     settled figure is the bill."""
+    source: str = ""
+    """The operator funding source the review was pinned to (D94).
+    Empty when the record names none, including every record from
+    before the field existed."""
 
     @property
     def billed_usd(self) -> Decimal:
@@ -284,6 +290,7 @@ def _merge_progress(records: list[Mapping[str, object]]) -> Progress:
     reservation = Decimal(0)
     reading: frozenset[str] = frozenset()
     held = Decimal(0)
+    source = ""
     for fields in records:
         done = _int(fields.get(FIELD_LENSES_DONE), done)
         total = _int(fields.get(FIELD_LENSES_TOTAL), total)
@@ -293,7 +300,24 @@ def _merge_progress(records: list[Mapping[str, object]]) -> Progress:
         reservation = _decimal(fields.get(FIELD_RESERVATION_USD), reservation)
         reading = _reading(fields, reading)
         held = _decimal(fields.get(FIELD_HELD_USD), held)
-    return Progress(done, total, calls, committed, settled, reservation, reading, held)
+        source = _funding_source(fields, source)
+    return Progress(
+        done, total, calls, committed, settled, reservation, reading, held, source
+    )
+
+
+def _funding_source(fields: Mapping[str, object], previous: str) -> str:
+    """The source name a progress record carries.
+
+    A record that omits the field keeps the previous name. A blank
+    field clears it. A value that is not a source name keeps the
+    previous one, so a corrupt line cannot rename the review."""
+    if FIELD_SOURCE not in fields:
+        return previous
+    parsed = accepted_source_name(fields[FIELD_SOURCE])
+    if parsed is None:
+        return previous
+    return parsed
 
 
 def _is_run_start(line: str) -> bool:

@@ -410,6 +410,25 @@ def test_a_truncated_reading_value_falls_back_and_fails_safe(tmp_path):
     assert progress.reading  # fragments survive as tokens; nothing crashes
 
 
+def test_a_progress_source_survives_a_later_record_that_omits_it(tmp_path):
+    """A source name stays until a later record replaces it. A record
+    that omits the field keeps it. A value that is not a source name
+    does not replace it. A blank field clears it. Kills dropping the
+    field on merge, and accepting arbitrary text as a source name."""
+    path = _write(
+        tmp_path / "events.jsonl",
+        _event(source="subs-a", lenses_done=1),
+        _event(lenses_done=2),
+        _event(source="Not A Name", lenses_done=3),
+    )
+    progress = read_progress(path)
+    assert progress is not None
+    assert progress.source == "subs-a"
+    cleared = read_progress(_write(tmp_path / "cleared.jsonl", _event(source="")))
+    assert cleared is not None
+    assert cleared.source == ""
+
+
 def test_an_oversized_events_file_is_read_from_its_tail(tmp_path):
     """The reader's byte cap seeks to the tail rather than failing or
     reading unbounded: a progress record past the cap is still found
