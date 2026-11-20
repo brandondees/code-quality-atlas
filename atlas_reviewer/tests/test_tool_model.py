@@ -437,6 +437,34 @@ def test_the_largest_call_reservation_is_the_per_call_cap_priced():
     )
 
 
+def test_a_priced_200_with_no_choices_carries_its_cost():
+    """D92's fix round 2: `_choice`'s refusal sits between the cost
+    computation and the `_priced` raises, so an empty `choices` list on a
+    200 whose usage priced left `reported_cost` unset and the settle
+    released a real bill at $0. The refusal now carries the parsed cost.
+    Kills the unpriced-choice mutant, which would leave the served call
+    to settle at $0."""
+    from decimal import Decimal
+
+    lens, _fake = model(
+        reply(
+            {
+                "model": MODEL_ID,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "cost": "1.25",
+                    "is_byok": False,
+                },
+            }
+        )
+    )
+    with pytest.raises(BoundaryError, match="no choice") as caught:
+        lens.turn(request())
+    assert caught.value.reported_cost == Decimal("1.25")
+
+
 def test_a_response_too_large_is_not_a_transport_error():
     """Review Minor 2: `ResponseTooLargeError` is raised after the response
     arrived, so it is a model-level error, not a retryable transport one."""

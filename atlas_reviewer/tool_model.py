@@ -618,7 +618,13 @@ def _turn(
         raise _priced(
             BoundaryError(f"OpenRouter served {served!r}, not {model_id}"), cost
         )
-    choice = _choice(data)
+    try:
+        choice = _choice(data)
+    except BoundaryError as exc:
+        # A 200 that priced and then named no choice is a served call:
+        # the refusal carries the cost it just computed (D92's fix round
+        # 2), so the settle books the bill instead of releasing it.
+        raise _priced(exc, cost) from None
     finish = choice.get("finish_reason")
     _remember(
         data, usage_obj, served, finish, reasoning_hint=reasoning_hint

@@ -1789,6 +1789,126 @@ def test_a_reservation_that_committed_before_the_halt_is_released(monkeypatch):
     assert spend.committed_usd == Decimal("0.00")
 
 
+def test_a_waiter_inside_the_reserve_wait_commits_nothing_when_the_key_refuses():
+    """D92's fix round 2: the halt checks live inside `_reserve` itself,
+    so the test catches the waiter INSIDE `reserve`'s wait -- the pricing
+    returns before the refusal lands, the worst case does not fit, and the
+    waiter parks in the backpressure wait; the refusal's settle and halt
+    land under one lock while it waits. The waiter then returns the halt
+    outcome, commits nothing, and takes no call slot. Kills both
+    dropped-halt-check mutants in `_reserve`: without the post-wait check
+    the waking waiter commits in the released room (and takes the slot),
+    and without the pre-wait check a reserve entered after the halt
+    commits the same way -- phase 2 reserves after the halt and pins the
+    call count."""
+    spend = Spend(replace(LIMITS, reservation_usd=Decimal("3.00")).resolve())
+    assert spend.reserve(Decimal("2.00")) is None  # the in-flight call
+    entered_wait = threading.Event()
+    sent: list[object] = []
+    outcome: dict[str, object] = {}
+
+    class SignalingClock:
+        """Signals the first monotonic read -- the wait loop's own -- so
+        the test knows the waiter is inside `reserve`."""
+
+        def __init__(self) -> None:
+            self._t = 0.0
+
+        def monotonic(self):
+            entered_wait.set()
+            return self._t
+
+    class Waiter:
+        name = "waiter"
+
+        def worst_case_usd(self, req):
+            return Decimal("2.00")
+
+        def turn(self, req):
+            sent.append(req)
+            raise AssertionError("the waiter's call is not sent")
+
+    ask = TurnRequest("system", (UserText("Review the change."),), ())
+
+    def run_waiter():
+        try:
+            outcome["value"] = _reserve_call(
+                Waiter(), ask, spend, SignalingClock(), time.monotonic() + 5
+            )
+        except BaseException as exc:  # noqa: BLE001 -- the test reads it
+            outcome["error"] = repr(exc)
+
+    thread = threading.Thread(target=run_waiter)
+    thread.start()
+    assert entered_wait.wait(5)
+    # The in-flight call is the one the key refused: one locked settle and
+    # halt while the waiter sits inside the reserve's wait.
+    spend.fail_and_halt(Decimal("2.00"), None, "model key out of credit")
+    thread.join(5)
+    assert "error" not in outcome
+    assert outcome["value"] == (Cause.MODEL_ERROR, HALTED_CALL)
+    assert sent == []
+    assert spend.calls == 1
+    # Phase 2: a reserve entered after the halt commits nothing either --
+    # the pre-wait check is what this phase pins.
+    after = _reserve_call(Waiter(), ask, spend, FakeClock(), time.monotonic() + 5)
+    assert after == (Cause.MODEL_ERROR, HALTED_CALL)
+    assert spend.calls == 1
+    assert spend.committed_usd == Decimal("0.00")
+
+
+def test_a_fitted_reservation_that_committed_before_the_halt_is_released(
+    monkeypatch,
+):
+    """D92's fix round 2: `_reserve_call` releases a FITTED reservation
+    that committed before the halt showed, the same rule the unfitted
+    release pins -- the caller returns the halt's outcome and never sends
+    the call it reserved. The full-cap reserve is refused, the fit prices
+    a smaller cap whose reserve commits, and the halt lands inside that
+    reserve. Kills the dropped-fitted-release mutant, which would leave
+    the unsent fitted call's worst case booked."""
+    spend = Spend(
+        replace(
+            LIMITS, reservation_usd=Decimal("1.00"), min_output_tokens=1_000
+        ).resolve()
+    )
+    real_reserve = spend.reserve
+    reserves = {"n": 0}
+
+    def reserve_then_halt(worst, clock=None, wait_until=None):
+        refused = real_reserve(worst, clock=clock, wait_until=wait_until)
+        reserves["n"] += 1
+        if reserves["n"] == 2 and refused is None:
+            # The halt lands in the fitted reserve's own window, between
+            # its commit and the caller's halted check.
+            spend.halt("model key out of credit")
+        return refused
+
+    monkeypatch.setattr(spend, "reserve", reserve_then_halt)
+
+    class Fittable:
+        name = "fittable"
+
+        def worst_case_usd(self, req):
+            return Decimal("1.50") if req.max_output_tokens is None else Decimal("0.40")
+
+        def output_tokens_within(self, req, budget):
+            return 5_000
+
+        def turn(self, req):
+            raise AssertionError("the halted call is not sent")
+
+    ask = TurnRequest("system", (UserText("Review the change."),), ())
+    outcome = _reserve_call(Fittable(), ask, spend, FakeClock(), time.monotonic() + 5)
+    assert outcome == (Cause.MODEL_ERROR, HALTED_CALL)
+    assert reserves["n"] == 2
+    # Only the fitted reserve committed: the full-cap one was refused
+    # before any commit, and the fitted one's release brought the dollars
+    # back down.
+    assert spend.calls == 1
+    assert spend.committed_usd == Decimal("0.00")
+
+
 def test_a_priced_response_the_turn_rejected_settles_at_its_cost(tmp_path):
     """D92's fix round: a served call whose response priced and whose turn
     then failed settles at the parsed cost -- the real bill -- not at $0

@@ -592,7 +592,13 @@ def _tenant_turn(
             BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}"),
             cost,
         )
-    choice = _choice(data)
+    try:
+        choice = _choice(data)
+    except BoundaryError as exc:
+        # The same priced-refusal rule as the operator path (D92's fix
+        # round 2): the response was served and priced at the operator's
+        # table, so the refusal carries that cost.
+        raise _priced(exc, cost) from None
     finish = choice.get("finish_reason")
     _remember(data, usage_obj, served, finish)
     if finish == "length":

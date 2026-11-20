@@ -1776,9 +1776,11 @@ def _place_call(
     """One model call: price it, reserve that, send it, settle it. Split
     from `run_attempt` so each stays under the complexity gate. An
     `AttemptOutcome` is a cut already recorded on `p`; a str is a failed
-    call the loop may retry (D49), its reservation committed, since the
-    provider may still have billed it; `_TimeoutRetry` sends the outer
-    loop back around with the request queued as D58's timeout retry."""
+    call's retry text (D49), and its reservation is whatever the three-way
+    settle just booked -- the parsed cost of a served call, the kept
+    reservation of a written request, or the $0 of a definite refusal;
+    `_TimeoutRetry` sends the outer loop back around with the request
+    queued as D58's timeout retry."""
     reserved = _reserve_call(model, request, spend, clock, wait_until)
     if not isinstance(reserved, _Reserved):
         return p.cut(*reserved)

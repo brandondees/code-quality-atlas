@@ -408,6 +408,34 @@ def test_a_quota_error_names_itself():
     assert CREDENTIALS.key not in str(exc.value)
 
 
+def test_a_priced_200_with_no_choices_carries_the_price_table_cost():
+    """D92's fix round 2: the tenant path's `_choice` refusal sits between
+    the price-table pricing and the `_priced` raises, so an empty
+    `choices` list on a 200 the table priced left `reported_cost` unset
+    and the settle released a real bill at $0. The refusal now carries the
+    price-table cost. Kills the unpriced-choice mutant on the tenant
+    path."""
+    from decimal import Decimal
+
+    body = json.dumps(
+        {
+            "id": "x",
+            "model": "openai/gpt-4o",
+            "choices": [],
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 200},
+        }
+    ).encode()
+    provider, _transport = _provider(
+        [(200, body)],
+        catalog=lambda _path: _catalog_doc(prompt="0.000003", completion="0.000015"),
+    )
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    with pytest.raises(BoundaryError, match="no choice") as caught:
+        model.turn(_request(UserText("go")))
+    assert caught.value.reported_cost == Decimal("0.006")
+
+
 def test_an_endpoint_error_names_the_status():
     provider, _transport = _provider([(503, b"down")])
     provider.preflight()

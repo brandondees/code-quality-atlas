@@ -5921,6 +5921,27 @@ dropped from the boundary settle, the adapter's attachment dropped, the
 timeout booking flipped back to the release, and `fail_and_halt` settling
 without ever setting the flag (the race restored).
 
+**Correction (2026-11-19, part 2's fix round 2 — the mutant claims and
+the wait, restated).** The part-2 fix round's entry claimed its waiter
+test killed the two dropped-halt-check mutants in `_reserve`; the round-2
+review re-applied them and both survived — the test parks inside pricing,
+so the waiter hits `_reserve_call`'s own halted check and never reaches
+`reserve`. A new test parks the waiter inside `reserve`'s backpressure
+wait itself (a clock that signals the wait loop's first monotonic read),
+fails the held call with the refusal while it waits, and pins the halt
+outcome, an empty `sent`, the call count and the $0 — then reserves once
+more after the halt, which pins the pre-wait check the first phase cannot
+reach; each guard's deletion fails it now. The entry's fitted-release
+claim was accurate but untested; the new fitted-reservation test (a
+full-cap reserve refused, the fitted reserve committing, the halt landing
+inside it) kills the dropped-fitted-release mutant. The `_choice`
+refusals — operator and tenant, both between the cost computation and
+the `_priced` raises — now carry the priced cost, each with its own test
+(the operator one pins `usage.cost` 1.25; the tenant one pins the
+price-table cost on `prompt_tokens` 1000 and `completion_tokens` 200 at
+the operator's rates), and `_place_call`'s docstring says a retry string
+carries whatever the three-way settle booked.
+
 ## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
 
 The live code-quality-atlas bot reviewed both heads; its findings were

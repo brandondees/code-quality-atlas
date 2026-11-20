@@ -2848,6 +2848,8 @@ def test_a_key_short_of_its_planned_minimum_refuses_before_any_lens_fans_out(
     assert "## Findings" not in draft
     # No model call was made: the refusal came before any lens fanned out.
     assert fake.chat_requests() == []
+
+
 def test_a_key_refused_mid_review_halts_and_posts_the_error(tmp_path, monkeypatch):
     """D92: a 402 during the lenses stops the review at once -- the
     refused call is sent once, the spend halts with the fixed cause, the
