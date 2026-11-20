@@ -6068,25 +6068,28 @@ such pattern to fix.
 
 ## 2026-11-20 — parity key and the offline k-of-3 gate (#713, D71)
 
-The seven protocol Minors are a checked-in key under
+Five protocol Minors are a checked-in key under
 `atlas_reviewer/fixtures/parity-key/`, scored by `score_parity` and by
-`python -m atlas_reviewer eval-parity`. A finding is found when a verified
-citation shares a line with its span (`SPAN_SLACK` is 0) and the severity
-is at least minor. The pull request body is found by an exact citation,
-and a paraphrase is lost. Partial is a nit on that span, or the right
-function at the wrong line, and it does not count. A finding passes when
-it was found in at least 2 of a 3-run sample. A missed key finding fails.
-An extra does not. A selected lens not run or failed, coverage not
-complete, a limit stop, or a lens the key names that the run did not
-select fails that run even when every finding was found. The report
-carries the comparison fields null when a run omits them, so a later
-Sonnet-versus-Haiku run can drop in without a report change. That
-comparison was not run. No model was called, and no Fly app, secret, or
-deploy changed. The six files under
+`python -m atlas_reviewer eval-parity`. The Nov 14 trial named seven.
+`640-m2` and `640-m3` are not records: at `72c56eb` the hook raises
+`PostHookMissing` and the caller records the refusal, and both D46 lines
+already name D48. Grading those spans would fail a review that reports
+nothing there. A finding is found when a verified citation sits inside
+its span (`SPAN_SLACK` is 0) and the severity is at least minor. A
+citation of the whole function overlaps and is partial. The pull request
+body is found by an exact citation, and a paraphrase is lost. Partial is
+a nit on that span, a wider citation, or the right function at the wrong
+line, and it does not count. A finding passes when it was found in at
+least 2 of a 3-run sample. A missed key finding fails. An extra does not.
+A selected lens not run or failed, coverage not complete, a limit stop,
+or a lens the key names that the run did not select fails that run even
+when every finding was found. The report carries the comparison fields
+null when a run omits them, so a later Sonnet-versus-Haiku run can drop
+in without a report change. That comparison was not run. No model was
+called, and no Fly app, secret, or deploy changed. The six files under
 `atlas_reviewer/fixtures/parity-offline/` are scorer fixtures that find
-every finding; they are not a measurement. Spans were read at the reviewed
-commits. `661-m2` is `rounds.py` 202–209; the trial's `coordinator.py`
-range does not format the count. `640-m2` raises `PostHookMissing` and the
-caller records the refusal. `640-m3`'s two lines already name D48. D71
-records the anchors, the grade, and the tests. The stack is the key
-loader, the grade, the in-memory gate, then this command.
+every graded finding; they are not a measurement. Spans were read at the
+reviewed commits. `661-m2` is `rounds.py` 202–209; the trial's
+`coordinator.py` range does not format the count. D71 records the
+anchors, the grade, and the tests. The stack is the key loader, the
+grade, the in-memory gate, then this command.
