@@ -1,6 +1,8 @@
 # Parity key
 
-The directory holds the seven protocol Minors. The gate grades all seven.
+The directory holds the five protocol Minors that are defects at the
+reviewed commit. The Nov 14 trial named seven. `640.json` records why
+`640-m2` and `640-m3` are not records.
 One JSON file is one pull request. A later protocol-reviewed pull request
 joins the key by adding another file in this directory; ids must stay unique.
 The loader is `atlas_reviewer.parity_key.load_key`. It checks the schema.
@@ -20,7 +22,7 @@ entry that contains the span. `pull_request.body` has no line. Its
 citation. `needs` is what reaching the finding took: `ci`, `read`,
 `run_tests`, or `mutate`. `lenses` names the owner lens.
 
-## The seven findings
+## The five findings
 
 | Id | Reviewed commit | Span | What the record holds |
 |---|---|---|---|
@@ -29,7 +31,13 @@ citation. `needs` is what reaching the finding took: `ci`, `read`,
 | `661-m3` | same | `atlas_reviewer/rounds.py` 184–186 | `break` after `continue` in `prior_blocks`. |
 | `661-m4` | same | `atlas_reviewer/rounds.py` 210–219 | The `findings_omitted` gate. The span starts at 210 so it does not cover 661-m2. |
 | `640-m1` | `72c56eb24d16025719c4d58ba921eadef94bb8a8` | `atlas_reviewer/service_queue.py` 329 | `begin_post`'s cancel check. `still_current` is a different method. |
-| `640-m2` | same | `atlas_reviewer/service_post.py` 232–234 | `check is None` raises `PostHookMissing`. The caller records the refusal. |
-| `640-m3` | same | `docs/open-questions.md` 62, or `atlas_reviewer/README.md` 14 | Both lines already name D48. Either citation counts. |
+
+## Named by the trial, and not records
+
+`640-m2` is `service_post.py` 232–234. At the reviewed commit those lines
+raise `PostHookMissing`, and `service.py` 430–431 records the refusal.
+`640-m3` is `docs/open-questions.md` line 62 and `atlas_reviewer/README.md`
+line 14. At the reviewed commit both lines already say D46 amends D48.
+A key finding there would grade a true report as a miss.
 
 Line numbers are the reviewed commit's, not current main's.

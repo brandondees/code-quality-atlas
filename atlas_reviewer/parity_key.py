@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The 7-Minor parity key.
+"""The parity key: five graded protocol Minors.
 
 A key file is one pull request's verified protocol findings. Adding a
 protocol-reviewed pull request is another JSON file in the same directory;
@@ -179,6 +179,9 @@ def _spans_cover(
     for span in code:
         if not any(_covers(outer, span) for outer in encloses):
             raise EvalFormatError(f"{name} span is outside its enclosing function")
+    for outer in encloses:
+        if not any(_covers(outer, span) for span in code):
+            raise EvalFormatError(f"{name} enclosing span covers no defect")
 
 
 def _covers(outer: Span, inner: Span) -> bool:

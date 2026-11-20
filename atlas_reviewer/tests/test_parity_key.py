@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The parity key: the seven protocol Minors and the loader that refuses a bad record."""
+"""The parity key: the five graded protocol Minors and the loader that refuses a bad record."""
 
 import json
 from pathlib import Path
@@ -56,35 +56,18 @@ def _write(directory: Path, name: str, payload: object) -> None:
     (directory / name).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_the_checked_in_key_is_the_seven_protocol_minors():
+def test_the_checked_in_key_grades_the_five_findings_that_hold():
     findings = load_key(KEY_DIR)
     by_id = {item.id: item for item in findings}
-    assert list(by_id) == [
-        "640-m1",
-        "640-m2",
-        "640-m3",
-        "661-m1",
-        "661-m2",
-        "661-m3",
-        "661-m4",
-    ]
+    assert list(by_id) == ["640-m1", "661-m1", "661-m2", "661-m3", "661-m4"]
+    note = (KEY_DIR / "640.json").read_text(encoding="utf-8")
+    assert "640-m2" in note and "PostHookMissing" in note
+    assert "640-m3" in note and "D48" in note
     cancel = by_id["640-m1"]
     assert cancel.reviewed_commit == _QUEUE
     assert cancel.spans[0] == Span("atlas_reviewer/service_queue.py", 329, 329)
     assert cancel.lenses == ("reviewing-test-quality",)
     assert cancel.needs == ("mutate",)
-    hook = by_id["640-m2"]
-    assert hook.spans[0] == Span("atlas_reviewer/service_post.py", 232, 234)
-    assert hook.lenses == ("hunting-silent-failures",)
-    assert "PostHookMissing" in hook.source
-    decision = by_id["640-m3"]
-    assert [span.path for span in decision.spans] == [
-        "docs/open-questions.md",
-        "atlas_reviewer/README.md",
-    ]
-    assert decision.spans[0].line_start == 62
-    assert decision.spans[1].line_start == 14
-    assert decision.lenses == ("reviewing-decision-lifecycle",)
     body = by_id["661-m1"]
     assert body.reviewed_commit == _COMMIT
     assert body.spans[0] == Span(BODY)
@@ -189,6 +172,15 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
                 encloses=[{"path": "a.py", "line": 1, "end_line": 2}]
             ),
             "outside its enclosing function",
+        ),
+        (
+            lambda body: body["findings"][0].update(
+                encloses=[
+                    {"path": "a.py", "line": 1, "end_line": 10},
+                    {"path": "other.py", "line": 1, "end_line": 4},
+                ]
+            ),
+            "covers no defect",
         ),
         (
             lambda body: body["findings"][0].update(
