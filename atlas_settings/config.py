@@ -33,7 +33,7 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 
 from atlas_reviewer.installation_store import ENV_STORE_KEY
 from atlas_settings.phrases import CAP_REFUSED
@@ -138,7 +138,10 @@ def settings_config(env: Mapping[str, str] | None = None) -> SettingsConfig:
     store_key = environ[ENV_STORE_KEY].strip()
     try:
         Fernet(store_key.encode("ascii"))
-    except (ValueError, InvalidToken, UnicodeEncodeError, TypeError):
+    except ValueError:
+        # Building a Fernet from bytes raises ValueError (binascii.Error
+        # among them; UnicodeEncodeError is its subclass), the same shape
+        # the store's own open() check catches.
         raise SettingsConfigError(
             f"{ENV_STORE_KEY} must be a valid Fernet key"
         ) from None
