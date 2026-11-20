@@ -49,17 +49,22 @@ class RateLimiter:
             now = self._now()
             if len(self._hits) >= _MAX_RATE_KEYS:
                 # The rare path: the table is at its cap, so the walk
-                # runs — the stale keys drop first, and any that still
-                # fill the table give up the oldest (the key whose
-                # newest hit is furthest back). The walk never runs
-                # below the cap, so the common call filters its own
-                # key's hits and walks nothing else.
+                # runs — but it drops only keys whose newest hit is
+                # already outside that key's own window. A live key's
+                # hit log is its budget; deleting it would hand the
+                # caller a fresh allowance, so a key inside its window
+                # is never deleted, whatever pressure the table is
+                # under. The walk never runs below the cap, so the
+                # common call filters its own key's hits and walks
+                # nothing else.
                 for other, (window, stamps) in list(self._hits.items()):
-                    if not stamps or now - max(stamps) >= window:
+                    if other != key and stamps and now - max(stamps) >= window:
                         del self._hits[other]
-                while len(self._hits) >= _MAX_RATE_KEYS:
-                    oldest = min(self._hits, key=lambda k: max(self._hits[k][1]))
-                    del self._hits[oldest]
+                if len(self._hits) >= _MAX_RATE_KEYS and key not in self._hits:
+                    # The table is full of in-window keys and the caller
+                    # has no row of its own: refuse, rather than delete
+                    # someone's live budget to make room.
+                    return False
             hits = [
                 t for t in self._hits.get(key, (window_s, []))[1] if now - t < window_s
             ]
