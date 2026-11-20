@@ -79,6 +79,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, TypeGuard
 
+from atlas_reviewer.funding import accepted_source_name
 from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError
@@ -657,11 +658,14 @@ class DailySpend:
         calls: int,
         *,
         at: datetime | None = None,
+        source: str = "",
     ) -> None:
         """Append one settled review's bill to the day's file.
         One `os.write` of one line under `O_APPEND` is the append; a
         write that raises leaves the file as it was and the caller names
-        the gap."""
+        the gap. ``source`` is the funding source the bill came from.
+        Empty omits the field, so a line from before sources, and a
+        review that had no list, stay unattributed."""
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
         self._append(
@@ -672,6 +676,7 @@ class DailySpend:
                 ).isoformat(),
                 "calls": calls,
                 "committed_usd": str(amount_usd),
+                **_source_fields(source),
             },
         )
 
@@ -683,6 +688,7 @@ class DailySpend:
         key: str,
         *,
         at: datetime | None = None,
+        source: str = "",
     ) -> tuple[bool, str]:
         """Append one attempt's committed spend to the day's file **once
         per key**, as `(appended, gap)`.
@@ -715,6 +721,7 @@ class DailySpend:
                 "calls": calls,
                 "committed_usd": str(amount_usd),
                 "key": key,
+                **_source_fields(source),
             },
         )
         return True, ""
@@ -782,6 +789,74 @@ class DailySpend:
         if cap is not None and total >= cap:
             return CAP_REACHED, ""
         return "", ""
+
+    def by_source(
+        self, repo: str, *, day: date | None = None
+    ) -> tuple[tuple[tuple[str, Decimal], ...] | None, str]:
+        """Settled spend grouped by funding source, in first-seen order.
+
+        A line with no source is the group ``""``. The groups sum to
+        ``committed`` for the same file. An unreadable line is
+        ``(None, gap)``, the same fail-closed reading as ``committed``.
+        A missing file is no spend."""
+        path = (
+            self.file(repo) if day is None else spend_file(self.state_root, repo, day)
+        )
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return (), ""
+        except OSError as exc:
+            return None, f"the day's spend file could not be read: {exc}"
+        order: list[str] = []
+        totals: dict[str, Decimal] = {}
+        for number, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            parsed = _record_source(line)
+            if parsed is None:
+                return None, (
+                    "the day's spend file has an unreadable record (line "
+                    f"{number}), so the day's total is unknown and the "
+                    "budget holds until the file is repaired"
+                )
+            amount, source = parsed
+            if source not in totals:
+                order.append(source)
+                totals[source] = Decimal(0)
+            totals[source] += amount
+        return tuple((name, totals[name]) for name in order), ""
+
+
+def _source_fields(source: str) -> dict[str, str]:
+    """The ledger's source field, or nothing when the review had no source.
+
+    A name that is not a source name is refused rather than written."""
+    if source == "":
+        return {}
+    if accepted_source_name(source) != source:
+        raise ValueError(f"funding source {source!r} is not a source name")
+    return {"source": source}
+
+
+def _record_source(line: str) -> tuple[Decimal, str] | None:
+    """One line's bill and source, or None when the line is not a record.
+
+    A missing source is unattributed. A source that is not a source name
+    is not a record this module wrote."""
+    amount = _record_amount(line)
+    if amount is None:
+        return None
+    try:
+        data = json.loads(line)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict) or "source" not in data:
+        return amount, ""
+    source = accepted_source_name(data.get("source"))
+    if source is None:
+        return None
+    return amount, source
 
 
 def _record_amount(line: str) -> Decimal | None:
