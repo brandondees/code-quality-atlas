@@ -101,6 +101,7 @@ from atlas_reviewer.egress import TenantEndpointTransport
 from atlas_reviewer.eval_harness import EvalFormatError, load_directory
 from atlas_reviewer.evidence import PullInfo, Remark, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
+from atlas_reviewer.funding import funding_byok
 from atlas_reviewer.gather import Collected, pr_commits
 from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import (
@@ -354,6 +355,7 @@ def _select_provider(
                 require_zdr=False if args.no_require_zdr else None,
             )
         )
+        provider.byok_source = funding_byok(env)
     telemetry.span("model preflight", "key status", provider.preflight)
     return provider
 

@@ -876,6 +876,78 @@ def test_non_retryable_errors_stop_at_once():
     assert len(fake.chat_requests()) == 1
 
 
+def _credit_low_body(
+    *, typed: bool = True, phrase: str = "credit balance is too low"
+) -> dict:
+    error: dict[str, str] = {"message": f"Your {phrase} to access the API. sk-secret"}
+    if typed:
+        error["type"] = "invalid_request_error"
+    return {"error": error}
+
+
+def test_a_byok_credit_balance_400_is_out_of_credit_and_the_body_stays_off_the_error():
+    """On a BYOK source, Anthropic's credit-low 400 is the D92 out-of-credit
+    refusal, after one chat request. The error names the status, not the
+    body and not the key. Kills treating that 400 as a per-call error, and
+    copying the body onto the exception."""
+    fake = OpenRouterFake(reply(_credit_low_body(), status=400))
+    chosen = provider(fake)
+    chosen.byok_source = True
+    with pytest.raises(KeyRefusedError, match="HTTP 400") as refused:
+        chosen.complete(SMALL)
+    assert refused.value.review_error == "model key out of credit"
+    assert len(fake.chat_requests()) == 1
+    assert "sk-secret" not in str(refused.value)
+    assert "credit balance" not in str(refused.value)
+
+
+def test_the_same_400_is_a_boundary_error_unless_it_is_a_byok_credit_refusal():
+    """The pilot key keeps today's 400. A BYOK 400 that is not both the
+    error type and the credit phrase stays a per-call error. A 402 on a
+    BYOK source is still out of credit. A 429 is not a key refusal.
+    Kills classifying every 400 as out of credit."""
+    pilot = OpenRouterFake(reply(_credit_low_body(), status=400))
+    with pytest.raises(BoundaryError, match="HTTP 400") as plain:
+        provider(pilot).complete(SMALL)
+    assert not isinstance(plain.value, KeyRefusedError)
+    for body in (
+        _credit_low_body(typed=False),
+        _credit_low_body(phrase="max_tokens is too large"),
+        {"error": {}},
+    ):
+        fake = OpenRouterFake(reply(body, status=400))
+        chosen = provider(fake)
+        chosen.byok_source = True
+        with pytest.raises(BoundaryError, match="HTTP 400") as other:
+            chosen.complete(SMALL)
+        assert not isinstance(other.value, KeyRefusedError)
+        assert len(fake.chat_requests()) == 1
+    exhausted = OpenRouterFake(reply({}, status=402))
+    byok = provider(exhausted)
+    byok.byok_source = True
+    with pytest.raises(KeyRefusedError) as dry:
+        byok.complete(SMALL)
+    assert dry.value.review_error == "model key out of credit"
+    from atlas_reviewer.openrouter import key_refusal_or_boundary
+
+    # A 429 stays a per-call error even when the body carries the credit
+    # phrase, so a rate limit cannot advance the review to the next source.
+    limited = key_refusal_or_boundary(
+        429,
+        "OpenRouter HTTP 429 for https://openrouter.ai/api/v1/chat/completions",
+        body=b'{"type":"invalid_request_error","message":"credit balance is too low"}',
+        byok=True,
+    )
+    assert not isinstance(limited, KeyRefusedError)
+    blank = key_refusal_or_boundary(
+        400,
+        "OpenRouter HTTP 400 for https://openrouter.ai/api/v1/chat/completions",
+        body=b"",
+        byok=True,
+    )
+    assert not isinstance(blank, KeyRefusedError)
+
+
 @pytest.mark.parametrize(
     ("status", "cause"),
     [

@@ -304,6 +304,31 @@ def test_a_timeout_raises_for_the_loop_to_retry():
     assert lens.timeout_s == 300.0
 
 
+def test_a_byok_credit_balance_400_on_the_lens_path_is_out_of_credit():
+    """The agentic adapter classifies the same BYOK 400 the one-shot
+    adapter does. The pilot key's identical body stays a per-call error.
+    Kills updating only one of the two call sites."""
+    body = {
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Your credit balance is too low. sk-secret",
+        }
+    }
+    lens, fake = model(reply(body, status=400))
+    lens.provider.byok_source = True
+    with pytest.raises(KeyRefusedError, match="HTTP 400") as refused:
+        lens.turn(request())
+    assert refused.value.review_error == "model key out of credit"
+    assert len(fake.chat_requests()) == 1
+    assert "sk-secret" not in str(refused.value)
+    assert "credit balance" not in str(refused.value)
+    pilot, pilot_fake = model(reply(body, status=400))
+    with pytest.raises(BoundaryError, match="HTTP 400") as plain:
+        pilot.turn(request())
+    assert not isinstance(plain.value, KeyRefusedError)
+    assert len(pilot_fake.chat_requests()) == 1
+
+
 def test_a_transport_error_other_than_a_timeout_is_not_retried():
     lens, fake = model(BoundaryError("connection refused"))
     with pytest.raises(TransportError, match="transport error"):
