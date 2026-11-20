@@ -580,3 +580,60 @@ def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypa
     with pytest.raises(BoundaryError) as failed:
         key_probe(secret)
     assert not isinstance(failed.value, KeyRefusedError)
+
+
+def test_a_funding_key_is_scrubbed_and_boot_does_not_probe(tmp_path, monkeypatch):
+    """The subscription key is a secret the service log scrubs, and
+    building the service does not call the key endpoint. Kills scrubbing
+    only today's pilot variable, and probing at boot."""
+    from atlas_reviewer.service import (
+        ReviewServer,
+        ServiceConfig,
+        Worker,
+        _child_secrets,
+        _service_secrets,
+        serve,
+    )
+
+    env = _env(_source())
+    env["ATLAS_FUNDING_SUBS_A"] = "sk-or-v1-subscription-secret"
+    assert "sk-or-v1-subscription-secret" in _child_secrets(env)
+    assert "sk-or-v1-subscription-secret" in _service_secrets(
+        ServiceConfig(secret=SECRET, allowlist=frozenset({"o/r"})), env
+    )
+    captured: dict[str, object] = {}
+    real_init = Worker.__init__
+
+    def init(self, *args, **kwargs):
+        captured["funding"] = kwargs.get("funding")
+        captured["tenant_active"] = kwargs.get("tenant_active")
+        real_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(Worker, "__init__", init)
+    monkeypatch.setattr(Worker, "start", lambda self: None)
+    monkeypatch.setattr(Worker, "stop", lambda self, timeout=30: None)
+
+    def fake_init(self, config, board, log):
+        self.config = config
+        self.board = board
+        self.log = log
+
+    monkeypatch.setattr(ReviewServer, "__init__", fake_init)
+    monkeypatch.setattr(ReviewServer, "serve_forever", lambda self: None)
+    monkeypatch.setattr(ReviewServer, "server_close", lambda self: None)
+
+    def probe(key):
+        raise AssertionError(f"boot probed {key}")
+
+    monkeypatch.setattr("atlas_reviewer.service.key_probe", probe)
+    boot = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+        "ATLAS_SERVICE_PROVIDER": "offline",
+        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        **env,
+    }
+    assert serve(config_from_env(boot), boot) == 0
+    assert captured["funding"] is not None
+    tenant_active = captured["tenant_active"]
+    assert callable(tenant_active)
+    assert tenant_active() is False

@@ -145,7 +145,16 @@ def _deliver(
     )
 
 
-def _worker(board, runner, publisher=None, root=None, telemetry=None, spend=None):
+def _worker(
+    board,
+    runner,
+    publisher=None,
+    root=None,
+    telemetry=None,
+    spend=None,
+    funding=None,
+    tenant_active=None,
+):
     return Worker(
         board,
         runner,
@@ -153,6 +162,8 @@ def _worker(board, runner, publisher=None, root=None, telemetry=None, spend=None
         publisher,
         state_root=root,
         spend=spend,
+        funding=funding,
+        tenant_active=tenant_active,
     )
 
 
@@ -5640,3 +5651,211 @@ def test_the_sweep_boot_log_names_the_skipped_strays(tmp_path):
     assert any("deleted 1 record(s)" in line for line in lines)
     assert any("skipped 1 non-record file(s)" in line for line in lines)
     assert store.load(str(_INSTALLATION)) is None
+
+
+def test_the_worker_runs_on_the_source_chosen_at_claim_time(tmp_path):
+    """The runner sees the chosen source, and the context is clear again
+    after the review. Kills a worker that probes and then forgets to hand
+    the choice to the child."""
+    from atlas_reviewer.funding import (
+        FundingSelector,
+        active_choice,
+        load_funding_sources,
+    )
+    from atlas_reviewer.pricing import KeyStatus
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    selector = FundingSelector(
+        sources,
+        env,
+        lambda key: KeyStatus(Decimal(50), Decimal(40), Decimal(0), True),
+        "anthropic/claude-sonnet-5.5",
+    )
+    seen: list[object] = []
+
+    def runner(event, cancel):
+        seen.append(active_choice.get())
+        return ReviewRun(True, REPORT)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert _worker(board, runner, root=tmp_path, funding=selector).run_one() is True
+    choice = seen[0]
+    assert choice is not None
+    assert choice.name == "subs-a"  # type: ignore[attr-defined]
+    assert choice.key == "sk-or-v1-subs-a"  # type: ignore[attr-defined]
+    assert active_choice.get() is None
+
+
+def test_a_tenant_claim_does_not_probe_the_operator_list(tmp_path):
+    """A tenant run never reads the operator source list. Kills a worker
+    that selects an operator source and then also runs the tenant path."""
+    from atlas_reviewer.funding import (
+        FundingSelector,
+        active_choice,
+        load_funding_sources,
+    )
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+
+    def probe(key):
+        raise AssertionError(f"a tenant claim probed {key}")
+
+    seen: list[object] = []
+
+    def runner(event, cancel):
+        seen.append(active_choice.get())
+        return ReviewRun(True, REPORT)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board,
+        runner,
+        root=tmp_path,
+        funding=FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5"),
+        tenant_active=lambda: True,
+    )
+    assert worker.run_one() is True
+    assert seen == [None]
+
+
+def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_path):
+    """No source has credit, so the D92 error is posted and the runner
+    never starts. Kills starting a child on a dry list, and failing the
+    job with no post."""
+    from atlas_reviewer.funding import FundingSelector, load_funding_sources
+    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
+    from atlas_reviewer.pricing import KeyStatus
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    def runner(event, cancel):
+        raise AssertionError("a dry list must not start a child")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        funding=FundingSelector(
+            sources,
+            env,
+            lambda key: KeyStatus(Decimal(10), Decimal(0), Decimal(10), True),
+            "anthropic/claude-sonnet-5.5",
+        ),
+    )
+    assert worker.run_one() is True
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+
+
+def test_an_unreadable_installation_store_does_not_select_an_operator_source(
+    tmp_path,
+):
+    """A store the parent cannot read fails the review. It does not fall
+    through to the operator list. Kills that fallback."""
+    from atlas_reviewer.funding import FundingSelector, load_funding_sources
+    from atlas_reviewer.installation_store import InstallationStoreError
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+
+    def probe(key):
+        raise AssertionError("a broken store must not probe an operator key")
+
+    def runner(event, cancel):
+        raise AssertionError("a broken store must not start a child")
+
+    def tenant_active():
+        raise InstallationStoreError("the installation record did not decrypt")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board,
+        runner,
+        root=tmp_path,
+        funding=FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5"),
+        tenant_active=tenant_active,
+    )
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.FAILED),)
