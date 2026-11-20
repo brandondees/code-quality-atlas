@@ -1,0 +1,50 @@
+{
+  "pr": 661,
+  "reviewed_commit": "674071a91513b4774c82350fb757d9c085f10baf",
+  "source": "docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md names m1, m3 and m4. Issue #708 comment 6902255823 names m2 as unreadable shown as \"1 line\". The Nov 14 report mt14/report-draft.md is not in this repo. Line anchors are the reviewed commit, not current main.",
+  "findings": [
+    {
+      "id": "661-m1",
+      "severity": "minor",
+      "path": "pull_request.body",
+      "summary": "The pull request body's CI and stack lines are stale.",
+      "lenses": ["reviewing-pr-and-process-hygiene"],
+      "markers": ["stale", "stack"],
+      "needs": ["ci"],
+      "match": "markers"
+    },
+    {
+      "id": "661-m2",
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "line": 207,
+      "summary": "unreadable shown as \"1 line\"",
+      "lenses": ["hunting-silent-failures"],
+      "markers": ["unreadable", "1 line"],
+      "needs": ["read"],
+      "match": "place"
+    },
+    {
+      "id": "661-m3",
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "line": 186,
+      "summary": "break instead of continue hides a current-head round.",
+      "lenses": ["tracing-correctness-and-invariants"],
+      "markers": ["break", "continue"],
+      "needs": ["run_tests", "mutate"],
+      "match": "place"
+    },
+    {
+      "id": "661-m4",
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "line": 211,
+      "summary": "The superseded findings_omitted gate is unpinned.",
+      "lenses": ["reviewing-test-quality"],
+      "markers": ["findings_omitted", "superseded"],
+      "needs": ["mutate"],
+      "match": "place"
+    }
+  ]
+}
