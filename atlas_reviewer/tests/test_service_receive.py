@@ -22,6 +22,7 @@ from cryptography.fernet import Fernet
 from atlas_reviewer.budget import DailySpend, no_installation_cap, spend_file
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.ports import KEY_AUTH_REFUSED, KEY_OUT_OF_CREDIT
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service import (
@@ -6021,9 +6022,7 @@ def _funding_pair():
     )
 
 
-def _refused_report(settled: str) -> ReviewReport:
-    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
-
+def _refused_report(settled: str, cause: str = KEY_OUT_OF_CREDIT) -> ReviewReport:
     return ReviewReport(
         (),
         (),
@@ -6032,20 +6031,22 @@ def _refused_report(settled: str) -> ReviewReport:
         (),
         (f"Model calls: 1; settled: ${settled}; held at reservation: $0.",),
         "",
-        review_error=KEY_OUT_OF_CREDIT,
+        review_error=cause,
         coverage_complete=False,
     )
 
 
+@pytest.mark.parametrize("cause", [KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED])
 def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
-    tmp_path,
+    tmp_path, cause
 ):
     """One claim tries one source. A refusal records the bill, puts the
     same head back, and posts nothing. The next claim uses the next
-    source. The last refusal is the D92 post. Kills trying the next
-    source inside the same claim, and posting the intermediate error."""
+    source. The last refusal is the D92 post. Both D92 causes advance.
+    Kills trying the next source inside the same claim, posting the
+    intermediate error, and dropping ``KEY_AUTH_REFUSED`` from the
+    advance gate."""
     from atlas_reviewer.funding import active_choice
-    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
 
     seen: list[str] = []
 
@@ -6054,7 +6055,7 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
         assert choice is not None
         seen.append(choice.name)
         settled = "1.00" if choice.name == "subs-a" else "0.25"
-        return ReviewRun(True, _refused_report(settled))
+        return ReviewRun(True, _refused_report(settled, cause))
 
     posted: list[str] = []
 
@@ -6079,8 +6080,15 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     assert board.states() == ((SHA_A, JobState.QUEUED),)
     assert worker.run_one() is True
     assert seen == ["subs-a", "subs-b"]
-    assert posted == [KEY_OUT_OF_CREDIT]
+    assert posted == [cause]
     assert board.states() == ((SHA_A, JobState.DONE),)
+    advances = [
+        event for event in worker._telemetry.events if event.step == "refusal advance"
+    ]
+    assert len(advances) == 1
+    assert advances[0].fields["source"] == "subs-a"
+    assert advances[0].fields["cause"] == cause
+    assert "sk-or" not in str(advances[0].fields)
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("1.25")

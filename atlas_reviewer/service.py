@@ -1075,7 +1075,13 @@ class Worker:
         posted. The D92 post is the attempt that finds no further
         source. A tenant run has no choice, so its refusal never advances
         onto an operator source. A review that failed for any other
-        reason, including a 429, is not this."""
+        reason, including a 429, is not this. A crash between the cost
+        record and the run-dir drop leaves the directory on disk with
+        the bill already recorded. Recovery re-queues a running job, and
+        the next claim's backfill can record that span again. Dropping
+        the directory first would lose the bill, so the record stays
+        first. The window is the same shape as a crash between the cost
+        record and a normal settle."""
         if (
             choice is None
             or self._funding is None
@@ -1085,6 +1091,15 @@ class Worker:
         if not self._funding.mark_refused(choice.name, report.review_error):
             return False
         self._cost_event(job, report)
+        self._telemetry.record(
+            "service",
+            "refusal advance",
+            {
+                **_fields(job.event),
+                "source": choice.name,
+                "cause": report.review_error,
+            },
+        )
         self._drop_run_dir(job)
         self._stored_supersede(job, self._board.release_claim(job))
         return True
