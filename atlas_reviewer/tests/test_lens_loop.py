@@ -168,7 +168,7 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
 
 
 def test_a_refused_key_stops_the_review_and_never_retries():
-    """D92: a 402/401/403 from the endpoint is a review error, not a
+    """D92: a 401 or 402 from the endpoint is a review error, not a
     spend. The lens cut carries the refusal's fixed detail, the spend
     halts with the fixed cause, the failed call settles at $0, and the
     model is asked exactly once -- the D49 retry does not apply to a

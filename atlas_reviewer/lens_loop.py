@@ -1392,6 +1392,16 @@ class Spend:
             self.held_usd += worst_usd
             self._settled.notify_all()
 
+    def snapshot(self) -> tuple[Decimal, Decimal, Decimal]:
+        """Committed, settled, and held, read under one lock.
+
+        `hold` writes settled and then held. A progress record that
+        samples the two fields separately can see the settled increase
+        and not the hold, and a crash backfill would book that hold as
+        a bill (round-1 review of #799)."""
+        with self._lock:
+            return (self.committed_usd, self.settled_usd, self.held_usd)
+
     def billed_usd(self) -> Decimal:
         """Known bills: settled spend minus the part held because the
         request was written and never answered. A served call with no

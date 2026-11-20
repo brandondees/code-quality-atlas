@@ -1430,6 +1430,10 @@ def _record_progress(
         reading = set(_still_unread([ran.result for ran in runs], changed))
     text = cap_reading(sorted(reading))
     done = {ran.result.lens for ran in runs if ran.result.outcome is not None}
+    # One sample. `hold` writes settled and then held; reading them
+    # separately can book the hold as a bill in a crash backfill
+    # (round-1 review of #799).
+    committed, settled, held = spend.snapshot()
     telemetry.record(
         PROGRESS_PHASE,
         step,
@@ -1438,9 +1442,9 @@ def _record_progress(
             FIELD_LENSES_DONE: len(done),
             FIELD_LENSES_TOTAL: len(names),
             FIELD_CALLS: spend.calls,
-            FIELD_COMMITTED_USD: str(spend.committed_usd),
-            FIELD_SETTLED_USD: str(spend.settled_usd),
-            FIELD_HELD_USD: str(spend.held_usd),
+            FIELD_COMMITTED_USD: str(committed),
+            FIELD_SETTLED_USD: str(settled),
+            FIELD_HELD_USD: str(held),
             FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
             FIELD_READING: text,
         },

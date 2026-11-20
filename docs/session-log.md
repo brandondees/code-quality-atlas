@@ -6106,9 +6106,10 @@ got booked. The picker seeded that figure into the review, the cost line
 printed it as committed, and the daily ledger recorded it, including a
 crash backfill of the in-flight-inclusive committed figure. A key that
 refused every call reported about $25 committed, and the daily ledger
-counted that figure. `refused_bill` is now the one
-dollar rule: a reported cost, or $0. `ReviewBudget.release` and the lens
-loop's `settle_failure` and `fail_and_halt` all use it. A timeout or a
+counted that figure. `refused_bill` is the lens loop's dollar rule: a
+reported cost, or $0. `ReviewBudget.release` settles `Decimal(0)`. Only
+the lens loop's `settle_failure` and `fail_and_halt` call `refused_bill`.
+A timeout or a
 transport failure before a response stays held at the reservation
 (D58) and is not a bill. A served response that could not be priced,
 including a 200 with no usage, counts at its reservation (D43) and the

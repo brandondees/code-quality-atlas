@@ -224,13 +224,13 @@ _MAX_RETRY_WAIT = 8.0
 
 
 def key_refusal_or_boundary(status: int, message: str) -> BoundaryError:
-    """The error a non-200 chat-completion status raises (D92). A 401, 402
-    or 403 refused the key itself: a `KeyRefusedError`, a review error the
+    """The error a non-200 chat-completion status raises (D92). A 401 or
+    402 refused the key itself: a `KeyRefusedError`, a review error the
     review stops on at once and never retries, whose `review_error` is the
-    fixed cause text the draft and the posted error name. Any other
-    status stays the plain boundary error it was. The message is
-    controller text -- a status and a safe URL, never a response body and
-    never key material."""
+    fixed cause text the draft and the posted error name. A 403 is a
+    per-call boundary error, not a key refusal. Any other status stays
+    the plain boundary error it was. The message is controller text -- a
+    status and a safe URL, never a response body and never key material."""
     cause = KEY_REFUSAL_CAUSES.get(status)
     if cause is None:
         return BoundaryError(message)

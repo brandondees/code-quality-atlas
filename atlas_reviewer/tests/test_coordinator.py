@@ -3230,6 +3230,125 @@ def test_the_review_records_its_progress_for_the_service_to_read(tmp_path):
     assert progress.reservation_usd > 0
 
 
+class _WaitVisibleLock:
+    """A lock that announces a blocking acquire before it waits.
+
+    The progress-record test uses the announcement to see that the reader
+    is blocked on the lock. A sleep cannot tell a blocked reader from one
+    that has not been scheduled yet."""
+
+    def __init__(self):
+        self._inner = threading.Lock()
+        self._meta = threading.Lock()
+        self._waiters = 0
+        self.waiting = threading.Event()
+
+    def acquire(self, blocking=True, timeout=-1):
+        if not blocking:
+            return self._inner.acquire(False)
+        with self._meta:
+            self._waiters += 1
+            self.waiting.set()
+        try:
+            if timeout < 0:
+                return self._inner.acquire()
+            return self._inner.acquire(True, timeout)
+        finally:
+            with self._meta:
+                self._waiters -= 1
+                if self._waiters == 0:
+                    self.waiting.clear()
+
+    def release(self):
+        self._inner.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+class _HoldPausedBetweenWrites(Spend):
+    """`hold`, with the gap between its two stores widened.
+
+    Production `hold` writes settled and then held under one lock. This
+    subclass holds that lock across a pause so a reader can be observed
+    in the gap. The pause is the test's; the two stores are `hold`'s."""
+
+    def __post_init__(self):
+        self._lock = _WaitVisibleLock()
+        self._settled = threading.Condition(self._lock)
+        self.between = threading.Event()
+        self.resume = threading.Event()
+
+    def hold(self, worst_usd):
+        with self._lock:
+            self.settled_usd += worst_usd
+            self.between.set()
+            self.resume.wait()
+            self.held_usd += worst_usd
+            self._settled.notify_all()
+
+
+def test_a_progress_record_samples_a_hold_after_both_of_its_writes():
+    """A hold writes settled, then held. The progress record samples both
+    under that same lock, so a crash backfill cannot book the hold as a
+    bill. Kills a read of the two fields outside the lock: that reader
+    runs while the hold is paused between the writes and records settled
+    with held still at 0."""
+    from atlas_reviewer.coordinator import _record_progress
+    from atlas_reviewer.head_change import FIELD_HELD_USD, FIELD_SETTLED_USD
+
+    class Capture:
+        def __init__(self):
+            self.fields = None
+            self.recorded = threading.Event()
+
+        def record(self, phase, step, fields=None, **kwargs):
+            self.fields = fields
+            self.recorded.set()
+
+    spend = _HoldPausedBetweenWrites(LIMITS.resolve())
+    capture = Capture()
+    errors = []
+
+    def read():
+        try:
+            _record_progress(capture, (), (), spend, frozenset())
+        except Exception as exc:  # noqa: BLE001 -- the test reports the thread's failure
+            errors.append(exc)
+
+    writer = threading.Thread(target=lambda: spend.hold(Decimal("1.00")))
+    writer.start()
+    assert spend.between.wait(5), "hold did not reach the gap between its writes"
+    reader = threading.Thread(target=read)
+    reader.start()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if spend._lock.waiting.is_set() or capture.recorded.is_set() or errors:
+            break
+        time.sleep(0.001)
+    else:
+        spend.resume.set()
+        writer.join(5)
+        reader.join(5)
+        raise AssertionError("the progress read neither waited nor recorded")
+    try:
+        assert not errors
+        assert not capture.recorded.is_set()
+    finally:
+        spend.resume.set()
+        writer.join(5)
+        reader.join(5)
+    assert not writer.is_alive()
+    assert not reader.is_alive()
+    assert not errors
+    assert Decimal(capture.fields[FIELD_SETTLED_USD]) == Decimal("1.00")
+    assert Decimal(capture.fields[FIELD_HELD_USD]) == Decimal("1.00")
+
+
 def test_progress_is_emitted_as_lenses_complete_not_in_submission_order(tmp_path):
     """The first wave's records are emitted as lenses COMPLETE (round-2
     review of #747, R2-F7): with a pool past one, blocking on the
