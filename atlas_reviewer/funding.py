@@ -20,7 +20,7 @@ import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 ENV_FUNDING_SOURCES = "ATLAS_FUNDING_SOURCES"
 # The chosen source's name and BYOK flag, handed to the one child that
@@ -45,6 +45,9 @@ _KEY_ENV = re.compile(r"^ATLAS_[A-Z0-9_]+$")
 # pass the registry.
 _PROVIDER = re.compile(r"^[a-z0-9][a-z0-9._+-]*(?:/[a-z0-9][a-z0-9._+-]*)*$")
 _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._+-]*/[a-z0-9][a-z0-9._+-]*$")
+# A dollar amount: digits, or digits with one decimal point. This rejects
+# the forms ``Decimal`` would otherwise accept, such as ``1e3`` and ``1_000``.
+_DOLLAR_AMOUNT = re.compile(r"^[0-9]+(?:\.[0-9]+)?$")
 _FIELDS = frozenset(
     {
         "name",
@@ -185,7 +188,7 @@ def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     per-call error. Only the exact word ``true`` opts in.
     """
     source = os.environ if env is None else env
-    return source.get(ENV_FUNDING_BYOK, "").strip().lower() == "true"
+    return source.get(ENV_FUNDING_BYOK, "").strip() == "true"
 
 
 def _source(item: object, index: int) -> FundingSource:
@@ -275,13 +278,10 @@ def _ceiling(value: object, where: str) -> Decimal:
         raise ValueError(  # noqa: TRY004
             f"{where} key ceiling must be a whole number or a decimal string"
         )
-    raw = str(value).strip() if isinstance(value, str) else str(value)
-    try:
-        amount = Decimal(raw)
-    except InvalidOperation:
-        raise ValueError(
-            f"{where} key ceiling {value!r} is not a dollar amount"
-        ) from None
+    raw = value.strip() if isinstance(value, str) else str(value)
+    if _DOLLAR_AMOUNT.fullmatch(raw) is None:
+        raise ValueError(f"{where} key ceiling {value!r} is not a dollar amount")
+    amount = Decimal(raw)
     if not amount.is_finite() or amount <= 0 or amount > _MAX_CEILING:
         raise ValueError(
             f"{where} key ceiling must be greater than 0 and at most {_MAX_CEILING}"
