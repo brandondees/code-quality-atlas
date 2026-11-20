@@ -6128,9 +6128,10 @@ decided that order, that a subscription-funded review may be non-ZDR
 (`only: ["anthropic"]`, `zdr: false`, never a false ZDR declaration),
 and that each subscription key's monthly cap stays in OpenRouter. The
 app reads remaining credit through the existing key preflight. One
-review stays on the source chosen at claim time. A key refusal
-re-queues the same head once on the next source and posts the D92
-error only when every source has refused. A tenant run never reads
+review stays on the source chosen at claim time. A key refusal marks
+that source unavailable. Each source is tried at most once while the
+worker remembers, so three sources can advance twice, and the D92
+error is posted only when no source remains. A tenant run never reads
 the list. Unset `ATLAS_FUNDING_SOURCES` stays today's behavior. D94
 records it. The plan is
 `docs/plans/2026-11-20-funding-sources.md`. No code in this slice, no

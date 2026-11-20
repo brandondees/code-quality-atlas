@@ -51,17 +51,27 @@ names one source:
   a key variable.
 - `providers` — the `provider.only` list for this source.
 - `require_zdr` — whether this source sends `zdr: true`.
-- `model_filter` — which model ids this source may serve (`*`,
-  `anthropic/*`, or one model id).
+- `model_filter` — which model ids this source may serve. `*` matches
+  every id. A vendor prefix `anthropic/*` matches an id that starts
+  with `anthropic/`, including a dated revision such as
+  `anthropic/claude-sonnet-5.5-20260928`. The slash is part of the
+  match, so `anthropic-evil/x` does not match. Anything else is one
+  exact id, so the undated id and its dated revision do not match
+  each other.
 - `key_ceiling_usd` — the preflight ceiling for this key, the same role
-  as `ATLAS_KEY_CEILING_USD` on today's single key. The app does not
-  store OpenRouter's own monthly cap; it reads `limit_remaining`.
+  as `ATLAS_KEY_CEILING_USD` on today's single key, with one extra
+  bound the single-key parser does not have: at most 10000. A larger
+  figure would make the claim-time over-ceiling check fail to skip
+  any key. The app does not store OpenRouter's own monthly cap; it
+  reads `limit_remaining`.
 - `byok` — whether this source is a subscription BYOK key. The pilot
   source is not.
 
 A present value that does not parse, or that names a missing key
-variable, stops the process at boot. An empty or absent variable is
-unset, not an error.
+variable, stops the process at boot. The boot error names the variable
+and the defect. It does not quote the document, so a key pasted into
+the setting does not appear in the message. An empty or absent
+variable is unset, not an error.
 
 The operator's order, once the keys exist, is the subscription whose
 billing cycle ends first, then the other subscription, then `pilot`.
@@ -86,16 +96,23 @@ which has not been marked unavailable. The chosen key is copied into
 the child's existing `ATLAS_OPENROUTER_API_KEY`, and the source's
 providers, ZDR flag, and ceiling replace `ATLAS_PROVIDERS`,
 `ATLAS_REQUIRE_ZDR`, and `ATLAS_KEY_CEILING_USD` for that child only.
-The source name is passed as `ATLAS_FUNDING_SOURCE`. The child's
-allowlist does not gain the subscription key variables, so a child
-cannot see a key it was not given.
+The source name is passed as `ATLAS_FUNDING_SOURCE`, and the source's
+`byok` flag is passed as `ATLAS_FUNDING_BYOK`. The child's allowlist
+gains those two names and does not gain the subscription key
+variables, so a child cannot see a key it was not given. The
+credit-low HTTP 400 rule in §4 is classified in the child, where the
+400 arrives, so the child has to be told the flag. `require_zdr` is
+not a proxy for it.
 
 The priced D92 minimum — remaining credit against the smaller of one
 call's largest reservation and the per-lens budget — still runs in the
 child, because it needs the catalog the child already loads. A source
-that passes the key probe and then fails that minimum is a key
-refusal, and the advance rule below applies. The parent does not fetch
-the catalog a second time.
+that passes the key probe and then fails that minimum stops the review
+with the out-of-credit cause (`KEY_OUT_OF_CREDIT`), the same cause an
+HTTP 402 reports. The advance rule below treats that cause as a key
+refusal, so the minimum advances. An HTTP 401 reports
+`KEY_AUTH_REFUSED` and advances the same way. The parent does not
+fetch the catalog a second time.
 
 A tenant run does not probe the list and does not receive
 `ATLAS_FUNDING_SOURCE`. A tenant refusal does not advance.
@@ -103,19 +120,25 @@ A tenant run does not probe the list and does not receive
 ## 4. One review, one source
 
 The child keeps the key it was given for the whole review. A refusal
-does not swap keys inside the process: the prompt cache is per
-upstream account, and a mid-review swap would also change the
+does not swap keys inside the process. Each pinned endpoint keeps its
+own prompt cache (D63), and a mid-review swap would also change the
 retention policy of a review that had already sent part of the diff.
+Whether two OpenRouter keys also split that cache by account is not
+something this repo has recorded.
 
 When the child finishes with a key-refusal cause, the worker marks
 that source unavailable, records the attempt's settled bill (D93: a
 refused call is $0, and calls that were served before the refusal are
 billed to that source), drops that attempt's run directory, and puts
-the same head back on the queue. It does not post. Each source is
-tried at most once while the worker process remembers the refusal, so
-a list of three sources can advance twice. The next claim takes the
-next source that still has credit. The D92 post is sent only when no
-source remains, with the last refusal's cause.
+the same head back on the queue. It does not post. The queue answers
+`DUPLICATE` for a head it already holds or has finished, and that
+answer is keyed on `(repo, pr_number, head_sha)`. The re-queue is
+`release_claim`, which puts the running job back to queued. It does
+not enqueue the head a second time, which the queue would refuse.
+Each source is tried at most once while the worker process remembers
+the refusal, so a list of three sources can advance twice. The next
+claim takes the next source that still has credit. The D92 post is
+sent only when no source remains, with the last refusal's cause.
 
 The memory is the worker process. It survives the re-queue, because
 the next claim is the same process, and a restart forgets it. The
@@ -164,5 +187,5 @@ someone asks for it.
 | F0 | This plan and D94. Docs only. |
 | F1 | `funding.py` parses `ATLAS_FUNDING_SOURCES`, fails closed, and treats unset as no registry. |
 | F2 | The worker selects a source at claim time, the child receives it through the existing variables, and the cost line and the progress record name it. A tenant run never sees it. |
-| F3 | A key refusal marks that source unavailable, re-queues the same head on the next source, and suppresses the intermediate error post. The D92 post waits until no source remains. The BYOK credit-balance 400 is a refusal. |
+| F3 | A key refusal (HTTP 401, HTTP 402, or the child's priced-minimum out-of-credit cause) marks that source unavailable, releases the claim so the same head is queued again, and suppresses the intermediate error post. Each source is tried at most once while the worker remembers. The D92 post waits until no source remains. The BYOK credit-balance 400 is a refusal only when the child was handed `ATLAS_FUNDING_BYOK=true`. |
 | F4 | Ledger lines carry `source`, and `funding-spend` reports the day's spend by source. |
