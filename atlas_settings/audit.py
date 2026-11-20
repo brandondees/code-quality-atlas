@@ -28,6 +28,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 AUDIT_FILE_NAME = "settings-audit.jsonl"
+# The read-back's tail window: the newest entries are the ones the page
+# reads back, so the read scans at most this many bytes from the end of
+# the file instead of the whole append-only history.
+_AUDIT_READ_TAIL_BYTES = 65_536
 ACTIONS = (
     "store-credentials",
     "record-consent",
@@ -81,54 +85,37 @@ class AuditLog:
         )
         with self._lock:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+            pre_size = self._path.stat().st_size if self._path.exists() else 0
             fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 data = line.encode("utf-8")
                 written = os.write(fd, data)
                 if written < len(data):
-                    # A short append would leave a partial line — a torn
-                    # audit entry is worse than a missing one, so it is
-                    # the recorded failure it is.
+                    # A short append leaves torn bytes that would swallow
+                    # the next entry's parse: truncate them back off
+                    # before raising, so the file ends where it was.
+                    os.truncate(self._path, pre_size)
                     raise OSError("the audit line was not written whole")
             finally:
                 os.close(fd)
-            self._rotate_if_over_cap()
-
-    def _rotate_if_over_cap(self) -> None:
-        """The file's hard cap: repeat the half-drop until the size is at
-        or under the cap, and drop a single line that alone exceeds it —
-        the audit never grows past `_MAX_AUDIT_BYTES`, whatever one
-        write added. The replacement keeps the file's own 0600 mode: the
-        temp is created with it, not with the process umask's default.
-        Runs under the append thread lock; this process is the file's
-        only writer."""
-        if self._path.stat().st_size <= _MAX_AUDIT_BYTES:
-            return
-        raw = self._path.read_bytes()
-        while len(raw) > _MAX_AUDIT_BYTES:
-            lines = raw.split(b"\n")
-            if len(lines) <= 2:
-                # One line alone exceeds the cap: it goes.
-                raw = b""
-                break
-            raw = b"\n".join(lines[len(lines) // 2 :])
-        tmp = self._path.with_name(self._path.name + ".rotating")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            os.write(fd, raw)
-        finally:
-            os.close(fd)
-        tmp.replace(self._path)
 
     def entries(self, installation_id: str, action: str) -> list[dict[str, object]]:
         """The installation's recorded entries for one action, oldest
-        first (the file's own order). A file that cannot be read is an
-        empty list — the page shows the record's own `updated_at`
-        fallback when the audit cannot answer, never a wrong time — and
-        a line that cannot be decoded or parsed is skipped, so one bad
-        byte cannot blind the page to every installation's record."""
+        first, read from a bounded tail window of the file — the newest
+        entries are the ones the page reads back, and the append-only
+        history is never trimmed to make the read cheaper. A file that
+        cannot be read is an empty list — the page shows the record's
+        own `updated_at` fallback when the audit cannot answer, never a
+        wrong time — and a line that cannot be decoded or parsed is
+        skipped, so one bad byte cannot blind the page to every
+        installation's record."""
         try:
-            raw = self._path.read_bytes()
+            size = self._path.stat().st_size
+            with self._path.open("rb") as fh:
+                if size > _AUDIT_READ_TAIL_BYTES:
+                    fh.seek(size - _AUDIT_READ_TAIL_BYTES)
+                    fh.readline()  # drop the partial line the seek lands in
+                raw = fh.read()
         except FileNotFoundError:
             return []
         except OSError as exc:
