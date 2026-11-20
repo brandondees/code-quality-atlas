@@ -15,12 +15,23 @@ operator list cannot name it.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
-from collections.abc import Mapping
+import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+
+from atlas_reviewer.http import UrllibTransport, safe_url
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    KeyRefusedError,
+)
+from atlas_reviewer.pricing import KeyStatus, PricingUnknownError, parse_key_status
 
 ENV_FUNDING_SOURCES = "ATLAS_FUNDING_SOURCES"
 # The chosen source's name and BYOK flag, handed to the one child that
@@ -181,6 +192,48 @@ def noted_funding_source(env: Mapping[str, str] | None = None) -> str:
     return raw
 
 
+KEY_URL = "https://openrouter.ai/api/v1/key"
+_PROBE_TIMEOUT_S = 15.0
+_REFUSAL_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
+
+
+@dataclass(frozen=True)
+class FundingChoice:
+    """The one source a review was pinned to at claim time.
+
+    ``key`` is the credential the child receives as
+    ``ATLAS_OPENROUTER_API_KEY``. It is not logged and it is not written
+    on the draft."""
+
+    name: str
+    key: str
+    providers: tuple[str, ...]
+    require_zdr: bool
+    key_ceiling_usd: Decimal
+    byok: bool
+
+
+@dataclass(frozen=True)
+class FundingSelection:
+    """What claim time decided.
+
+    ``choice`` is the source the review runs on. ``refusal`` is a D92
+    cause, set only when every source that could serve the model has
+    refused or is out of credit: the service posts that error and does
+    not start a child. ``error`` is any other reason no source was
+    chosen — a probe that failed, a key over its ceiling — and the
+    review fails without a D92 post."""
+
+    choice: FundingChoice | None = None
+    refusal: str = ""
+    error: str = ""
+
+
+active_choice: contextvars.ContextVar[FundingChoice | None] = contextvars.ContextVar(
+    "atlas_funding_choice", default=None
+)
+
+
 def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     """True only when the child was handed a BYOK source.
 
@@ -189,6 +242,178 @@ def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     """
     source = os.environ if env is None else env
     return source.get(ENV_FUNDING_BYOK, "").strip() == "true"
+
+
+def accepted_source_name(value: object) -> str | None:
+    """A source name, ``""`` when the field is present and blank, None
+    when the value cannot be a source name."""
+    if value == "":
+        return ""
+    if isinstance(value, str) and _NAME.fullmatch(value) is not None:
+        return value
+    return None
+
+
+def funding_key_values(env: Mapping[str, str]) -> tuple[str, ...]:
+    """The funding keys a log has to scrub. A value shorter than 8
+    characters is left alone, the same bar the other secret scrubbing
+    uses. An unreadable document yields nothing: boot already refused it."""
+    try:
+        sources = load_funding_sources(env)
+    except ValueError:
+        return ()
+    if sources is None:
+        return ()
+    values: list[str] = []
+    for source in sources:
+        key = env.get(source.key_env, "")
+        if len(key) >= 8 and key not in values:
+            values.append(key)
+    return tuple(values)
+
+
+def key_probe(key: str) -> KeyStatus:
+    """``GET /api/v1/key`` for one OpenRouter key.
+
+    A 401 or 402 is a key refusal. Anything else that is not a 200 is a
+    boundary error, so the caller can try another source without
+    treating a transient failure as a dry key. The error text is the
+    status and the URL, never the body and never the key. The transport
+    does not follow redirects, so the bearer token stays on this host.
+    """
+    transport = UrllibTransport()
+    response = transport.request(
+        "GET",
+        KEY_URL,
+        {
+            "User-Agent": "code-quality-atlas-reviewer",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+        None,
+        _PROBE_TIMEOUT_S,
+    )
+    where = safe_url(KEY_URL)
+    message = f"OpenRouter HTTP {response.status} for {where}"
+    if response.status == 401:
+        raise KeyRefusedError(message, review_error=KEY_AUTH_REFUSED)
+    if response.status == 402:
+        raise KeyRefusedError(message, review_error=KEY_OUT_OF_CREDIT)
+    if response.status != 200:
+        raise BoundaryError(message)
+    try:
+        data = json.loads(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise PricingUnknownError(f"non-JSON response from {where}") from None
+    if not isinstance(data, dict):
+        raise PricingUnknownError(f"non-object response from {where}")
+    return parse_key_status(data)
+
+
+class FundingSelector:
+    """Picks the first source that can fund one review.
+
+    The unavailable set is this process's memory of keys that refused.
+    A restart forgets it, and the next probe decides again. Choosing and
+    marking share one lock: more than one review can be claimed at once.
+    """
+
+    def __init__(
+        self,
+        sources: tuple[FundingSource, ...],
+        env: Mapping[str, str],
+        probe: Callable[[str], KeyStatus],
+        model: str,
+    ) -> None:
+        self._sources = sources
+        self._env = env
+        self._probe = probe
+        self._model = model
+        self._lock = threading.Lock()
+        self._unavailable: set[str] = set()
+        self._causes: dict[str, str] = {}
+
+    def choose(self) -> FundingSelection:
+        with self._lock:
+            return self._choose()
+
+    def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
+        """Remember that ``name`` refused. True when another source can
+        still serve the model. ``cause`` is the D92 text a later claim
+        posts when nothing else can serve."""
+        with self._lock:
+            self._unavailable.add(name)
+            if cause in _REFUSAL_CAUSES:
+                self._causes[name] = cause
+            return self._another_available()
+
+    def _choose(self) -> FundingSelection:
+        last_refusal = ""
+        blocked = False
+        for source in self._sources:
+            if not source.allows(self._model) or source.name in self._unavailable:
+                continue
+            outcome = self._one(source)
+            if isinstance(outcome, FundingChoice):
+                return FundingSelection(choice=outcome)
+            if outcome in _REFUSAL_CAUSES:
+                last_refusal = outcome
+                continue
+            blocked = True
+        if blocked:
+            return FundingSelection(
+                error="no funding source is available for this review"
+            )
+        cause = last_refusal or self._remembered_cause()
+        if cause:
+            return FundingSelection(refusal=cause)
+        return FundingSelection(error="no funding source is available for this review")
+
+    def _one(self, source: FundingSource) -> FundingChoice | str:
+        """A choice, a D92 cause, or ``""`` when the source was skipped
+        without being marked unavailable."""
+        key = self._env.get(source.key_env, "")
+        if key.strip() == "":
+            return ""
+        try:
+            status = self._probe(key)
+        except KeyRefusedError as exc:
+            if exc.review_error not in _REFUSAL_CAUSES:
+                return ""
+            self._refuse(source.name, exc.review_error)
+            return exc.review_error
+        except BoundaryError:
+            return ""
+        if status.limit > source.key_ceiling_usd:
+            return ""
+        if status.limit_remaining <= 0:
+            self._refuse(source.name, KEY_OUT_OF_CREDIT)
+            return KEY_OUT_OF_CREDIT
+        return FundingChoice(
+            source.name,
+            key,
+            source.providers,
+            source.require_zdr,
+            source.key_ceiling_usd,
+            source.byok,
+        )
+
+    def _refuse(self, name: str, cause: str) -> None:
+        self._unavailable.add(name)
+        self._causes[name] = cause
+
+    def _remembered_cause(self) -> str:
+        cause = ""
+        for source in self._sources:
+            if source.allows(self._model):
+                cause = self._causes.get(source.name, cause)
+        return cause
+
+    def _another_available(self) -> bool:
+        return any(
+            source.allows(self._model) and source.name not in self._unavailable
+            for source in self._sources
+        )
 
 
 def _source(item: object, index: int) -> FundingSource:

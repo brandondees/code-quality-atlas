@@ -6147,3 +6147,15 @@ variable is `ATLAS_OPENROUTER_API_KEY` or a name under
 operator list cannot read an installation credential. The registry
 stores the variable name, not the key. Nothing selects a source yet,
 and no model was called.
+
+## 2026-11-20 — funding sources, claim-time selection (D94)
+
+When `ATLAS_FUNDING_SOURCES` is set, claiming a review probes the keys
+in order and pins that review to the first source with credit remaining
+under its ceiling whose filter matches the model. The child receives
+that one key as `ATLAS_OPENROUTER_API_KEY`, and the source name is on
+the cost line and the progress record. A key that is dry or refused is
+skipped. A probe that fails, or a key over its ceiling, fails the
+review without the D92 post. A tenant run does not probe the list and
+does not receive the source name. Unset still does neither. No model
+was called.

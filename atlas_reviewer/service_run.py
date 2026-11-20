@@ -59,6 +59,12 @@ from typing import Any
 from atlas_reviewer.agentic_config import ENV as AGENTIC_LIMIT_ENV
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.funding import (
+    ENV_FUNDING_BYOK,
+    ENV_FUNDING_SOURCE,
+    FundingChoice,
+    active_choice,
+)
 from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.lens_contract import Severity
@@ -131,6 +137,11 @@ _CHILD_ALLOWED = frozenset(
         ENV_TENANT_MODEL_KEY,
         ENV_TENANT_BASE_URL,
         ENV_TENANT_MODEL,
+        # Which operator funding source this child was pinned to (D94),
+        # and whether that source is BYOK. Settings, not credentials:
+        # the key itself arrives in the operator key variable above.
+        ENV_FUNDING_SOURCE,
+        ENV_FUNDING_BYOK,
     }
     # The agentic limits (D68's per-lens knobs and the per-review dollar
     # ceiling included) ride along in both modes: the agentic child reads
@@ -484,13 +495,17 @@ def child_env(
     *,
     token: str = "",
     tenant: TenantCredentials | None = None,
+    funding: FundingChoice | None = None,
 ) -> dict[str, str]:
     """The review process gets only ``_CHILD_ALLOWED``. ``token`` is a
     read-only installation token, when the parent minted one. A
     tenant-path run (config slice S10) adds the installation's own
     endpoint credentials and **drops the operator's key**: the tenant
     child has no use for it, and the two paths never share a child
-    environment."""
+    environment. An operator funding choice (D94) overlays the one key
+    and the route the child already reads, and names the source. A
+    tenant run drops that name too: the installation's review never
+    sees which operator key the parent holds."""
     cleaned = {key: value for key, value in env.items() if key in _CHILD_ALLOWED}
     # The image starts as root, so HOME can still be /root after the
     # uid drop. The child must not inherit a home it cannot write.
@@ -503,6 +518,16 @@ def child_env(
         cleaned[ENV_TENANT_BASE_URL] = tenant.base_url
         cleaned[ENV_TENANT_MODEL] = tenant.model
         cleaned.pop(MODEL_KEY_ENV, None)
+        cleaned.pop(ENV_FUNDING_SOURCE, None)
+        cleaned.pop(ENV_FUNDING_BYOK, None)
+        return cleaned
+    if funding is not None:
+        cleaned[MODEL_KEY_ENV] = funding.key
+        cleaned[ENV_PROVIDERS] = ",".join(funding.providers)
+        cleaned[ENV_REQUIRE_ZDR] = "true" if funding.require_zdr else "false"
+        cleaned[ENV_KEY_CEILING_USD] = format(funding.key_ceiling_usd, "f")
+        cleaned[ENV_FUNDING_SOURCE] = funding.name
+        cleaned[ENV_FUNDING_BYOK] = "true" if funding.byok else "false"
     return cleaned
 
 
@@ -552,7 +577,12 @@ def make_runner(
             return ReviewRun(False, error=mint_error)
         code = run_process(
             argv,
-            child_env(env, token=token, tenant=tenant),
+            child_env(
+                env,
+                token=token,
+                tenant=tenant,
+                funding=None if tenant is not None else active_choice.get(),
+            ),
             cancel,
             stderr_path,
             popen=popen,
