@@ -8,8 +8,8 @@ One JSON file is one pull request. A later protocol-reviewed pull request
 joins the key by adding another file in this directory; ids must stay unique.
 The loader is `atlas_reviewer.parity_key.load_key`. It checks the schema.
 `grade_findings` compares one list of verified findings with these spans.
-`score_parity` counts a finding across recorded runs. `eval-parity` is a
-later layer.
+`score_parity` counts a finding across recorded runs. `eval-parity` reads
+a directory of run files and writes that report.
 
 The spans were read at the `reviewed_commit` in each file. The Nov 14 trial
 scorer and `docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md` name

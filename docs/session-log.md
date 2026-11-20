@@ -6065,3 +6065,35 @@ outside-the-try mutant dies). The tenant adapter has no credit seam at
 all — no `largest_call_reservation` or `remaining_credit_usd`, the
 coordinator's attribute probe accepts it — so the tenant path has no
 such pattern to fix.
+
+## 2026-11-20 — parity key and the offline k-of-3 gate (#713, D71)
+
+The seven protocol Minors are a checked-in key under
+`atlas_reviewer/fixtures/parity-key/`, scored by `score_parity` and by
+`python -m atlas_reviewer eval-parity`. #640 is anchored on `0fe45e5e`,
+the head the Nov 14 trial reviewed. `72c56eb` is the later merged head.
+At the reviewed commit a missing hook skips the head check, and D46 does
+not say it amends D48, so `640-m2` and `640-m3` are graded records. The
+four #661 defects were re-read at `674071a9` and are still those lines.
+A finding is found when a verified citation sits inside
+its span (`SPAN_SLACK` is 0) and the severity is at least minor. A
+citation of the whole function overlaps and is partial. The pull request
+body is found by an exact citation, and a paraphrase is lost. Partial is
+a nit on that span, a wider citation, or the right function at the wrong
+line, and it does not count. A finding passes when it was found in at
+least 2 of a 3-run sample. A missed key finding fails. An extra does not.
+A selected lens not run or failed, coverage not complete, a limit stop,
+or a lens the key names that the run did not select fails that run even
+when every finding was found. A run of another commit fails on its own,
+and a repeated run or a mix of models is refused. A `head_sha` that is
+not 40 lowercase hex is refused, and an unreadable run file exits 2.
+The report carries the comparison fields null when a run omits them,
+so a later Sonnet-versus-Haiku run can drop in without a report change.
+That comparison was not run. No model was called, and no Fly app,
+secret, or deploy changed. The six files under
+`atlas_reviewer/fixtures/parity-offline/` are scorer fixtures that find
+every graded finding; they are not a measurement. Spans were read at the
+reviewed commits. `661-m2` is `rounds.py` 202–209; the trial's
+`coordinator.py` range does not format the count. D71 records the
+anchors, the grade, and the tests. The stack is the key loader, the
+grade, the in-memory gate, then this command.

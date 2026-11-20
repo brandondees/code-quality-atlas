@@ -950,6 +950,13 @@ python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-references
 python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score --gate
 ```
 
+`eval-parity` scores a directory of recorded runs against the parity key
+and prints the gate. It does not call a model, GitHub, or Phoenix.
+
+```sh
+python -m atlas_reviewer eval-parity --runs atlas_reviewer/fixtures/parity-offline
+```
+
 `--fixtures` is a directory of JSON files. A file with `output` and no
 `candidate` is a reference row (the Phoenix dataset shape: `input`,
 `output`, `metadata`). A file with `candidate` is scored. `--gate` exits 1 unless the directory has a passing pair for every

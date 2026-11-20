@@ -7,12 +7,15 @@ the loader reads every file. A record is a path and a line span, or the
 pull request body and the lines a citation has to quote.
 ``grade_findings`` compares one verified candidate list with those spans.
 ``score_parity`` counts found, partial, and lost across recorded runs.
-The command that reads a directory of runs is a later layer.
+``load_runs`` reads a directory of those runs, and
+``python -m atlas_reviewer eval-parity`` scores them offline.
 """
 
 from __future__ import annotations
 
 import json
+import math
+import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -119,11 +122,11 @@ def load_key(path: Path) -> tuple[KeyFinding, ...]:
 
     A duplicate id, a key the schema does not name, a code span with no
     line, or a body record with no citation is refused. An empty directory
-    is refused.
+    is refused, and so is a directory that cannot be listed.
     """
     if not path.is_dir():
         raise EvalFormatError(f"parity key is not a directory: {path}")
-    files = sorted(item for item in path.glob("*.json") if item.is_file())
+    files = _json_files(path, "parity key")
     if not files:
         raise EvalFormatError(f"parity key has no JSON files: {path}")
     findings: list[KeyFinding] = []
@@ -141,7 +144,7 @@ def _load_file(path: Path) -> tuple[KeyFinding, ...]:
     body = _object(_read_json(path), path.name)
     _unknown(body, _FILE_KEYS, path.name)
     pr = _positive(body.get("pr"), f"{path.name} pr")
-    commit = _commit(body.get("reviewed_commit"), path.name)
+    commit = _commit(body.get("reviewed_commit"), f"{path.name} reviewed_commit")
     _text(body.get("source"), f"{path.name} source")
     raw = body.get("findings")
     if not isinstance(raw, list) or not raw:
@@ -280,7 +283,7 @@ def _ident(value: object, name: str) -> str:
 
 def _commit(value: object, name: str) -> str:
     if not isinstance(value, str) or _COMMIT.fullmatch(value) is None:
-        raise EvalFormatError(f"{name} reviewed_commit must be 40 lowercase hex")
+        raise EvalFormatError(f"{name} must be 40 lowercase hex")
     return value
 
 
@@ -307,7 +310,7 @@ def _strings(value: object, name: str) -> tuple[str, ...]:
 def _read_json(path: Path) -> object:
     try:
         text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
+    except (UnicodeDecodeError, OSError) as exc:
         raise EvalFormatError(f"{path.name} cannot be read: {exc}") from exc
     try:
         return json.loads(text)
@@ -681,3 +684,179 @@ def _run_row(
 
 def _runs_word(count: int) -> str:
     return "run" if count == 1 else "runs"
+
+
+_RUN_KEYS = frozenset(
+    {
+        "pr",
+        "model",
+        "repetition",
+        "head_sha",
+        "coverage_complete",
+        "lenses_run",
+        "lenses_not_run",
+        "lenses_failed",
+        "limit_stops",
+        "findings",
+        "false_positive_majors",
+        "lenses_clean",
+        "lenses_planned",
+        "cost_usd",
+        "wall_seconds",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "previous_turn_misses",
+    }
+)
+_CANDIDATE_KEYS = frozenset(
+    {"severity", "path", "quote", "verified", "line", "end_line", "lens"}
+)
+
+
+def load_runs(path: Path) -> tuple[ParityRun, ...]:
+    """Every ``*.json`` file in ``path``, in file name order.
+
+    Two runs of one pull request may not share a repetition. ``verified``
+    is required and is not defaulted. ``head_sha`` is 40 lowercase hex.
+    Comparison fields may be null, and so may ``lens``. A key this schema
+    does not name is refused. A severity of blocker, major, minor, or nit
+    is casefolded. Any other string is kept and graded lost. A directory
+    that cannot be listed is refused.
+    """
+    if not path.is_dir():
+        raise EvalFormatError(f"parity runs are not a directory: {path}")
+    files = _json_files(path, "parity runs")
+    if not files:
+        raise EvalFormatError(f"parity runs have no JSON files: {path}")
+    runs = tuple(_parse_run(file) for file in files)
+    seen: set[tuple[int, int]] = set()
+    for run in runs:
+        key = (run.pr, run.repetition)
+        if key in seen:
+            raise EvalFormatError(
+                f"{run.name} repeats repetition {run.repetition} for pull request {run.pr}"
+            )
+        seen.add(key)
+    return runs
+
+
+def _parse_run(path: Path) -> ParityRun:
+    body = _object(_read_json(path), path.name)
+    _unknown(body, _RUN_KEYS, path.name)
+    raw = body.get("findings")
+    if not isinstance(raw, list):
+        raise EvalFormatError(f"{path.name} needs a findings list")
+    return ParityRun(
+        name=path.name,
+        pr=_positive(body.get("pr"), f"{path.name} pr"),
+        model=_text(body.get("model"), f"{path.name} model"),
+        repetition=_positive(body.get("repetition"), f"{path.name} repetition"),
+        head_sha=_commit(body.get("head_sha"), f"{path.name} head_sha"),
+        findings=tuple(
+            _candidate(item, f"{path.name} findings[{index}]")
+            for index, item in enumerate(raw)
+        ),
+        coverage_complete=_bool(
+            body.get("coverage_complete"), f"{path.name} coverage_complete"
+        ),
+        lenses_run=_strings(body.get("lenses_run"), f"{path.name} lenses_run"),
+        lenses_not_run=_strings(
+            body.get("lenses_not_run"), f"{path.name} lenses_not_run"
+        ),
+        lenses_failed=_strings(body.get("lenses_failed"), f"{path.name} lenses_failed"),
+        limit_stops=_strings(body.get("limit_stops"), f"{path.name} limit_stops"),
+        false_positive_majors=_optional_count(body, "false_positive_majors", path.name),
+        lenses_clean=_optional_count(body, "lenses_clean", path.name),
+        lenses_planned=_optional_count(body, "lenses_planned", path.name),
+        cost_usd=_optional_number(body, "cost_usd", path.name),
+        wall_seconds=_optional_number(body, "wall_seconds", path.name),
+        cache_read_tokens=_optional_count(body, "cache_read_tokens", path.name),
+        cache_write_tokens=_optional_count(body, "cache_write_tokens", path.name),
+        previous_turn_misses=_optional_count(body, "previous_turn_misses", path.name),
+    )
+
+
+def _candidate(value: object, name: str) -> CitedFinding:
+    body = _object(value, name)
+    _unknown(body, _CANDIDATE_KEYS, name)
+    severity = body.get("severity")
+    if not isinstance(severity, str):
+        raise EvalFormatError(f"{name} severity must be blocker, major, minor or nit")
+    folded = severity.casefold()
+    if folded in _SEVERITIES:
+        severity = folded
+    verified = body.get("verified")
+    if not isinstance(verified, bool):
+        raise EvalFormatError(f"{name} verified must be true or false")
+    quote = body.get("quote")
+    if not isinstance(quote, str):
+        raise EvalFormatError(f"{name} quote must be a string")
+    line = _optional_line(body.get("line"), f"{name} line")
+    end = _optional_line(body.get("end_line"), f"{name} end_line")
+    if end is not None and (line is None or end < line):
+        raise EvalFormatError(f"{name} end_line must be at or after line")
+    lens_value = body.get("lens")
+    lens = None if lens_value is None else _text(lens_value, f"{name} lens")
+    return CitedFinding(
+        _text(body.get("path"), f"{name} path"),
+        quote,
+        severity,
+        verified,
+        line,
+        end,
+        lens,
+    )
+
+
+def _json_files(path: Path, kind: str) -> list[Path]:
+    """The ``*.json`` files in ``path``, in name order.
+
+    A directory that cannot be listed raises ``EvalFormatError``. An empty
+    list is the caller's own "no JSON files" error, so a permission failure
+    is not reported as an empty directory.
+    """
+    try:
+        with os.scandir(path) as scan:
+            files = sorted(
+                path / entry.name
+                for entry in scan
+                if entry.name.endswith(".json") and entry.is_file()
+            )
+    except OSError as exc:
+        raise EvalFormatError(f"{kind} cannot be read: {exc}") from exc
+    return files
+
+
+def _optional_count(body: Mapping[str, object], key: str, name: str) -> int | None:
+    if key not in body or body[key] is None:
+        return None
+    return _count(body[key], f"{name} {key}")
+
+
+def _optional_number(body: Mapping[str, object], key: str, name: str) -> float | None:
+    if key not in body or body[key] is None:
+        return None
+    return _number(body[key], f"{name} {key}")
+
+
+def _count(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EvalFormatError(f"{name} must be an integer that is at least 0")
+    return value
+
+
+def _number(value: object, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise EvalFormatError(f"{name} must be a finite number that is at least 0")
+    return float(value)
+
+
+def _bool(value: object, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise EvalFormatError(f"{name} must be true or false")
+    return value

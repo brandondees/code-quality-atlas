@@ -1,0 +1,56 @@
+{
+  "pr": 640,
+  "model": "recorded-fixture",
+  "repetition": 1,
+  "head_sha": "0fe45e5ea79f3abd8e07488a01b623186df96692",
+  "coverage_complete": true,
+  "lenses_run": [
+    "reviewing-test-quality",
+    "hunting-silent-failures",
+    "reviewing-decision-lifecycle"
+  ],
+  "lenses_not_run": [],
+  "lenses_failed": [],
+  "limit_stops": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "path": "atlas_reviewer/service_queue.py",
+      "quote": "if job.superseded or job.cancel.is_set()",
+      "verified": true,
+      "lens": "reviewing-test-quality",
+      "line": 329
+    },
+    {
+      "severity": "minor",
+      "path": "atlas_reviewer/service_post.py",
+      "quote": "if check is not None and not check()",
+      "verified": true,
+      "lens": "hunting-silent-failures",
+      "line": 230
+    },
+    {
+      "severity": "minor",
+      "path": "docs/open-questions.md",
+      "quote": "amends D24, and the webhook service's provider default from D25",
+      "verified": true,
+      "lens": "reviewing-decision-lifecycle",
+      "line": 62
+    },
+    {
+      "severity": "nit",
+      "path": "docs/open-questions.md",
+      "quote": "an extra note the key does not record",
+      "verified": true,
+      "line": 1
+    }
+  ],
+  "false_positive_majors": null,
+  "lenses_clean": null,
+  "lenses_planned": null,
+  "cost_usd": null,
+  "wall_seconds": null,
+  "cache_read_tokens": null,
+  "cache_write_tokens": null,
+  "previous_turn_misses": null
+}

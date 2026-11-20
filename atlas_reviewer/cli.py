@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Operator entry point: `python -m atlas_reviewer {review,agentic-review,sweep,eval,probe-runner}`.
+"""Operator entry point: `python -m atlas_reviewer {review,agentic-review,sweep,eval,eval-parity,probe-runner}`.
 
 `review --dry-run` needs no credentials and no network: GitHub is a fixture
 directory, the runner is the in-memory fake, the provider is offline.
@@ -147,6 +147,7 @@ from atlas_reviewer.openrouter import (
     OpenRouterProvider,
     model_route,
 )
+from atlas_reviewer.parity_key import KEY_DIR, load_key, load_runs, score_parity
 from atlas_reviewer.picker import (
     Depth,
     LensSelection,
@@ -1962,6 +1963,20 @@ def build_parser() -> argparse.ArgumentParser:
         "and one records over_context_window",
     )
     ev.set_defaults(handler=_cmd_eval)
+    parity = sub.add_parser(
+        "eval-parity",
+        help="score recorded runs against the parity key (offline)",
+    )
+    parity.add_argument(
+        "--runs",
+        required=True,
+        help="directory of recorded run JSON files",
+    )
+    parity.add_argument(
+        "--key",
+        help="parity key directory (default: the checked-in key)",
+    )
+    parity.set_defaults(handler=_cmd_eval_parity)
     probe = sub.add_parser(
         "probe-runner",
         help="live Sprites check without a model: protocol, or the review's exec sequence",
@@ -2166,6 +2181,18 @@ def _cmd_eval(args: argparse.Namespace, run: _Run) -> int:
     if args.gate and not report["gate_pass"]:
         return 1
     return EXIT_OK
+
+
+def _cmd_eval_parity(args: argparse.Namespace, run: _Run) -> int:
+    """Score recorded runs against the parity key. No model call and no network."""
+    try:
+        findings = load_key(Path(args.key) if args.key else KEY_DIR)
+        runs = load_runs(Path(args.runs))
+        report = score_parity(findings, runs)
+    except EvalFormatError as exc:
+        raise UsageError(str(exc)) from exc
+    run.out.write(json.dumps(report, indent=2) + "\n")
+    return EXIT_OK if report["gate_pass"] else 1
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (

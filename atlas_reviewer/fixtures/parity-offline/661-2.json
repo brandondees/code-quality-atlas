@@ -1,0 +1,64 @@
+{
+  "pr": 661,
+  "model": "recorded-fixture",
+  "repetition": 2,
+  "head_sha": "674071a91513b4774c82350fb757d9c085f10baf",
+  "coverage_complete": true,
+  "lenses_run": [
+    "reviewing-pr-and-process-hygiene",
+    "hunting-silent-failures",
+    "tracing-correctness-and-invariants",
+    "reviewing-test-quality"
+  ],
+  "lenses_not_run": [],
+  "lenses_failed": [],
+  "limit_stops": [],
+  "findings": [
+    {
+      "severity": "minor",
+      "path": "pull_request.body",
+      "quote": "`gate` on `674071a9` (run 43510666665)",
+      "verified": true,
+      "lens": "reviewing-pr-and-process-hygiene"
+    },
+    {
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "quote": "{unreadable} line(s) could not be parsed",
+      "verified": true,
+      "lens": "hunting-silent-failures",
+      "line": 207
+    },
+    {
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "quote": "break",
+      "verified": true,
+      "lens": "tracing-correctness-and-invariants",
+      "line": 186
+    },
+    {
+      "severity": "minor",
+      "path": "atlas_reviewer/rounds.py",
+      "quote": "findings_omitted",
+      "verified": true,
+      "lens": "reviewing-test-quality",
+      "line": 211
+    },
+    {
+      "severity": "nit",
+      "path": "atlas_reviewer/rounds.py",
+      "quote": "an extra note the key does not record",
+      "verified": true,
+      "line": 1
+    }
+  ],
+  "false_positive_majors": null,
+  "lenses_clean": null,
+  "lenses_planned": null,
+  "cost_usd": null,
+  "wall_seconds": null,
+  "cache_read_tokens": null,
+  "cache_write_tokens": null,
+  "previous_turn_misses": null
+}
