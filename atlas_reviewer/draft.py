@@ -93,6 +93,12 @@ class DraftInput:
     secrets: tuple[CommittedSecret, ...] | None = None
     verdict: Verdict = UNDETERMINED
     commits: tuple[str, ...] = ()
+    review_error: str = ""
+    """The fixed cause a refused key stopped the review with (D92):
+    `model key out of credit` or `model key refused`. Non-empty means this
+    draft is an error or a partial record, not an ordinary review -- the
+    banner names the cause and what did not run, and the service's post
+    carries the same. Empty on every review that ran on a served key."""
 
 
 MAX_WARNED_PATHS = 100
@@ -172,11 +178,35 @@ def _rendered(d: DraftInput, scrub: Callable[[str], str]) -> str:
         ),
     )
     sections = (
-        status_line(d.verdict),
-        warning(d.verdict, MAX_WARNED_PATHS, scrub),
+        status_line(d.verdict, review_error=d.review_error),
+        _review_error_banner(d, scrub),
         *(scrub(s) for s in body),
     )
     return "\n\n".join(s for s in sections if s) + "\n"
+
+
+def _review_error_banner(d: DraftInput, scrub: Callable[[str], str]) -> str:
+    """The banner a refused key's draft leads with (D92), in place of the
+    incomplete-coverage warning. Nothing ran: the review could not run,
+    and the post is the error the fixed cause names, never an ordinary
+    review. Something ran before the stop: the review is partial -- the
+    parts reviewed before the stop stand below, the rest did not run, and
+    the banner says so rather than claiming the review never ran."""
+    if not d.review_error:
+        return warning(d.verdict, MAX_WARNED_PATHS, scrub)
+    narrated = sum(1 for p in d.narratives if p.reviewed)
+    if narrated:
+        return (
+            f"> **REVIEW PARTIAL -- not a clean review.** The review stopped "
+            f"early: {d.review_error}. The {narrated} diff part(s) reviewed "
+            "before the stop stand below; the part(s) after the stop did not "
+            "run, and their files are not reviewed."
+        )
+    return (
+        f"> **REVIEW ERROR -- not a review.** The review could not run: "
+        f"{d.review_error}. Nothing here is a review finding and no "
+        "coverage is claimed."
+    )
 
 
 def _header(d: DraftInput) -> str:

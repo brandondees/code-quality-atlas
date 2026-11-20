@@ -50,10 +50,16 @@ from atlas_reviewer.lens_contract import (
     Severity,
     Valence,
 )
-from atlas_reviewer.lens_loop import AssistantText, LimitsUnsetError, UserText
+from atlas_reviewer.lens_loop import (
+    AssistantText,
+    LimitsUnsetError,
+    Spend,
+    UserText,
+)
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    KeyRefusedError,
     RateLimitedError,
     RefusedError,
 )
@@ -1879,6 +1885,128 @@ def test_findings_of_an_unattested_attempt_are_never_reported():
     result = synthesize([lens_result(misack)])
     assert result.findings == ()
     assert result.verdict is Verdict.APPROVE
+
+
+def test_a_halted_spend_with_a_refused_key_renders_the_error_draft():
+    """D92: a spend a refused key halted with its fixed cause synthesizes
+    into an error review -- the draft's headline names the cause, the
+    status line carries it for the service, and the draft carries no
+    Findings section to mistake for a clean bill. Kills the
+    dropped-cause mutant (synthesize ignoring the spend's halt cause),
+    the dropped-status-field mutant, and the findings-section mutant
+    that would render the empty Findings block under the error
+    headline."""
+    spend = Spend(LIMITS.resolve())
+    spend.halt("model key out of credit")
+    review = synthesize([], spend=spend)
+    assert review.review_error == "model key out of credit"
+    assert review.event is ReviewEvent.COMMENT
+    draft = render_draft(review, Redactor())
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    fields = json.loads(
+        draft.split("-->", 1)[0].removeprefix("<!-- atlas-review-status: ")
+    )
+    assert fields["review_error"] == "model key out of credit"
+    assert fields["coverage_complete"] is False
+
+
+def test_a_refused_carry_call_keeps_the_findings_and_names_the_partial_stop(tmp_path):
+    """D92's fix round: the lenses ran clean, then the carry-forward's own
+    call was refused. The review keeps the verified findings -- the
+    lenses' own -- and the headline says the review is partial, naming the
+    cause and that the stop came after the lenses ran; it never claims the
+    review never ran. Kills the re-raise-without-cause mutant (the carry
+    refusal leaving `review_error` empty, which posts an ordinary review)
+    and the findings-section mutant (any halt dropping the Findings)."""
+    log = _round_log_with_prior(tmp_path)
+    model = ScriptedLensModel(
+        [
+            READ_ALL,
+            final(finding()),
+            KeyRefusedError(
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            ),
+        ],
+        decisions=(),
+    )
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.review_error == "model key out of credit"
+    assert result.verified
+    draft = render_draft(result, Redactor())
+    assert "REVIEW PARTIAL -- not a clean review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings (verified quotes only)" in draft
+    assert "the stop came after the lenses ran" in draft
+
+
+def test_a_refused_decision_call_makes_no_later_lens_turn(tmp_path):
+    """D92's fix round 2: a refused key on the delta decision call halts
+    the spend with the fixed cause, and the fallback that follows runs on
+    a halted spend -- every lens NOT RUN, no lens turn made. Kills the
+    dropped-handler mutant (the refusal falling to the plain boundary
+    re-raise, which neither halts nor stops the fallback's lens turns)."""
+
+    class RefusesFirstCall:
+        """The decision call is the delta review's first model call; the
+        refusal lands there, and any later call is a lens turn the halted
+        spend must not make."""
+
+        name = "refused-decision"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def output_tokens_within(self, request, budget):
+            return 0
+
+        def turn(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                raise KeyRefusedError(
+                    "OpenRouter HTTP 402 for "
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    review_error="model key out of credit",
+                )
+            raise AssertionError("no lens turn follows a refused decision call")
+
+    model = RefusesFirstCall()
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=_round_log_with_prior(tmp_path),
+        delta=_delta_scope(),
+    )  # fmt: skip
+    assert result.review_error == "model key out of credit"
+    assert [lens.state for lens in result.lenses] == [LensState.NOT_RUN]
+    assert model.calls == 1
+
+
+def test_a_partial_lens_ran_before_the_halt_makes_the_review_partial():
+    """D92's fix round 3: the partial/error decision is one rule on both
+    layers. A lens that ran PARTIAL -- a model call served it and read
+    real files before the stop -- with no verified finding and no clean
+    run makes the draft partial (the banner says what ran stands), not
+    the error report that claims the review never ran; the service post
+    reads the same set from the draft's ledger, so its partial banner
+    matches. Kills the error-only mutant on the coordinator's predicate
+    (a partial lens dropped from `ran before the stop`), which would post
+    `the review stopped before it could review` over a review that
+    did."""
+    spend = Spend(LIMITS.resolve())
+    spend.halt("model key out of credit")
+    partial_lens = scoped(LENS, ("calc.py",), unread=("calc.py",))
+    review = synthesize([partial_lens], spend=spend)
+    assert review.review_error == "model key out of credit"
+    draft = render_draft(review, Redactor())
+    assert "REVIEW PARTIAL -- not a clean review" in draft
+    assert "REVIEW ERROR -- not a review" not in draft
+    assert "## Findings (verified quotes only)" in draft
 
 
 OTHER = "sweeping-for-security"

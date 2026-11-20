@@ -155,7 +155,14 @@ from atlas_reviewer.budget import (
     worst_case_usd,
 )
 from atlas_reviewer.http import HttpResponse, Transport, safe_url
-from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Json
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    ByokRefusedError,
+    Json,
+    KeyRefusedError,
+)
 from atlas_reviewer.pricing import (
     KeyStatus,
     ModelTerms,
@@ -199,10 +206,34 @@ _MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._+-]*/[a-z0-9][a-z0-9._+-]*$")
 _PROVIDER_SLUG = re.compile(r"^[a-z0-9][a-z0-9._+-]*(?:/[a-z0-9][a-z0-9._+-]*)*$")
 KEY_LIMIT_MAX_USD = Decimal("5.00")
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
+# The statuses that refuse the key itself (D92, as its fix round 3
+# settles the mapping): credit exhausted and the authentication refusal.
+# A 403 is NOT here: OpenRouter also returns it for a request whose input
+# was flagged, which is a per-request refusal of content, not a key
+# problem -- one flagged lens call must not halt the review, so 403 stays
+# a plain per-call BoundaryError.
+KEY_REFUSAL_CAUSES = {
+    401: KEY_AUTH_REFUSED,
+    402: KEY_OUT_OF_CREDIT,
+}
 _PER_MILLION = Decimal(1_000_000)
 # A numeric Retry-After above this waits this long; the 3-call cap still bounds
 # how many waits a review can make.
 _MAX_RETRY_WAIT = 8.0
+
+
+def key_refusal_or_boundary(status: int, message: str) -> BoundaryError:
+    """The error a non-200 chat-completion status raises (D92). A 401, 402
+    or 403 refused the key itself: a `KeyRefusedError`, a review error the
+    review stops on at once and never retries, whose `review_error` is the
+    fixed cause text the draft and the posted error name. Any other
+    status stays the plain boundary error it was. The message is
+    controller text -- a status and a safe URL, never a response body and
+    never key material."""
+    cause = KEY_REFUSAL_CAUSES.get(status)
+    if cause is None:
+        return BoundaryError(message)
+    return KeyRefusedError(message, review_error=cause)
 
 
 @dataclass(frozen=True)
@@ -982,7 +1013,9 @@ class OpenRouterProvider:
             )
         if resp.status != 200:
             ReviewBudget.settle(record, f"HTTP {resp.status}")
-            raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
+            raise key_refusal_or_boundary(
+                resp.status, f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
+            )
         counts_byok = self._key_status.counts_byok if self._key_status else False
         return _completion(resp, terms, record, self.model_id, counts_byok=counts_byok)
 

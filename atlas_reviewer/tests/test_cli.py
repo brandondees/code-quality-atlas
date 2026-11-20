@@ -2762,6 +2762,115 @@ def test_a_live_agentic_review_renders_the_prompt_cache_section(tmp_path, monkey
     assert all(isinstance(adapter, OpenRouterLensModel) for adapter in made)
 
 
+def test_a_refused_key_on_the_agentic_picker_is_the_error_not_a_fallback(
+    tmp_path, monkeypatch
+):
+    """D92's fix round: the agentic picker's refusal is not the
+    critical-tier fallback -- the review stops before any lens is planned,
+    the error draft is what renders and posts, and no lens call is made on
+    the refused key. Kills the fallback mutant (the refusal landing in the
+    BoundaryError handler) and the CLI-swallow mutant (the refusal leaving
+    the command as a boundary exit with no draft)."""
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, key_status, reply
+
+    refusal = reply(
+        json.dumps({"error": {"message": "Insufficient credits"}}).encode(),
+        status=402,
+    )
+    fake = OpenRouterFake(
+        refusal,
+        key=reply(key_status(limit=5, remaining=5)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "review", "--pool-size", "1"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out, err=err, sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(fake, key, limits=limits),
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    # The picker's call was the only one: no lens ran on the refused key.
+    assert len(fake.chat_requests()) == 1
+
+
+def test_a_key_refused_mid_review_halts_and_posts_the_error(tmp_path, monkeypatch):
+    """D92: a 402 during the lenses stops the review at once -- the
+    refused call is sent once, the spend halts with the fixed cause, the
+    second lens never starts, and the child exits incomplete with the
+    error draft instead of a review whose empty Findings read clean. This
+    layer keeps the refused call's reservation as spent (D43's settle
+    rule); the failed-call accounting that books the refusal at $0 is
+    part 2's. Kills the retry mutant (a second send) and the dropped-halt
+    mutant."""
+    from contextlib import ExitStack
+
+    from atlas_reviewer.local_runner import LocalSprites, LocalTasks
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, key_status, reply
+
+    refusal = reply(
+        json.dumps({"error": {"message": "Insufficient credits"}}).encode(),
+        status=402,
+    )
+    fake = OpenRouterFake(
+        refusal,
+        refusal,
+        refusal,
+        refusal,
+        key=reply(key_status(limit=5, remaining=5)),
+    )
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    state = tmp_path / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as claims:
+        tasks = claims.enter_context(LocalTasks(state / "tasks.sock"))
+        monkeypatch.setattr(cli, "SOCKET_PATH", str(tasks.path))
+        monkeypatch.setattr(cli, "BRIDGE_ROOT", str(tmp_path / "bridge"))
+        out, err = io.StringIO(), io.StringIO()
+        code = cli.main(
+            ["--state-dir", str(state), "agentic-review", "--event", EVENT,
+             "--provider", "openrouter", "--allow-live-inference", "--depth",
+             "triage", "--pool-size", "1", "--max-turns", "2"],
+            env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+            out=out, err=err, sprites_factory=lambda _env: LocalSprites(),
+            openrouter_factory=lambda key, limits: OpenRouterProvider(
+                fake, key, limits=limits
+            ),
+        )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    # The refusal was sent once, not retried (D49 does not apply to a key
+    # refusal), and the second lens made no call on the halted spend.
+    assert len(fake.chat_requests()) == 1
+
+
 def test_agentic_review_validates_the_diff_prefix_share_flag(tmp_path):
     """D65: the share is a limit flag like the others -- a value outside
     0 to 1 is a usage error, and 0 is accepted (it pages every review)."""

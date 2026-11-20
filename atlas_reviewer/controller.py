@@ -70,6 +70,7 @@ from atlas_reviewer.ports import (
     ByokRefusedError,
     Clock,
     GitHubReader,
+    KeyRefusedError,
     Narrative,
     PickRequest,
     ReviewHarness,
@@ -208,7 +209,23 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     conversation = _conversation(event, pull, deps, config, collected, scrub=scrub)
     collected.notes.extend(_not_rerun_notes(evidence, scrub=scrub))
     issues = _issue_blocks(event, pull, deps, config, collected, scrub=scrub)
-    lenses = _select_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
+    picker_refusal: KeyRefusedError | None = None
+    try:
+        lenses = _select_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
+    except KeyRefusedError as exc:
+        # The picker's call was refused (D92): the review stops with no
+        # lens plan and no part narrated, and the outcome is the error the
+        # fixed cause names -- the critical-tier fallback would spend a
+        # lens plan, and every part after it, on a key that cannot serve
+        # any of it.
+        lenses = LensSelection(
+            (),
+            "the lens picker's model call was refused; the review stopped "
+            "before any part was narrated",
+            used_call=False,
+            skipped="",
+        )
+        picker_refusal = exc
     collected.notes.extend(n for n in (lenses.note,) if n)
     base = _Base(
         event,
@@ -230,7 +247,14 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     )
     calls = config.model_calls - int(lenses.used_call)
     selection = None if diff is None else _fit(diff.text, calls, base, deps, config)
-    parts = _narrate_parts(base, selection, deps, telemetry)
+    parts: tuple[PartNarrative, ...]
+    refusal: KeyRefusedError | None
+    if picker_refusal is not None:
+        # The picker's refusal already stopped the review: no part is
+        # narrated on a key that refused the plan's own call.
+        parts, refusal = (), picker_refusal
+    else:
+        parts, refusal = _narrate_parts(base, selection, deps, telemetry)
     secrets = None if diff is None else diff.secrets
     dropped = _dropped(base, selection)
     verdict = decide(
@@ -276,6 +300,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             telemetry=telemetry.events,
             verdict=verdict,
             commits=base.commits,
+            review_error="" if refusal is None else refusal.review_error,
         ),
         scrub,
     )
@@ -922,20 +947,26 @@ def _narrate_parts(
     selection: DiffSelection | None,
     deps: Deps,
     telemetry: Telemetry,
-) -> tuple[PartNarrative, ...]:
+) -> tuple[tuple[PartNarrative, ...], KeyRefusedError | None]:
     """One model call per part, in risk order. A part whose call fails or is
     refused (call cap, cost cap, token bound) still yields a `PartNarrative`,
     so its files are reported as unreviewed rather than dropped. A
     `ByokRefusedError` does not: it ends the review, so no later part is
-    called and the run is not a partial draft. No diff, no call."""
+    called and the run is not a partial draft. A refused key ends the review
+    the same way (D92), and the parts narrated before the refusal stand --
+    the caller renders the partial-or-error outcome the fixed cause names,
+    never an ordinary review. No diff, no call."""
     if selection is None:
-        return ()
+        return (), None
     requests = _requests(base, selection)
     total = len(requests)
-    return tuple(
-        _narrate_part(i, total, part, request, deps, telemetry)
-        for i, (part, request) in enumerate(requests, 1)
-    )
+    parts: list[PartNarrative] = []
+    for index, (part, request) in enumerate(requests, 1):
+        try:
+            parts.append(_narrate_part(index, total, part, request, deps, telemetry))
+        except KeyRefusedError as exc:
+            return tuple(parts), exc
+    return tuple(parts), None
 
 
 def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> str:
@@ -977,7 +1008,11 @@ def _narrate_part(
             lambda: deps.harness.review(request),
             {"files": len(part.files), "diff_chars": part.chars},
         )
-    except ByokRefusedError:
+    except (ByokRefusedError, KeyRefusedError):
+        # Both refusals end the review: the key refused spend (D41) or the
+        # key itself was refused -- credit or authentication (D92). A later
+        # diff part must not call a key in either state, and the caller
+        # renders the outcome the fixed cause names.
         raise
     except BoundaryError as exc:
         return PartNarrative(

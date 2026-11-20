@@ -5717,3 +5717,198 @@ asserts exactly `Decimal("25")` with an empty note.
 `test_review_template_sync.py`, `test_decision_updates_are_appended.py`),
 both full suites with their coverage floors, ruff, ruff format --check,
 mypy and the drift check run before the push.
+
+## 2026-11-19 — D92 part 1: a refused key is a review error, posted as one
+
+The launch brief's read-only analysis of the v9 agentic service's runs on
+the exhausted pilot OpenRouter key: each review made 4–7 model calls that
+all refused (presumably HTTP 402), every refused call booked its full
+worst-case reservation ($1.40–$2.40 at the pinned route's caps, D43's
+failed-call rule), so the review projected to the $10 ceiling (D68),
+stopped on `reservation_usd`, and posted "Agentic coverage incomplete"
+with "Findings: None" — a review that never ran, billed $0, reading as a
+clean, incomplete one. The brief's four fixes are decided as D92; part 1
+lands here (the classification and the error post), part 2 (the
+failed-call accounting and the up-front credit check) is the stacked PR
+on top of this one. Offline only: fakes, recorded HTTP and scripted
+models; no live model call, network call or secret read; no deployed
+service setting, Fly config value or secret changed.
+
+**The classification.** `ports.KeyRefusedError` — a `BoundaryError`
+carrying the fixed cause text on `review_error`. The OpenRouter one-shot
+client's non-retryable branch and the agentic adapter's `turn` classify
+401/402/403 by status (`openrouter.key_refusal_or_boundary`); the tenant
+path's auth and quota refusals raise the same class with the same causes.
+The message is controller text — a status and a safe URL — never a
+response body, never key material. In the lens loop the refusal is not
+retried (D49's retry is for a call a provider may yet serve), the spend
+halts at once with the fixed cause (`Spend.halt` grew its optional cause
+record; `halted_cause` is empty for every other halt), every later lens
+runs NOT RUN on the halted spend, and the bounded re-assessment call
+halts the same way. The two fixed causes are `model key out of credit`
+(402) and `model key refused` (401/403).
+
+**The error draft and the error post.** `synthesize` reads the spend's
+halt cause into the review's `review_error`; the draft's headline and
+status line name the cause, the coverage ledger and the cost line stay,
+and the Findings section is not rendered at all — an error report, not a
+review with an empty findings list. The service's draft summarizer
+carries the cause (`ReviewReport.review_error`), and `render_comment`
+returns the error body for such a report: the not-a-review banner, the
+fixed cause, and the idempotency marker, so a retry dedupes as before.
+The exit code is unchanged (`EXIT_INCOMPLETE`, postable), and the queue's
+follow-up logic keys on the report's incomplete coverage as before, so
+the pull request is retried as a full review when the key is served
+again. The delta review's own pre-lens calls (the D83 decision call and
+the carry-forward call) keep their boundary-failure fallbacks: a refusal
+there surfaces through the fallback and the lenses' own classification,
+and the review still ends in the error post.
+
+**Mutants, each applied by hand and killed** (the mutated module's
+bytecode cache deleted first): the lens loop's key-refusal clause dropped
+— the refusal retried as a model error and never halted
+(`test_a_refused_key_stops_the_review_and_never_retries`); the
+provider's classification dropped — a 402 stays a plain `BoundaryError`
+(`test_a_refused_key_is_a_review_error_and_never_retried`, the adapter's
+`test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal`, the
+tenant path's `test_a_refused_key_classifies_as_a_review_error`); the
+halt cause dropped (`test_a_refused_key_stops_the_review_and_never_
+retries`'s `halted_cause` pin); the error draft's findings-section gate
+dropped (`test_a_halted_spend_with_a_refused_key_renders_the_error_
+draft`); the error post's early return dropped
+(`test_the_error_report_posts_the_error_not_a_review`); the status
+line's `review_error` field dropped (`test_an_error_draft_summarizes_to_
+the_error_report`); `synthesize` stopped reading the spend's halt cause
+(the same coordinator draft test); and the re-assessment call's
+key-refusal clause dropped (`test_a_refused_key_on_the_reassessment_
+halts_the_spend_with_the_cause`).
+
+**Gates.** Both suites with their coverage floors, ruff check, ruff
+format, mypy, drift and the generated-tree sync run before the push; the
+eight mutants above are the round's only new ones.
+
+## 2026-11-19 (same day) — #782/#783 fix round 1: the sites the first cut missed, the partial rule, the marker, and the waiter race
+
+The round-1 reviews on both PRs (the round-2 record on #782 names the two
+Majors its first pass posted plus the two it re-measured; #783's round-4
+record names one new Major and re-raises its round-1 pair). Every Major
+and Minor is fixed in the layer that owns it; the Nits rode along. Offline
+only throughout: fakes, recorded HTTP and scripted models; no live model
+call, network call or secret read; no deployed service setting, Fly config
+value or secret changed.
+
+**#782 — the classification covers every model-call site, and the partial
+rule.** The one-shot controller's narration treated a refused key as an
+ordinary part failure (`NarrativeFailure`), walked past it into later
+parts, and posted an ordinary review. `_narrate_part` now re-raises the
+refusal beside the BYOK one; `_narrate_parts` collects the parts narrated
+before the refusal and returns the refusal with them; `run_review` catches
+the picker's refusal the same way (an empty plan, no part narrated) and
+puts the fixed cause on the one-shot draft's new `review_error` field,
+which `verdict.status_line` carries and the service's summarizer reads.
+The lens picker's refusal is no longer the critical-tier fallback on
+either mode (`_pick` re-raises beside BYOK). The delta decision call and
+the carry-forward call halt the spend with the fixed cause; the decision
+fallback re-runs lenses on a halted spend (every one NOT RUN), and
+`_review_lenses` re-reads the spend's halt cause after every composition
+step, so a refusal on a post-synthesis call — carry or re-assessment —
+reaches the finalized review. **The partial rule:** `render_draft` keeps
+the verified findings of lenses that ran clean before the halt; the
+headline is `REVIEW PARTIAL -- not a clean review`, naming the cause and
+what did not run to its end — it never claims the review never ran — and
+`render_comment` renders the same partial banner over the standing
+findings; only a review nothing ran on posts the bare error body. **The
+marker:** error and partial posts carry `atlas-service-post: <key> error`
+and record under their own ledger key, so the head is reviewable again
+once the key is served; an error retry still dedupes against itself.
+**The typed field:** the summarizer reads only the two fixed causes and
+raises `DraftParseError` on anything else, the way a mismatched mode does.
+**Mutants, each applied by hand and killed** (bytecode cache deleted
+first): the one-shot refusal swallowed into the boundary handler as a
+`NarrativeFailure` (`test_a_refused_key_after_a_served_part_is_partial_
+and_keeps_the_narrative`, which also pins the status-line field); the
+picker's refusal falling back to the critical tier (the one-shot
+`test_a_refused_key_on_the_one_shot_picker_is_the_error_not_a_fallback`
+and the agentic CLI's test of the same behavior); the carry refusal
+re-raised without the cause (`test_a_refused_carry_call_keeps_the_
+findings_and_names_the_partial_stop`); the findings-section gate dropping
+every finding on any halt (the same coordinator test and
+`test_a_partial_refusal_post_keeps_the_findings_and_names_the_stop`);
+the error post recorded under the head's own key and marker
+(`test_an_error_post_does_not_block_a_later_review_of_the_same_head`);
+the count-of-zero partial banner (`test_a_refusal_after_the_lenses_ran_
+names_no_not_run_lens`); and the typed field accepting any string
+(`test_an_unrecognized_review_error_is_a_parse_failure`, with both fixed
+causes pinned by the parametrized parse test).
+
+**#783 — the waiter race, the priced-response settle, and the booking
+reversal** are recorded in that layer's own entry below.
+
+## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
+
+The live code-quality-atlas bot reviewed both heads; its findings were
+triaged against the code, and the dedicated reviewers' round-3 reports
+named one Nit on #782 and one Major, one Minor and one Nit on #783.
+Offline only throughout: fakes, recorded HTTP and scripted models; no
+live model call, network call or secret read; no deployed service
+setting, Fly config value or secret changed.
+
+**The 403 mapping (the bot's Major, confirmed).** OpenRouter also returns
+403 for a request whose input was flagged -- a per-request refusal of
+content, not a key problem -- and the diff is PR-author controlled, so
+one flagged lens call would have halted the review and posted `model key
+refused` over a working key. The OpenRouter mapping now carries 401 and
+402 only (`KEY_REFUSAL_CAUSES`), the tenant path's `AUTH_STATUSES` is 401
+only, and a 403 stays the plain per-call `BoundaryError` it was --
+retried and failed per lens like any model error, with the review
+continuing. Pinned on all three paths: the one-shot client (the 403
+refuses its call, the next call is served, and no `review_error` is
+carried), the agentic adapter (the next `turn` goes out), and both
+tenant paths (the one-shot `_response` and the adapter's
+`_refuse_status`). The tenant path keeps 403 per-call because an
+arbitrary OpenAI-compatible endpoint's 403 has no single documented
+key-level meaning; no provider doc was found that would justify keeping
+it key-level, so the conservative per-call treatment stands.
+
+**The historical session-log line, restored (the bot's Minors, confirmed
+-- six lenses found the same defect).** The rebase's conflict resolution
+had stripped the `` `<<<<<<< HEAD` `` code span out of the #775 fix-round
+entry's own sentence about that marker, leaving an unbalanced backtick
+and a record that no longer said what the marker was. The line is
+restored byte-for-byte to main's text; the diff against main is pure
+appends again (verified for both docs files), and the committed
+conflict-marker guard still passes -- the restored marker sits mid-line
+inside a code span, a shape the guard does not flag.
+
+**The partial predicate is one rule (the bot's Minor, confirmed).** The
+coordinator's draft and headline decided partial on verified findings
+and CLEAN runs, while the service post also counted a PARTIAL lens
+(`_AGENTIC_RUN_STATES` is clean and partial). A lens that ran partial --
+a model call served it and read real files before the stop -- made the
+post say partial while the draft claimed the review never ran. The
+coordinator now decides both from `_ran_before_the_stop`: verified
+findings, a clean run, or a partial lens; the service post reads the
+same set from the ledger, and the pinning test (a partial lens, nothing
+verified, nothing clean) fails the error-only mutant on both layers.
+
+**The tenant adapter's refusal path, pinned (the bot's Minor,
+confirmed).** `_refuse_status` -- the path `TenantLensModel.turn`
+actually calls -- had no test pinning the `KeyRefusedError`
+conversion; the older adapter test's `pytest.raises(BoundaryError)`
+could not see a revert. The new parametrized adapter test pins 401 and
+402 with their causes; 403 is pinned plain on both tenant paths.
+
+**The D92 entry's queue sentence, restated (the bot's Minor,
+confirmed).** The record said the review "is retried as a full review
+when the key is served again" because the queue keys off incomplete
+coverage; the reviews' reading is right -- the queue's covered flag
+shapes the follow-up for a newer pending head, and the same-head
+redelivery works because the error and partial posts dedupe under their
+own marker and ledger key. The sentence now states both mechanisms.
+
+**Deferred, with the bot's own words as the evidence: the `KeyRefusal`
+StrEnum refactor (the bot's Nit).** The finding's fix paragraph says
+"This is optional; the current code works" -- the closed set is enforced
+where it matters (the service's typed parse raises on anything outside
+it), and the refactor would touch six layers in a round whose other
+findings are behavioral. The owner can call for it separately.

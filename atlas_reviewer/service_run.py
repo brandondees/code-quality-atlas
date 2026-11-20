@@ -72,6 +72,7 @@ from atlas_reviewer.openrouter import (
     ENV_REQUIRE_ZDR,
 )
 from atlas_reviewer.picker import FLOOR_TIER
+from atlas_reviewer.ports import KEY_AUTH_REFUSED, KEY_OUT_OF_CREDIT
 from atlas_reviewer.review_wide import ENV_REPO_CEILING_MAX_USD
 from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.tenant_provider import (
@@ -396,6 +397,12 @@ class ReviewReport:
     which it reused, each with the coordinator's reason -- so the posted
     comment shows the judgment, not only its outcome. Empty on a full
     review."""
+    review_error: str = ""
+    """The fixed cause a refused key halted the review with (D92), read
+    from the draft status line: `model key out of credit` or `model key
+    refused`. Non-empty means the post is the error that cause names, not
+    a review -- no findings section, no coverage claim. Empty on every
+    review that ran on a served key."""
 
 
 @dataclass(frozen=True)
@@ -661,6 +668,28 @@ def _status_flag(status: Mapping[str, object], key: str) -> Any:
     return value if isinstance(value, str) else ""
 
 
+REVIEW_ERROR_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
+"""The two fixed causes a refused key's review error carries (D92). The
+status line's `review_error` field is controller text with exactly these
+values; anything else on a draft is not a field this coordinator wrote."""
+
+
+def _review_error(status: Mapping[str, object]) -> str:
+    """The draft's refused-key cause (D92), typed: only the two fixed
+    causes read. An unrecognized value is not a field this coordinator
+    wrote -- version skew, or a draft this service cannot map -- and
+    raises, the way a mismatched mode does; posting it would put
+    unvalidated text where the fixed cause belongs."""
+    value = _status_flag(status, "review_error")
+    if not value:
+        return ""
+    if value not in REVIEW_ERROR_CAUSES:
+        raise DraftParseError(
+            f"the draft's review_error is not a cause this service knows: {value!r}"
+        )
+    return value
+
+
 def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
     recommended = status.get("review_event")
     run: list[str] = []
@@ -693,6 +722,7 @@ def _oneshot_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         findings=_findings(draft),
         coverage_complete=_status_flag(status, "coverage_complete"),
         delta_note=_status_flag(status, "delta_note"),
+        review_error=_review_error(status),
     )
 
 
@@ -772,6 +802,7 @@ def _agentic_report(draft: str, status: Mapping[str, object]) -> ReviewReport:
         lens_decisions=tuple(_bullets(section(draft, "Lens decisions (delta review)"))),
         coverage_complete=_status_flag(status, "coverage_complete"),
         delta_note=_status_flag(status, "delta_note"),
+        review_error=_review_error(status),
     )
 
 

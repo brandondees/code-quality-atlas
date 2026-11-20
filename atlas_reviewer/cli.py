@@ -70,11 +70,14 @@ from atlas_reviewer.conversation import (
 )
 from atlas_reviewer.coordinator import (
     NONCE_BYTES,
+    AgenticReview,
+    endpoint_class,
     first_turn,
     limits_for_lens,
     model_for_lens,
     render_draft,
     review_lenses,
+    synthesize,
 )
 from atlas_reviewer.delta import (
     CARRY_TARGET_PREFIX,
@@ -126,6 +129,7 @@ from atlas_reviewer.lens_loop import (
     AgenticLimits,
     FinalReply,
     LensModel,
+    Spend,
     TurnRequest,
     input_room_tokens,
 )
@@ -154,6 +158,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
     GitHubReader,
+    KeyRefusedError,
     ModelProvider,
     NotFoundError,
     PickRequest,
@@ -914,6 +919,42 @@ def _conversation_block(
     return block, (*collected.omissions, *omissions)
 
 
+def _picker_spend(picker_provider: ModelProvider) -> tuple[int, Decimal]:
+    """The calls and dollars the lens picker already committed (D68):
+    they count toward this review's `max_calls` and `reservation_usd`."""
+    budget = getattr(picker_provider, "budget", None)
+    return (
+        (len(budget.calls), budget.committed_usd())
+        if isinstance(budget, ReviewBudget)
+        else (0, Decimal(0))
+    )
+
+
+def _key_refusal_review(
+    cause: str,
+    limits: AgenticLimits,
+    picker_spend: tuple[int, Decimal],
+    model: LensModel,
+) -> AgenticReview:
+    """The error review a refused key renders when the review stopped
+    before any lens was planned (D92): the picker's own call was the one
+    refused, so no lens ran and none is listed -- the draft and the post
+    name the fixed cause, and the review's spend records the picker's
+    committed dollars against the review's limits."""
+    spend = Spend(
+        limits.resolve(cross_limits=False),
+        picker_spend[0],
+        picker_spend[1],
+        settled_usd=picker_spend[1],
+    )
+    spend.halt(cause)
+    return synthesize(
+        (),
+        spend=spend,
+        endpoint_class=endpoint_class(model),
+    )
+
+
 def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     """Every selected lens, concurrently up to the pool, then one draft.
 
@@ -1094,6 +1135,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             )
 
         acquire_shared()
+        names: tuple[str, ...] = ()
         try:
             with opening_trace(None, scrub).review(
                 event.repo, event.pr_number, event.head_sha
@@ -1109,12 +1151,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 )
                 selection = _with_preference_note(selection, config, proposal_notes)
                 names = tuple(loaded.name for loaded in plan.loaded)
-                budget = getattr(picker_provider, "budget", None)
-                picker_spend = (
-                    (len(budget.calls), budget.committed_usd())
-                    if isinstance(budget, ReviewBudget)
-                    else (0, Decimal(0))
-                )
+                picker_spend = _picker_spend(picker_provider)
                 ledger = AttemptLedger(
                     _attestation_ledger_path(args, env, scratch), clock
                 )
@@ -1234,12 +1271,36 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     ),
                 )
                 span.set("atlas.review_event", review.event.value)
+        except KeyRefusedError as exc:
+            # The lens picker's call was refused (D92): the review stops
+            # before any lens fans out, and the error review the fixed
+            # cause names is what renders and posts.
+            review = _key_refusal_review(
+                exc.review_error, limits, _picker_spend(picker_provider),
+                lens_model,
+            )  # fmt: skip
         finally:
             release_shared()
-    # The pool creates each adapter when its lens run starts, so the
-    # collection order follows the pool's scheduling, not lens-name
-    # order; the draft orders the sessions by lens name (round-2 review,
-    # Nit 4).
+    return _emit_agentic_draft(
+        review, names, live_models, redactor, args, run, telemetry, out, err
+    )
+
+
+def _emit_agentic_draft(
+    review: AgenticReview,
+    names: Sequence[str],
+    live_models: Sequence[OpenRouterLensModel | TenantLensModel],
+    redactor: Redactor,
+    args: argparse.Namespace,
+    run: _Run,
+    telemetry: Telemetry,
+    out: TextIO,
+    err: TextIO,
+) -> int:
+    """The agentic draft's render and exit codes. The pool creates each
+    adapter when its lens run starts, so the cache's collection order
+    follows the pool's scheduling, not lens-name order; the draft orders
+    the sessions by lens name (round-2 review, Nit 4)."""
     cache = tuple(
         session for model in live_models for session in model.cache_sessions()
     )
@@ -1248,7 +1309,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         f"{_telemetry_line(run, telemetry)}"
         f"review event: {review.event.value}; coverage_complete="
         f"{str(review.coverage_complete).lower()}; unreviewed_files="
-        f"{len(review.unreviewed_paths)}; lenses={len(names)}; "
+        f"{len(review.unreviewed_paths)}; lenses={len(tuple(names))}; "
         f"not_run={len(review.not_picked)}\n"
     )
     if not review.coverage_complete:

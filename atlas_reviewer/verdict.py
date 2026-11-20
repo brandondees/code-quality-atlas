@@ -95,9 +95,11 @@ UNDETERMINED = decide(
 )
 
 
-def status_line(v: Verdict) -> str:
+def status_line(v: Verdict, review_error: str = "") -> str:
     """One HTML comment for pipelines to gate on. It holds only
-    controller-made values (no paths), so PR text cannot end it early."""
+    controller-made values (no paths), so PR text cannot end it early.
+    `review_error` is the refused-key cause (D92), carried only when the
+    review stopped on one -- controller text either way."""
     fields = {
         "review_event": v.event.value,
         "proposed_event": v.proposed.value,
@@ -105,6 +107,8 @@ def status_line(v: Verdict) -> str:
         "changed_files": v.coverage.changed,
         "unreviewed_files": len(v.coverage.unreviewed),
     }
+    if review_error:
+        fields["review_error"] = review_error
     return f"{STATUS_PREFIX}{json.dumps(fields)} -->"
 
 

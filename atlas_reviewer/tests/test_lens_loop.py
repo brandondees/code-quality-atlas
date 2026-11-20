@@ -55,6 +55,7 @@ from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    KeyRefusedError,
     TransportError,
     TransportTimeoutError,
 )
@@ -158,6 +159,47 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
             review_started=clock.monotonic(),
         )  # fmt: skip
     assert spend.committed_usd == Decimal("0.01")
+
+
+def test_a_refused_key_stops_the_review_and_never_retries():
+    """D92: a 402/401/403 from the endpoint is a review error, not a
+    spend. The lens cut carries the refusal's fixed detail, the spend
+    halts with the fixed cause, and the model is asked exactly once --
+    the D49 retry does not apply to a refusal the key itself made.
+    Kills the retry mutant (routing the refusal into the generic
+    boundary branch sends it again) and the dropped-halt mutant."""
+    calls = []
+
+    class Refused:
+        name = "refused"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            calls.append(request)
+            raise KeyRefusedError(
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            )
+
+    clock = FakeClock()
+    spend = Spend(LIMITS.resolve())
+    outcome = run_attempt(
+        job(), object(), Refused(), spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert len(calls) == 1
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert "OpenRouter HTTP 402" in outcome.detail
+    assert spend.halted
+    assert spend.halted_cause == "model key out of credit"
+    assert spend.calls == 1
+    # The failed call keeps its reservation as spent (D43's settle rule,
+    # which the failed-call accounting change amends).
+    assert spend.committed_usd == Decimal("0.10")
+    assert spend.settled_usd == Decimal("0.10")
 
 
 def test_every_exception_path_after_a_reservation_settles_it_as_spent():

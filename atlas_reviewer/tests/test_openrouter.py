@@ -32,6 +32,7 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
+    KeyRefusedError,
     TransportError,
     TransportTimeoutError,
 )
@@ -873,6 +874,51 @@ def test_non_retryable_errors_stop_at_once():
     with pytest.raises(BoundaryError, match="HTTP 400"):
         provider(fake).complete(SMALL)
     assert len(fake.chat_requests()) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "cause"),
+    [
+        (401, "model key refused"),
+        (402, "model key out of credit"),
+    ],
+)
+def test_a_refused_key_is_a_review_error_and_never_retried(status, cause):
+    """D92, as its fix round 3 settles the mapping: a 401/402 refused the
+    key itself, so the one-shot client raises `KeyRefusedError` -- a
+    review error whose `review_error` is the fixed cause text -- after one
+    send, with no retry and no echo of the response body. Kills the
+    generic-boundary mutant (a 402 that stayed a plain `BoundaryError`
+    would classify as a retryable model error in the loop) and the retry
+    mutant (a second send on a refused key)."""
+    body = json.dumps(
+        {"error": {"message": f"Insufficient credits, key sk-or-v1-{status}"}}
+    ).encode()
+    fake = OpenRouterFake(reply(body, status=status), reply(completion()))
+    with pytest.raises(KeyRefusedError) as caught:
+        provider(fake).complete(SMALL)
+    assert caught.value.review_error == cause
+    assert "Insufficient" not in str(caught.value)
+    assert "sk-or-v1" not in str(caught.value)
+    assert len(fake.chat_requests()) == 1
+
+
+def test_a_403_is_a_plain_per_call_error_and_never_a_key_refusal():
+    """D92's fix round 3: OpenRouter also returns 403 for a request whose
+    input was flagged, which is a per-request refusal of content, not a
+    key problem -- so a 403 stays the plain boundary error it was, the
+    review does not halt, and the next call still goes out. Kills the
+    key-refusal mutant (a 403 classified as `KeyRefusedError` would stop
+    the review and post `model key refused` over a flagged input)."""
+    fake = OpenRouterFake(reply({}, status=403), reply(completion()))
+    p = provider(fake)
+    with pytest.raises(BoundaryError, match="HTTP 403") as caught:
+        p.complete(SMALL)
+    assert not isinstance(caught.value, KeyRefusedError)
+    assert getattr(caught.value, "review_error", None) is None
+    # The review was not halted: the next call goes out and is served.
+    assert p.complete(SMALL) == "review text"
+    assert len(fake.chat_requests()) == 2
 
 
 # --- $3 reservation ----------------------------------------------------------

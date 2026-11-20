@@ -175,6 +175,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     ByokRefusedError,
     Clock,
+    KeyRefusedError,
     RunnerLedger,
     SpritesApi,
     TransportError,
@@ -235,7 +236,8 @@ NONCE_BYTES = 8
 # have unread files; a round that does not shrink the gap ends it earlier.
 MAX_CONTINUATIONS = 4
 HALTED_REASON = (
-    "not started: an earlier call in this review stopped it (BYOK or a failed lens)"
+    "not started: an earlier call in this review stopped it "
+    "(BYOK, a refused key, or a failed lens)"
 )
 LATE_REASON = "not started: the review deadline had passed"
 NO_BODY_REASON = "no lens body in the bundle"
@@ -406,6 +408,16 @@ class AgenticReview:
     the incoming changes, never a fixed path-intersection rule; it is
     recorded here, in the telemetry and in the round record, and
     summarized in the post. Empty on a full review."""
+    review_error: str = ""
+    """The fixed cause a refused key halted the review with (D92):
+    `model key out of credit` or `model key refused`, the spend's own
+    halt cause. Non-empty means this draft is an error or a partial
+    record, not an ordinary review: with no verified finding, no clean
+    run and no partial lens before the halt, the draft is the error
+    report, with no Findings section to mistake for a clean bill; when a
+    lens ran -- clean with its findings, or partial over the files it
+    read -- the review is partial and the headline names what did not
+    run. Empty on every review that ran on a served key."""
 
     @property
     def reused_lenses(self) -> frozenset[str]:
@@ -564,6 +576,7 @@ def synthesize(
         rerank_note=rerank_note,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
         endpoint_class=endpoint_class,
+        review_error="" if spend is None else spend.halted_cause,
     )
 
 
@@ -1133,6 +1146,13 @@ def _review_lenses(
             if delta is not None
             else frozenset(),
             lens_decisions=decisions,
+            # The refused-key cause is read from the spend one last time,
+            # after every composition step (D92's fix round): a carry or a
+            # re-assessment call can be the call the key refused, and both
+            # run after `synthesize` captured the halt -- the finalized
+            # review carries the cause, or a refused-key review would post
+            # as an ordinary one.
+            review_error=spend.halted_cause or review.review_error,
         ),
         redactor,
         # The digest is stored with the record (D73, round-2 review of
@@ -1766,6 +1786,17 @@ def _reassess_call(
     worst = reserved.worst
     try:
         reply = model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause the draft and the post carry,
+        # and the refusal is never retried. The failed call keeps its
+        # reservation as spent (D43's settle rule, which the failed-call
+        # accounting change amends).
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        return AttemptOutcome(
+            Attestation.UNACKNOWLEDGED, frozenset({Cause.MODEL_ERROR}), detail=str(exc)
+        )
     except ByokRefusedError as exc:
         spend.settle(worst, None)
         spend.halt()
@@ -2172,6 +2203,14 @@ def _decision_call(
         )
     try:
         reply = traced_model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause, and the decision fallback then
+        # re-runs lenses on a halted spend -- every one NOT RUN -- so the
+        # review renders and posts as the error the cause names.
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
@@ -2423,6 +2462,15 @@ def _carry_call(
         )
     try:
         reply = traced_model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause; the carry fallback composes the
+        # priors as recorded, and the finalized review carries the cause
+        # as its review error -- the posted result is the error or the
+        # partial record it names, never an ordinary review.
+        spend.settle(worst, None)
+        spend.halt(exc.review_error)
+        raise
     except ByokRefusedError:
         spend.settle(worst, None)
         spend.halt()
@@ -3320,6 +3368,11 @@ def status_line(review: AgenticReview) -> str:
         "round_log_note": _status_log_note(review.round_log_note),
         "limit_stop": _limit_stop(review),
     }
+    if review.review_error:
+        # The refused-key cause (D92), fixed controller text: the service
+        # reads it and renders the post as the error it is, never as an
+        # incomplete review.
+        fields["review_error"] = review.review_error
     if review.delta_from:
         # The delta review's own counts (#702): a pipeline gating on the
         # status line can tell a delta review from a full one and see
@@ -3399,21 +3452,34 @@ def render_draft(
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub)]
-    lines += _delta_lines(review, scrub)
-    lines += _selection_and_rank_lines(review, scrub)
-    lines += _reassess_sections(review, scrub)
-    lines += _delta_sections(review, scrub)
-    lines += ["", "## Findings (verified quotes only)", ""]
-    lines += [_finding_line(f, scrub) for f in review.verified] or [
-        "No verified findings."
-    ]
-    if review.unverified:
-        lines += ["", "## Not verified (not reported as findings)", ""]
+    if review.review_error and not _ran_before_the_stop(review):
+        # An error report, not a review (D92): the draft carries the
+        # ledger and the cost, never a Findings section an empty one
+        # could read as a clean bill.
         lines += [
-            f"- {f.id} {quote_untrusted(str(f.finding.location), QUOTED_CHARS, scrub=scrub)}: "
-            f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
-            for f in review.unverified
+            "",
+            (
+                "The review stopped before it could review; the cause above is "
+                "fixed controller text. Every lens below shows why it did not "
+                "run."
+            ),
         ]
+    else:
+        lines += _delta_lines(review, scrub)
+        lines += _selection_and_rank_lines(review, scrub)
+        lines += _reassess_sections(review, scrub)
+        lines += _delta_sections(review, scrub)
+        lines += ["", "## Findings (verified quotes only)", ""]
+        lines += [_finding_line(f, scrub) for f in review.verified] or [
+            "No verified findings."
+        ]
+        if review.unverified:
+            lines += ["", "## Not verified (not reported as findings)", ""]
+            lines += [
+                f"- {f.id} {quote_untrusted(str(f.finding.location), QUOTED_CHARS, scrub=scrub)}: "
+                f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
+                for f in review.unverified
+            ]
     if review.context_omissions:
         lines += ["", "## Context omissions", ""]
         lines += [
@@ -3544,7 +3610,50 @@ def _selection_and_rank_lines(
     return lines
 
 
+def _ran_before_the_stop(review: AgenticReview) -> bool:
+    """Whether any lens ran before the refused-key halt (D92's fix round
+    3): a clean run stands with its findings, and a partial run read real
+    files before the stop -- either makes the review partial rather than
+    the error report that says it never ran. The service post reads the
+    same set from the draft's ledger (`_AGENTIC_RUN_STATES` is clean and
+    partial), so the two layers decide alike."""
+    return bool(
+        review.verified
+        or _clean_runs(review.lenses)
+        or any(r.state is LensState.PARTIAL for r in review.lenses)
+    )
+
+
 def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
+    if review.review_error:
+        # A refused key's draft leads with the cause (D92). Lenses that ran
+        # before the halt stand: the review is partial, the verified
+        # findings are kept, and the banner names what did not run -- it
+        # never claims the review never ran.
+        clean = _clean_runs(review.lenses)
+        short = [
+            r
+            for r in review.lenses
+            if r.state is not LensState.CLEAN and r.lens not in clean
+        ]
+        if _ran_before_the_stop(review):
+            named = (
+                "; ".join(f"{r.lens}: {r.state.value}" for r in short)
+                if short
+                else "the stop came after the lenses ran"
+            )
+            return (
+                "> **REVIEW PARTIAL -- not a clean review.** "
+                f"The review stopped early: {review.review_error}. The "
+                "verified findings below are the lenses' own and stand; "
+                f"what did not run to its end: {named}. This is not a "
+                "clean bill."
+            )
+        return (
+            f"> **REVIEW ERROR -- not a review.** The review stopped before "
+            f"it could review: {review.review_error}. Nothing below is a "
+            "review finding, and no coverage is claimed."
+        )
     if review.coverage_complete:
         count = _changed_file_count(review)
         files = (

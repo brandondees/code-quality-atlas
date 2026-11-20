@@ -102,6 +102,7 @@ from atlas_reviewer.openrouter import (
     _json_object,
     _no_byok_reason,
     _tokens,
+    key_refusal_or_boundary,
     optional_parameters,
     provider_preferences,
     sends_cache_control,
@@ -301,7 +302,9 @@ class OpenRouterLensModel:
             self.provider._timeout_s,
         )
         if resp.status != 200:
-            raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
+            raise key_refusal_or_boundary(
+                resp.status, f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
+            )
         try:
             data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)
         except BoundaryError:
