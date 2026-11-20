@@ -4,6 +4,7 @@
 import io
 import json
 import math
+import os
 import shutil
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import pytest
 
 from atlas_reviewer import cli
 from atlas_reviewer.eval_harness import EvalFormatError
-from atlas_reviewer.parity_key import load_runs
+from atlas_reviewer.parity_key import load_key, load_runs
 
 _SHA = "674071a91513b4774c82350fb757d9c085f10baf"
 _OFFLINE = Path(__file__).resolve().parents[1] / "fixtures" / "parity-offline"
@@ -75,6 +76,7 @@ def test_a_run_directory_round_trips_and_optional_counts_may_be_null(tmp_path: P
         (lambda body: body.update(coverage_complete="yes"), "must be true or false"),
         (lambda body: body.update(cost_usd=-1), "finite number"),
         (lambda body: body.update(cost_usd=math.nan), "finite number"),
+        (lambda body: body.update(cost_usd=math.inf), "finite number"),
         (lambda body: body.update(cost_usd=True), "finite number"),
         (
             lambda body: body.update(false_positive_majors=True),
@@ -88,10 +90,6 @@ def test_a_run_directory_round_trips_and_optional_counts_may_be_null(tmp_path: P
         (lambda body: body.update(unreviewed_files=0), "unknown key"),
         (lambda body: body.update(findings="nope"), "needs a findings list"),
         (lambda body: body["findings"].__setitem__(0, "nope"), "is not an object"),
-        (
-            lambda body: body["findings"][0].update(severity="critical"),
-            "severity must be",
-        ),
         (
             lambda body: body["findings"][0].update(severity=["minor"]),
             "severity must be",
@@ -111,6 +109,12 @@ def test_a_run_directory_round_trips_and_optional_counts_may_be_null(tmp_path: P
         (lambda body: body.update(model="  "), "model must be a non-empty string"),
         (
             lambda body: body.update(head_sha="72c56eb"),
+            "head_sha must be 40 lowercase hex",
+        ),
+        (
+            lambda body: body.update(
+                head_sha="0FE45E5EA79F3ABD8E07488A01B623186DF96692"
+            ),
             "head_sha must be 40 lowercase hex",
         ),
     ],
@@ -142,6 +146,87 @@ def test_a_null_lens_is_absent(tmp_path: Path):
     body["findings"][0]["lens"] = None
     (tmp_path / "one.json").write_text(json.dumps(body), encoding="utf-8")
     assert load_runs(tmp_path)[0].findings[0].lens is None
+
+
+def test_a_mixed_case_minor_is_found_and_an_unknown_severity_is_lost(tmp_path: Path):
+    """``Minor`` on 640-m1's line is found. ``critical`` is lost.
+
+    Both leave the command. A loader that refuses any severity outside the
+    exact lowercase set exits 2 here.
+    """
+    sha = "0fe45e5ea79f3abd8e07488a01b623186df96692"
+
+    def write(severity: str) -> None:
+        body = {
+            "pr": 640,
+            "model": "recorded-fixture",
+            "repetition": 1,
+            "head_sha": sha,
+            "coverage_complete": True,
+            "lenses_run": [
+                "reviewing-test-quality",
+                "hunting-silent-failures",
+                "reviewing-decision-lifecycle",
+            ],
+            "lenses_not_run": [],
+            "lenses_failed": [],
+            "limit_stops": [],
+            "findings": [
+                {
+                    "severity": severity,
+                    "path": "atlas_reviewer/service_queue.py",
+                    "quote": "if job.superseded or job.cancel.is_set()",
+                    "verified": True,
+                    "line": 329,
+                }
+            ],
+        }
+        (tmp_path / "640-1.json").write_text(json.dumps(body), encoding="utf-8")
+
+    write("Minor")
+    code, out, err = _cli("eval-parity", "--runs", str(tmp_path))
+    assert code in (0, 1)
+    assert err == ""
+    assert json.loads(out)["runs"][0]["grades"]["640-m1"] == "found"
+
+    write("critical")
+    code, out, err = _cli("eval-parity", "--runs", str(tmp_path))
+    assert code in (0, 1)
+    assert err == ""
+    assert json.loads(out)["runs"][0]["grades"]["640-m1"] == "lost"
+
+
+def test_an_unreadable_directory_is_not_reported_as_empty(tmp_path: Path):
+    """Mode 000 is a read failure, not an empty directory.
+
+    ``Path.glob`` returns no names when the directory cannot be listed, so
+    a loader that goes back to it says "no JSON files".
+    """
+    if os.geteuid() == 0:
+        pytest.skip("mode 000 does not hide a directory from root")
+    runs = tmp_path / "runs"
+    key = tmp_path / "key"
+    runs.mkdir()
+    key.mkdir()
+    (runs / "one.json").write_text("{}", encoding="utf-8")
+    (key / "one.json").write_text("{}", encoding="utf-8")
+    runs.chmod(0o000)
+    key.chmod(0o000)
+    try:
+        with pytest.raises(EvalFormatError, match="cannot be read") as runs_error:
+            load_runs(runs)
+        assert "no JSON files" not in str(runs_error.value)
+        with pytest.raises(EvalFormatError, match="cannot be read") as key_error:
+            load_key(key)
+        assert "no JSON files" not in str(key_error.value)
+        code, out, err = _cli("eval-parity", "--runs", str(runs))
+        assert code == 2
+        assert out == ""
+        assert "cannot be read" in err
+        assert "no JSON files" not in err
+    finally:
+        runs.chmod(0o755)
+        key.chmod(0o755)
 
 
 def test_an_unreadable_run_file_exits_2(
@@ -213,8 +298,19 @@ def test_the_checked_in_runs_pass_and_are_not_a_model_measurement():
     assert all(
         item["passed"] is True and item["found"] == 3 for item in report["findings"]
     )
+    blank = (
+        "false_positive_majors",
+        "lenses_clean",
+        "lenses_planned",
+        "cost_usd",
+        "wall_seconds",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "previous_turn_misses",
+    )
     assert all(
-        item["extras"] == 1 and item["cost_usd"] is None for item in report["runs"]
+        item["extras"] == 1 and all(item[field] is None for field in blank)
+        for item in report["runs"]
     )
     readme = (_OFFLINE / "README.md").read_text(encoding="utf-8")
     assert "not a measurement" in readme

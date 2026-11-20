@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -121,11 +122,11 @@ def load_key(path: Path) -> tuple[KeyFinding, ...]:
 
     A duplicate id, a key the schema does not name, a code span with no
     line, or a body record with no citation is refused. An empty directory
-    is refused.
+    is refused, and so is a directory that cannot be listed.
     """
     if not path.is_dir():
         raise EvalFormatError(f"parity key is not a directory: {path}")
-    files = sorted(item for item in path.glob("*.json") if item.is_file())
+    files = _json_files(path, "parity key")
     if not files:
         raise EvalFormatError(f"parity key has no JSON files: {path}")
     findings: list[KeyFinding] = []
@@ -718,11 +719,13 @@ def load_runs(path: Path) -> tuple[ParityRun, ...]:
     Two runs of one pull request may not share a repetition. ``verified``
     is required and is not defaulted. ``head_sha`` is 40 lowercase hex.
     Comparison fields may be null, and so may ``lens``. A key this schema
-    does not name is refused.
+    does not name is refused. A severity of blocker, major, minor, or nit
+    is casefolded. Any other string is kept and graded lost. A directory
+    that cannot be listed is refused.
     """
     if not path.is_dir():
         raise EvalFormatError(f"parity runs are not a directory: {path}")
-    files = sorted(item for item in path.glob("*.json") if item.is_file())
+    files = _json_files(path, "parity runs")
     if not files:
         raise EvalFormatError(f"parity runs have no JSON files: {path}")
     runs = tuple(_parse_run(file) for file in files)
@@ -777,8 +780,11 @@ def _candidate(value: object, name: str) -> CitedFinding:
     body = _object(value, name)
     _unknown(body, _CANDIDATE_KEYS, name)
     severity = body.get("severity")
-    if not isinstance(severity, str) or severity not in _SEVERITIES:
+    if not isinstance(severity, str):
         raise EvalFormatError(f"{name} severity must be blocker, major, minor or nit")
+    folded = severity.casefold()
+    if folded in _SEVERITIES:
+        severity = folded
     verified = body.get("verified")
     if not isinstance(verified, bool):
         raise EvalFormatError(f"{name} verified must be true or false")
@@ -800,6 +806,25 @@ def _candidate(value: object, name: str) -> CitedFinding:
         end,
         lens,
     )
+
+
+def _json_files(path: Path, kind: str) -> list[Path]:
+    """The ``*.json`` files in ``path``, in name order.
+
+    A directory that cannot be listed raises ``EvalFormatError``. An empty
+    list is the caller's own "no JSON files" error, so a permission failure
+    is not reported as an empty directory.
+    """
+    try:
+        with os.scandir(path) as scan:
+            files = sorted(
+                path / entry.name
+                for entry in scan
+                if entry.name.endswith(".json") and entry.is_file()
+            )
+    except OSError as exc:
+        raise EvalFormatError(f"{kind} cannot be read: {exc}") from exc
+    return files
 
 
 def _optional_count(body: Mapping[str, object], key: str, name: str) -> int | None:
