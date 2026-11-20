@@ -34,8 +34,13 @@ have accumulated, the turn's results go back and one finalize turn asks
 the model to finalize with what it has -- the reply it then gives is
 judged like any final reply, with the stop attached, and the spent
 bridge refuses whatever the model still calls. A retried call
-reserves and settles like any other call, and the failed call's
-reservation stays committed. A call the reservation cannot cover at its
+reserves and settles like any other call, and a failed call settles by
+what its response carried (D92, as its fix round settled the rule): a
+priced 200 the turn rejected at the parsed cost, a served response with
+no usable usage at its reservation (D43), a written request that never
+came back at its reservation too (D58 item 5), and a definite refusal --
+the key's own, or a status that refused the request -- released at $0. A
+call the reservation cannot cover at its
 full output cap is sent with the largest cap it can cover, when that is
 at least `min_output_tokens` (D50). A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
@@ -1148,8 +1153,12 @@ BACKPRESSURE_REAL_LIMIT_S = 10.0
 class Spend:
     """The review's model calls and committed dollars, across every lens
     attempt. A call is reserved at its worst case before it is sent and
-    settled at its reported cost; a failed call, or one whose reported cost
-    is not a cost, stays at its worst case. `derivation` carries D68's
+    settled at its reported cost. A served call whose cost was never
+    reported keeps its reservation as spent (D43); a written request that
+    never came back keeps it too (D58 item 5); a definite refusal -- the
+    key's own, or a status that refused the request, neither of which
+    billed anything -- releases the reservation it held only while in
+    flight and settles at $0 (D92, as its fix round settled the rule). `derivation` carries D68's
     review-wide derivation when the coordinator derived this review's
     limits, and the two review-wide stops then name the derived values and
     the ceiling.
@@ -1235,6 +1244,11 @@ class Spend:
         if self.calls >= self.limits.max_calls:
             return self._calls_stop()
         cap = self.limits.reservation_usd
+        if self._halted.is_set():
+            # The review has halted: no further call commits, whatever a
+            # release just freed (D92's fix round) -- the caller reads the
+            # halt and the outcome is the halt's, not a dollar stop.
+            return self._reservation_stop(self.committed_usd + worst_usd)
         projected = self.committed_usd + worst_usd
         if projected > cap:
             if self.settled_usd + worst_usd > cap:
@@ -1244,6 +1258,10 @@ class Spend:
             if clock is None or wait_until is None:
                 return self._reservation_stop(projected)
             self._wait_for_settle(worst_usd, clock, wait_until)
+            if self._halted.is_set():
+                # The wait ended on the halt, not on room: nothing commits
+                # (D92's fix round).
+                return self._reservation_stop(projected)
             projected = self.committed_usd + worst_usd
             if projected > cap:
                 # Out of wait: either the wall ran out with settles still
@@ -1325,10 +1343,12 @@ class Spend:
 
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
         """Settle a sent call: to its reported cost when that is a cost,
-        else to its reservation, kept as spent (D43) -- a call that will
-        never report an actual is not in flight waiting to come down.
-        Every settle frees the in-flight worst case the reservation held
-        and wakes the backpressure waits.
+        else to its reservation, kept as spent (D43) -- a served call that
+        will never report an actual is not in flight waiting to come down,
+        and the provider may have billed it. Every settle frees the
+        in-flight worst case the reservation held and wakes the
+        backpressure waits. A call that failed -- no served response to
+        bill from -- settles through `settle_failure` instead (D92).
 
         A cost above the call's own worst case is recorded on `overruns`
         (D82's tripwire) and nothing else: the reservation was the bound
@@ -1347,6 +1367,50 @@ class Spend:
                     )
             else:
                 self.settled_usd += worst_usd
+            self._settled.notify_all()
+
+    def settle_failure(self, worst_usd: Decimal, reported_usd: Any) -> None:
+        """Settle a call that was never served: the worst case the
+        reservation held comes down -- it was the in-flight bound, and the
+        call is no longer in flight (D92) -- and the call settles at the
+        cost the response reported, $0 when none is. The old rule that
+        kept every failure at its full reservation booked the failed calls
+        of a review on an exhausted key at about their whole worst case,
+        until the ceiling stopped a review that had billed nothing and
+        looked like a clean, incomplete one; the settle paths that may
+        have been billed instead -- a served response, a written request
+        -- keep the reservation (D43, D58 item 5).
+
+        A reported figure above the worst case cannot happen on an
+        unserved call -- the reservation priced the call's own worst case
+        and nothing was served -- so no overrun note is written here; a
+        cost above the reservation on a call that WAS served is `settle`'s
+        D82 tripwire, not this."""
+        with self._lock:
+            if _valid_cost(reported_usd):
+                self.committed_usd += reported_usd - worst_usd
+                self.settled_usd += reported_usd
+            else:
+                self.committed_usd -= worst_usd
+            self._settled.notify_all()
+
+    def fail_and_halt(self, worst_usd: Decimal, reported_usd: Any, cause: str) -> None:
+        """The refused key's one locked step (D92's fix round): the failed
+        call settles AND the halt flag sets with the fixed cause under one
+        lock acquisition, so a backpressure waiter waking on the release
+        already sees the halt. Settling first and halting second let the
+        waiter's worst case fit in the released room and commit before the
+        flag was up -- a call the key had already refused, booked at its
+        full reservation, or sent."""
+        with self._lock:
+            if _valid_cost(reported_usd):
+                self.committed_usd += reported_usd - worst_usd
+                self.settled_usd += reported_usd
+            else:
+                self.committed_usd -= worst_usd
+            if cause:
+                self._halted_cause = cause
+            self._halted.set()
             self._settled.notify_all()
 
 
@@ -1712,9 +1776,11 @@ def _place_call(
     """One model call: price it, reserve that, send it, settle it. Split
     from `run_attempt` so each stays under the complexity gate. An
     `AttemptOutcome` is a cut already recorded on `p`; a str is a failed
-    call the loop may retry (D49), its reservation committed, since the
-    provider may still have billed it; `_TimeoutRetry` sends the outer
-    loop back around with the request queued as D58's timeout retry."""
+    call's retry text (D49), and its reservation is whatever the three-way
+    settle just booked -- the parsed cost of a served call, the kept
+    reservation of a written request, or the $0 of a definite refusal;
+    `_TimeoutRetry` sends the outer loop back around with the request
+    queued as D58's timeout retry."""
     reserved = _reserve_call(model, request, spend, clock, wait_until)
     if not isinstance(reserved, _Reserved):
         return p.cut(*reserved)
@@ -1729,16 +1795,15 @@ def _place_call(
         spend.settle(worst, None)
         return p.cut(*_stopped(exc.hit))
     except KeyRefusedError as exc:
-        # A refused key is a review error, not a spend (D92): the review's
-        # spend halts with the fixed cause and the refusal is never
-        # retried (D49's retry is for calls a provider may yet serve, not
-        # for one the key itself refused). The cut ends this lens; every
-        # later lens runs NOT RUN on the halted spend, and the review
-        # renders and posts as the error it is, never as an incomplete
-        # review. The failed call keeps its reservation as spent (D43's
-        # settle rule, which the failed-call accounting change amends).
-        spend.settle(worst, None)
-        spend.halt(exc.review_error)
+        # A refused key is a review error, not a spend (D92): the settle
+        # and the halt land under one lock (`fail_and_halt`), so a
+        # backpressure waiter waking on the release already sees the halt
+        # and commits nothing. The refusal is never retried (D49's retry
+        # is for calls a provider may yet serve, not for one the key
+        # itself refused). The cut ends this lens; every later lens runs
+        # NOT RUN on the halted spend, and the review renders and posts
+        # as the error it is, never as an incomplete review.
+        spend.fail_and_halt(worst, None, exc.review_error)
         return p.cut(Cause.MODEL_ERROR, str(exc))
     except ByokRefusedError as exc:
         # The refusal still leaves the loop. The turns and tool calls
@@ -1753,8 +1818,9 @@ def _place_call(
         raise
     except TransportTimeoutError as first:
         # The timed-out request keeps its full reservation as spent
-        # (D58 item 5); it may still have been billed, and it will
-        # never report an actual, so it is not in flight.
+        # (D58 item 5, restored by D92's fix round): the request was
+        # written, and the provider may still have billed it. The one
+        # retry is unchanged.
         spend.settle(worst, None)
         if not _retry_earned(
             request, retried_request, model, clock, lens_deadline,
@@ -1763,10 +1829,27 @@ def _place_call(
             return p.cut(Cause.TRANSPORT_ERROR, str(first))
         return _TimeoutRetry()
     except TransportError as exc:
+        # A written request may still have been billed, whatever the
+        # transport then did (D58 item 5's booking, restored by D92's fix
+        # round): the reservation is kept as spent.
         spend.settle(worst, None)
         return p.cut(Cause.TRANSPORT_ERROR, str(exc))
     except BoundaryError as exc:
-        spend.settle(worst, None)
+        # The settle reads what the exception carries (D92's fix round,
+        # restated by round 3). A priced 200 the turn then rejected
+        # settles at the parsed cost -- the real bill; a response that
+        # arrived but never priced -- unparseable, or over the transport's
+        # size cap -- was served and keeps the reservation (D43); only a
+        # response that never arrived -- a non-retryable status that
+        # refused the request before any body was served -- is a failed
+        # call, released at $0.
+        reported = exc.reported_cost
+        if reported is not None and _valid_cost(reported):
+            spend.settle(worst, reported)
+        elif reported is not None:
+            spend.settle(worst, None)
+        else:
+            spend.settle_failure(worst, None)
         if _refusal_cause(exc) == Cause.MODEL_REFUSED:
             # A ZDR or a worst-case pricing refusal is a decision, not a
             # failure: it is not retried (D49).
@@ -1840,8 +1923,14 @@ def run_attempt(
         timeout_retry = False
         while True:
             # Every call prices and reserves its own worst case and counts
-            # toward max_calls (D49). A failed call's reservation stays
-            # committed: the provider may still have billed it.
+            # toward max_calls (D49). A failed call settles by what the
+            # response carried (D92, as its fix round settled the rule): a
+            # priced 200 the turn rejected settles at the parsed cost, a
+            # served response with no usable usage keeps its reservation
+            # (D43), a written request that never came back keeps it too
+            # (D58 item 5), and a definite refusal -- the key's own, or a
+            # status that refused the request -- releases at $0, billed
+            # nothing.
             placed = _place_call(
                 request, model, spend, p, clock,
                 min(lens_deadline, review_deadline), retried_request,
@@ -2122,7 +2211,11 @@ def _reserve_call(
         # The review halted while this reservation waited (or just after
         # it committed): the call is not sent, and the outcome is the halt
         # the loop already records, not a dollar stop (round-2 review of
-        # #717, n-7).
+        # #717, n-7). A reservation that did commit releases (D92's fix
+        # round) -- the halt is the refusal's, and the room it freed is
+        # not owed by a call that was never sent.
+        if refused is None:
+            spend.settle_failure(worst, None)
         return Cause.MODEL_ERROR, HALTED_CALL
     if refused is None:
         return _Reserved(worst, request)
@@ -2135,6 +2228,10 @@ def _reserve_call(
         return _stopped(fitted_call)
     fitted_request, worst, refused_again = fitted_call
     if spend.halted:
+        # The fitted reservation committed before the halt showed: the
+        # same release (D92's fix round).
+        if refused_again is None:
+            spend.settle_failure(worst, None)
         return Cause.MODEL_ERROR, HALTED_CALL
     if refused_again is not None:
         return _stopped(refused_again)

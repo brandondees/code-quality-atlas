@@ -408,6 +408,34 @@ def test_a_quota_error_names_itself():
     assert CREDENTIALS.key not in str(exc.value)
 
 
+def test_a_priced_200_with_no_choices_carries_the_price_table_cost():
+    """D92's fix round 2: the tenant path's `_choice` refusal sits between
+    the price-table pricing and the `_priced` raises, so an empty
+    `choices` list on a 200 the table priced left `reported_cost` unset
+    and the settle released a real bill at $0. The refusal now carries the
+    price-table cost. Kills the unpriced-choice mutant on the tenant
+    path."""
+    from decimal import Decimal
+
+    body = json.dumps(
+        {
+            "id": "x",
+            "model": "openai/gpt-4o",
+            "choices": [],
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 200},
+        }
+    ).encode()
+    provider, _transport = _provider(
+        [(200, body)],
+        catalog=lambda _path: _catalog_doc(prompt="0.000003", completion="0.000015"),
+    )
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    with pytest.raises(BoundaryError, match="no choice") as caught:
+        model.turn(_request(UserText("go")))
+    assert caught.value.reported_cost == Decimal("0.006")
+
+
 def test_an_endpoint_error_names_the_status():
     provider, _transport = _provider([(503, b"down")])
     provider.preflight()
@@ -557,6 +585,39 @@ def test_the_adapter_settles_tool_work_without_reading_usage_cost():
     model = TenantLensModel(provider, per_call=_resolved())
     reply = model.turn(_request(UserText("go")))
     assert reply.cost_usd == Decimal("0.0000525")
+
+
+def test_a_non_json_200_on_the_adapter_is_served_and_unpriced():
+    """D92's fix round 3: the tenant adapter's non-JSON 200 raise sat
+    between the response's arrival and the priced raises, so the settle's
+    unset branch released a call the provider served and may have billed.
+    The raise now carries `UNPRICED` -- served but unpriced -- and the
+    settle keeps the reservation (D43). Kills the unset-cost mutant on
+    the non-JSON rewrap."""
+    from atlas_reviewer.tool_model import UNPRICED
+
+    provider, _transport = _provider([(200, b"not-json")])
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    with pytest.raises(BoundaryError, match="non-JSON") as caught:
+        model.turn(_request(UserText("go")))
+    assert caught.value.reported_cost is UNPRICED
+
+
+def test_a_response_too_large_on_the_tenant_adapter_is_served_and_unpriced():
+    """D92's fix round 3, the tenant half of the too-large rule: the
+    response arrived and may have been billed, so the converted error
+    carries `UNPRICED` and the settle keeps the reservation. Kills the
+    unset-cost mutant on the tenant adapter's too-large rewrap."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+    from atlas_reviewer.tool_model import UNPRICED
+
+    provider, _transport = _provider([ResponseTooLargeError("over 50 bytes")])
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    with pytest.raises(BoundaryError, match="response") as caught:
+        model.turn(_request(UserText("go")))
+    assert caught.value.reported_cost is UNPRICED
 
 
 def test_the_adapter_refuses_a_served_model_mismatch_by_name():

@@ -7,7 +7,7 @@ import json
 import re
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 import pytest
@@ -2009,6 +2009,131 @@ def test_a_partial_lens_ran_before_the_halt_makes_the_review_partial():
     assert "## Findings (verified quotes only)" in draft
 
 
+@dataclass
+class Credited(ScriptedLensModel):
+    """A scripted lens model that also answers the key-credit seam
+    (D92)."""
+
+    remaining: Decimal = Decimal("50.00")
+    smallest: Decimal = Decimal("2.40")
+
+    def remaining_credit_usd(self) -> Decimal:
+        return self.remaining
+
+    def largest_call_reservation(self) -> Decimal:
+        return self.smallest
+
+
+def test_a_key_short_of_the_planned_minimum_refuses_before_any_lens_runs(tmp_path):
+    """D92: before fan-out, a key whose remaining credit is below the
+    planned review's minimum -- the smaller of one call's largest
+    reservation and the per-lens dollar budget -- refuses the review: no
+    lens runs, every planned lens is NOT RUN with the fixed reason, and
+    the review carries the error. Kills the dropped-check mutant (the
+    review running its lenses into refused calls) and the
+    wrong-comparison mutant (refusing a key that funds the minimum)."""
+    model = Credited([_acknowledge], remaining=Decimal("0.50"))
+    result, _ = _lenses(tmp_path, [LENS], model)
+    assert result.review_error == "model key out of credit"
+    assert [lens.state for lens in result.lenses] == [LensState.NOT_RUN]
+    assert result.lenses[0].reason == "not started: model key out of credit"
+    assert model.requests == []
+    draft = render_draft(result, Redactor())
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "## Findings" not in draft
+
+
+def test_a_key_that_funds_the_planned_minimum_runs_the_review(tmp_path):
+    """D92's check accepts a key whose remaining credit funds the planned
+    minimum, and a model that carries no key-credit seam at all -- every
+    other scripted-model test here -- accepts the same way: the check
+    never refuses on missing data."""
+    model = Credited([READ_ALL, final(finding())], remaining=Decimal("5.00"))
+    model.per_call = LIMITS.resolve()
+    result, _ = _lenses(tmp_path, [LENS], model)
+    assert result.review_error == ""
+    assert result.lenses[0].state is LensState.CLEAN
+    # The bound is exclusive: a key whose remaining credit exactly meets
+    # the planned minimum is accepted.
+    at_bound = Credited([READ_ALL, final(finding())], remaining=Decimal("2.40"))
+    at_bound.per_call = LIMITS.resolve()
+    result, _ = _lenses(tmp_path, [LENS], at_bound)
+    assert result.review_error == ""
+    assert result.lenses[0].state is LensState.CLEAN
+
+
+def test_a_reassess_call_settles_by_what_the_response_carried():
+    """D92's fix round 4: the re-assessment call's boundary branch runs
+    the same three-way settle the decision and carry calls run. An
+    overrun (reserved $0.10, reported $0.15) settles at the reported
+    cost, and an underrun ($0.03) at its own -- neither at the
+    reservation. Kills the always-keep-reservation mutant on the
+    re-assessment's boundary branch, which ignored `reported_cost`."""
+
+    class PricedThenRefused(ScriptedLensModel):
+        def __init__(self, reported):
+            super().__init__([])
+            self.reported = reported
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            exc = BoundaryError("model turn did not finish (finish_reason=error)")
+            exc.reported_cost = self.reported
+            raise exc
+
+    from atlas_reviewer.coordinator import _reassess_call
+
+    for reported, expected in (
+        (Decimal("0.15"), Decimal("0.15")),
+        (Decimal("0.03"), Decimal("0.03")),
+    ):
+        spend = Spend(LIMITS.resolve(cross_limits=False))
+        outcome = _reassess_call(
+            EVENT,
+            LENS,
+            BODY,
+            "FINDING CONTRACT",
+            "f00dfeed",
+            (),
+            [checked(Severity.MAJOR)],
+            trees(),
+            DIFF,
+            CHANGED,
+            PricedThenRefused(reported),
+            spend,
+            LIMITS.resolve(cross_limits=False),
+            FakeClock(),
+            600.0,
+        )
+        assert Cause.MODEL_ERROR in outcome.causes
+        assert spend.committed_usd == expected, reported
+        assert spend.settled_usd == expected, reported
+
+
+def test_a_credit_refused_delta_review_still_carries_the_prior_blocker(tmp_path):
+    """D92's fix round 4: a delta review that stops at the credit
+    preflight composes the earlier review's findings through the
+    carry-forward's fallback -- the carry call itself is refused on the
+    halted spend, so no model call is made -- and a prior Blocker keeps
+    its carried disposition: it counts for the verdict, the lenses stay
+    NOT RUN, and the credit refusal stays the review error. Kills the
+    dropped-carryforward mutant on the preflight refusal, which dropped
+    every prior finding, Blockers included."""
+    model = Credited([_acknowledge], remaining=Decimal("0.50"))
+    log = _round_log_with_prior(tmp_path, line=f"L1-F1 blocker calc.py:2 {PRIOR_TEXT}")
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.review_error == "model key out of credit"
+    assert [lens.state for lens in result.lenses] == [LensState.NOT_RUN]
+    assert result.verdict is Verdict.BLOCK
+    carried = [f for _i, f, _lens in result.carried_unverified]
+    assert len(carried) == 1
+    assert carried[0].severity is Severity.BLOCKER
+
+
 OTHER = "sweeping-for-security"
 OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
 _MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")
@@ -3938,10 +4063,50 @@ def test_a_carry_call_crossing_the_deadline_mid_reservation_is_not_sent():
         )
     # Mutant target: the turn was sent anyway.
     assert model.requests == []
-    # The reservation stays accounted: the dollars were held against the
-    # review's cap while the decision was made.
+    # The reservation was held and released without a settle (D92): the
+    # call was never sent, so nothing is left committed against the
+    # review's cap.
     assert spend.calls == 1
-    assert spend.committed_usd > 0
+    assert spend.committed_usd == Decimal("0.00")
+
+
+def test_a_decision_call_crossing_the_deadline_mid_reservation_releases_the_room():
+    """D92, the decision call's half of the same rule: a call that
+    reserved and then cannot be sent releases the reservation it held
+    only in principle -- nothing was in flight, nothing was billed, and
+    the caller's re-run-every-lens fallback runs. Mutant: the never-sent
+    call keeping its worst case committed, which holds dollars the
+    review's cap never owed."""
+    from atlas_reviewer.coordinator import DecisionCallRefused, _decision_call
+    from atlas_reviewer.lens_loop import Spend
+
+    clock = FakeClock()
+    deadline = 600.0
+
+    class Pricer(ScriptedLensModel):
+        def worst_case_usd(self, request):
+            clock.advance(deadline + 1.0)
+            return super().worst_case_usd(request)
+
+    model = Pricer([])
+    spend = Spend(LIMITS.resolve(cross_limits=False))
+    with pytest.raises(DecisionCallRefused, match="while the decision call reserved"):
+        _decision_call(
+            EVENT,
+            [(LENS, "concern", False)],
+            _delta_scope(),
+            model,
+            spend,
+            LIMITS.resolve(cross_limits=False),
+            clock,
+            deadline,
+            "f00dfeed",
+            (),
+        )
+    # Mutant target: the turn was sent anyway.
+    assert model.requests == []
+    assert spend.calls == 1
+    assert spend.committed_usd == Decimal("0.00")
 
 
 def test_a_dropped_restatement_is_named_in_the_draft(tmp_path):

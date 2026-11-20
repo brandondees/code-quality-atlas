@@ -399,15 +399,144 @@ def test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal(status, cause):
     assert len(fake.chat_requests()) == 1
 
 
+def test_a_priced_response_the_turn_rejects_carries_its_cost():
+    """D92's fix round: a 200 whose usage priced and whose turn then
+    failed -- an unfinished turn here -- raises with the parsed cost
+    attached, so the settle at the raise site books the real bill. Kills
+    the dropped-attachment mutant, which would leave the served call to
+    settle at $0."""
+    from decimal import Decimal
+
+    lens, _fake = model(
+        reply(
+            completion(text="later", finish="error"),
+        )
+    )
+    with pytest.raises(BoundaryError) as caught:
+        lens.turn(request())
+    assert caught.value.reported_cost == Decimal("0.0123")
+
+
+def test_the_largest_call_reservation_is_the_per_call_cap_priced():
+    """D92's fix round: the credit check's per-call figure is the LARGEST
+    reservation one call holds -- the per-call input cap priced at the
+    endpoint's rates -- and the method is named for what it computes.
+    Kills the smaller-bound mutant, which would price a smaller input and
+    let a key that cannot fund the largest call through the check."""
+
+    from atlas_reviewer.budget import worst_case_usd
+    from atlas_reviewer.tool_model import resolve_per_call
+
+    lens, _fake = model(reply(completion("done")))
+    terms, _counts, _selected = lens._ready()
+    bounds = resolve_per_call(lens.per_call, terms)
+    expected = worst_case_usd(bounds.max_input_tokens, terms, bounds)
+    assert lens.largest_call_reservation() == expected
+    assert lens.largest_call_reservation() >= worst_case_usd(
+        bounds.max_input_tokens // 2, terms, bounds
+    )
+
+
+def test_a_too_large_response_keeps_its_reservation_in_the_loop(tmp_path):
+    """D92's fix round 3, the loop-level pin: a `ResponseTooLargeError`
+    turn was served, so its reservation stays committed -- the review's
+    committed spend ends at the reservation, not at $0. Kills the release
+    mutant that the adapter-level attachment alone does not reach (a
+    settle that released despite the attached `UNPRICED`)."""
+    from decimal import Decimal
+
+    from atlas_reviewer.lens_loop import Spend
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    from .test_lens_loop import CONTRACT, NONCE, job, lens_system
+
+    # Two steps: the too-large call is retried once (D49), and both
+    # attempts are served-but-unpriced reservations that stay committed.
+    lens, _fake = model(
+        ResponseTooLargeError("response exceeded 50 bytes"),
+        ResponseTooLargeError("response exceeded 50 bytes"),
+    )
+    ask = TurnRequest(
+        lens_system(
+            "tracing-correctness-and-invariants", BODY, CONTRACT, None, nonce=NONCE
+        ),
+        (UserText(job().first_turn),),
+        tool_schemas(),
+    )
+    worst = lens.worst_case_usd(ask)
+    outcome, _m, spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        spend=Spend(
+            replace(LIMITS, reservation_usd=Decimal(5), lens_wall_s=600).resolve()
+        ),
+    )
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert spend.committed_usd == 2 * worst
+
+
+def test_an_unresolvable_per_call_override_names_no_credit_figure():
+    """D92's fix round 4: `resolve_per_call` runs inside the same guarded
+    read as the terms, so a per-call override above the endpoint's limit
+    does not escape the credit check and kill the review before any lens
+    starts -- the adapter names no figure, the check accepts, and the lens
+    loop reports the limit the same way the turn path does. Kills the
+    outside-the-try mutant, which raised `LimitRefused` out of
+    `largest_call_reservation`."""
+    from atlas_reviewer.coordinator import limits_for_lens, model_for_lens
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import KEY, OpenRouterFake
+
+    limits = limits_for_lens({"ATLAS_MAX_OUTPUT_TOKENS": "99000"})
+    adapter = model_for_lens(OpenRouterProvider(OpenRouterFake(), KEY), limits)
+    assert adapter.largest_call_reservation() is None
+
+
+def test_a_priced_200_with_no_choices_carries_its_cost():
+    """D92's fix round 2: `_choice`'s refusal sits between the cost
+    computation and the `_priced` raises, so an empty `choices` list on a
+    200 whose usage priced left `reported_cost` unset and the settle
+    released a real bill at $0. The refusal now carries the parsed cost.
+    Kills the unpriced-choice mutant, which would leave the served call
+    to settle at $0."""
+    from decimal import Decimal
+
+    lens, _fake = model(
+        reply(
+            {
+                "model": MODEL_ID,
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 50,
+                    "cost": "1.25",
+                    "is_byok": False,
+                },
+            }
+        )
+    )
+    with pytest.raises(BoundaryError, match="no choice") as caught:
+        lens.turn(request())
+    assert caught.value.reported_cost == Decimal("1.25")
+
+
 def test_a_response_too_large_is_not_a_transport_error():
     """Review Minor 2: `ResponseTooLargeError` is raised after the response
-    arrived, so it is a model-level error, not a retryable transport one."""
+    arrived, so it is a model-level error, not a retryable transport one.
+    D92's fix round 3: the converted error is served-but-unpriced -- the
+    provider generated the body and may have billed it -- so it carries
+    `UNPRICED` and the settle keeps the reservation instead of releasing
+    it at $0. Kills the unset-cost mutant on the too-large rewrap."""
     from atlas_reviewer.ports import ResponseTooLargeError
+    from atlas_reviewer.tool_model import UNPRICED
 
     lens, fake = model(ResponseTooLargeError("response exceeded 50 bytes"))
     with pytest.raises(BoundaryError, match="too large") as excinfo:
         lens.turn(request())
     assert not isinstance(excinfo.value, TransportError)
+    assert excinfo.value.reported_cost is UNPRICED
     assert len(fake.chat_requests()) == 1
 
 
@@ -605,8 +734,9 @@ def test_a_changed_system_prompt_resets_the_meter():
 
 def test_the_timeout_retry_is_its_own_reserved_call(tmp_path):
     """Review M2: the timed-out request keeps its full reservation as
-    spent -- it may still be billed -- and the retry is its own reserved
-    call against the shared budget, counted like any turn."""
+    spent -- it may still be billed (D58 item 5, restored by D92's fix
+    round) -- and the retry is its own reserved call against the shared
+    budget, counted like any turn."""
     from .test_lens_loop import CONTRACT, NONCE, job, lens_system
 
     lens, fake = model(

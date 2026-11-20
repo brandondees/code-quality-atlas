@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Protocol
 
 from atlas_reviewer.prompt import LoadedLens, Prompt, UntrustedBlock
@@ -21,6 +22,13 @@ Json = Mapping[str, Any]
 class BoundaryError(RuntimeError):
     """An external API (GitHub, Sprites, a model provider) failed or
     returned something this service cannot use."""
+
+    reported_cost: Decimal | None = None
+    """The cost the served response's usage priced, attached by an adapter
+    that raises after pricing a 200 (D92's fix round): the settle at the
+    raise site can then book the real bill instead of guessing. None when
+    no response was priced -- a transport failure, a status refusal, a
+    body that never parsed far enough to price."""
 
 
 class KeyRefusedError(BoundaryError):

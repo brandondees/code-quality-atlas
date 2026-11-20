@@ -98,6 +98,7 @@ from atlas_reviewer.tool_model import (
     _choice,
     _messages,
     _one_call,
+    _priced,
     _remember,
     _session_label,
     _tokens,
@@ -500,7 +501,12 @@ class TenantLensModel:
         except TransportTimeoutError:
             raise
         except ResponseTooLargeError as exc:
-            raise BoundaryError(f"the tenant endpoint's response: {exc}") from exc
+            # The response arrived and may have been billed: served but
+            # unpriced, so the settle keeps the reservation (D43, D92's
+            # fix round 3).
+            raise _priced(
+                BoundaryError(f"the tenant endpoint's response: {exc}"), UNPRICED
+            ) from exc
         except BoundaryError as exc:
             raise TransportError(f"the tenant endpoint transport error: {exc}") from exc
 
@@ -573,8 +579,12 @@ def _tenant_turn(
     try:
         data = _json_object(raw)
     except BoundaryError:
-        raise BoundaryError(
-            "the tenant endpoint returned a non-JSON response"
+        # The 200 arrived -- the provider served it and may have billed it
+        # -- so the error is served-but-unpriced: the settle keeps the
+        # reservation (D43), it does not release at $0 (D92's fix round 3).
+        raise _priced(
+            BoundaryError("the tenant endpoint returned a non-JSON response"),
+            UNPRICED,
         ) from None
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
@@ -587,8 +597,17 @@ def _tenant_turn(
         and served != model_id
         and not _is_dated_revision(served, model_id)
     ):
-        raise BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}")
-    choice = _choice(data)
+        raise _priced(
+            BoundaryError(f"the tenant endpoint served {served!r}, not {model_id!r}"),
+            cost,
+        )
+    try:
+        choice = _choice(data)
+    except BoundaryError as exc:
+        # The same priced-refusal rule as the operator path (D92's fix
+        # round 2): the response was served and priced at the operator's
+        # table, so the refusal carries that cost.
+        raise _priced(exc, cost) from None
     finish = choice.get("finish_reason")
     _remember(data, usage_obj, served, finish)
     if finish == "length":
@@ -597,22 +616,34 @@ def _tenant_turn(
         )
     message = choice.get("message")
     if not isinstance(message, dict):
-        raise BoundaryError("the tenant endpoint's response has no message")
+        raise _priced(
+            BoundaryError("the tenant endpoint's response has no message"), cost
+        )
     calls = message.get("tool_calls")
     if isinstance(calls, list) and calls:
         if finish not in ("tool_calls", "stop"):
-            raise BoundaryError(
-                f"the tenant endpoint's tool calls did not finish (finish_reason={finish})"
+            raise _priced(
+                BoundaryError(
+                    f"the tenant endpoint's tool calls did not finish "
+                    f"(finish_reason={finish})"
+                ),
+                cost,
             )
         return ToolCalls(tuple(_one_call(call) for call in calls), cost)
     if finish != "stop":
-        raise BoundaryError(
-            f"the tenant endpoint's turn did not finish (finish_reason={finish})"
+        raise _priced(
+            BoundaryError(
+                f"the tenant endpoint's turn did not finish (finish_reason={finish})"
+            ),
+            cost,
         )
     text = message.get("content")
     if not isinstance(text, str) or not text.strip():
-        raise BoundaryError(
-            f"the tenant endpoint returned no review text (finish_reason={finish})"
+        raise _priced(
+            BoundaryError(
+                f"the tenant endpoint returned no review text (finish_reason={finish})"
+            ),
+            cost,
         )
     return FinalReply(text, cost)
 

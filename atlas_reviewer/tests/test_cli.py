@@ -2809,14 +2809,54 @@ def test_a_refused_key_on_the_agentic_picker_is_the_error_not_a_fallback(
     assert len(fake.chat_requests()) == 1
 
 
+def test_a_key_short_of_its_planned_minimum_refuses_before_any_lens_fans_out(
+    tmp_path, monkeypatch
+):
+    """D92: the preflight refuses only a key with no credit left, so a key
+    with a little remaining passed it and then lost every lens call to
+    HTTP 402. The agentic path now refuses before fan-out when the key's
+    remaining credit is below the planned review's minimum, and the child
+    exits incomplete with the error draft -- no model call made, no lens
+    runner started. Kills the dropped-check mutant (the review fanning
+    out anyway) and the wrong-comparison mutant."""
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, key_status, reply
+
+    fake = OpenRouterFake(key=reply(key_status(limit=5, remaining=0.50)))
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth",
+         "triage"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out, err=err, sprites_factory=lambda _env: FakeSprites(),
+        openrouter_factory=lambda key, limits: OpenRouterProvider(fake, key, limits=limits),
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = out.getvalue()
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "model key out of credit" in draft
+    assert "## Findings" not in draft
+    # No model call was made: the refusal came before any lens fanned out.
+    assert fake.chat_requests() == []
+
+
 def test_a_key_refused_mid_review_halts_and_posts_the_error(tmp_path, monkeypatch):
     """D92: a 402 during the lenses stops the review at once -- the
-    refused call is sent once, the spend halts with the fixed cause, the
-    second lens never starts, and the child exits incomplete with the
-    error draft instead of a review whose empty Findings read clean. This
-    layer keeps the refused call's reservation as spent (D43's settle
-    rule); the failed-call accounting that books the refusal at $0 is
-    part 2's. Kills the retry mutant (a second send) and the dropped-halt
+    refused call is sent once, settles at $0 through `fail_and_halt` (the
+    settle and the halt under one lock), the spend halts with the fixed
+    cause, the second lens never starts, and the child exits incomplete
+    with the error draft instead of a review whose empty Findings read
+    clean. Kills the retry mutant (a second send) and the dropped-halt
     mutant."""
     from contextlib import ExitStack
 

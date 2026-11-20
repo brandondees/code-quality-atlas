@@ -5787,6 +5787,45 @@ halts_the_spend_with_the_cause`).
 format, mypy, drift and the generated-tree sync run before the push; the
 eight mutants above are the round's only new ones.
 
+**Update (2026-11-19, part 2 — the failed-call accounting and the up-front
+credit check, on the stacked PR).** `Spend.settle_failure` settles a
+failed call at the cost its response reported — $0 when none is — and
+releases the reservation the call held only while in flight; the loop's
+transport, timeout and boundary failure paths settle through it, and so
+do the coordinator's own bounded calls (the re-assessment refusal, and
+the decision and carry-forward calls whose post-reservation wall check
+refuses to send — the never-sent reservation comes down, amending the
+round-5-of-#748 wording that kept the dollars held). A served call whose
+cost was never reported still keeps its reservation as spent (D43), and
+a settle above the worst case stays D82's tripwire. D50's refit path is
+unchanged, but a failed call no longer shrinks the next send's cap: the
+resend prices against the remainder the failure left, and the two
+refit-tracking tests now pin that the resend takes the model's cap again.
+The up-front check (`_credit_refusal` over the adapter's
+`remaining_credit_usd` and `largest_call_reservation` -- named
+`smallest_call_reservation` when this entry was first written; the fix
+round renamed it for what it computes) refuses before
+fan-out when the key's remaining credit is below the planned review's
+minimum — the smaller of one call's largest reservation and the per-lens
+dollar budget — with every planned lens NOT RUN on the fixed reason and
+the error draft and post from part 1 carrying the cause. A key with no
+credit figure to compare against, and a model with no key-credit seam,
+accepts. **Mutants, each applied by hand and killed** (bytecode cache
+deleted first): `settle_failure` keeping the worst case
+(`test_a_failed_call_settles_at_the_cost_its_response_reported`); the
+timeout handler releasing its reservation
+(`test_a_timeout_resend_takes_the_models_cap_again`, restated below:
+D92's fix round reversed this booking, and the restored keep is now what
+`test_a_timeout_resend_refits_against_the_remainder_then_left` pins);
+the pre-fan-out
+check dropped (the coordinator's
+`test_a_key_short_of_the_planned_minimum_refuses_before_any_lens_runs`
+and the CLI's test of the same behavior); the credit comparison closed
+at equality (`test_a_key_that_funds_the_planned_minimum_runs_the_
+review`'s at-the-boundary key); the decision call's and the carry call's
+never-sent releases dropped (their two wall-check tests); and the
+adapter's refusal text emptied (the CLI test).
+
 ## 2026-11-19 (same day) — #782/#783 fix round 1: the sites the first cut missed, the partial rule, the marker, and the waiter race
 
 The round-1 reviews on both PRs (the round-2 record on #782 names the two
@@ -5843,6 +5882,73 @@ causes pinned by the parametrized parse test).
 
 **#783 — the waiter race, the priced-response settle, and the booking
 reversal** are recorded in that layer's own entry below.
+
+**Update (2026-11-19, part 2's fix round — the waiter race, the priced
+settle, and the booking reversal, on the stacked PR).** Three of the
+round-1 review's findings, each with its own pinned test. **The waiter
+race:** `_place_call` settled the refused call and halted second, so a
+backpressure waiter waking on the release saw room, committed its own
+worst case before the flag was up, and then — past the halt — either sent
+a call the key had already refused or returned the halt outcome with the
+reservation left booked (the review reproduced both: $8 of booked worst
+case on a $10 cap with two waiters, $2 left stranded by one). `Spend.
+fail_and_halt` now lands the failed call's settle and the halt flag under
+one lock acquisition; `_reserve` refuses to commit once the review has
+halted, both before the wait and after it ends on the halt; and
+`_reserve_call` releases a reservation that committed before the halt
+showed, because the caller returns the halt's outcome and never sends the
+call it reserved. The re-assessment, decision and carry handlers land
+their settle and halt the same way. **The priced settle:** a 200 whose
+usage priced and whose turn then failed — a wrong served model, no
+message, an unfinished turn, no text — settled at $0, dropping a real
+bill; the adapters now attach the parsed cost to the raised
+`BoundaryError` (`reported_cost`, `UNPRICED` when the response carried no
+usable usage), and the lens loop's and the coordinator's boundary-branch
+settles book the parsed cost when there is one, keep the reservation when
+the response was served but unpriced (D43), and release at $0 only when
+nothing was served. **The booking reversal:** the round-0 rule that
+released a transport timeout's and a transport failure's reservation is
+reversed — D58 item 5 stands (the request was written; the provider may
+have billed it), so only a definite refusal settles at $0. D92's own
+entry carries the correction. **Tests:** the waiter blocked on the cap
+commits nothing and sends no turn (`committed_usd` ends at $0); a
+reservation that committed before the halt shows is released; a priced
+response the turn rejected settles at its parsed cost; the timeout's
+refit and the timeout-retry's own reservation are pinned at their
+pre-part-2 shape again; the adapter's attachment and the renamed
+`largest_call_reservation` (the method computes the largest reservation
+one call holds; the old name said the opposite of the check's own
+semantics) each carry their pin. **Mutants, each applied by hand and
+killed** (bytecode cache deleted first): the two halted-reserve guards
+dropped (the waiter commits in the released room), the halted-commit
+release dropped (the unsent reservation stays booked), the priced cost
+dropped from the boundary settle, the adapter's attachment dropped, the
+timeout booking flipped back to the release, and `fail_and_halt` settling
+without ever setting the flag (the race restored).
+
+**Correction (2026-11-19, part 2's fix round 2 — the mutant claims and
+the wait, restated).** The part-2 fix round's entry claimed its waiter
+test killed the two dropped-halt-check mutants in `_reserve`; the round-2
+review re-applied them and both survived — the test parks inside pricing,
+so the waiter hits `_reserve_call`'s own halted check and never reaches
+`reserve`. A new test parks the waiter inside `reserve`'s backpressure
+wait itself (a clock that signals the wait loop's first monotonic read),
+fails the held call with the refusal while it waits, and pins the halt
+outcome, an empty `sent`, the call count and the $0. (This entry first
+said the test's post-halt phase pinned the pre-wait check; the round-3
+review showed that phase went through `_reserve_call`, which returns at
+its own halted check and never reaches `reserve` — so the phase now calls
+`spend.reserve` directly after the halt and pins the reservation stop,
+the call count and the $0, and each guard's deletion fails the test.) The entry's fitted-release
+claim was accurate but untested; the new fitted-reservation test (a
+full-cap reserve refused, the fitted reserve committing, the halt landing
+inside it) kills the dropped-fitted-release mutant. The `_choice`
+refusals — operator and tenant, both between the cost computation and
+the `_priced` raises — now carry the priced cost, each with its own test
+(the operator one pins `usage.cost` 1.25; the tenant one pins the
+price-table cost on `prompt_tokens` 1000 and `completion_tokens` 200 at
+the operator's rates), and `_place_call`'s docstring says a retry string
+carries whatever the three-way settle booked.
 
 ## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
 
@@ -5912,3 +6018,50 @@ StrEnum refactor (the bot's Nit).** The finding's fix paragraph says
 where it matters (the service's typed parse raises on anything outside
 it), and the refactor would touch six layers in a round whose other
 findings are behavioral. The owner can call for it separately.
+
+## 2026-11-20 (same day) — #783 fix round 4: the re-assessment's three-way settle, the preflight refusal's carry-forward, and the guarded credit figure
+
+CodeRabbit's three Majors on the rebased head, each verified against the
+code before the fix. Offline only: fakes, recorded HTTP and scripted
+models; no live model call, network call or secret read; no deployed
+service setting, Fly config value or secret changed.
+
+**The re-assessment's boundary branch (confirmed).** The decision and
+carry calls had run the three-way settle since fix round 1, but the
+re-assessment call's own boundary branch still settled every boundary
+error at its reservation, ignoring `reported_cost` — a priced 200 the
+turn rejected over-booked, and an unserved refusal never released. The
+branch now runs the same three-way (a priced cost settles at the parsed
+cost, a served-but-unpriced response keeps the reservation, a response
+that never arrived releases at $0), with the transport failure kept on
+its own reservation-retaining branch. Pinned by an overrun (reserved
+$0.10, reported $0.15 → committed $0.15) and an underrun ($0.03 →
+$0.03); the always-keep mutant dies.
+
+**The credit preflight's delta refusal composes the priors (confirmed).**
+The pre-fan-out refusal returned before `_delta_prelude` and
+`_with_carryforward`, so a delta review that stopped at the preflight
+dropped the earlier review's findings — Blockers and their carried
+dispositions with them — where the old refused-decision-call path's
+fallback had kept them. The refusal branch now composes the priors
+through `_with_carryforward` inside the traced body: the carry call
+itself is refused on the halted spend (`_reserve_call` returns the halt
+before any pricing), so the fallback composes with no model call, the
+lenses stay NOT RUN, the credit refusal stays the review error, and a
+prior Blocker keeps its carried disposition and counts for the verdict
+(pinned: the review's verdict is BLOCK and the carried severity is
+BLOCKER; the dropped-composition mutant dies).
+
+**The credit figure's unresolvable override (confirmed).**
+`largest_call_reservation` ran `resolve_per_call` outside its guarded
+read, so a per-call override above the endpoint's limit raised
+`LimitRefused` out of the credit check and killed the review before any
+lens started. The resolve now runs inside the same try: the adapter
+names no figure, `_credit_refusal` accepts, and the lens loop reports
+the limit the same way the turn path does. Pinned by an
+`ATLAS_MAX_OUTPUT_TOKENS` override above the fixture endpoint's
+completion limit (`largest_call_reservation()` is None; the
+outside-the-try mutant dies). The tenant adapter has no credit seam at
+all — no `largest_call_reservation` or `remaining_credit_usd`, the
+coordinator's attribute probe accepts it — so the tenant path has no
+such pattern to fix.
