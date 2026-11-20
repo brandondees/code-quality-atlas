@@ -37,6 +37,9 @@ _FUNDING_KEY_PREFIX = "ATLAS_FUNDING_"
 _NOT_A_KEY = frozenset({ENV_FUNDING_SOURCES, ENV_FUNDING_SOURCE, ENV_FUNDING_BYOK})
 _MAX_DOCUMENT_CHARS = 8192
 _MAX_SOURCES = 8
+# A ceiling above this makes the claim-time over-ceiling check fail to
+# skip any key. The single-key parser has no such cap; this one does so
+# an extra digit fails at boot instead of disabling that check.
 _MAX_CEILING = Decimal(10000)
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _KEY_ENV = re.compile(r"^ATLAS_[A-Z0-9_]+$")
@@ -102,7 +105,7 @@ def load_funding_sources(env: Mapping[str, str]) -> tuple[FundingSource, ...] | 
             f"{ENV_FUNDING_SOURCES} is longer than {_MAX_DOCUMENT_CHARS} characters"
         )
     try:
-        data = json.loads(raw)
+        data = json.loads(raw, object_pairs_hook=_object)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{ENV_FUNDING_SOURCES} is not JSON: {exc.msg}") from None
     if not isinstance(data, list):
@@ -191,6 +194,21 @@ def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     return source.get(ENV_FUNDING_BYOK, "").strip() == "true"
 
 
+def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """One JSON object, refusing a field that appears twice.
+
+    ``json.loads`` otherwise keeps the last value, and the missing-field
+    check would then accept a document that names two different sources
+    under one ``name``.
+    """
+    data: dict[str, object] = {}
+    for key, value in pairs:
+        if key in data:
+            raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field {key!r}")
+        data[key] = value
+    return data
+
+
 def _source(item: object, index: int) -> FundingSource:
     where = f"{ENV_FUNDING_SOURCES} source {index}"
     if not isinstance(item, dict):
@@ -212,6 +230,9 @@ def _source(item: object, index: int) -> FundingSource:
     require_zdr = _bool(item["require_zdr"], where, "require_zdr")
     model_filter = _filter(item["model_filter"], where)
     ceiling = _ceiling(item["key_ceiling_usd"], where)
+    # byok and require_zdr are independent. A source that declares both
+    # is the operator's claim; the child fails at the ZDR preflight.
+    # This parser does not add a joint rule, and claim time does not either.
     byok = _bool(item["byok"], where, "byok")
     return FundingSource(
         name, key_env, providers, require_zdr, model_filter, ceiling, byok
