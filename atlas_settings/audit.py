@@ -2,20 +2,19 @@
 """The settings page's append-only audit (D90): one JSONL line per write
 the page accepted — which action, which installation, which GitHub user
 id, and when. It never records a value: no key, no endpoint, no model,
-no cap figure, no consent text. The file lives at
-`<state dir>/settings-audit.jsonl`, outside the installation store's
-directory, appended with `O_APPEND` under a thread lock — the lock serializes
-this process's threads; the cross-process safety of a small append is
-`O_APPEND`'s own atomicity. The file is bounded: past the byte cap the
-oldest half is rotated away under the same lock, so the audit grows no
-further than its cap for the life of the volume while the newest
-entries — the ones the page reads back — always survive; the rotation
-never touches another process's append, because this process is the
-file's only writer. The page reads it back for
-exactly one fact: when this installation's credentials were last saved,
-which the page shows instead of a key. A line that cannot be decoded or
-parsed is skipped, never fatal — one bad byte must not blind the page
-to every installation's record."""
+no cap figure, no consent text. Nothing is ever deleted or rotated: the
+file is append-only for the life of the volume, exactly as D90 records
+it. The file lives at `<state dir>/settings-audit.jsonl`, outside the
+installation store's directory, appended with `O_APPEND` under a thread
+lock — this process is the file's only writer, and `O_APPEND` keeps each
+small line atomic even so. A short append truncates the torn bytes back
+off before raising, so no fragment can swallow the next entry. The
+read-back is what is bounded: it scans a tail window of the file, not
+the whole append-only history, because the one fact the page reads back
+(when this installation's credentials were last saved) is always among
+the newest entries; a line that cannot be decoded or parsed is skipped,
+never fatal — one bad byte must not blind the page to every
+installation's record."""
 
 from __future__ import annotations
 
@@ -40,10 +39,6 @@ ACTIONS = (
     "delete-installation",
     "login",
 )
-# The file's bound: past this many bytes the oldest half of the audit is
-# rotated away on the next write, under the append lock.
-_MAX_AUDIT_BYTES = 1_048_576
-
 _log = logging.getLogger(__name__)
 
 
