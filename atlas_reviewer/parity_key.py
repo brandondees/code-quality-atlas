@@ -6,7 +6,8 @@ protocol-reviewed pull request is another JSON file in the same directory;
 the loader reads every file. A record is a path and a line span, or the
 pull request body and the lines a citation has to quote.
 ``grade_findings`` compares one verified candidate list with those spans.
-The count across runs is a later layer.
+``score_parity`` counts found, partial, and lost across recorded runs.
+The command that reads a directory of runs is a later layer.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from atlas_reviewer.eval_harness import EvalFormatError
 
@@ -76,6 +77,9 @@ SPAN_SLACK = 0
 FOUND = "found"
 PARTIAL = "partial"
 LOST = "lost"
+RUNS_REQUIRED = 3
+FOUND_IN_AT_LEAST = 2
+PARTIAL_COUNTS_AS_FOUND = False
 _RANK = {"nit": 0, "minor": 1, "major": 2, "blocker": 3}
 
 
@@ -440,3 +444,201 @@ def _assignment(edges: Sequence[Sequence[int]], n_candidates: int) -> list[int]:
     for ref_index in range(len(edges)):
         visit(ref_index, [False] * n_candidates)
     return assigned
+
+
+@dataclass(frozen=True)
+class ParityRun:
+    """One recorded review. Comparison fields stay None when the run omitted them."""
+
+    name: str
+    pr: int
+    model: str
+    repetition: int
+    head_sha: str
+    findings: tuple[CitedFinding, ...]
+    coverage_complete: bool
+    lenses_run: tuple[str, ...]
+    lenses_not_run: tuple[str, ...]
+    lenses_failed: tuple[str, ...]
+    limit_stops: tuple[str, ...]
+    false_positive_majors: int | None = None
+    lenses_clean: int | None = None
+    lenses_planned: int | None = None
+    cost_usd: float | None = None
+    wall_seconds: float | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    previous_turn_misses: int | None = None
+
+
+def score_parity(
+    findings: Sequence[KeyFinding],
+    runs: Sequence[ParityRun],
+    *,
+    runs_required: int = RUNS_REQUIRED,
+    found_in_at_least: int = FOUND_IN_AT_LEAST,
+    partial_counts_as_found: bool = PARTIAL_COUNTS_AS_FOUND,
+) -> dict[str, Any]:
+    """The gate. Empty ``failures`` is a pass.
+
+    A finding passes when the sample has ``runs_required`` runs and the
+    finding was found in ``found_in_at_least`` of them. Partial counts only
+    when ``partial_counts_as_found`` is set. An automatic failure is recorded
+    on its run and fails the gate on its own; it does not drop that run from
+    the sample.
+    """
+    _check_rule(runs_required, found_in_at_least)
+    grouped = _group(findings)
+    failures: list[str] = []
+    run_rows: list[dict[str, Any]] = []
+    per_pr: dict[int, list[tuple[str, ...]]] = {pr: [] for pr in grouped}
+    for run in runs:
+        pr_findings = grouped.get(run.pr, ())
+        if run.pr not in grouped:
+            failures.append(
+                f"{run.name} is for pull request {run.pr}, which is not in the key"
+            )
+        graded = grade_findings(pr_findings, run.findings)
+        if run.pr in per_pr:
+            per_pr[run.pr].append(graded.grades)
+        reasons = automatic_failures(run, pr_findings)
+        failures.extend(f"{run.name}: {reason}" for reason in reasons)
+        run_rows.append(_run_row(run, pr_findings, graded, reasons))
+    finding_rows: list[dict[str, Any]] = []
+    for pr, pr_findings in grouped.items():
+        rows = per_pr[pr]
+        if len(rows) < runs_required:
+            failures.append(
+                f"pull request {pr} has {len(rows)} {_runs_word(len(rows))} recorded; "
+                f"the sample is {runs_required}"
+            )
+        for index, finding in enumerate(pr_findings):
+            row, missed = _tally(
+                finding,
+                [grades[index] for grades in rows],
+                runs_required,
+                found_in_at_least,
+                partial_counts_as_found,
+            )
+            finding_rows.append(row)
+            if missed:
+                failures.append(missed)
+    return {
+        "gate_pass": not failures,
+        "defaults": {
+            "runs_required": runs_required,
+            "found_in_at_least": found_in_at_least,
+            "partial_counts_as_found": partial_counts_as_found,
+        },
+        "failures": failures,
+        "findings": finding_rows,
+        "runs": run_rows,
+    }
+
+
+def automatic_failures(
+    run: ParityRun, findings: Sequence[KeyFinding]
+) -> tuple[str, ...]:
+    """Why this run fails even if it found every key finding. Independent of k-of-3."""
+    reasons: list[str] = []
+    if run.coverage_complete is not True:
+        reasons.append("coverage_complete is not true")
+    for name in run.lenses_not_run:
+        reasons.append(f"lens {name} was NOT RUN")
+    for name in run.lenses_failed:
+        reasons.append(f"lens {name} failed")
+    for stop in run.limit_stops:
+        reasons.append(f"limit stop: {stop}")
+    ran = set(run.lenses_run)
+    for finding in findings:
+        missing = [name for name in finding.lenses if name not in ran]
+        if missing:
+            reasons.append(f"lens {missing[0]} named by the key was not run")
+    return tuple(dict.fromkeys(reasons))
+
+
+def _check_rule(runs_required: int, found_in_at_least: int) -> None:
+    if (
+        isinstance(runs_required, bool)
+        or isinstance(found_in_at_least, bool)
+        or not isinstance(runs_required, int)
+        or not isinstance(found_in_at_least, int)
+        or runs_required < 1
+        or found_in_at_least < 1
+        or found_in_at_least > runs_required
+    ):
+        raise EvalFormatError(
+            "runs_required and found_in_at_least must be positive integers, "
+            "and found_in_at_least cannot exceed runs_required"
+        )
+
+
+def _group(findings: Sequence[KeyFinding]) -> dict[int, tuple[KeyFinding, ...]]:
+    buckets: dict[int, list[KeyFinding]] = {}
+    for finding in findings:
+        buckets.setdefault(finding.pr, []).append(finding)
+    return {pr: tuple(items) for pr, items in buckets.items()}
+
+
+def _tally(
+    finding: KeyFinding,
+    counts: list[str],
+    runs_required: int,
+    found_in_at_least: int,
+    partial_counts_as_found: bool,
+) -> tuple[dict[str, Any], str]:
+    found = counts.count(FOUND)
+    partial = counts.count(PARTIAL)
+    lost = counts.count(LOST)
+    credit = found + (partial if partial_counts_as_found else 0)
+    passed = len(counts) >= runs_required and credit >= found_in_at_least
+    missed = ""
+    if credit < found_in_at_least:
+        label = "credited" if partial_counts_as_found else "found"
+        missed = f"{finding.id} {label} in {credit} of {len(counts)} (need {found_in_at_least})"
+    return (
+        {
+            "id": finding.id,
+            "pr": finding.pr,
+            "found": found,
+            "partial": partial,
+            "lost": lost,
+            "of": len(counts),
+            "passed": passed,
+        },
+        missed,
+    )
+
+
+def _run_row(
+    run: ParityRun,
+    pr_findings: Sequence[KeyFinding],
+    graded: FindingGrades,
+    reasons: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        "name": run.name,
+        "pr": run.pr,
+        "model": run.model,
+        "repetition": run.repetition,
+        "head_sha": run.head_sha,
+        "automatic_fail": list(reasons),
+        "grades": {
+            finding.id: grade
+            for finding, grade in zip(pr_findings, graded.grades, strict=True)
+        },
+        "extras": graded.extras,
+        "extra_majors": graded.extra_majors,
+        "false_positive_majors": run.false_positive_majors,
+        "lenses_clean": run.lenses_clean,
+        "lenses_planned": run.lenses_planned,
+        "cost_usd": run.cost_usd,
+        "wall_seconds": run.wall_seconds,
+        "cache_read_tokens": run.cache_read_tokens,
+        "cache_write_tokens": run.cache_write_tokens,
+        "previous_turn_misses": run.previous_turn_misses,
+    }
+
+
+def _runs_word(count: int) -> str:
+    return "run" if count == 1 else "runs"
