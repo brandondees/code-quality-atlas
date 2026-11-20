@@ -386,17 +386,19 @@ def test_a_ledger_line_names_its_funding_source_only_when_it_has_one(tmp_path):
     spend = _spend(tmp_path)
     spend.record("o/r", Decimal("0.40"), 1)
     spend.record("o/r", Decimal("1.25"), 2, source="subs-a")
+    spend.record("o/r", Decimal("1.25"), 1, source="subs-a")
     spend.record("o/r", Decimal("0.10"), 1, source="subs-b")
     text = spend.file("o/r").read_text(encoding="utf-8")
     lines = [json.loads(line) for line in text.splitlines()]
     assert "source" not in lines[0]
     assert lines[1]["source"] == "subs-a"
-    assert lines[2]["source"] == "subs-b"
+    assert lines[2]["source"] == "subs-a"
+    assert lines[3]["source"] == "subs-b"
     groups, gap = spend.by_source("o/r")
     assert gap == ""
     assert groups == (
         ("", Decimal("0.40")),
-        ("subs-a", Decimal("1.25")),
+        ("subs-a", Decimal("2.50")),
         ("subs-b", Decimal("0.10")),
     )
     total, total_gap = spend.committed("o/r")

@@ -5169,12 +5169,13 @@ def test_a_backfill_that_drops_a_bad_source_still_calls_the_bill_backfilled(
     """When the ledger refuses the source name, the bill is written
     without it and the record stays a backfill. Kills marking that bill
     as an unknown measurement."""
+    from atlas_reviewer.budget import SourceNameError
     from atlas_reviewer.service import _backfill_crashed_spend
 
     class _RefuseNamed(DailySpend):
         def record_once(self, repo, amount_usd, calls, key, *, at=None, source=""):
             if source:
-                raise ValueError("funding source")
+                raise SourceNameError("funding source")
             return super().record_once(
                 repo, amount_usd, calls, key, at=at, source=source
             )
@@ -6054,8 +6055,8 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
 
 def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
     """A source name the ledger rejects does not drop the settled bill.
-    The line is written with no source. Kills letting ValueError escape
-    and leaving the day's total short."""
+    The line is written with no source. Kills letting ``SourceNameError``
+    escape and leaving the day's total short."""
     from atlas_reviewer.service_queue import Job
 
     spend = _spend(tmp_path)
@@ -6077,6 +6078,109 @@ def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
     assert total == Decimal("1.25")
     line = json.loads(spend.file(REPO).read_text(encoding="utf-8"))
     assert "source" not in line
+
+
+def test_a_negative_bill_is_not_logged_as_a_dropped_source(tmp_path):
+    """A negative amount is a ``ValueError``, not a refused source name.
+    Kills catching every ``ValueError`` and logging ``spend source
+    dropped`` for it."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    with pytest.raises(ValueError, match="negative"):
+        worker._record_spend(
+            Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+            (-2, "-1.25", "0"),
+            None,
+            {"repo": REPO},
+            "subs-a",
+        )
+    assert not any(
+        event.step == "spend source dropped" for event in worker._telemetry.events
+    )
+    assert spend.committed(REPO) == (Decimal(0), "")
+
+
+def test_a_negative_backfill_is_not_logged_as_a_dropped_source(tmp_path, monkeypatch):
+    """The crash backfill lets a negative bill raise. Kills the same
+    broad ``ValueError`` catch on that path."""
+    from atlas_reviewer.head_change import Progress
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    monkeypatch.setattr(Progress, "billed_usd", property(lambda self: Decimal("-1.25")))
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    with pytest.raises(ValueError, match="negative"):
+        _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert not any("not a source name" in event.error for event in telemetry.events)
+
+
+def test_a_dropped_source_whose_retry_cannot_be_written_is_named(tmp_path):
+    """The retry after a refused name has its own write-error record.
+    Kills deleting the inner ``OSError`` handler."""
+    from atlas_reviewer.budget import DailySpend, SourceNameError
+    from atlas_reviewer.service import _backfill_crashed_spend
+    from atlas_reviewer.service_queue import Job
+
+    class _DiskOnBlank(DailySpend):
+        def record(self, repo, amount_usd, calls, *, at=None, source=""):
+            if source:
+                raise SourceNameError("funding source 'x' is not a source name")
+            raise OSError("disk")
+
+        def record_once(self, repo, amount_usd, calls, key, *, at=None, source=""):
+            if source:
+                raise SourceNameError("funding source 'x' is not a source name")
+            raise OSError("disk")
+
+    spend = _DiskOnBlank(
+        tmp_path,
+        Decimal("100.00"),
+        cap_for=no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    worker._record_spend(
+        Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+        (2, "1.25", "0"),
+        None,
+        {"repo": REPO},
+        "Not A Name",
+    )
+    steps = [event.step for event in worker._telemetry.events]
+    assert "spend source dropped" in steps
+    assert "spend not recorded" in steps
+    event = PrEvent(REPO, 9, SHA_B)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    crashed = [item for item in telemetry.events if item.step == "crashed spend"]
+    assert crashed[-1].error.startswith("OSError:")
 
 
 def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):
