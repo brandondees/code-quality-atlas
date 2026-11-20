@@ -663,9 +663,12 @@ class DailySpend:
         """Append one settled review's bill to the day's file.
         One `os.write` of one line under `O_APPEND` is the append; a
         write that raises leaves the file as it was and the caller names
-        the gap. ``source`` is the funding source the bill came from.
+        the gap.         ``source`` is the funding source the bill came from.
         Empty omits the field, so a line from before sources, and a
-        review that had no list, stay unattributed."""
+        review that had no list, stay unattributed. A ``source`` that
+        is not a source name raises ``SourceNameError`` and writes
+        nothing. A negative amount or call count raises ``ValueError``
+        and writes nothing."""
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
         self._append(
@@ -702,7 +705,10 @@ class DailySpend:
         itself, so no crash between an append and a bookkeeping step can
         double-count. An unreadable ledger is not appended to -- its
         total is unknown and the refusal already holds -- and the gap is
-        returned so the caller can name it."""
+        returned so the caller can name it. A ``source`` that is not a
+        source name raises ``SourceNameError`` and writes nothing. A
+        negative amount or call count raises ``ValueError`` and writes
+        nothing."""
         if not key:
             raise ValueError("a once-only record needs a key")
         if amount_usd < 0:
@@ -815,7 +821,7 @@ class DailySpend:
                 continue
             try:
                 parsed = _record_source(line)
-            except ValueError:
+            except SourceNameError:
                 return None, (
                     f"the day's spend file has an unreadable source (line {number})"
                 )
@@ -833,6 +839,10 @@ class DailySpend:
         return tuple((name, totals[name]) for name in order), ""
 
 
+class SourceNameError(ValueError):
+    """``source`` is not a source name. Nothing was written."""
+
+
 def _source_fields(source: str) -> dict[str, str]:
     """The ledger's source field, or nothing when the review had no source.
 
@@ -840,7 +850,7 @@ def _source_fields(source: str) -> dict[str, str]:
     if source == "":
         return {}
     if accepted_source_name(source) != source:
-        raise ValueError(f"funding source {source!r} is not a source name")
+        raise SourceNameError(f"funding source {source!r} is not a source name")
     return {"source": source}
 
 
@@ -848,20 +858,22 @@ def _record_source(line: str) -> tuple[Decimal, str] | None:
     """One line's bill and source, or None when the line is not a record.
 
     A missing source is unattributed. A source that is not a source name
-    raises ValueError: the amount is readable, and the report names the
-    field instead of treating the day's total as unknown."""
-    amount = _record_amount(line)
+    raises ``SourceNameError``: the amount is readable, and the report
+    names the field instead of treating the day's total as unknown.
+    The line is parsed once."""
+    data = _record_object(line)
+    if data is None:
+        return None
+    amount = _amount_of(data)
     if amount is None:
         return None
-    try:
-        data = json.loads(line)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-        return None
-    if not isinstance(data, dict) or "source" not in data:
+    if "source" not in data:
         return amount, ""
     source = accepted_source_name(data.get("source"))
     if source is None:
-        raise ValueError(f"funding source {data.get('source')!r} is not a source name")
+        raise SourceNameError(
+            f"funding source {data.get('source')!r} is not a source name"
+        )
     return amount, source
 
 
@@ -869,12 +881,23 @@ def _record_amount(line: str) -> Decimal | None:
     """The `committed_usd` figure of one ledger line, or None when the
     line is not a record this module wrote: not JSON, not an object, the
     field missing or not a non-negative decimal string."""
+    data = _record_object(line)
+    if data is None:
+        return None
+    return _amount_of(data)
+
+
+def _record_object(line: str) -> dict[str, object] | None:
     try:
         data = json.loads(line)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
+    return data
+
+
+def _amount_of(data: Mapping[str, object]) -> Decimal | None:
     raw = data.get("committed_usd")
     if not isinstance(raw, str):
         return None

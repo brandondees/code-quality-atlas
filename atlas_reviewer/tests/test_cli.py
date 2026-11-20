@@ -55,6 +55,14 @@ def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_p
     assert code == 0
     assert err == ""
     assert out == "(unset) 0.40\nsubs-a 1.25\n"
+    today = DailySpend(tmp_path)
+    today.record("acme/today", Decimal("1.25"), 1, source="subs-a")
+    default_code, default_out, default_err = run_cli(
+        "--state-dir", str(tmp_path), "funding-spend", "--repo", "acme/today"
+    )
+    assert default_code == 0
+    assert default_err == ""
+    assert default_out == "subs-a 1.25\n"
     missing, missing_out, missing_err = run_cli(
         "--state-dir",
         str(tmp_path),
