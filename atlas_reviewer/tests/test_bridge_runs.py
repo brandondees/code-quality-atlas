@@ -1984,6 +1984,27 @@ def test_the_sweep_kills_a_runner_descendant(tmp_path):
             daemon.wait()
 
 
+def test_the_sweep_waits_out_a_slow_sigkill():
+    """A process still listed after the first reap check is not a survivor.
+
+    One 50 ms sleep lost this race on a loaded CI runner. The sweep polls
+    until the process is gone, and only then fails closed.
+    """
+
+    class Slow(LocalSprites):
+        def __init__(self) -> None:
+            super().__init__()
+            self.seen = 0
+
+        def _stray_descendants(self) -> set[int]:
+            self.seen += 1
+            if self.seen < 3:
+                return {os.getpid() + 4_194_304}
+            return set()
+
+    Slow().sweep("cqa-slow")
+
+
 def test_the_sweep_fails_closed_on_a_survivor():
     """A sweep that cannot clear the runner's strays is a fail-closed
     boundary error -- the `unavailable` gap -- never a silent pass."""

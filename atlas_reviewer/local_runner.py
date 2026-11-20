@@ -37,6 +37,10 @@ from atlas_reviewer.runner import EXIT_MARKER, SWEEP_TAG
 REAP_TIMEOUT_S = 5.0
 
 
+# How long a sweep waits for SIGKILL to land before it fails closed.
+_SWEEP_REAP_S = 0.5
+
+
 class LocalSprites(FakeSprites):
     """Runs the exec wrapper's argv here and answers with its stdout as
     one stdout frame, the shape the live exec stream has. The exec's
@@ -113,11 +117,16 @@ class LocalSprites(FakeSprites):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        # SIGKILL is asynchronous: give the kernel a beat before the
-        # reaping scan, then reap what died.
-        time.sleep(0.05)
-        self._reap()
-        survivors = self._stray_descendants()
+        # SIGKILL is asynchronous. One 50 ms sleep is not always enough
+        # for a loaded runner to drop the process from the scan, so poll
+        # until the deadline and then fail closed.
+        deadline = time.monotonic() + _SWEEP_REAP_S
+        while True:
+            time.sleep(0.05)
+            self._reap()
+            survivors = self._stray_descendants()
+            if not survivors or time.monotonic() >= deadline:
+                break
         if survivors:
             raise BoundaryError(
                 f"the stray-process sweep left {len(survivors)} survivor(s)"
