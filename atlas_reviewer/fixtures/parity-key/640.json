@@ -1,17 +1,45 @@
 {
   "pr": 640,
-  "reviewed_commit": "72c56eb24d16025719c4d58ba921eadef94bb8a8",
-  "source": "Checked at 72c56eb24d16025719c4d58ba921eadef94bb8a8. The Nov 14 trial names three Minors. Only 640-m1 is a record. 640-m2 is not a record: service_post.py lines 232-234 raise PostHookMissing, and service.py lines 430-431 record the refusal. 640-m3 is not a record: docs/open-questions.md line 62 and atlas_reviewer/README.md line 14 already say D46 amends D48's no-publish rule.",
+  "reviewed_commit": "0fe45e5ea79f3abd8e07488a01b623186df96692",
+  "source": "Checked at 0fe45e5ea79f3abd8e07488a01b623186df96692, the head the Nov 14 trial reviewed. 72c56eb24d16025719c4d58ba921eadef94bb8a8 is the later merged head. The hook and the D46 wording were fixed after the review. All three Minors are records at the reviewed commit.",
   "findings": [
     {
       "id": "640-m1",
       "severity": "minor",
       "summary": "The begin_post cancel check is unpinned.",
-      "source": "begin_post's cancel check is service_queue.py line 329, `if job.superseded or job.cancel.is_set()`. The method is lines 323-340. The trial range 320-335 also includes still_current, which is a different method, so the span is line 329.",
+      "source": "Read at 0fe45e5e. begin_post's cancel check is service_queue.py line 329, `if job.superseded or job.cancel.is_set()`. The method is lines 323-340. still_current is lines 317-321, a different method, so the span is line 329.",
       "lenses": ["reviewing-test-quality"],
       "needs": ["mutate"],
       "spans": [{"path": "atlas_reviewer/service_queue.py", "line": 329, "end_line": 329}],
       "encloses": [{"path": "atlas_reviewer/service_queue.py", "line": 323, "end_line": 340}],
+      "citations": []
+    },
+    {
+      "id": "640-m2",
+      "severity": "minor",
+      "summary": "A missing hook posts with no head check.",
+      "source": "Read at 0fe45e5e. service_post.py lines 229-231 read `check = before_send.get()` and run the head check only when check is not None. A missing hook falls through and post creates the review. post is lines 217-236. The later merged head raises instead. The span is the check that skips a missing hook.",
+      "lenses": ["hunting-silent-failures"],
+      "needs": ["read"],
+      "spans": [{"path": "atlas_reviewer/service_post.py", "line": 229, "end_line": 231}],
+      "encloses": [{"path": "atlas_reviewer/service_post.py", "line": 217, "end_line": 236}],
+      "citations": []
+    },
+    {
+      "id": "640-m3",
+      "severity": "minor",
+      "summary": "D46 does not say it amends D48, and the README sentence does not either.",
+      "source": "Read at 0fe45e5e. D46 is docs/open-questions.md line 62. The heading amends D24 and D25 and does not say amends D48. The README sentence is lines 13-15. It names the webhook receiver (D48) and a COMMENT post, and it does not say D46 amends D48. Either span counts. The later merged head names the amendment on both lines.",
+      "lenses": ["reviewing-decision-lifecycle"],
+      "needs": ["read"],
+      "spans": [
+        {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
+        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15}
+      ],
+      "encloses": [
+        {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
+        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15}
+      ],
       "citations": []
     }
   ]

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The parity key: five graded protocol Minors.
+"""The parity key: seven graded protocol Minors.
 
 A key file is one pull request's verified protocol findings. Adding a
 protocol-reviewed pull request is another JSON file in the same directory;

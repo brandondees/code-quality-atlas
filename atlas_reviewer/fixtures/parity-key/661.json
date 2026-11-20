@@ -1,7 +1,7 @@
 {
   "pr": 661,
   "reviewed_commit": "674071a91513b4774c82350fb757d9c085f10baf",
-  "source": "Checked at 674071a91513b4774c82350fb757d9c085f10baf. The Nov 14 trial scorer and docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md name the four Minors. Each finding's source records the span chosen at that commit.",
+  "source": "Checked again at 674071a91513b4774c82350fb757d9c085f10baf. That commit is the pull request head from 2026-11-13, the night before the Nov 14 trial, and the four defects are live there: the break is line 186, the unreadable count is line 207, and the omitted-findings gate is line 211. Each finding's source records the span chosen at that commit.",
   "findings": [
     {
       "id": "661-m1",
