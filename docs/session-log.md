@@ -6193,4 +6193,7 @@ A settled bill can name the funding source it came from. A line with
 no source omits the field, and the day's total still adds every line.
 `funding-spend` prints the day's settled spend grouped by source. A
 missing file is zero. An unreadable file exits 2. The crash backfill
-keeps the source the progress record named. No model was called.
+keeps the source the progress record named. A name the ledger refuses
+is written without that name, and the bill is not dropped; a negative
+bill still raises. A backfill that drops a refused name stays measured
+as a backfill. No model was called.
