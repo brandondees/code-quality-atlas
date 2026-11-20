@@ -6,6 +6,7 @@ settings render never carries a key, whatever the inputs."""
 from datetime import UTC, datetime
 
 from atlas_settings.pages import (
+    StoredCredentials,
     error_page,
     esc,
     esc_attr,
@@ -18,22 +19,34 @@ NOW = datetime(2026, 11, 19, 12, 0, 0, tzinfo=UTC)
 CSRF = "csrf-token-value"
 
 
+def _stored(**overrides: object) -> StoredCredentials | None:
+    """The stored-credentials value from the loose test shorthand: the
+    tests' `has_credentials`/`credentials_saved_at`/`base_url`/`model`
+    keys compose into the one value the page now takes."""
+    if not overrides.pop("has_credentials", False):
+        return None
+    return StoredCredentials(
+        saved_at=overrides.pop("credentials_saved_at", None),  # type: ignore[arg-type]
+        base_url=overrides.pop("base_url", ""),  # type: ignore[arg-type]
+        model=overrides.pop("model", ""),  # type: ignore[arg-type]
+    )
+
+
 def _render(**overrides: object) -> str:
     kwargs: dict[str, object] = {
         "installation_id": "42",
         "account_login": "octo-admin",
         "account_type": "User",
         "allowlisted_repo_count": 1,
-        "has_credentials": False,
-        "credentials_saved_at": None,
-        "base_url": "",
-        "model": "",
         "consent_acknowledged_at": None,
         "daily_cap_usd": None,
         "csrf": CSRF,
         "flash": None,
     }
     kwargs.update(overrides)
+    kwargs["credentials"] = _stored(**kwargs)  # type: ignore[arg-type]
+    for name in ("has_credentials", "credentials_saved_at", "base_url", "model"):
+        kwargs.pop(name, None)
     return settings_page(**kwargs)  # type: ignore[arg-type]
 
 
@@ -202,22 +215,68 @@ def test_a_naive_stamp_is_not_on_record() -> None:
 
 def test_the_hostile_payload_escapes_in_every_field() -> None:
     """The hostile probe rides every interpolated field — the element
-    texts and the attribute value with its quote — and nothing raw
-    survives (kills the field-uncovered mutant for base_url and model,
-    the values the page shows back)."""
+    texts, the attribute value with its quote, the installation id and
+    account type, the cap figure, `error_page`'s title and message, and
+    `layout`'s title — and the escaped forms are asserted directly, so
+    nothing raw survives and a switch to the text escaper in an
+    attribute context fails here (the review's attribute-injection
+    case)."""
     payload = "<script>\"'&"
     page = _render(
+        installation_id=payload,
         account_login=payload,
+        account_type=payload,
         base_url=f"https://{payload}/v1",
         model=payload,
         consent_acknowledged_at=NOW,
         has_credentials=True,
         credentials_saved_at=NOW,
+        daily_cap_usd=payload,
         csrf=payload,
         flash=payload,
     )
-    text = page
-    assert "<script>" not in text
-    assert "onsubmit" not in text
-    # The attribute context escapes the quote and the apostrophe.
-    assert 'value="<script>' not in text
+    assert "<script>" not in page
+    # The attribute context escapes the quote and the apostrophe — the
+    # exact escaped form is asserted, because the weaker "raw open-tag
+    # absent" check passes even when a text escaper ends the value
+    # attribute early.
+    assert 'name="csrf" value="&lt;script&gt;&quot;&#x27;&amp;"' in page
+    error = error_page(payload, payload)
+    assert "<script>" not in error
+    # Element text needs no quote escaping (a quote cannot break out of
+    # it); the markup-significant characters are what must be escaped.
+    assert "&lt;script&gt;" in error
+    titled = layout(payload, "<p>body</p>")
+    assert "<title>&lt;script&gt;" in titled
+    assert "onsubmit" not in page  # nothing injects a handler either
+
+
+def test_the_credentials_form_refills_the_non_secret_fields() -> None:
+    """A refused submit re-renders with the endpoint and model the admin
+    typed (escaped into the value attributes); the key is never
+    prefilled — a refused save must never leave a pasted key sitting in
+    the form."""
+    from atlas_settings.phrases import ENDPOINT_REFUSED_PREFIX
+
+    page = _render(
+        consent_acknowledged_at=NOW,
+        prefill_base_url="https://api.example.com/v1",
+        prefill_model="vendor/good-model",
+    )
+    assert (
+        'name="base_url" autocomplete="off"\n value="https://api.example.com/v1"'
+        in page
+    )
+    assert 'name="model" autocomplete="off"\n value="vendor/good-model"' in page
+    assert 'name="key"' in page
+    assert 'name="key" value=' not in page
+    # A hostile prefill escapes too: the value attribute cannot be
+    # broken out of.
+    hostile = _render(
+        consent_acknowledged_at=NOW,
+        prefill_base_url="<script>\"'&",
+        prefill_model="vendor/good-model",
+    )
+    assert 'value="<script>' not in hostile
+    assert "&lt;script&gt;&quot;&#x27;&amp;" in hostile
+    del ENDPOINT_REFUSED_PREFIX
