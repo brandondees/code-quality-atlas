@@ -5992,9 +5992,7 @@ def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):
     board = Board(tmp_path / "queue.json")
     board.enqueue(PrEvent(REPO, 7, SHA_A))
     spend = _spend(tmp_path)
-    worker = _worker(
-        board, runner, root=tmp_path, spend=spend, funding=_funding_pair()
-    )
+    worker = _worker(board, runner, root=tmp_path, spend=spend, funding=_funding_pair())
     assert worker.run_one() is True
     assert board.states() == ((SHA_A, JobState.QUEUED),)
     assert not run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)).exists()
