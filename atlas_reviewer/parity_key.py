@@ -69,9 +69,9 @@ class KeyFinding:
     needs: tuple[str, ...]
 
 
-# Shared lines, and no line past either span. A neighboring line in the
-# same function is partial. A wider window would let 661-m2's last line
-# also match 661-m4.
+# The candidate may extend this many lines past the defect and still be a
+# find. Zero means the citation has to sit inside the defect span. A
+# neighboring line, or a citation of the whole function, is partial.
 SPAN_SLACK = 0
 FOUND = "found"
 PARTIAL = "partial"
@@ -317,9 +317,10 @@ def grade_findings(
     """Found, then partial. Each candidate is used at most once.
 
     Both pairings are maximum matchings, so two spans that share a line
-    are both found when each can take a different candidate. A candidate
-    that was not checked, or that names the right file at the wrong line,
-    is not found. ``extra_majors`` counts unused majors only.
+    are both found when each can take a different candidate. A find is a
+    verified citation that sits inside the defect span. A citation of the
+    whole function overlaps and is partial. ``extra_majors`` counts unused
+    majors only.
     """
     used: set[int] = set()
     grades = [LOST for _finding in findings]
@@ -357,21 +358,25 @@ def _assign(
         used.add(cand_index)
 
 
+def _rank(candidate: CitedFinding) -> int:
+    return _RANK.get(candidate.severity.casefold(), -1)
+
+
 def _is_found(finding: KeyFinding, candidate: CitedFinding) -> bool:
-    if not candidate.verified or _RANK.get(candidate.severity, -1) < _RANK["minor"]:
+    if not candidate.verified or _rank(candidate) < _RANK["minor"]:
         return False
     if _is_body(finding):
         return _cites(finding, candidate)
-    return _overlaps_any(finding.spans, candidate)
+    return _contained_any(finding.spans, candidate)
 
 
 def _is_partial(finding: KeyFinding, candidate: CitedFinding) -> bool:
-    if not candidate.verified:
+    if not candidate.verified or _rank(candidate) < 0:
         return False
     if _is_body(finding):
-        return candidate.severity == "nit" and _cites(finding, candidate)
+        return _rank(candidate) == _RANK["nit"] and _cites(finding, candidate)
     if _overlaps_any(finding.spans, candidate):
-        return candidate.severity == "nit"
+        return True
     return _overlaps_any(finding.encloses, candidate)
 
 
@@ -382,6 +387,23 @@ def _is_body(finding: KeyFinding) -> bool:
 def _cites(finding: KeyFinding, candidate: CitedFinding) -> bool:
     return candidate.path == BODY and any(
         text in candidate.quote for text in finding.citations
+    )
+
+
+def _contained_any(spans: Sequence[Span], candidate: CitedFinding) -> bool:
+    return any(_contains(span, candidate) for span in spans)
+
+
+def _contains(span: Span, candidate: CitedFinding) -> bool:
+    if not _overlaps(span, candidate):
+        return False
+    cand_end = (
+        candidate.end_line
+        if candidate.end_line is not None
+        else cast(int, candidate.line)
+    )
+    return cast(int, candidate.line) >= cast(int, span.line_start) - SPAN_SLACK and (
+        cand_end <= cast(int, span.line_end) + SPAN_SLACK
     )
 
 

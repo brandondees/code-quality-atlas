@@ -47,12 +47,14 @@ window would let the last line of 661-m2 also match 661-m4, and the two
 grades would depend on which finding was listed first.
 
 A candidate is **found** when it is verified, its severity is at least
-minor, and its span overlaps a key span on the same path. For
-`pull_request.body` the quote has to contain one citation as an exact
-substring. A paraphrase is lost. A candidate is **partial** when it is
-verified and either the overlap is a nit, or the line is in the enclosing
-function or decision and misses the defect span. Partial does not count
-toward a pass. Anything else, including a finding that was not verified,
-is **lost**. Each candidate is used at most once. Two lenses that report
-the same span count once. An unused major is an `extra_major`. An unused
-blocker is an extra and is not a major.
+minor, and its span sits inside a key span on the same path. Citing the
+whole enclosing function, or the whole file, overlaps the defect and is
+**partial**. A nit on the defect is partial. So is a verified line in the
+enclosing function that misses the defect. For `pull_request.body` the
+quote has to contain one citation as an exact substring. A paraphrase is
+lost. Severity is compared case-insensitively. Partial does not count
+toward a pass. Anything else, including a finding that was not verified
+or a severity the record does not name, is **lost**. Each candidate is
+used at most once. Two lenses that report the same span count once. An
+unused major is an `extra_major`. An unused blocker is an extra and is
+not a major.

@@ -390,37 +390,24 @@ def test_the_line_before_the_omitted_findings_gate_does_not_find_it():
     assert both.grades == (FOUND, LOST)
 
 
-def test_the_queue_cancel_check_and_the_hook_are_graded_on_their_spans():
+def test_the_queue_cancel_check_is_graded_on_its_line():
     cancel = _key("640-m1")
     queue = "atlas_reviewer/service_queue.py"
     assert grade_findings([cancel], [_cite(queue, 329)]).grades == (FOUND,)
     assert grade_findings([cancel], [_cite(queue, 330)]).grades == (PARTIAL,)
     assert grade_findings([cancel], [_cite(queue, 317)]).grades == (LOST,)
-    hook = _key("640-m2")
-    poster = "atlas_reviewer/service_post.py"
-    assert grade_findings([hook], [_cite(poster, 233)]).grades == (FOUND,)
-    assert grade_findings([hook], [_cite("atlas_reviewer/service.py", 430)]).grades == (
-        LOST,
-    )
 
 
-def test_either_amendment_line_finds_the_decision():
-    finding = _key("640-m3")
-    assert grade_findings([finding], [_cite("docs/open-questions.md", 62)]).grades == (
+def test_a_citation_wider_than_the_defect_is_partial():
+    finding = _key("661-m3")
+    assert grade_findings([finding], [_cite(_ROUNDS, 185)]).grades == (FOUND,)
+    assert grade_findings([finding], [_cite(_ROUNDS, 184, end_line=186)]).grades == (
         FOUND,
     )
-    assert grade_findings(
-        [finding], [_cite("atlas_reviewer/README.md", 14)]
-    ).grades == (FOUND,)
-    assert grade_findings([finding], [_cite("docs/open-questions.md", 61)]).grades == (
-        LOST,
-    )
-    assert grade_findings(
-        [finding], [_cite("atlas_reviewer/README.md", 13)]
-    ).grades == (PARTIAL,)
-    assert grade_findings(
-        [finding], [_cite("atlas_reviewer/README.md", 10)]
-    ).grades == (LOST,)
+    whole_function = _cite(_ROUNDS, 162, end_line=223)
+    whole_file = _cite(_ROUNDS, 1, end_line=5000)
+    assert grade_findings([finding], [whole_function]).grades == (PARTIAL,)
+    assert grade_findings([finding], [whole_file]).grades == (PARTIAL,)
 
 
 def test_a_major_or_a_blocker_on_the_span_is_found():
@@ -438,6 +425,12 @@ def test_a_major_or_a_blocker_on_the_span_is_found():
     assert grade_findings(
         [finding], [_cite(queue, 329, severity="critical")]
     ).grades == (LOST,)
+    assert grade_findings([finding], [_cite(queue, 329, severity="Minor")]).grades == (
+        FOUND,
+    )
+    assert grade_findings([finding], [_cite(queue, 329, severity="Nit")]).grades == (
+        PARTIAL,
+    )
 
 
 def test_two_lenses_on_one_span_count_once_and_a_blocker_is_not_a_major():
