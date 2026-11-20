@@ -20,9 +20,9 @@
       "path": "unlocated",
       "summary": "A protocol Minor that is visible by reading a file the model skipped. The plan records that cause and not a path.",
       "lenses": [],
-      "markers": ["skipped", "file"],
+      "markers": [],
       "needs": ["read"],
-      "match": "markers"
+      "match": "unscored"
     },
     {
       "id": "640-m3",
@@ -30,9 +30,9 @@
       "path": "docs/open-questions.md",
       "summary": "A decision-lifecycle body. The plan names the finding and not a quoted defect.",
       "lenses": ["reviewing-decision-lifecycle"],
-      "markers": ["decision-lifecycle"],
+      "markers": [],
       "needs": ["read"],
-      "match": "markers"
+      "match": "unscored"
     }
   ]
 }

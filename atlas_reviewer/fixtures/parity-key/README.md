@@ -14,8 +14,11 @@ repo. Nothing here is a fresh measurement of a model.
 
 ## What a record stores
 
-`match` is `place` or `markers`. A place record has a line on `path`. A
-markers record has one or more markers and may omit the line. `needs` is
+`match` is `place`, `markers`, or `unscored`. A place record has a line
+on `path`. A markers record has one or more markers and may omit the line.
+An unscored record is reported and is not a grade: the source names the
+finding and does not quote a defect a marker could match without also
+matching a lens name or ordinary review text. `needs` is
 what reaching the finding took: `ci`, `read`, `run_tests`, or `mutate`.
 `path: unlocated` means this repo's record names no source path.
 
@@ -28,7 +31,7 @@ what reaching the finding took: `ci`, `read`, `run_tests`, or `mutate`.
 | `661-m3` | same | `atlas_reviewer/rounds.py:186` | `break` instead of `continue` hides a current-head round. The lines above it `continue` for a superseded record that does not fit. |
 | `661-m4` | same | `atlas_reviewer/rounds.py:211` | The superseded `findings_omitted` gate is unpinned. Reaching it needs `mutate`. |
 | `640-m1` | `72c56eb24d16025719c4d58ba921eadef94bb8a8` | `atlas_reviewer/service_queue.py:329` | The `begin_post` cancel check is unpinned. Reaching it needs `mutate`. |
-| `640-m2` | same | no path in the repo record | The plan says "reading a file the model skipped" and does not name the file. Markers are `skipped` and `file`. |
-| `640-m3` | same | no line; markers `decision-lifecycle` | The plan says "a decision-lifecycle body" and does not quote a defect. `reviewing-decision-lifecycle` is the lens #708 says was not picked. D46 at the reviewed head is `docs/open-questions.md` line 62 and is one physical line, so a five-line window would also cover neighboring decisions. The record stores markers and no line. |
+| `640-m2` | same | unscored; no path in the repo record | The plan says "reading a file the model skipped" and does not name the file. `skipped` and `file` also occur in ordinary review text, so the record is not graded. |
+| `640-m3` | same | unscored; no line | The plan says "a decision-lifecycle body" and does not quote a defect. That phrase is a substring of the lens name `reviewing-decision-lifecycle`, so a marker would count a lens list as the finding. The record is not graded. The lens #708 says was not picked stays on the record, and a run that does not select it still fails once the gate lands. |
 
 Line numbers are the reviewed commit's, not current main's.

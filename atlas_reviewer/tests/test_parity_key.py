@@ -61,15 +61,16 @@ def test_the_checked_in_key_is_the_seven_protocol_minors():
     assert anchor.path == "atlas_reviewer/service_queue.py"
     assert anchor.line_start == 329
     assert anchor.line_end is None
-    assert by_id["640-m1"].path == anchor.path
-    assert by_id["640-m1"].line_start == anchor.line_start
+    assert anchor.lenses == ("reviewing-test-quality",)
     assert by_id["640-m1"].needs == ("mutate",)
     assert by_id["640-m2"].path == "unlocated"
     assert by_id["640-m2"].line_start is None
-    assert by_id["640-m2"].match == "markers"
+    assert by_id["640-m2"].match == "unscored"
+    assert by_id["640-m2"].markers == ()
     assert by_id["640-m2"].lenses == ()
     assert "mt14/report-draft.md" in by_id["640-m2"].source
-    assert by_id["640-m3"].markers == ("decision-lifecycle",)
+    assert by_id["640-m3"].match == "unscored"
+    assert by_id["640-m3"].markers == ()
     assert by_id["640-m3"].lenses == ("reviewing-decision-lifecycle",)
     assert by_id["661-m1"].reviewed_commit == _COMMIT
     assert by_id["661-m1"].path == "pull_request.body"
@@ -82,6 +83,9 @@ def test_the_checked_in_key_is_the_seven_protocol_minors():
     assert by_id["661-m3"].needs == ("run_tests", "mutate")
     assert by_id["661-m4"].line_start == 211
     assert all(item.severity == "minor" for item in findings)
+    for record in (by_id["640-m3"], by_id["661-m1"]):
+        with pytest.raises(EvalFormatError, match="has no place to grade"):
+            record.as_eval()
 
 
 def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
@@ -110,7 +114,10 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
         (lambda body: body.update(findings=[]), "non-empty findings list"),
         (lambda body: body.update(findings="nope"), "non-empty findings list"),
         (lambda body: body.update(note="x"), "unknown key"),
-        (lambda body: body["findings"][0].update(match="fuzzy"), "place or markers"),
+        (
+            lambda body: body["findings"][0].update(match="fuzzy"),
+            "place, markers or unscored",
+        ),
         (
             lambda body: body["findings"][0].update(severity="critical"),
             "severity must be",
@@ -124,7 +131,7 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
         ),
         (lambda body: body["findings"][0].update(needs=["guess"]), "needs must list"),
         (lambda body: body["findings"][0].update(needs=[]), "needs must list"),
-        (lambda body: body["findings"][0].update(id="has space"), "id must be"),
+        (lambda body: body["findings"][0].update(id="has space"), "underscores"),
         (lambda body: body["findings"][0].update(path=""), "path must be"),
         (lambda body: body["findings"][0].update(lenses=["", "x"]), "lenses must be"),
         (lambda body: body["findings"][0].update(extra=1), "unknown key"),

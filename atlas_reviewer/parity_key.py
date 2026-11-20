@@ -19,7 +19,7 @@ from pathlib import Path
 from atlas_reviewer.eval_harness import EvalFinding, EvalFormatError
 
 KEY_DIR = Path(__file__).resolve().parent / "fixtures" / "parity-key"
-_MATCHES = frozenset({"place", "markers"})
+_MATCHES = frozenset({"place", "markers", "unscored"})
 _NEEDS = frozenset({"ci", "read", "run_tests", "mutate"})
 _SEVERITIES = frozenset({"blocker", "major", "minor", "nit"})
 _FILE_KEYS = frozenset({"pr", "reviewed_commit", "source", "findings"})
@@ -60,6 +60,11 @@ class KeyFinding:
     needs: tuple[str, ...] = ()
 
     def as_eval(self) -> EvalFinding:
+        """The place record as a harness finding. Markers and unscored records raise."""
+        if self.match != "place":
+            raise EvalFormatError(
+                f"{self.id} is a {self.match} record and has no place to grade"
+            )
         return EvalFinding(
             self.severity,
             self.path,
@@ -120,7 +125,7 @@ def _finding(value: object, name: str, pr: int, commit: str, source: str) -> Key
     _unknown(body, _FINDING_KEYS, name)
     match = body.get("match")
     if match not in _MATCHES:
-        raise EvalFormatError(f"{name} match must be place or markers")
+        raise EvalFormatError(f"{name} match must be place, markers or unscored")
     severity = body.get("severity")
     if not isinstance(severity, str) or severity not in _SEVERITIES:
         raise EvalFormatError(f"{name} severity must be blocker, major, minor or nit")
@@ -173,7 +178,9 @@ def _text(value: object, name: str) -> str:
 
 def _ident(value: object, name: str) -> str:
     if not isinstance(value, str) or _ID.fullmatch(value) is None:
-        raise EvalFormatError(f"{name} id must be letters, digits, dots or dashes")
+        raise EvalFormatError(
+            f"{name} id must be letters, digits, dots, dashes or underscores"
+        )
     return value
 
 
