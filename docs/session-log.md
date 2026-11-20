@@ -5572,7 +5572,7 @@ smaller findings; all fixed here, offline throughout.
 
 **The Blocker — the marker, and why every gate missed it.** The rebase's
 fixture-docstring resolution replaced the two sides' overlapping text but
-left the ` line itself sitting in the module docstring --
+left the `<<<<<<< HEAD` line itself sitting in the module docstring --
 syntactically invisible (it is string content), so the gate, ruff, mypy
 and both suites stayed green over an unfinished conflict resolution. The
 line is deleted; the merged text around it was already the correct
@@ -5843,3 +5843,72 @@ causes pinned by the parametrized parse test).
 
 **#783 — the waiter race, the priced-response settle, and the booking
 reversal** are recorded in that layer's own entry below.
+
+## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
+
+The live code-quality-atlas bot reviewed both heads; its findings were
+triaged against the code, and the dedicated reviewers' round-3 reports
+named one Nit on #782 and one Major, one Minor and one Nit on #783.
+Offline only throughout: fakes, recorded HTTP and scripted models; no
+live model call, network call or secret read; no deployed service
+setting, Fly config value or secret changed.
+
+**The 403 mapping (the bot's Major, confirmed).** OpenRouter also returns
+403 for a request whose input was flagged -- a per-request refusal of
+content, not a key problem -- and the diff is PR-author controlled, so
+one flagged lens call would have halted the review and posted `model key
+refused` over a working key. The OpenRouter mapping now carries 401 and
+402 only (`KEY_REFUSAL_CAUSES`), the tenant path's `AUTH_STATUSES` is 401
+only, and a 403 stays the plain per-call `BoundaryError` it was --
+retried and failed per lens like any model error, with the review
+continuing. Pinned on all three paths: the one-shot client (the 403
+refuses its call, the next call is served, and no `review_error` is
+carried), the agentic adapter (the next `turn` goes out), and both
+tenant paths (the one-shot `_response` and the adapter's
+`_refuse_status`). The tenant path keeps 403 per-call because an
+arbitrary OpenAI-compatible endpoint's 403 has no single documented
+key-level meaning; no provider doc was found that would justify keeping
+it key-level, so the conservative per-call treatment stands.
+
+**The historical session-log line, restored (the bot's Minors, confirmed
+-- six lenses found the same defect).** The rebase's conflict resolution
+had stripped the `` `<<<<<<< HEAD` `` code span out of the #775 fix-round
+entry's own sentence about that marker, leaving an unbalanced backtick
+and a record that no longer said what the marker was. The line is
+restored byte-for-byte to main's text; the diff against main is pure
+appends again (verified for both docs files), and the committed
+conflict-marker guard still passes -- the restored marker sits mid-line
+inside a code span, a shape the guard does not flag.
+
+**The partial predicate is one rule (the bot's Minor, confirmed).** The
+coordinator's draft and headline decided partial on verified findings
+and CLEAN runs, while the service post also counted a PARTIAL lens
+(`_AGENTIC_RUN_STATES` is clean and partial). A lens that ran partial --
+a model call served it and read real files before the stop -- made the
+post say partial while the draft claimed the review never ran. The
+coordinator now decides both from `_ran_before_the_stop`: verified
+findings, a clean run, or a partial lens; the service post reads the
+same set from the ledger, and the pinning test (a partial lens, nothing
+verified, nothing clean) fails the error-only mutant on both layers.
+
+**The tenant adapter's refusal path, pinned (the bot's Minor,
+confirmed).** `_refuse_status` -- the path `TenantLensModel.turn`
+actually calls -- had no test pinning the `KeyRefusedError`
+conversion; the older adapter test's `pytest.raises(BoundaryError)`
+could not see a revert. The new parametrized adapter test pins 401 and
+402 with their causes; 403 is pinned plain on both tenant paths.
+
+**The D92 entry's queue sentence, restated (the bot's Minor,
+confirmed).** The record said the review "is retried as a full review
+when the key is served again" because the queue keys off incomplete
+coverage; the reviews' reading is right -- the queue's covered flag
+shapes the follow-up for a newer pending head, and the same-head
+redelivery works because the error and partial posts dedupe under their
+own marker and ledger key. The sentence now states both mechanisms.
+
+**Deferred, with the bot's own words as the evidence: the `KeyRefusal`
+StrEnum refactor (the bot's Nit).** The finding's fix paragraph says
+"This is optional; the current code works" -- the closed set is enforced
+where it matters (the service's typed parse raises on anything outside
+it), and the refactor would touch six layers in a round whose other
+findings are behavioral. The owner can call for it separately.

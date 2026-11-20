@@ -327,21 +327,76 @@ def test_an_auth_error_names_itself_and_never_the_key():
 
 
 def test_a_refused_key_classifies_as_a_review_error():
-    """D92: the tenant path's auth and quota refusals raise
-    `KeyRefusedError` with the fixed cause text, so the agentic loop
-    stops the review instead of retrying and booking the worst case.
-    Kills the plain-boundary mutant, which would leave the refusal
-    retryable in the loop."""
+    """D92, as its fix round 3 settles the mapping: the tenant path's
+    authentication (401) and quota (402) refusals raise `KeyRefusedError`
+    with the fixed cause text, so the agentic loop stops the review
+    instead of retrying and booking the worst case. Kills the
+    plain-boundary mutant, which would leave the refusal retryable in the
+    loop."""
     provider, _transport = _provider([(402, b'{"error": "no credits"}')])
     provider.preflight()
     with pytest.raises(KeyRefusedError) as quota:
         provider.complete(PROMPT)
     assert quota.value.review_error == KEY_OUT_OF_CREDIT
-    auth, _transport = _provider([(403, b'{"error": "forbidden"}')])
+    auth, _transport = _provider([(401, b'{"error": "bad key"}')])
     auth.preflight()
     with pytest.raises(KeyRefusedError) as refused:
         auth.complete(PROMPT)
     assert refused.value.review_error == KEY_AUTH_REFUSED
+
+
+@pytest.mark.parametrize(
+    ("status", "cause"),
+    [
+        (401, KEY_AUTH_REFUSED),
+        (402, KEY_OUT_OF_CREDIT),
+    ],
+)
+def test_the_adapters_refusal_path_classifies_the_key_refusals(status, cause):
+    """D92's fix round 3, and the round-1 review's test gap: the adapter's
+    own refusal path (`_refuse_status`, which `TenantLensModel.turn`
+    calls) classifies 401 and 402 as `KeyRefusedError` with the fixed
+    cause -- the `pytest.raises(BoundaryError)` the older adapter test
+    used could not see a revert to the plain class. Kills the
+    plain-boundary mutant on the adapter's refusal path."""
+    provider, _transport = _provider([(status, b'{"error": "refused"}')])
+    provider.preflight()
+    model = TenantLensModel(provider, per_call=_resolved())
+    with pytest.raises(KeyRefusedError) as caught:
+        model.turn(_request(UserText("go")))
+    assert caught.value.review_error == cause
+
+
+def test_a_403_is_a_plain_per_call_error_on_both_tenant_paths():
+    """D92's fix round 3: a 403 from an arbitrary OpenAI-compatible
+    endpoint can be a per-request refusal of the request or its content,
+    not a key problem, so both tenant paths -- the one-shot client's
+    `_response` and the adapter's `_refuse_status` -- keep it the plain
+    boundary error it was, and the next call still goes out. Kills the
+    key-refusal mutant on either path."""
+    provider, _transport = _provider(
+        [(403, b'{"error": "flagged"}'), (200, _completion_body())]
+    )
+    provider.preflight()
+    with pytest.raises(BoundaryError, match="HTTP 403") as caught:
+        provider.complete(PROMPT)
+    assert not isinstance(caught.value, KeyRefusedError)
+    # The next call is served: the review was not halted.
+    assert provider.complete(PROMPT) == "Findings: none that survived verification."
+    # The adapter's own refusal path (`_refuse_status`) keeps a 403 plain.
+    flagged, _transport2 = _provider(
+        [(403, b'{"error": "flagged"}'), (200, _completion_body())]
+    )
+    flagged.preflight()
+    adapter = TenantLensModel(flagged, per_call=_resolved())
+    with pytest.raises(BoundaryError, match="HTTP 403") as adapter_caught:
+        adapter.turn(_request(UserText("go")))
+    assert not isinstance(adapter_caught.value, KeyRefusedError)
+    assert getattr(adapter_caught.value, "review_error", None) is None
+    # The next adapter call is served: the review was not halted.
+    assert adapter.turn(_request(UserText("go"))).text == (
+        "Findings: none that survived verification."
+    )
 
 
 def test_a_quota_error_names_itself():

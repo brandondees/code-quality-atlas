@@ -720,6 +720,28 @@ def test_a_partial_refusal_post_keeps_the_findings_and_names_the_stop():
     assert error_marker_for(key) in body
 
 
+def test_a_partial_lens_ran_before_the_halt_posts_the_partial_banner():
+    """D92's fix round 3: the service post reads the same set from the
+    draft's ledger -- a PARTIAL lens counts as run (`_AGENTIC_RUN_STATES`
+    is clean and partial) -- so a review with a partial lens and no
+    verified finding posts the partial banner, not the error body that
+    says the review could not run. Kills the error-body mutant (the post
+    ignoring `lenses_run`) on the same case the coordinator's predicate
+    test pins."""
+
+    key = post_key(EVENT)
+    report = replace(
+        REPORT,
+        review_error="model key out of credit",
+        findings=(),
+        lenses_run=("tracing-correctness-and-invariants",),
+    )
+    body = render_comment(report, key, lambda item: item)
+    assert "REVIEW PARTIAL -- not a clean review" in body
+    assert "REVIEW ERROR -- not a review" not in body
+    assert error_marker_for(key) in body
+
+
 def test_a_refusal_after_the_lenses_ran_names_no_not_run_lens():
     """D92's fix round: the re-assessment-after-clean case has no lens
     that failed to run, and the partial banner says so instead of naming

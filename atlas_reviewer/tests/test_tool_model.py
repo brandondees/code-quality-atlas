@@ -383,15 +383,15 @@ def test_a_model_error_after_a_response_is_not_retried():
     [
         (401, "model key refused"),
         (402, "model key out of credit"),
-        (403, "model key refused"),
     ],
 )
 def test_a_refused_key_from_the_agentic_adapter_is_a_key_refusal(status, cause):
-    """D92: the agentic adapter classifies a 401/402/403 as
-    `KeyRefusedError` with the fixed cause text, the message carrying a
-    status and a safe URL only -- no key material, no response body.
-    Kills the generic-boundary mutant, which would route the refusal into
-    the lens loop's D49 retry and book it at its full worst case."""
+    """D92, as its fix round 3 settles the mapping: the agentic adapter
+    classifies a 401/402 as `KeyRefusedError` with the fixed cause text,
+    the message carrying a status and a safe URL only -- no key material,
+    no response body. Kills the generic-boundary mutant, which would route
+    the refusal into the lens loop's D49 retry and book it at its full
+    worst case."""
     lens, fake = model(reply(completion(), status=status))
     with pytest.raises(KeyRefusedError) as caught:
         lens.turn(request())
@@ -409,6 +409,22 @@ def test_a_response_too_large_is_not_a_transport_error():
         lens.turn(request())
     assert not isinstance(excinfo.value, TransportError)
     assert len(fake.chat_requests()) == 1
+
+
+def test_a_403_on_the_agentic_adapter_is_a_plain_per_call_error():
+    """D92's fix round 3: a 403 on the agentic adapter stays the plain
+    boundary error it was -- a flagged input is a per-request refusal, not
+    a key problem -- so the lens loop's D49 retry and the per-lens failure
+    apply, and the review is not halted. Kills the key-refusal mutant on
+    the adapter's status classification."""
+    lens, fake = model(reply(completion(), status=403), reply(completion("later")))
+    with pytest.raises(BoundaryError) as caught:
+        lens.turn(request())
+    assert not isinstance(caught.value, KeyRefusedError)
+    assert getattr(caught.value, "review_error", None) is None
+    # The next call goes out: the review was not halted.
+    assert lens.turn(request()).text == "later"
+    assert len(fake.chat_requests()) == 2
 
 
 def test_the_first_turn_keeps_the_byte_bound():

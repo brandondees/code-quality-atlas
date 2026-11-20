@@ -112,7 +112,11 @@ ENV_TENANT_MODEL = "ATLAS_TENANT_MODEL"
 CATALOG_API_URL = "https://openrouter.ai/api/v1"
 CATALOG_TIMEOUT_S = 30.0
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
-AUTH_STATUSES = frozenset({401, 403})
+# 401 only (D92's fix round 3): a 403 from an arbitrary OpenAI-compatible
+# endpoint can be a per-request refusal of the request or its content, not
+# a key problem, so it stays a plain per-call BoundaryError and the review
+# keeps going; only the authentication refusal stops the review.
+AUTH_STATUSES = frozenset({401})
 QUOTA_STATUSES = frozenset({402})
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_RETRY_WAIT = 8.0

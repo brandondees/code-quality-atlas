@@ -412,11 +412,12 @@ class AgenticReview:
     """The fixed cause a refused key halted the review with (D92):
     `model key out of credit` or `model key refused`, the spend's own
     halt cause. Non-empty means this draft is an error or a partial
-    record, not an ordinary review: when no lens ran clean before the
-    halt the draft is the error report, with no Findings section to
-    mistake for a clean bill, and when a lens did run clean the review is
-    partial -- the verified findings stand and the headline names what
-    did not run. Empty on every review that ran on a served key."""
+    record, not an ordinary review: with no verified finding, no clean
+    run and no partial lens before the halt, the draft is the error
+    report, with no Findings section to mistake for a clean bill; when a
+    lens ran -- clean with its findings, or partial over the files it
+    read -- the review is partial and the headline names what did not
+    run. Empty on every review that ran on a served key."""
 
     @property
     def reused_lenses(self) -> frozenset[str]:
@@ -3451,7 +3452,7 @@ def render_draft(
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub)]
-    if review.review_error and not review.verified and not _clean_runs(review.lenses):
+    if review.review_error and not _ran_before_the_stop(review):
         # An error report, not a review (D92): the draft carries the
         # ledger and the cost, never a Findings section an empty one
         # could read as a clean bill.
@@ -3609,10 +3610,24 @@ def _selection_and_rank_lines(
     return lines
 
 
+def _ran_before_the_stop(review: AgenticReview) -> bool:
+    """Whether any lens ran before the refused-key halt (D92's fix round
+    3): a clean run stands with its findings, and a partial run read real
+    files before the stop -- either makes the review partial rather than
+    the error report that says it never ran. The service post reads the
+    same set from the draft's ledger (`_AGENTIC_RUN_STATES` is clean and
+    partial), so the two layers decide alike."""
+    return bool(
+        review.verified
+        or _clean_runs(review.lenses)
+        or any(r.state is LensState.PARTIAL for r in review.lenses)
+    )
+
+
 def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     if review.review_error:
         # A refused key's draft leads with the cause (D92). Lenses that ran
-        # clean before the halt stand: the review is partial, the verified
+        # before the halt stand: the review is partial, the verified
         # findings are kept, and the banner names what did not run -- it
         # never claims the review never ran.
         clean = _clean_runs(review.lenses)
@@ -3621,7 +3636,7 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
             for r in review.lenses
             if r.state is not LensState.CLEAN and r.lens not in clean
         ]
-        if review.verified or clean:
+        if _ran_before_the_stop(review):
             named = (
                 "; ".join(f"{r.lens}: {r.state.value}" for r in short)
                 if short

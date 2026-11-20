@@ -1987,6 +1987,28 @@ def test_a_refused_decision_call_makes_no_later_lens_turn(tmp_path):
     assert model.calls == 1
 
 
+def test_a_partial_lens_ran_before_the_halt_makes_the_review_partial():
+    """D92's fix round 3: the partial/error decision is one rule on both
+    layers. A lens that ran PARTIAL -- a model call served it and read
+    real files before the stop -- with no verified finding and no clean
+    run makes the draft partial (the banner says what ran stands), not
+    the error report that claims the review never ran; the service post
+    reads the same set from the draft's ledger, so its partial banner
+    matches. Kills the error-only mutant on the coordinator's predicate
+    (a partial lens dropped from `ran before the stop`), which would post
+    `the review stopped before it could review` over a review that
+    did."""
+    spend = Spend(LIMITS.resolve())
+    spend.halt("model key out of credit")
+    partial_lens = scoped(LENS, ("calc.py",), unread=("calc.py",))
+    review = synthesize([partial_lens], spend=spend)
+    assert review.review_error == "model key out of credit"
+    draft = render_draft(review, Redactor())
+    assert "REVIEW PARTIAL -- not a clean review" in draft
+    assert "REVIEW ERROR -- not a review" not in draft
+    assert "## Findings (verified quotes only)" in draft
+
+
 OTHER = "sweeping-for-security"
 OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
 _MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")

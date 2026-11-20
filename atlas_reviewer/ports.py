@@ -25,8 +25,11 @@ class BoundaryError(RuntimeError):
 
 class KeyRefusedError(BoundaryError):
     """The model endpoint refused the key: credit exhausted (HTTP 402) or
-    authentication refused (401/403). A review error, not a spend (D92):
-    the review stops at once, the refusal is never retried, and no later
+    the authentication refusal (401). A 403 is deliberately not this: a
+    provider can return it for a request whose input was flagged, which is
+    a per-request refusal, not a key problem (D92's fix round 3). A review
+    error, not a spend (D92): the review stops at once, the refusal is
+    never retried, and no later
     model call is made. `review_error` is the fixed cause text the draft
     and the posted error name -- no key material and no response body in
     it."""
@@ -38,7 +41,8 @@ class KeyRefusedError(BoundaryError):
 
 # The fixed cause texts a refused key's review error carries (D92):
 # controller-made, so the draft and the posted error name the cause
-# without echoing anything the endpoint sent.
+# without echoing anything the endpoint sent. 401 is the authentication
+# refusal; a 403 stays a per-call boundary error (D92's fix round 3).
 KEY_OUT_OF_CREDIT = "model key out of credit"
 KEY_AUTH_REFUSED = "model key refused"
 
