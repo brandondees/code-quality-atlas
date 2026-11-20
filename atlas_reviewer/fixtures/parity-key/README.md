@@ -7,7 +7,8 @@ after that review.
 One JSON file is one pull request. A later protocol-reviewed pull request
 joins the key by adding another file in this directory; ids must stay unique.
 The loader is `atlas_reviewer.parity_key.load_key`. It checks the schema.
-The grade that compares a verified finding with these spans is a later layer.
+`grade_findings` compares one list of verified findings with these spans.
+The count across runs is a later layer.
 
 The spans were read at the `reviewed_commit` in each file. The Nov 14 trial
 scorer and `docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md` name
@@ -38,3 +39,20 @@ citation. `needs` is what reaching the finding took: `ci`, `read`,
 Line numbers are the reviewed commit's, not current main's. Pull request 661 was
 re-read at `674071a9`. The break, the unreadable count, and the
 omitted-findings gate are those lines.
+
+## How a finding is graded
+
+`SPAN_SLACK` is 0. Overlap means the two spans share a line. A five-line
+window would let the last line of 661-m2 also match 661-m4, and the two
+grades would depend on which finding was listed first.
+
+A candidate is **found** when it is verified, its severity is at least
+minor, and its span overlaps a key span on the same path. For
+`pull_request.body` the quote has to contain one citation as an exact
+substring. A paraphrase is lost. A candidate is **partial** when it is
+verified and either the overlap is a nit, or the line is in the enclosing
+function or decision and misses the defect span. Partial does not count
+toward a pass. Anything else, including a finding that was not verified,
+is **lost**. Each candidate is used at most once. Two lenses that report
+the same span count once. An unused major is an `extra_major`. An unused
+blocker is an extra and is not a major.

@@ -7,7 +7,18 @@ from pathlib import Path
 import pytest
 
 from atlas_reviewer.eval_harness import EvalFormatError
-from atlas_reviewer.parity_key import BODY, KEY_DIR, Span, load_key
+from atlas_reviewer.parity_key import (
+    BODY,
+    FOUND,
+    KEY_DIR,
+    LOST,
+    PARTIAL,
+    CitedFinding,
+    KeyFinding,
+    Span,
+    grade_findings,
+    load_key,
+)
 
 _COMMIT = "674071a91513b4774c82350fb757d9c085f10baf"
 _QUEUE = "0fe45e5ea79f3abd8e07488a01b623186df96692"
@@ -134,6 +145,10 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
             lambda body: body.update(reviewed_commit="674071A9"),
             "reviewed_commit must be 40 lowercase hex",
         ),
+        (
+            lambda body: body.update(reviewed_commit=1),
+            "reviewed_commit must be 40 lowercase hex",
+        ),
         (lambda body: body.update(source="  "), "source must be a non-empty string"),
         (lambda body: body.update(findings=[]), "non-empty findings list"),
         (lambda body: body.update(findings="nope"), "non-empty findings list"),
@@ -147,6 +162,7 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
             "severity must be",
         ),
         (lambda body: body["findings"][0].update(id="has space"), "underscores"),
+        (lambda body: body["findings"][0].update(id=1), "underscores"),
         (lambda body: body["findings"][0].update(summary=""), "summary must be"),
         (lambda body: body["findings"][0].update(lenses=[]), "needs a lens"),
         (lambda body: body["findings"][0].update(lenses=["", "x"]), "lenses must be"),
@@ -304,3 +320,191 @@ def test_a_span_that_is_not_an_object_is_refused(tmp_path: Path):
     _write(tmp_path, "one.json", _document([_finding(spans=["a.py"])]))
     with pytest.raises(EvalFormatError, match="is not an object"):
         load_key(tmp_path)
+
+
+def _key(finding_id: str) -> KeyFinding:
+    return next(item for item in load_key(KEY_DIR) if item.id == finding_id)
+
+
+def _cite(
+    path: str,
+    line: int | None = None,
+    *,
+    quote: str = "the line",
+    severity: str = "minor",
+    verified: bool = True,
+    end_line: int | None = -1,
+    lens: str | None = None,
+) -> CitedFinding:
+    resolved = line if end_line == -1 else end_line
+    return CitedFinding(path, quote, severity, verified, line, resolved, lens)
+
+
+_ROUNDS = "atlas_reviewer/rounds.py"
+
+
+def test_quoting_the_ci_line_finds_the_stale_body():
+    finding = _key("661-m1")
+    quoted = _cite(BODY, None, quote=f"Tests: {_CI}", end_line=None)
+    assert grade_findings([finding], [quoted]).grades == (FOUND,)
+    stack = _cite(BODY, None, quote=f"from the {_STACK}", end_line=None)
+    assert grade_findings([finding], [stack]).grades == (FOUND,)
+
+
+def test_the_stacked_branch_is_stale_does_not_find_the_ci_lines():
+    finding = _key("661-m1")
+    paraphrase = _cite(BODY, None, quote="the stacked branch is stale", end_line=None)
+    assert grade_findings([finding], [paraphrase]).grades == (LOST,)
+    sha_only = _cite(BODY, None, quote="61273b4f", end_line=None)
+    assert grade_findings([finding], [sha_only]).grades == (LOST,)
+    shouted = _cite(BODY, None, quote=_CI.upper(), end_line=None)
+    assert grade_findings([finding], [shouted]).grades == (LOST,)
+
+
+def test_an_unverified_citation_is_not_found():
+    finding = _key("661-m1")
+    quoted = _cite(BODY, None, quote=_CI, verified=False, end_line=None)
+    assert grade_findings([finding], [quoted]).grades == (LOST,)
+    nit = _cite(BODY, None, quote=_CI, severity="nit", end_line=None)
+    assert grade_findings([finding], [nit]).grades == (PARTIAL,)
+    elsewhere = _cite(_ROUNDS, 207, quote=_CI)
+    assert grade_findings([finding], [elsewhere]).grades == (LOST,)
+
+
+def test_a_wrong_line_in_the_right_file_is_not_found():
+    finding = _key("661-m2")
+    assert grade_findings([finding], [_cite(_ROUNDS, 207)]).grades == (FOUND,)
+    assert grade_findings([finding], [_cite(_ROUNDS, 170)]).grades == (PARTIAL,)
+    assert grade_findings([finding], [_cite(_ROUNDS, 226)]).grades == (LOST,)
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/coordinator.py", 207)]
+    ).grades == (LOST,)
+    unchecked = _cite(_ROUNDS, 207, verified=False, quote="{unreadable} line(s)")
+    assert grade_findings([finding], [unchecked]).grades == (LOST,)
+
+
+def test_the_line_before_the_omitted_findings_gate_does_not_find_it():
+    gate = _key("661-m4")
+    assert grade_findings([gate], [_cite(_ROUNDS, 209)]).grades == (PARTIAL,)
+    both = grade_findings([_key("661-m2"), gate], [_cite(_ROUNDS, 207)])
+    assert both.grades == (FOUND, LOST)
+
+
+def test_the_queue_cancel_check_and_the_hook_are_graded_on_their_spans():
+    cancel = _key("640-m1")
+    queue = "atlas_reviewer/service_queue.py"
+    assert grade_findings([cancel], [_cite(queue, 329)]).grades == (FOUND,)
+    assert grade_findings([cancel], [_cite(queue, 330)]).grades == (PARTIAL,)
+    assert grade_findings([cancel], [_cite(queue, 317)]).grades == (LOST,)
+    hook = _key("640-m2")
+    poster = "atlas_reviewer/service_post.py"
+    assert grade_findings([hook], [_cite(poster, 233)]).grades == (FOUND,)
+    assert grade_findings([hook], [_cite("atlas_reviewer/service.py", 430)]).grades == (
+        LOST,
+    )
+
+
+def test_either_amendment_line_finds_the_decision():
+    finding = _key("640-m3")
+    assert grade_findings([finding], [_cite("docs/open-questions.md", 62)]).grades == (
+        FOUND,
+    )
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/README.md", 14)]
+    ).grades == (FOUND,)
+    assert grade_findings([finding], [_cite("docs/open-questions.md", 61)]).grades == (
+        LOST,
+    )
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/README.md", 13)]
+    ).grades == (PARTIAL,)
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/README.md", 10)]
+    ).grades == (LOST,)
+
+
+def test_a_major_or_a_blocker_on_the_span_is_found():
+    finding = _key("640-m1")
+    queue = "atlas_reviewer/service_queue.py"
+    assert grade_findings([finding], [_cite(queue, 329, severity="major")]).grades == (
+        FOUND,
+    )
+    assert grade_findings(
+        [finding], [_cite(queue, 329, severity="blocker")]
+    ).grades == (FOUND,)
+    assert grade_findings([finding], [_cite(queue, 329, severity="nit")]).grades == (
+        PARTIAL,
+    )
+    assert grade_findings(
+        [finding], [_cite(queue, 329, severity="critical")]
+    ).grades == (LOST,)
+
+
+def test_two_lenses_on_one_span_count_once_and_a_blocker_is_not_a_major():
+    finding = _key("640-m1")
+    queue = "atlas_reviewer/service_queue.py"
+    graded = grade_findings(
+        [finding],
+        [
+            _cite(queue, 329, lens="reviewing-test-quality"),
+            _cite(queue, 329, lens="hunting-silent-failures", severity="blocker"),
+        ],
+    )
+    assert graded.grades == (FOUND,)
+    assert graded.extras == 1
+    assert graded.extra_majors == 0
+    unused = grade_findings([finding], [_cite(queue, 1, severity="major")])
+    assert unused.grades == (LOST,)
+    assert unused.extra_majors == 1
+
+
+def _span_finding(finding_id: str, start: int, end: int) -> KeyFinding:
+    return KeyFinding(
+        finding_id,
+        1,
+        _COMMIT,
+        "synthetic",
+        "minor",
+        "overlap",
+        (Span("a.py", start, end),),
+        (Span("a.py", 1, 40),),
+        (),
+        ("tracing-correctness-and-invariants",),
+        ("read",),
+    )
+
+
+def test_overlapping_spans_are_both_found_in_either_candidate_order():
+    findings = (_span_finding("a", 10, 20), _span_finding("b", 15, 25))
+    wide = _cite("a.py", 18)
+    narrow = _cite("a.py", 12)
+    assert grade_findings(findings, [wide, narrow]).grades == (FOUND, FOUND)
+    assert grade_findings(findings, [narrow, wide]).grades == (FOUND, FOUND)
+    # The wide finding can move off the line the narrow one needs.
+    crowded = (_span_finding("a", 10, 12), _span_finding("b", 10, 30))
+    assert grade_findings(crowded, [_cite("a.py", 11), _cite("a.py", 20)]).grades == (
+        FOUND,
+        FOUND,
+    )
+
+
+def test_a_span_with_no_line_and_an_inverted_range_are_lost():
+    bare = KeyFinding(
+        "bare",
+        1,
+        _COMMIT,
+        "no line",
+        "minor",
+        "bare",
+        (Span("a.py"),),
+        (Span("b.py", 1, 10),),
+        (),
+        ("tracing-correctness-and-invariants",),
+        ("read",),
+    )
+    assert grade_findings([bare], [_cite("a.py", 4)]).grades == (LOST,)
+    inverted = _cite(_ROUNDS, 207, end_line=200)
+    assert grade_findings([_key("661-m2")], [inverted]).grades == (LOST,)
+    open_end = _cite(_ROUNDS, 207, end_line=None)
+    assert grade_findings([_key("661-m2")], [open_end]).grades == (FOUND,)
+    assert grade_findings((), ()).extras == 0

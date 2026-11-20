@@ -4,15 +4,16 @@
 A key file is one pull request's verified protocol findings. Adding a
 protocol-reviewed pull request is another JSON file in the same directory;
 the loader reads every file. A record is a path and a line span, or the
-pull request body and the lines a citation has to quote. The grade that
-compares a verified finding with those spans is a later layer.
+pull request body and the lines a citation has to quote.
+``grade_findings`` compares one verified candidate list with those spans.
+The count across runs is a later layer.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -66,6 +67,47 @@ class KeyFinding:
     citations: tuple[str, ...]
     lenses: tuple[str, ...]
     needs: tuple[str, ...]
+
+
+# Shared lines, and no line past either span. A neighboring line in the
+# same function is partial. A wider window would let 661-m2's last line
+# also match 661-m4.
+SPAN_SLACK = 0
+FOUND = "found"
+PARTIAL = "partial"
+LOST = "lost"
+_RANK = {"nit": 0, "minor": 1, "major": 2, "blocker": 3}
+
+
+@dataclass(frozen=True)
+class CitedFinding:
+    """One verified finding, already deduped by the coordinator.
+
+    ``verified`` is required. The grader does not read the file. ``quote``
+    has to contain a body citation. A file finding is cited by its line.
+    """
+
+    path: str
+    quote: str
+    severity: str
+    verified: bool
+    line: int | None = None
+    end_line: int | None = None
+    lens: str | None = None
+
+
+@dataclass(frozen=True)
+class FindingGrades:
+    """Grades aligned with the findings, plus unused candidates.
+
+    ``grades`` is found, partial, or lost. ``extra_majors`` counts unused
+    candidates whose severity is major. A blocker is an extra and is not a
+    major.
+    """
+
+    grades: tuple[str, ...]
+    extras: int
+    extra_majors: int
 
 
 def load_key(path: Path) -> tuple[KeyFinding, ...]:
@@ -267,3 +309,112 @@ def _read_json(path: Path) -> object:
         return json.loads(text)
     except json.JSONDecodeError as exc:
         raise EvalFormatError(f"{path.name} is not JSON: {exc}") from exc
+
+
+def grade_findings(
+    findings: Sequence[KeyFinding], candidates: Sequence[CitedFinding]
+) -> FindingGrades:
+    """Found, then partial. Each candidate is used at most once.
+
+    Both pairings are maximum matchings, so two spans that share a line
+    are both found when each can take a different candidate. A candidate
+    that was not checked, or that names the right file at the wrong line,
+    is not found. ``extra_majors`` counts unused majors only.
+    """
+    used: set[int] = set()
+    grades = [LOST for _finding in findings]
+    _assign(findings, candidates, grades, used, FOUND, _is_found)
+    _assign(findings, candidates, grades, used, PARTIAL, _is_partial)
+    unused = [
+        candidates[index] for index in range(len(candidates)) if index not in used
+    ]
+    majors = sum(item.severity == "major" for item in unused)
+    return FindingGrades(tuple(grades), len(unused), majors)
+
+
+def _assign(
+    findings: Sequence[KeyFinding],
+    candidates: Sequence[CitedFinding],
+    grades: list[str],
+    used: set[int],
+    grade: str,
+    holds: Callable[[KeyFinding, CitedFinding], bool],
+) -> None:
+    edges = [
+        [
+            index
+            for index, candidate in enumerate(candidates)
+            if index not in used and holds(finding, candidate)
+        ]
+        if grades[ref] == LOST
+        else []
+        for ref, finding in enumerate(findings)
+    ]
+    for cand_index, ref_index in enumerate(_assignment(edges, len(candidates))):
+        if ref_index == -1:
+            continue
+        grades[ref_index] = grade
+        used.add(cand_index)
+
+
+def _is_found(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    if not candidate.verified or _RANK.get(candidate.severity, -1) < _RANK["minor"]:
+        return False
+    if _is_body(finding):
+        return _cites(finding, candidate)
+    return _overlaps_any(finding.spans, candidate)
+
+
+def _is_partial(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    if not candidate.verified:
+        return False
+    if _is_body(finding):
+        return candidate.severity == "nit" and _cites(finding, candidate)
+    if _overlaps_any(finding.spans, candidate):
+        return candidate.severity == "nit"
+    return _overlaps_any(finding.encloses, candidate)
+
+
+def _is_body(finding: KeyFinding) -> bool:
+    return finding.spans[0].path == BODY
+
+
+def _cites(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    return candidate.path == BODY and any(
+        text in candidate.quote for text in finding.citations
+    )
+
+
+def _overlaps_any(spans: Sequence[Span], candidate: CitedFinding) -> bool:
+    return any(_overlaps(span, candidate) for span in spans)
+
+
+def _overlaps(span: Span, candidate: CitedFinding) -> bool:
+    if span.path != candidate.path or span.line_start is None or candidate.line is None:
+        return False
+    cand_end = candidate.line if candidate.end_line is None else candidate.end_line
+    if cand_end < candidate.line:
+        return False
+    return span.line_start - SPAN_SLACK <= cand_end and (
+        candidate.line <= cast(int, span.line_end) + SPAN_SLACK
+    )
+
+
+def _assignment(edges: Sequence[Sequence[int]], n_candidates: int) -> list[int]:
+    """``assigned[candidate]`` is the reference index, or -1."""
+    assigned = [-1] * n_candidates
+
+    def visit(ref_index: int, seen: list[bool]) -> bool:
+        for cand_index in edges[ref_index]:
+            if seen[cand_index]:
+                continue
+            seen[cand_index] = True
+            prior = assigned[cand_index]
+            if prior == -1 or visit(prior, seen):
+                assigned[cand_index] = ref_index
+                return True
+        return False
+
+    for ref_index in range(len(edges)):
+        visit(ref_index, [False] * n_candidates)
+    return assigned
