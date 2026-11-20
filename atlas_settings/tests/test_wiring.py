@@ -260,3 +260,35 @@ def test_the_error_log_line_never_carries_the_query(tmp_path: Path) -> None:
     handler.log_sink = world.logs.append
     handler.log_error("boom %s", "arg")
     assert world.logs == ["GET /callback error"]
+
+
+def test_the_credentials_time_falls_back_to_the_record(
+    tmp_path: Path,
+) -> None:
+    """When the audit loses its file, a stored credential's shown time
+    falls back to the record's own `updated_at` — the page shows a real
+    time, not the not-on-record line a missing credential would produce
+    (kills the fallback's dropped-record mutant)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    world.app.post(
+        "/settings/credentials",
+        {
+            "csrf": world.csrf(),
+            "base_url": GOOD_ENDPOINT,
+            "key": FAKE_KEY,
+            "model": GOOD_MODEL,
+        },
+        world.cookie,
+        "1.2.3.4",
+    )
+    (tmp_path / "state" / "settings-audit.jsonl").unlink()
+    page = world.page_text()
+    assert "Credentials last saved:" in page
+    assert "not on record" not in page
