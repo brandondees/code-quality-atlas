@@ -4,12 +4,14 @@ the page accepted — which action, which installation, which GitHub user
 id, and when. It never records a value: no key, no endpoint, no model,
 no cap figure, no consent text. The file lives at
 `<state dir>/settings-audit.jsonl`, outside the installation store's
-directory, appended with `O_APPEND` under a process lock (small lines
-append atomically; the store's per-record `flock` covers the records
-themselves). The file is bounded: past the byte cap the oldest half is
-rotated away under the same lock, so the audit grows no further than
-its cap for the life of the volume while the newest entries — the ones
-the page reads back — always survive. The page reads it back for
+directory, appended with `O_APPEND` under a thread lock — the lock serializes
+this process's threads; the cross-process safety of a small append is
+`O_APPEND`'s own atomicity. The file is bounded: past the byte cap the
+oldest half is rotated away under the same lock, so the audit grows no
+further than its cap for the life of the volume while the newest
+entries — the ones the page reads back — always survive; the rotation
+never touches another process's append, because this process is the
+file's only writer. The page reads it back for
 exactly one fact: when this installation's credentials were last saved,
 which the page shows instead of a key. A line that cannot be decoded or
 parsed is skipped, never fatal — one bad byte must not blind the page
@@ -93,18 +95,29 @@ class AuditLog:
             self._rotate_if_over_cap()
 
     def _rotate_if_over_cap(self) -> None:
-        """Past the byte cap, keep the newest half of the file: the page
-        reads back only recent entries, and the cap is what keeps the
-        audit from growing for the life of the volume. Runs under the
-        append lock; this process is the file's only writer."""
-        size = self._path.stat().st_size
-        if size <= _MAX_AUDIT_BYTES:
+        """The file's hard cap: repeat the half-drop until the size is at
+        or under the cap, and drop a single line that alone exceeds it —
+        the audit never grows past `_MAX_AUDIT_BYTES`, whatever one
+        write added. The replacement keeps the file's own 0600 mode: the
+        temp is created with it, not with the process umask's default.
+        Runs under the append thread lock; this process is the file's
+        only writer."""
+        if self._path.stat().st_size <= _MAX_AUDIT_BYTES:
             return
         raw = self._path.read_bytes()
-        lines = raw.split(b"\n")
-        keep = lines[len(lines) // 2 :]
+        while len(raw) > _MAX_AUDIT_BYTES:
+            lines = raw.split(b"\n")
+            if len(lines) <= 2:
+                # One line alone exceeds the cap: it goes.
+                raw = b""
+                break
+            raw = b"\n".join(lines[len(lines) // 2 :])
         tmp = self._path.with_name(self._path.name + ".rotating")
-        tmp.write_bytes(b"\n".join(keep))
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, raw)
+        finally:
+            os.close(fd)
         tmp.replace(self._path)
 
     def entries(self, installation_id: str, action: str) -> list[dict[str, object]]:
