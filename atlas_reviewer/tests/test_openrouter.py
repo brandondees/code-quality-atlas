@@ -1143,6 +1143,26 @@ def test_settled_actuals_replace_reservations():
     assert budget.committed_usd() == Decimal("3.00")
 
 
+def test_an_oversized_response_is_a_bill_not_a_hold():
+    """`ResponseTooLargeError` is raised after the body arrived
+    (`http._read`). On the one-shot path that is a served call, so the
+    reservation is the bill and not a hold (D43). Kills catching it in
+    the transport `hold` branch (round-2 review of #799)."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    fake = OpenRouterFake(
+        *[ResponseTooLargeError("response exceeded 50 bytes") for _ in range(5)]
+    )
+    p = provider(fake)
+    with pytest.raises(ResponseTooLargeError):
+        p.complete(SMALL)
+    assert p.budget.calls
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
+    assert p.budget.billed_usd() > 0
+    assert all(record.held is False for record in p.budget.calls)
+
+
 def test_a_timeout_keeps_its_reservation_and_the_key_credit_caps_the_retry():
     """A request that was written and never answered keeps its reservation
     (D58 item 5). The key's remaining credit still counts that hold, so

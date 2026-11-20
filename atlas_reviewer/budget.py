@@ -396,7 +396,7 @@ class ReviewBudget:
             ),
             Decimal(0),
         )
-        return amount if amount > 0 else Decimal(0)
+        return amount
 
     def reserve(
         self, worst_case: Decimal, ceiling_usd: Decimal | None = None

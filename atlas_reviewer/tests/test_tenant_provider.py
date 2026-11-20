@@ -465,6 +465,26 @@ def test_a_transport_failure_names_the_endpoint():
     )
 
 
+def test_an_oversized_response_on_complete_is_a_bill_not_a_hold():
+    """The tenant `complete` path's transport catch also sees
+    `ResponseTooLargeError`. The body arrived, so the reservation is
+    the bill and not a hold (D43). Kills holding that error the way a
+    connect failure is held (round-2 review of #799)."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    provider, _transport = _provider(
+        [ResponseTooLargeError("response exceeded 50 bytes")] * 5,
+        sleep=lambda _s: None,
+    )
+    provider.preflight()
+    with pytest.raises(ResponseTooLargeError):
+        provider.complete(PROMPT)
+    assert provider.budget.calls
+    assert provider.budget.held_usd() == Decimal(0)
+    assert provider.budget.billed_usd() == provider.budget.committed_usd()
+    assert provider.budget.billed_usd() > 0
+
+
 def test_a_redirect_is_refused_by_name():
     provider, _transport = _provider([(302, b"", {"Location": "https://other/"})])
     provider.preflight()

@@ -1156,7 +1156,7 @@ class Spend:
     attempt. A call is reserved at its worst case before it is sent and
     settled at its reported cost. A served call whose cost was never
     reported keeps its reservation as spent (D43); a written request that
-    never came back keeps it too (D58 item 5); a     definite refusal -- the
+    never came back keeps it too (D58 item 5); a definite refusal -- the
     key's own, or a status that refused the request, neither of which
     billed anything -- releases the reservation it held only while in
     flight and settles at $0 (D92, as its fix round settled the rule).

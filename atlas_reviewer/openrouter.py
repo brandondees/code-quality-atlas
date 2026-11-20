@@ -162,6 +162,7 @@ from atlas_reviewer.ports import (
     ByokRefusedError,
     Json,
     KeyRefusedError,
+    ResponseTooLargeError,
 )
 from atlas_reviewer.pricing import (
     KeyStatus,
@@ -1002,6 +1003,13 @@ class OpenRouterProvider:
                 body,
                 self._timeout_s,
             )
+        except ResponseTooLargeError as exc:
+            # The body arrived and then exceeded the read cap. The
+            # provider served it and may have billed it, so the
+            # reservation is the bill (D43), the same rule the lens
+            # adapter applies. It is not a hold.
+            ReviewBudget.settle(record, f"response too large: {exc}")
+            return exc, None
         except BoundaryError as exc:
             # Written and never answered: the reservation stays, and it
             # is a hold, not a bill (D58 item 5, D93).

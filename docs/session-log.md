@@ -6112,7 +6112,7 @@ loop's `settle_failure` and `fail_and_halt` all use it. A timeout or a
 transport failure before a response stays held at the reservation
 (D58) and is not a bill. A served response that could not be priced,
 including a 200 with no usage, counts at its reservation (D43) and the
-daily ledger records it. The cost line reports settled and held
+daily ledger records it. An oversized body is that same served case on the one-shot and picker paths, not a hold. The cost line reports settled and held
 separately. The daily ledger records the settled bill. The in-review
 ceiling still counts a hold. The cost event's `committed_usd` stays
 the ceiling figure; the bill is `billed_usd`. D93 records the choice.
