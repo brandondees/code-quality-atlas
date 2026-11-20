@@ -848,7 +848,8 @@ def _record_source(line: str) -> tuple[Decimal, str] | None:
     """One line's bill and source, or None when the line is not a record.
 
     A missing source is unattributed. A source that is not a source name
-    is not a record this module wrote."""
+    raises ValueError: the amount is readable, and the report names the
+    field instead of treating the day's total as unknown."""
     amount = _record_amount(line)
     if amount is None:
         return None

@@ -799,6 +799,7 @@ def _backfill_crashed_spend(
         }
     )
     named = progress.source
+    note = ""
     try:
         appended, gap = spend.record_once(
             event.repo,
@@ -820,7 +821,7 @@ def _backfill_crashed_spend(
                 error=f"{type(exc).__name__}: {exc}",
             )
             return
-        gap = gap or (
+        note = (
             f"funding source {named!r} is not a source name; "
             "the bill was recorded without it"
         )
@@ -838,7 +839,7 @@ def _backfill_crashed_spend(
         return
     if not appended:
         fields["measured"] = "already recorded"
-    _record(telemetry, "crashed spend", fields)
+    _record(telemetry, "crashed spend", fields, error=note)
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
