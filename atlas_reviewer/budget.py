@@ -813,7 +813,12 @@ class DailySpend:
         for number, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
-            parsed = _record_source(line)
+            try:
+                parsed = _record_source(line)
+            except ValueError:
+                return None, (
+                    f"the day's spend file has an unreadable source (line {number})"
+                )
             if parsed is None:
                 return None, (
                     "the day's spend file has an unreadable record (line "
@@ -855,7 +860,7 @@ def _record_source(line: str) -> tuple[Decimal, str] | None:
         return amount, ""
     source = accepted_source_name(data.get("source"))
     if source is None:
-        return None
+        raise ValueError(f"funding source {data.get('source')!r} is not a source name")
     return amount, source
 
 
