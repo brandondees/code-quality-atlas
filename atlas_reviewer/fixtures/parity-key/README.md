@@ -1,7 +1,7 @@
 # Parity key
 
 The directory holds the seven protocol Minors. The gate grades all seven.
-#640 is anchored on `0fe45e5e`, the head the Nov 14 trial reviewed.
+Pull request 640 is anchored on `0fe45e5e`, the head the Nov 14 trial reviewed.
 `72c56eb` is the later merged head, and two of the defects were fixed
 after that review.
 One JSON file is one pull request. A later protocol-reviewed pull request
@@ -35,6 +35,6 @@ citation. `needs` is what reaching the finding took: `ci`, `read`,
 | `640-m2` | same | `atlas_reviewer/service_post.py` 229–231 | `check is not None` skips the head check when the hook is missing. `post` is 217–236. |
 | `640-m3` | same | `docs/open-questions.md` 62, or `atlas_reviewer/README.md` 13–15 | Neither line says D46 amends D48. Either citation counts. |
 
-Line numbers are the reviewed commit's, not current main's. #661 was
+Line numbers are the reviewed commit's, not current main's. Pull request 661 was
 re-read at `674071a9`. The break, the unreadable count, and the
 omitted-findings gate are those lines.
