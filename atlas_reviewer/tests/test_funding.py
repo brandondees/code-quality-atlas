@@ -262,6 +262,51 @@ def test_a_noted_source_name_is_the_token_and_byok_is_only_the_word_true():
     assert funding_byok({ENV_FUNDING_BYOK: "1"}) is False
 
 
+def test_a_refusal_mark_does_not_wait_for_the_probe_in_front_of_it():
+    """The key probe runs outside the selector lock. A refusal recorded
+    while a probe is in flight returns at once, and that source is not
+    the one the claim takes. Kills holding the lock across the HTTPS
+    call."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def probe(key: str) -> KeyStatus:
+        started.set()
+        release.wait(timeout=2)
+        return _credit()
+
+    env = _env(
+        _source(),
+        _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"),
+    )
+    selector = _selector(env, probe)
+    chosen: list[str] = []
+
+    def claim() -> None:
+        selection = selector.choose()
+        assert selection.choice is not None
+        chosen.append(selection.choice.name)
+
+    claim_thread = threading.Thread(target=claim)
+    claim_thread.start()
+    assert started.wait(timeout=2)
+    marked = threading.Event()
+
+    def mark() -> None:
+        assert selector.mark_refused("subs-a") is True
+        marked.set()
+
+    mark_thread = threading.Thread(target=mark)
+    mark_thread.start()
+    assert marked.wait(timeout=1)
+    release.set()
+    claim_thread.join(timeout=2)
+    mark_thread.join(timeout=2)
+    assert chosen == ["subs-b"]
+
+
 def _credit(limit: str = "50", remaining: str = "40") -> KeyStatus:
     return KeyStatus(
         limit=Decimal(limit),

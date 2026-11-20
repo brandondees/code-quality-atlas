@@ -334,13 +334,13 @@ class FundingSelector:
         self._causes: dict[str, str] = {}
 
     def choose(self) -> FundingSelection:
-        with self._lock:
-            return self._choose()
+        return self._choose()
 
     def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
         """Remember that ``name`` refused. True when another source can
-        still serve the model. ``cause`` is the D92 text a later claim
-        posts when nothing else can serve."""
+        still serve the model. The worker calls this when a review on
+        this source comes back as a key refusal, and ``cause`` is the
+        D92 text a later claim posts when nothing else can serve."""
         with self._lock:
             self._unavailable.add(name)
             if cause in _REFUSAL_CAUSES:
@@ -348,30 +348,41 @@ class FundingSelector:
             return self._another_available()
 
     def _choose(self) -> FundingSelection:
+        """Walk the sources in order. The key probe runs outside the
+        lock, so one claim's HTTPS call does not stall another claim
+        or a refusal mark. Two claims can probe the same key; both may
+        take it."""
         last_refusal = ""
         blocked = False
         for source in self._sources:
-            if not source.allows(self._model) or source.name in self._unavailable:
-                continue
-            outcome = self._one(source)
-            if isinstance(outcome, FundingChoice):
-                return FundingSelection(choice=outcome)
-            if outcome in _REFUSAL_CAUSES:
-                last_refusal = outcome
-                continue
-            blocked = True
-        if blocked:
-            return FundingSelection(
-                error="no funding source is available for this review"
-            )
-        cause = last_refusal or self._remembered_cause()
+            with self._lock:
+                if not source.allows(self._model) or source.name in self._unavailable:
+                    continue
+            outcome = self._probe_source(source)
+            with self._lock:
+                if source.name in self._unavailable:
+                    continue
+                if isinstance(outcome, FundingChoice):
+                    return FundingSelection(choice=outcome)
+                if outcome in _REFUSAL_CAUSES:
+                    self._refuse(source.name, outcome)
+                    last_refusal = outcome
+                    continue
+                blocked = True
+        with self._lock:
+            if blocked:
+                return FundingSelection(
+                    error="no funding source is available for this review"
+                )
+            cause = last_refusal or self._remembered_cause()
         if cause:
             return FundingSelection(refusal=cause)
         return FundingSelection(error="no funding source is available for this review")
 
-    def _one(self, source: FundingSource) -> FundingChoice | str:
+    def _probe_source(self, source: FundingSource) -> FundingChoice | str:
         """A choice, a D92 cause, or ``""`` when the source was skipped
-        without being marked unavailable."""
+        without being marked unavailable. This does not touch the
+        unavailable set; the caller records a refusal under the lock."""
         key = self._env.get(source.key_env, "")
         if key.strip() == "":
             return ""
@@ -380,14 +391,12 @@ class FundingSelector:
         except KeyRefusedError as exc:
             if exc.review_error not in _REFUSAL_CAUSES:
                 return ""
-            self._refuse(source.name, exc.review_error)
             return exc.review_error
         except BoundaryError:
             return ""
         if status.limit > source.key_ceiling_usd:
             return ""
         if status.limit_remaining <= 0:
-            self._refuse(source.name, KEY_OUT_OF_CREDIT)
             return KEY_OUT_OF_CREDIT
         return FundingChoice(
             source.name,
