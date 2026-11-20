@@ -2005,6 +2005,16 @@ def build_parser() -> argparse.ArgumentParser:
     _events_arg(probe)
     _first_frame_arg(probe)
     probe.set_defaults(handler=_cmd_probe)
+    funding = sub.add_parser(
+        "funding-spend",
+        help="print one day's settled spend by funding source",
+    )
+    funding.add_argument("--repo", required=True, help="owner/name")
+    funding.add_argument(
+        "--day",
+        help="UTC day YYYY-MM-DD (default: today)",
+    )
+    funding.set_defaults(handler=_cmd_funding_spend)
     return parser
 
 
@@ -2195,6 +2205,32 @@ def _cmd_eval_parity(args: argparse.Namespace, run: _Run) -> int:
         raise UsageError(str(exc)) from exc
     run.out.write(json.dumps(report, indent=2) + "\n")
     return EXIT_OK if report["gate_pass"] else 1
+
+
+def _cmd_funding_spend(args: argparse.Namespace, run: _Run) -> int:
+    """Print settled spend grouped by funding source. Reads the ledger
+    and writes nothing. Exit 2 when the ledger cannot be read."""
+    from datetime import date
+
+    from atlas_reviewer.budget import DailySpend
+
+    repo = args.repo.strip()
+    owner, slash, name = repo.partition("/")
+    if slash != "/" or not owner or not name or "/" in name:
+        raise UsageError("--repo must be owner/name")
+    day = None
+    if args.day:
+        try:
+            day = date.fromisoformat(args.day)
+        except ValueError:
+            raise UsageError("--day must be YYYY-MM-DD") from None
+    groups, gap = DailySpend(_state_dir(args, run.env)).by_source(repo, day=day)
+    if groups is None:
+        run.err.write(f"atlas_reviewer: {gap}\n")
+        return EXIT_USAGE
+    for source, amount in groups:
+        run.out.write(f"{source or '(unset)'} {format(amount, 'f')}\n")
+    return EXIT_OK
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (
