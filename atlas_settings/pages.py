@@ -8,6 +8,7 @@ the markup."""
 from __future__ import annotations
 
 import html
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from atlas_settings.phrases import (
@@ -16,6 +17,19 @@ from atlas_settings.phrases import (
     CONSENT_STATEMENT,
     DELETE_CONFIRM_PROMPT,
 )
+
+
+@dataclass(frozen=True)
+class StoredCredentials:
+    """The stored-credentials fact as one value: a record exists, saved
+    at this time, holding this endpoint and model. One optional value
+    instead of four loose parameters — there is no state where a
+    credential exists without its saved time, and no combination where
+    an endpoint shows without a key behind it."""
+
+    saved_at: datetime | None
+    base_url: str
+    model: str
 
 
 def layout(title: str, body: str, flash: str | None = None) -> str:
@@ -63,14 +77,13 @@ def settings_page(
     account_login: str,
     account_type: str,
     allowlisted_repo_count: int,
-    has_credentials: bool,
-    credentials_saved_at: datetime | None,
-    base_url: str,
-    model: str,
+    credentials: StoredCredentials | None,
     consent_acknowledged_at: datetime | None,
     daily_cap_usd: str | None,
     csrf: str,
     flash: str | None = None,
+    prefill_base_url: str = "",
+    prefill_model: str = "",
 ) -> str:
     """The settings page itself. The key is never shown — not even
     partly — after it is saved; what is shown is that a key is set, when
@@ -80,15 +93,19 @@ def settings_page(
             installation_id, account_login, account_type, allowlisted_repo_count
         )
     ]
-    sections.append(
-        _credentials_section(has_credentials, credentials_saved_at, base_url, model)
-    )
+    sections.append(_credentials_section(credentials))
     sections.append(_consent_section(consent_acknowledged_at, csrf))
     sections.append(_cap_section(daily_cap_usd, csrf))
     sections.append(
-        _credentials_form_section(csrf, has_credentials, consent_acknowledged_at)
+        _credentials_form_section(
+            csrf,
+            credentials is not None,
+            consent_acknowledged_at,
+            prefill_base_url,
+            prefill_model,
+        )
     )
-    sections.append(_danger_section(csrf, has_credentials))
+    sections.append(_danger_section(csrf, credentials is not None))
     return layout("Installation settings", "\n".join(sections), flash=flash)
 
 
@@ -105,20 +122,14 @@ def _installation_section(
 </section>"""
 
 
-def _credentials_section(
-    has_credentials: bool,
-    saved_at: datetime | None,
-    base_url: str,
-    model: str,
-) -> str:
-    if has_credentials:
-        when = _stamp(saved_at)
+def _credentials_section(credentials: StoredCredentials | None) -> str:
+    if credentials is not None:
         status = (
             "<p>A key is stored. The key is never shown again after it "
-            f"is saved, not even partly.</p>"
-            f"<p>Credentials last saved: {esc(when)}.</p>"
-            f"<p>Endpoint: <code>{esc(base_url)}</code></p>"
-            f"<p>Model: <code>{esc(model)}</code></p>"
+            "is saved, not even partly.</p>"
+            f"<p>Credentials last saved: {esc(_stamp(credentials.saved_at))}.</p>"
+            f"<p>Endpoint: <code>{esc(credentials.base_url)}</code></p>"
+            f"<p>Model: <code>{esc(credentials.model)}</code></p>"
         )
     else:
         status = "<p>No key is stored for this installation.</p>"
@@ -163,8 +174,15 @@ def _cap_section(daily_cap_usd: str | None, csrf: str) -> str:
 
 
 def _credentials_form_section(
-    csrf: str, has_credentials: bool, consent_acknowledged_at: datetime | None
+    csrf: str,
+    has_credentials: bool,
+    consent_acknowledged_at: datetime | None,
+    prefill_base_url: str = "",
+    prefill_model: str = "",
 ) -> str:
+    # The endpoint and model are non-secret and refill across a refused
+    # submit; the key is never prefilled — a refused save must never be
+    # the thing that keeps a pasted key sitting in a form.
     heading = "Rotate the key" if has_credentials else "Add credentials"
     if consent_acknowledged_at is None:
         # The form stays hidden until the consent above is
@@ -184,11 +202,13 @@ model call is made.</p>
 <form method="post" action="/settings/credentials">
 <input type="hidden" name="csrf" value="{esc_attr(csrf)}">
 <label>Endpoint base URL
-<input type="url" name="base_url" autocomplete="off"></label>
+<input type="url" name="base_url" autocomplete="off"
+ value="{esc_attr(prefill_base_url)}"></label>
 <label>API key
 <input type="password" name="key" autocomplete="new-password"></label>
 <label>Model
-<input type="text" name="model" autocomplete="off"></label>
+<input type="text" name="model" autocomplete="off"
+ value="{esc_attr(prefill_model)}"></label>
 <button type="submit">Save credentials</button>
 </form>
 <p>Saving credentials without the consent acknowledgement stores
