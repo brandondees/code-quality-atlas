@@ -207,7 +207,7 @@ def test_two_runs_cannot_pass_the_three_run_sample():
         "pull request 640 has 2 runs recorded" in item for item in report["failures"]
     )
     passed = {item["id"]: item["passed"] for item in report["findings"]}
-    assert passed == {"640-m1": False}
+    assert passed == {"640-m1": False, "640-m2": False, "640-m3": False}
     overridden = _report(
         findings, [_run(findings, 1), _run(findings, 2)], runs_required=2
     )
@@ -221,7 +221,9 @@ def test_every_recorded_finding_is_scored():
     assert report["gate_pass"] is True
     assert report["failures"] == []
     assert {item["id"]: item["passed"] for item in report["findings"]} == {
-        "640-m1": True
+        "640-m1": True,
+        "640-m2": True,
+        "640-m3": True,
     }
 
 
@@ -294,7 +296,7 @@ def test_a_limit_stop_fails_the_run():
 def test_a_lens_named_by_the_key_and_not_selected_fails_the_run():
     findings = _of(640)
     runs = [
-        _run(findings, 1, lenses_run=("hunting-silent-failures",)),
+        _run(findings, 1, lenses_run=("reviewing-test-quality",)),
         _run(findings, 2),
         _run(findings, 3),
     ]
@@ -303,7 +305,8 @@ def test_a_lens_named_by_the_key_and_not_selected_fails_the_run():
         item for item in report["failures"] if "named by the key was not run" in item
     ]
     assert named == [
-        "640-1.json: lens reviewing-test-quality named by the key was not run",
+        "640-1.json: lens hunting-silent-failures named by the key was not run",
+        "640-1.json: lens reviewing-decision-lifecycle named by the key was not run",
     ]
 
 
