@@ -5163,6 +5163,46 @@ def test_a_backfilled_crash_keeps_the_source_the_progress_named(tmp_path):
     assert spend.committed(OTHER) == (Decimal("1.10"), "")
 
 
+def test_a_backfill_that_drops_a_bad_source_still_calls_the_bill_backfilled(
+    tmp_path,
+):
+    """When the ledger refuses the source name, the bill is written
+    without it and the record stays a backfill. Kills marking that bill
+    as an unknown measurement."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    class _RefuseNamed(DailySpend):
+        def record_once(self, repo, amount_usd, calls, key, *, at=None, source=""):
+            if source:
+                raise ValueError("funding source")
+            return super().record_once(
+                repo, amount_usd, calls, key, at=at, source=source
+            )
+
+    spend = _RefuseNamed(
+        tmp_path,
+        Decimal("100.00"),
+        cap_for=no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
+    line = json.loads(spend.file(REPO).read_text(encoding="utf-8"))
+    assert "source" not in line
+    recorded = [item for item in telemetry.events if item.step == "crashed spend"]
+    assert recorded[-1].fields["measured"] == "backfilled"
+    assert "subs-a" in recorded[-1].error
+
+
 def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
     """The once is the ledger's own: the dedupe key is the evidence's
     content hash, so a recovery that runs twice against the same crashed
