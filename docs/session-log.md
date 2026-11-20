@@ -6170,3 +6170,13 @@ skipped. A probe that fails, or a key over its ceiling, fails the
 review without the D92 post. A tenant run does not probe the list and
 does not receive the source name. Unset still does neither. No model
 was called.
+
+## 2026-11-20 — funding sources, a refusal tries the next source (D94)
+
+A review pinned to one source that comes back with a key refusal is
+recorded and put back on the queue. The next claim uses the next
+source, and nothing is posted in between. The D92 error is posted only
+when no source remains. On a BYOK source, Anthropic's HTTP 400 that
+says the credit balance is too low is that same refusal; the pilot
+key's 400 stays a per-call error, and a 429 does not move the review.
+A tenant refusal stays on the tenant path. No model was called.

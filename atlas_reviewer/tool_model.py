@@ -303,7 +303,10 @@ class OpenRouterLensModel:
         )
         if resp.status != 200:
             raise key_refusal_or_boundary(
-                resp.status, f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
+                resp.status,
+                f"OpenRouter HTTP {resp.status} for {safe_url(url)}",
+                body=resp.body,
+                byok=self.provider.byok_source,
             )
         try:
             data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)

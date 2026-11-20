@@ -5978,3 +5978,180 @@ def test_a_raised_runner_clears_the_funding_choice(tmp_path):
     finally:
         if active_choice.get() is not None:
             active_choice.set(None)
+
+
+def _funding_pair():
+    from atlas_reviewer.funding import FundingSelector, load_funding_sources
+    from atlas_reviewer.pricing import KeyStatus
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+            {
+                "name": "subs-b",
+                "key_env": "ATLAS_FUNDING_SUBS_B",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
+        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    return FundingSelector(
+        sources,
+        env,
+        lambda key: KeyStatus(Decimal(50), Decimal(40), Decimal(0), True),
+        "anthropic/claude-sonnet-5.5",
+    )
+
+
+def _refused_report(settled: str) -> ReviewReport:
+    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
+
+    return ReviewReport(
+        (),
+        (),
+        "",
+        (),
+        (),
+        (f"Model calls: 1; settled: ${settled}; held at reservation: $0.",),
+        "",
+        review_error=KEY_OUT_OF_CREDIT,
+        coverage_complete=False,
+    )
+
+
+def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
+    tmp_path,
+):
+    """One claim tries one source. A refusal records the bill, puts the
+    same head back, and posts nothing. The next claim uses the next
+    source. The last refusal is the D92 post. Kills trying the next
+    source inside the same claim, and posting the intermediate error."""
+    from atlas_reviewer.funding import active_choice
+    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
+
+    seen: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        seen.append(choice.name)
+        settled = "1.00" if choice.name == "subs-a" else "0.25"
+        return ReviewRun(True, _refused_report(settled))
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path)
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        spend=spend,
+        funding=_funding_pair(),
+    )
+    assert worker.run_one() is True
+    assert seen == ["subs-a"]
+    assert posted == []
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+    assert worker.run_one() is True
+    assert seen == ["subs-a", "subs-b"]
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.25")
+
+
+def test_a_tenant_refusal_and_a_failed_run_do_not_advance_to_another_source(
+    tmp_path,
+):
+    """A tenant review's key refusal is posted, not moved onto an
+    operator source. A run that failed for another reason stays failed.
+    Kills advancing either of those."""
+    from atlas_reviewer.funding import active_choice
+    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    def tenant_runner(event, cancel):
+        assert active_choice.get() is None
+        return ReviewRun(True, _refused_report("0.10"))
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    selector = _funding_pair()
+    worker = _worker(
+        board,
+        tenant_runner,
+        publisher=publisher,
+        root=tmp_path,
+        funding=selector,
+        tenant_active=lambda: True,
+    )
+    assert worker.run_one() is True
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+
+    def failed(event, cancel):
+        return ReviewRun(False, error="review exited 1")
+
+    other = Board(tmp_path / "other.json")
+    other.enqueue(PrEvent(REPO, 8, SHA_B))
+    failed_worker = _worker(other, failed, root=tmp_path, funding=selector)
+    assert failed_worker.run_one() is True
+    assert other.states() == ((SHA_B, JobState.FAILED),)
+
+
+def test_a_finished_review_on_a_funding_source_is_not_requeued(tmp_path):
+    """A review that ran is posted. A 429, or any other non-refusal,
+    does not move the head to the next source. Kills advancing every
+    finished review."""
+    calls = {"n": 0}
+
+    def runner(event, cancel):
+        calls["n"] += 1
+        return ReviewRun(True, REPORT)
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    assert worker.run_one() is True
+    assert calls["n"] == 1
+    assert posted == [""]
+    assert board.states() == ((SHA_A, JobState.DONE),)

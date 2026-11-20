@@ -223,14 +223,39 @@ _PER_MILLION = Decimal(1_000_000)
 _MAX_RETRY_WAIT = 8.0
 
 
-def key_refusal_or_boundary(status: int, message: str) -> BoundaryError:
+def credit_balance_too_low(body: bytes | None) -> bool:
+    """Anthropic's out-of-credit 400, recognized only by both markers.
+
+    The body is decoded for the check and then discarded. The error the
+    caller raises carries neither the body nor the key."""
+    if not body:
+        return False
+    text = body.decode("utf-8", errors="replace")
+    return (
+        "invalid_request_error" in text
+        and "credit balance is too low" in text.casefold()
+    )
+
+
+def key_refusal_or_boundary(
+    status: int,
+    message: str,
+    *,
+    body: bytes | None = None,
+    byok: bool = False,
+) -> BoundaryError:
     """The error a non-200 chat-completion status raises (D92). A 401 or
     402 refused the key itself: a `KeyRefusedError`, a review error the
     review stops on at once and never retries, whose `review_error` is the
-    fixed cause text the draft and the posted error name. A 403 is a
-    per-call boundary error, not a key refusal. Any other status stays
-    the plain boundary error it was. The message is controller text -- a
+    fixed cause text the draft and the posted error name. On a BYOK
+    source only, Anthropic's HTTP 400 ``invalid_request_error`` whose
+    message says the credit balance is too low is that same out-of-credit
+    refusal (D94). A 403 is a per-call boundary error, not a key refusal.
+    Any other status, including that 400 on the pilot key, stays the
+    plain boundary error it was. The message is controller text -- a
     status and a safe URL, never a response body and never key material."""
+    if byok and status == 400 and credit_balance_too_low(body):
+        return KeyRefusedError(message, review_error=KEY_OUT_OF_CREDIT)
     cause = KEY_REFUSAL_CAUSES.get(status)
     if cause is None:
         return BoundaryError(message)
@@ -805,9 +830,11 @@ class OpenRouterProvider:
         model_id: str = MODEL_ID,
         allow_safety_retention: bool = False,
         key_ceiling: Decimal = KEY_LIMIT_MAX_USD,
+        byok_source: bool = False,
     ) -> None:
         self._transport = transport
         self._key = api_key
+        self.byok_source = byok_source
         self._api_url = api_url.rstrip("/")
         self._timeout_s = timeout_s
         self._sleep = sleep
@@ -1024,7 +1051,10 @@ class OpenRouterProvider:
         if resp.status != 200:
             ReviewBudget.release(record, f"HTTP {resp.status}")
             raise key_refusal_or_boundary(
-                resp.status, f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
+                resp.status,
+                f"OpenRouter HTTP {resp.status} for {safe_url(url)}",
+                body=resp.body,
+                byok=self.byok_source,
             )
         counts_byok = self._key_status.counts_byok if self._key_status else False
         return _completion(resp, terms, record, self.model_id, counts_byok=counts_byok)
