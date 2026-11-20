@@ -206,7 +206,7 @@ def test_a_model_that_is_not_a_visible_id_refuses_before_any_url() -> None:
     URL is built, so a newline or control character in the model can
     never reach a URL or a request."""
     for bad in ("vendor/bad\nmodel", "vendor\tmodel", "vendor model", ""):
-        with pytest.raises(PricingUnknownError, match="visible characters"):
+        with pytest.raises(PricingUnknownError, match="visible model id"):
             checks.validate_model(bad, transport=_table(None))
 
 
@@ -256,3 +256,33 @@ def test_a_short_key_is_not_held_to_the_collision_check() -> None:
     # Below the length the redaction registers, the collision hazard the
     # check guards does not arise.
     checks.check_key_against_controller_text("short")
+
+
+@pytest.mark.parametrize("body", [b"[]", b"null", b'"x"', b"7"])
+def test_a_non_object_catalog_answer_refuses(body: bytes) -> None:
+    """A 200 answer that is not a JSON object is the named refusal, not
+    an AttributeError (the part A reader guards the same shape)."""
+    transport = _fake_transport(200, body)
+    with pytest.raises(PricingUnknownError, match="the model is refused"):
+        checks.validate_model("vendor/x", transport=transport)
+
+
+def test_the_collision_refusal_covers_every_guard_text() -> None:
+    """The guard exists for the whole enumerated set: an 8+ character
+    slice of EVERY phrase is refused (kills the first-phrase-only
+    mutant)."""
+    for phrase in REDACTION_GUARD_TEXTS:
+        slice_ = phrase[:12]
+        assert len(slice_) >= 8
+        with pytest.raises(InstallationStoreError, match="collide"):
+            checks.check_key_against_controller_text(slice_)
+
+
+def test_the_redaction_floor_matches_the_redactor() -> None:
+    """The collision threshold is the redactor's own minimum known
+    secret length, pinned equal — a threshold that moves on either side
+    fails here."""
+    from atlas_reviewer.redact import _MIN_KNOWN_SECRET_LEN
+    from atlas_settings import checks as checks_module
+
+    assert checks_module._MIN_REDACTION_CHARS == _MIN_KNOWN_SECRET_LEN

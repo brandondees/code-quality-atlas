@@ -58,9 +58,12 @@ _MIN_REDACTION_CHARS = 8
 # The model refusals' fixed phrases: the submitted model and the
 # catalog's own id are untrusted input and never appear in a message.
 _MODEL_SHAPE_REFUSED = (
-    "the model id must be a model id of 1 to 200 visible characters; "
-    "the model is refused"
+    "the model id is not a visible model id of the shape the store "
+    "accepts; the model is refused"
 )
+# The DNS label limit (RFC 1035): a label longer than this, or an empty
+# one, is a host no resolver can use.
+_MAX_DNS_LABEL_CHARS = 63
 _MODEL_UNKNOWN_REFUSED = (
     "the operator's price table has no readable entry for this model; "
     "the model is refused"
@@ -81,7 +84,9 @@ def validate_endpoint(
     egress.check_url(url)
     parts = urlsplit(url)
     host = parts.hostname or ""
-    if any(label == "" or len(label) > 63 for label in host.split(".")):
+    if any(
+        label == "" or len(label) > _MAX_DNS_LABEL_CHARS for label in host.split(".")
+    ):
         raise egress.EgressRefused(
             "egress refused: the endpoint's host has an empty or over-long DNS label"
         )
@@ -141,6 +146,11 @@ def validate_model(
             "the operator's price table returned a response this page "
             "cannot read; the model is refused"
         ) from exc
+    if not isinstance(data, dict):
+        # The part A reader guards the same shape (`_catalog_document`);
+        # a JSON array, null, a string or a number is not a catalog
+        # document, and the parse's AttributeError must not escape.
+        raise PricingUnknownError(_MODEL_UNKNOWN_REFUSED)
     try:
         terms = terms_from_catalog(data, model)
     except PricingUnknownError:
