@@ -6136,3 +6136,15 @@ the list. Unset `ATLAS_FUNDING_SOURCES` stays today's behavior. D94
 records it. The plan is
 `docs/plans/2026-11-20-funding-sources.md`. No code in this slice, no
 model call, and no Fly app, secret, or deploy changed.
+
+## 2026-11-20 — funding sources, the registry (D94)
+
+`ATLAS_FUNDING_SOURCES` now parses into an ordered list of OpenRouter
+keys, or into no registry when it is unset, empty, or whitespace. A
+present document that is not that list, that names a missing key, or
+that cannot serve `ATLAS_MODEL` stops the service at boot. A key
+variable is `ATLAS_OPENROUTER_API_KEY` or a name under
+`ATLAS_FUNDING_`. A name under `ATLAS_TENANT_` is refused, so the
+operator list cannot read an installation credential. The registry
+stores the variable name, not the key. Nothing selects a source yet,
+and no model was called.
