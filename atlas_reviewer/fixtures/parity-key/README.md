@@ -7,7 +7,9 @@ after that review.
 One JSON file is one pull request. A later protocol-reviewed pull request
 joins the key by adding another file in this directory; ids must stay unique.
 The loader is `atlas_reviewer.parity_key.load_key`. It checks the schema.
-The grade that compares a verified finding with these spans is a later layer.
+`grade_findings` compares one list of verified findings with these spans.
+`score_parity` counts a finding across recorded runs. `eval-parity` is a
+later layer.
 
 The spans were read at the `reviewed_commit` in each file. The Nov 14 trial
 scorer and `docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md` name
@@ -38,3 +40,24 @@ citation. `needs` is what reaching the finding took: `ci`, `read`,
 Line numbers are the reviewed commit's, not current main's. Pull request 661 was
 re-read at `674071a9`. The break, the unreadable count, and the
 omitted-findings gate are those lines.
+
+## How a finding is graded
+
+`SPAN_SLACK` is 0. Overlap means the two spans share a line. A five-line
+window would let the last line of 661-m2 also match 661-m4, and the two
+grades would depend on which finding was listed first.
+
+A candidate is **found** when it is verified, its severity is at least
+minor, and its span sits inside a key span on the same path. Citing the
+whole enclosing function, or the whole file, overlaps the defect and is
+**partial**. A nit on the defect is partial. So is a verified line in the
+enclosing function that misses the defect. For `pull_request.body` the
+quote has to contain one citation as an exact substring. A paraphrase is
+lost. Severity is compared case-insensitively. Partial does not count
+toward a pass. Anything else, including a finding that was not verified
+or a severity the record does not name, is **lost**. `grade_findings`
+matches by candidate index. Each candidate is used at most once. Two
+candidates that cite one span for one key finding are two records: one
+matches, and the other is an extra. That extra counts in `extra_majors`
+when its severity is major. An unused blocker is an extra and is not a
+major.

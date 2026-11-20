@@ -27,6 +27,7 @@ import socket
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Self
 
@@ -35,6 +36,10 @@ from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.runner import EXIT_MARKER, SWEEP_TAG
 
 REAP_TIMEOUT_S = 5.0
+
+
+# How long a sweep waits for SIGKILL to land before it fails closed.
+_SWEEP_REAP_S = 0.5
 
 
 class LocalSprites(FakeSprites):
@@ -95,7 +100,13 @@ class LocalSprites(FakeSprites):
             ) from exc
         return b"\x01" + stdout
 
-    def sweep(self, name: str) -> None:
+    def sweep(
+        self,
+        name: str,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         """The local sweep (D80 round 2), scoped to this runner's own
         processes: the machine running the tests has other work under the
         same user, and the live sweep's uid scope would kill it, so the
@@ -113,11 +124,16 @@ class LocalSprites(FakeSprites):
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        # SIGKILL is asynchronous: give the kernel a beat before the
-        # reaping scan, then reap what died.
-        time.sleep(0.05)
-        self._reap()
-        survivors = self._stray_descendants()
+        # SIGKILL is asynchronous. One 50 ms sleep is not always enough
+        # for a loaded runner to drop the process from the scan, so poll
+        # until the deadline and then fail closed.
+        deadline = monotonic() + _SWEEP_REAP_S
+        while True:
+            sleep(0.05)
+            self._reap()
+            survivors = self._stray_descendants()
+            if not survivors or monotonic() >= deadline:
+                break
         if survivors:
             raise BoundaryError(
                 f"the stray-process sweep left {len(survivors)} survivor(s)"

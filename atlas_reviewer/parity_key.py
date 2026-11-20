@@ -4,18 +4,20 @@
 A key file is one pull request's verified protocol findings. Adding a
 protocol-reviewed pull request is another JSON file in the same directory;
 the loader reads every file. A record is a path and a line span, or the
-pull request body and the lines a citation has to quote. The grade that
-compares a verified finding with those spans is a later layer.
+pull request body and the lines a citation has to quote.
+``grade_findings`` compares one verified candidate list with those spans.
+``score_parity`` counts found, partial, and lost across recorded runs.
+The command that reads a directory of runs is a later layer.
 """
 
 from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from atlas_reviewer.eval_harness import EvalFormatError
 
@@ -66,6 +68,50 @@ class KeyFinding:
     citations: tuple[str, ...]
     lenses: tuple[str, ...]
     needs: tuple[str, ...]
+
+
+# The candidate may extend this many lines past the defect and still be a
+# find. Zero means the citation has to sit inside the defect span. A
+# neighboring line, or a citation of the whole function, is partial.
+SPAN_SLACK = 0
+FOUND = "found"
+PARTIAL = "partial"
+LOST = "lost"
+RUNS_REQUIRED = 3
+FOUND_IN_AT_LEAST = 2
+PARTIAL_COUNTS_AS_FOUND = False
+_RANK = {"nit": 0, "minor": 1, "major": 2, "blocker": 3}
+
+
+@dataclass(frozen=True)
+class CitedFinding:
+    """One verified finding, already deduped by the coordinator.
+
+    ``verified`` is required. The grader does not read the file. ``quote``
+    has to contain a body citation. A file finding is cited by its line.
+    """
+
+    path: str
+    quote: str
+    severity: str
+    verified: bool
+    line: int | None = None
+    end_line: int | None = None
+    lens: str | None = None
+
+
+@dataclass(frozen=True)
+class FindingGrades:
+    """Grades aligned with the findings, plus unused candidates.
+
+    ``grades`` is found, partial, or lost. ``extra_majors`` counts unused
+    candidates whose severity is major. A blocker is an extra and is not a
+    major.
+    """
+
+    grades: tuple[str, ...]
+    extras: int
+    extra_majors: int
 
 
 def load_key(path: Path) -> tuple[KeyFinding, ...]:
@@ -267,3 +313,371 @@ def _read_json(path: Path) -> object:
         return json.loads(text)
     except json.JSONDecodeError as exc:
         raise EvalFormatError(f"{path.name} is not JSON: {exc}") from exc
+
+
+def grade_findings(
+    findings: Sequence[KeyFinding], candidates: Sequence[CitedFinding]
+) -> FindingGrades:
+    """Found, then partial. Each candidate is used at most once.
+
+    Both pairings are maximum matchings, so two spans that share a line
+    are both found when each can take a different candidate. A find is a
+    verified citation that sits inside the defect span. A citation of the
+    whole function overlaps and is partial. ``extra_majors`` counts unused
+    majors only, in any capitalization.
+    """
+    used: set[int] = set()
+    grades = [LOST for _finding in findings]
+    _assign(findings, candidates, grades, used, FOUND, _is_found)
+    _assign(findings, candidates, grades, used, PARTIAL, _is_partial)
+    unused = [
+        candidates[index] for index in range(len(candidates)) if index not in used
+    ]
+    majors = sum(_rank(item) == _RANK["major"] for item in unused)
+    return FindingGrades(tuple(grades), len(unused), majors)
+
+
+def _assign(
+    findings: Sequence[KeyFinding],
+    candidates: Sequence[CitedFinding],
+    grades: list[str],
+    used: set[int],
+    grade: str,
+    holds: Callable[[KeyFinding, CitedFinding], bool],
+) -> None:
+    edges = [
+        [
+            index
+            for index, candidate in enumerate(candidates)
+            if index not in used and holds(finding, candidate)
+        ]
+        if grades[ref] == LOST
+        else []
+        for ref, finding in enumerate(findings)
+    ]
+    for cand_index, ref_index in enumerate(_assignment(edges, len(candidates))):
+        if ref_index == -1:
+            continue
+        grades[ref_index] = grade
+        used.add(cand_index)
+
+
+def _rank(candidate: CitedFinding) -> int:
+    return _RANK.get(candidate.severity.casefold(), -1)
+
+
+def _is_found(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    if not candidate.verified or _rank(candidate) < _RANK["minor"]:
+        return False
+    if _is_body(finding):
+        return _cites(finding, candidate)
+    return _contained_any(finding.spans, candidate)
+
+
+def _is_partial(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    if not candidate.verified or _rank(candidate) < 0:
+        return False
+    if _is_body(finding):
+        return _rank(candidate) == _RANK["nit"] and _cites(finding, candidate)
+    if _overlaps_any(finding.spans, candidate):
+        return True
+    return _overlaps_any(finding.encloses, candidate)
+
+
+def _is_body(finding: KeyFinding) -> bool:
+    return finding.spans[0].path == BODY
+
+
+def _cites(finding: KeyFinding, candidate: CitedFinding) -> bool:
+    return candidate.path == BODY and any(
+        text in candidate.quote for text in finding.citations
+    )
+
+
+def _contained_any(spans: Sequence[Span], candidate: CitedFinding) -> bool:
+    return any(_contains(span, candidate) for span in spans)
+
+
+def _contains(span: Span, candidate: CitedFinding) -> bool:
+    if not _overlaps(span, candidate):
+        return False
+    cand_end = (
+        candidate.end_line
+        if candidate.end_line is not None
+        else cast(int, candidate.line)
+    )
+    return cast(int, candidate.line) >= cast(int, span.line_start) - SPAN_SLACK and (
+        cand_end <= cast(int, span.line_end) + SPAN_SLACK
+    )
+
+
+def _overlaps_any(spans: Sequence[Span], candidate: CitedFinding) -> bool:
+    return any(_overlaps(span, candidate) for span in spans)
+
+
+def _overlaps(span: Span, candidate: CitedFinding) -> bool:
+    if span.path != candidate.path or span.line_start is None or candidate.line is None:
+        return False
+    cand_end = candidate.line if candidate.end_line is None else candidate.end_line
+    if cand_end < candidate.line:
+        return False
+    return span.line_start - SPAN_SLACK <= cand_end and (
+        candidate.line <= cast(int, span.line_end) + SPAN_SLACK
+    )
+
+
+def _assignment(edges: Sequence[Sequence[int]], n_candidates: int) -> list[int]:
+    """``assigned[candidate]`` is the reference index, or -1."""
+    assigned = [-1] * n_candidates
+
+    def visit(ref_index: int, seen: list[bool]) -> bool:
+        for cand_index in edges[ref_index]:
+            if seen[cand_index]:
+                continue
+            seen[cand_index] = True
+            prior = assigned[cand_index]
+            if prior == -1 or visit(prior, seen):
+                assigned[cand_index] = ref_index
+                return True
+        return False
+
+    for ref_index in range(len(edges)):
+        visit(ref_index, [False] * n_candidates)
+    return assigned
+
+
+@dataclass(frozen=True)
+class ParityRun:
+    """One recorded review. Comparison fields stay None when the run omitted them."""
+
+    name: str
+    pr: int
+    model: str
+    repetition: int
+    head_sha: str
+    findings: tuple[CitedFinding, ...]
+    coverage_complete: bool
+    lenses_run: tuple[str, ...]
+    lenses_not_run: tuple[str, ...]
+    lenses_failed: tuple[str, ...]
+    limit_stops: tuple[str, ...]
+    false_positive_majors: int | None = None
+    lenses_clean: int | None = None
+    lenses_planned: int | None = None
+    cost_usd: float | None = None
+    wall_seconds: float | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    previous_turn_misses: int | None = None
+
+
+def score_parity(
+    findings: Sequence[KeyFinding],
+    runs: Sequence[ParityRun],
+    *,
+    runs_required: int = RUNS_REQUIRED,
+    found_in_at_least: int = FOUND_IN_AT_LEAST,
+    partial_counts_as_found: bool = PARTIAL_COUNTS_AS_FOUND,
+) -> dict[str, Any]:
+    """The gate. Empty ``failures`` is a pass.
+
+    A finding passes when the sample has ``runs_required`` runs and the
+    finding was found in ``found_in_at_least`` of them. Partial counts only
+    when ``partial_counts_as_found`` is true. A value that is not a bool is
+    refused, as are the other two overrides. An automatic failure is recorded
+    on its run and fails the gate on its own; it does not drop that run from
+    the sample. A run whose ``head_sha`` is not that pull request's
+    ``reviewed_commit`` is one of those failures. A repeated run name, a
+    repeated pull request, model, and repetition, or two models in one pull
+    request's sample is refused.
+    """
+    _check_rule(runs_required, found_in_at_least, partial_counts_as_found)
+    _check_sample(runs)
+    grouped = _group(findings)
+    failures: list[str] = []
+    run_rows: list[dict[str, Any]] = []
+    per_pr: dict[int, list[tuple[str, ...]]] = {pr: [] for pr in grouped}
+    for run in runs:
+        pr_findings = grouped.get(run.pr, ())
+        if run.pr not in grouped:
+            failures.append(
+                f"{run.name} is for pull request {run.pr}, which is not in the key"
+            )
+        graded = grade_findings(pr_findings, run.findings)
+        if run.pr in per_pr:
+            per_pr[run.pr].append(graded.grades)
+        reasons = automatic_failures(run, pr_findings)
+        failures.extend(f"{run.name}: {reason}" for reason in reasons)
+        run_rows.append(_run_row(run, pr_findings, graded, reasons))
+    finding_rows: list[dict[str, Any]] = []
+    for pr, pr_findings in grouped.items():
+        rows = per_pr[pr]
+        if len(rows) < runs_required:
+            failures.append(
+                f"pull request {pr} has {len(rows)} {_runs_word(len(rows))} recorded; "
+                f"the sample is {runs_required}"
+            )
+        for index, finding in enumerate(pr_findings):
+            row, missed = _tally(
+                finding,
+                [grades[index] for grades in rows],
+                runs_required,
+                found_in_at_least,
+                partial_counts_as_found,
+            )
+            finding_rows.append(row)
+            if missed:
+                failures.append(missed)
+    return {
+        "gate_pass": not failures,
+        "defaults": {
+            "runs_required": runs_required,
+            "found_in_at_least": found_in_at_least,
+            "partial_counts_as_found": partial_counts_as_found,
+        },
+        "failures": failures,
+        "findings": finding_rows,
+        "runs": run_rows,
+    }
+
+
+def automatic_failures(
+    run: ParityRun, findings: Sequence[KeyFinding]
+) -> tuple[str, ...]:
+    """Why this run fails even if it found every key finding. Independent of k-of-3."""
+    reasons: list[str] = []
+    if run.coverage_complete is not True:
+        reasons.append("coverage_complete is not true")
+    for name in run.lenses_not_run:
+        reasons.append(f"lens {name} was NOT RUN")
+    for name in run.lenses_failed:
+        reasons.append(f"lens {name} failed")
+    for stop in run.limit_stops:
+        reasons.append(f"limit stop: {stop}")
+    ran = set(run.lenses_run)
+    already = set(run.lenses_not_run) | set(run.lenses_failed)
+    for finding in findings:
+        for name in finding.lenses:
+            if name not in ran and name not in already:
+                reasons.append(f"lens {name} named by the key was not run")
+    for commit in dict.fromkeys(finding.reviewed_commit for finding in findings):
+        if run.head_sha != commit:
+            reasons.append(
+                f"head_sha {run.head_sha} is not the reviewed commit {commit}"
+            )
+    return tuple(dict.fromkeys(reasons))
+
+
+def _check_sample(runs: Sequence[ParityRun]) -> None:
+    """One name, one (pull request, model, repetition), and one model per pull request."""
+    seen_names: set[str] = set()
+    seen_slots: set[tuple[int, str, int]] = set()
+    models: dict[int, str] = {}
+    for run in runs:
+        if run.name in seen_names:
+            raise EvalFormatError(f"run name {run.name} is recorded more than once")
+        seen_names.add(run.name)
+        slot = (run.pr, run.model, run.repetition)
+        if slot in seen_slots:
+            raise EvalFormatError(
+                f"pull request {run.pr} records {run.model} "
+                f"repetition {run.repetition} more than once"
+            )
+        seen_slots.add(slot)
+        prior = models.get(run.pr)
+        if prior is not None and prior != run.model:
+            raise EvalFormatError(
+                f"pull request {run.pr} mixes models {prior} and {run.model}"
+            )
+        models[run.pr] = run.model
+
+
+def _check_rule(
+    runs_required: int, found_in_at_least: int, partial_counts_as_found: bool
+) -> None:
+    if (
+        isinstance(runs_required, bool)
+        or isinstance(found_in_at_least, bool)
+        or not isinstance(runs_required, int)
+        or not isinstance(found_in_at_least, int)
+        or runs_required < 1
+        or found_in_at_least < 1
+        or found_in_at_least > runs_required
+        or not isinstance(partial_counts_as_found, bool)
+    ):
+        raise EvalFormatError(
+            "runs_required and found_in_at_least must be positive integers, "
+            "and found_in_at_least cannot exceed runs_required; "
+            "partial_counts_as_found must be true or false"
+        )
+
+
+def _group(findings: Sequence[KeyFinding]) -> dict[int, tuple[KeyFinding, ...]]:
+    buckets: dict[int, list[KeyFinding]] = {}
+    for finding in findings:
+        buckets.setdefault(finding.pr, []).append(finding)
+    return {pr: tuple(items) for pr, items in buckets.items()}
+
+
+def _tally(
+    finding: KeyFinding,
+    counts: list[str],
+    runs_required: int,
+    found_in_at_least: int,
+    partial_counts_as_found: bool,
+) -> tuple[dict[str, Any], str]:
+    found = counts.count(FOUND)
+    partial = counts.count(PARTIAL)
+    lost = counts.count(LOST)
+    credit = found + (partial if partial_counts_as_found else 0)
+    passed = len(counts) >= runs_required and credit >= found_in_at_least
+    missed = ""
+    if credit < found_in_at_least:
+        label = "credited" if partial_counts_as_found else "found"
+        missed = f"{finding.id} {label} in {credit} of {len(counts)} (need {found_in_at_least})"
+    return (
+        {
+            "id": finding.id,
+            "pr": finding.pr,
+            "found": found,
+            "partial": partial,
+            "lost": lost,
+            "of": len(counts),
+            "passed": passed,
+        },
+        missed,
+    )
+
+
+def _run_row(
+    run: ParityRun,
+    pr_findings: Sequence[KeyFinding],
+    graded: FindingGrades,
+    reasons: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        "name": run.name,
+        "pr": run.pr,
+        "model": run.model,
+        "repetition": run.repetition,
+        "head_sha": run.head_sha,
+        "automatic_fail": list(reasons),
+        "grades": {
+            finding.id: grade
+            for finding, grade in zip(pr_findings, graded.grades, strict=True)
+        },
+        "extras": graded.extras,
+        "extra_majors": graded.extra_majors,
+        "false_positive_majors": run.false_positive_majors,
+        "lenses_clean": run.lenses_clean,
+        "lenses_planned": run.lenses_planned,
+        "cost_usd": run.cost_usd,
+        "wall_seconds": run.wall_seconds,
+        "cache_read_tokens": run.cache_read_tokens,
+        "cache_write_tokens": run.cache_write_tokens,
+        "previous_turn_misses": run.previous_turn_misses,
+    }
+
+
+def _runs_word(count: int) -> str:
+    return "run" if count == 1 else "runs"
