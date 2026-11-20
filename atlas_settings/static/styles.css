@@ -51,8 +51,10 @@ td {
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
 }
-.note {
-  color: #555;
+.danger {
+  background: #a00;
+  color: #fff;
+  border-color: #a00;
 }
 code {
   word-break: break-all;

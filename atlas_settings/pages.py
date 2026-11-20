@@ -8,7 +8,7 @@ the markup."""
 from __future__ import annotations
 
 import html
-from datetime import datetime
+from datetime import UTC, datetime
 
 from atlas_settings.phrases import (
     CAP_STATEMENT,
@@ -85,7 +85,9 @@ def settings_page(
     )
     sections.append(_consent_section(consent_acknowledged_at, csrf))
     sections.append(_cap_section(daily_cap_usd, csrf))
-    sections.append(_credentials_form_section(csrf, has_credentials))
+    sections.append(
+        _credentials_form_section(csrf, has_credentials, consent_acknowledged_at)
+    )
     sections.append(_danger_section(csrf, has_credentials))
     return layout("Installation settings", "\n".join(sections), flash=flash)
 
@@ -110,11 +112,7 @@ def _credentials_section(
     model: str,
 ) -> str:
     if has_credentials:
-        when = (
-            saved_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-            if saved_at is not None
-            else "not on record"
-        )
+        when = _stamp(saved_at)
         status = (
             "<p>A key is stored. The key is never shown again after it "
             f"is saved, not even partly.</p>"
@@ -139,7 +137,7 @@ def _consent_section(consent_acknowledged_at: datetime | None, csrf: str) -> str
 <button type="submit">Record consent</button>
 </form>"""
     )
-    return f'<section id="consent">{acknowledged}</section>'
+    return f'<section id="consent"><h2>Data-policy consent</h2>{acknowledged}</section>'
 
 
 def _cap_section(daily_cap_usd: str | None, csrf: str) -> str:
@@ -154,16 +152,27 @@ def _cap_section(daily_cap_usd: str | None, csrf: str) -> str:
 <p>{esc(CAP_STATEMENT)}</p>
 <form method="post" action="/settings/cap">
 <input type="hidden" name="csrf" value="{esc_attr(csrf)}">
-<label>Daily cap in USD
+<label>Daily cap in USD — leave empty to clear the cap
 <input type="text" name="cap_usd" inputmode="decimal"
- placeholder="e.g. 5.00 (leave empty to clear)"></label>
+ placeholder="e.g. 5.00"></label>
 <button type="submit">Set cap</button>
 </form>
 </section>"""
 
 
-def _credentials_form_section(csrf: str, has_credentials: bool) -> str:
+def _credentials_form_section(
+    csrf: str, has_credentials: bool, consent_acknowledged_at: datetime | None
+) -> str:
     heading = "Rotate the key" if has_credentials else "Add credentials"
+    if consent_acknowledged_at is None:
+        # The form stays hidden until the consent below is
+        # acknowledged: a key pasted into a form whose submit the
+        # server would refuse is a dropped secret and a re-typed one.
+        return """<section id="credentials-form">
+<h2>Add credentials</h2>
+<p>The credentials form appears once the data-policy consent above is
+acknowledged.</p>
+</section>"""
     return f"""<section id="credentials-form">
 <h2>{heading}</h2>
 <p>The endpoint must be an <code>https://</code> URL whose host passes
@@ -186,10 +195,14 @@ nothing.</p>
 
 
 def _danger_section(csrf: str, has_credentials: bool) -> str:
+    # Revocation is deliberately one click, with no confirm step: it is
+    # the leaked-key path, where every extra interaction is time the
+    # attacker keeps the key. Deletion, which removes the cap and the
+    # consent too, is the one behind the typed confirmation.
     revoke = (
         f"""<form method="post" action="/settings/revoke">
 <input type="hidden" name="csrf" value="{esc_attr(csrf)}">
-<button type="submit">Revoke the key</button>
+<button type="submit" class="danger">Revoke the key</button>
 </form>
 <p>Revoking removes the key; the cap and the consent acknowledgement
 stay.</p>"""
@@ -203,15 +216,20 @@ stay.</p>"""
 <input type="hidden" name="csrf" value="{esc_attr(csrf)}">
 <label>{esc(DELETE_CONFIRM_PROMPT)}
 <input type="text" name="confirm" autocomplete="off"></label>
-<button type="submit">Delete everything</button>
+<button type="submit" class="danger">Delete everything</button>
 </form>
 <p>Deleting removes the credentials, the cap and the consent
 acknowledgement together.</p>
 </section>"""
 
 
-def _stamp(moment: datetime) -> str:
-    return moment.strftime("%Y-%m-%d %H:%M:%S UTC")
+def _stamp(moment: datetime | None) -> str:
+    """A stamp in UTC, whatever offset the stored value carries; a naive
+    or missing value is "not on record" — the store requires an offset,
+    so a naive value reaching this far is already not a fact to show."""
+    if moment is None or moment.tzinfo is None:
+        return "not on record"
+    return moment.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
 def esc(value: str) -> str:
