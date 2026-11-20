@@ -398,6 +398,36 @@ def test_the_queue_cancel_check_is_graded_on_its_line():
     assert grade_findings([cancel], [_cite(queue, 317)]).grades == (LOST,)
 
 
+def test_the_missing_hook_is_found_on_the_check_that_skips_it():
+    hook = _key("640-m2")
+    poster = "atlas_reviewer/service_post.py"
+    assert grade_findings([hook], [_cite(poster, 230)]).grades == (FOUND,)
+    assert grade_findings([hook], [_cite(poster, 229, end_line=231)]).grades == (FOUND,)
+    assert grade_findings([hook], [_cite(poster, 233)]).grades == (PARTIAL,)
+    assert grade_findings([hook], [_cite(poster, 217, end_line=236)]).grades == (
+        PARTIAL,
+    )
+    assert grade_findings([hook], [_cite("atlas_reviewer/service.py", 420)]).grades == (
+        LOST,
+    )
+
+
+def test_either_line_that_omits_the_d48_amendment_is_found():
+    finding = _key("640-m3")
+    assert grade_findings([finding], [_cite("docs/open-questions.md", 62)]).grades == (
+        FOUND,
+    )
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/README.md", 14)]
+    ).grades == (FOUND,)
+    assert grade_findings([finding], [_cite("docs/open-questions.md", 61)]).grades == (
+        LOST,
+    )
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/README.md", 12)]
+    ).grades == (LOST,)
+
+
 def test_a_citation_wider_than_the_defect_is_partial():
     finding = _key("661-m3")
     assert grade_findings([finding], [_cite(_ROUNDS, 185)]).grades == (FOUND,)
