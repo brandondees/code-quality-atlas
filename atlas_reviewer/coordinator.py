@@ -135,6 +135,7 @@ from atlas_reviewer.domain import (
     RunnerReport,
     RunnerStatus,
 )
+from atlas_reviewer.funding import noted_funding_source
 from atlas_reviewer.head_change import (
     FIELD_CALLS,
     FIELD_COMMITTED_USD,
@@ -145,6 +146,7 @@ from atlas_reviewer.head_change import (
     FIELD_READING,
     FIELD_RESERVATION_USD,
     FIELD_SETTLED_USD,
+    FIELD_SOURCE,
     LENS_SETTLED_STEP,
     PROGRESS_PHASE,
     PROGRESS_REVIEW_STEP,
@@ -421,6 +423,10 @@ class AgenticReview:
     """Reservations kept because the request was written and never
     answered (D93). Counted in `committed_usd` for the in-review
     ceiling. Not a bill."""
+    funding_source: str = ""
+    """The operator funding source this review was pinned to (D94), or
+    empty when the service has no source list. A short name the
+    controller chose. Never a key."""
     review_error: str = ""
     """The fixed cause a refused key halted the review with (D92):
     `model key out of credit` or `model key refused`, the spend's own
@@ -591,6 +597,7 @@ def synthesize(
         endpoint_class=endpoint_class,
         billed_usd="0" if spend is None else str(spend.billed_usd()),
         held_usd="0" if spend is None else str(spend.held_usd),
+        funding_source=noted_funding_source(),
         review_error="" if spend is None else spend.halted_cause,
     )
 
@@ -1434,21 +1441,21 @@ def _record_progress(
     # separately can book the hold as a bill in a crash backfill
     # (round-1 review of #799).
     committed, settled, held = spend.snapshot()
-    telemetry.record(
-        PROGRESS_PHASE,
-        step,
-        {
-            FIELD_LENS: runs[-1].result.lens if runs else "",
-            FIELD_LENSES_DONE: len(done),
-            FIELD_LENSES_TOTAL: len(names),
-            FIELD_CALLS: spend.calls,
-            FIELD_COMMITTED_USD: str(committed),
-            FIELD_SETTLED_USD: str(settled),
-            FIELD_HELD_USD: str(held),
-            FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
-            FIELD_READING: text,
-        },
-    )
+    fields: dict[str, str | int] = {
+        FIELD_LENS: runs[-1].result.lens if runs else "",
+        FIELD_LENSES_DONE: len(done),
+        FIELD_LENSES_TOTAL: len(names),
+        FIELD_CALLS: spend.calls,
+        FIELD_COMMITTED_USD: str(committed),
+        FIELD_SETTLED_USD: str(settled),
+        FIELD_HELD_USD: str(held),
+        FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
+        FIELD_READING: text,
+    }
+    source = noted_funding_source()
+    if source:
+        fields[FIELD_SOURCE] = source
+    telemetry.record(PROGRESS_PHASE, step, fields)
 
 
 def _combined_runner(reports: Sequence[RunnerReport]) -> RunnerReport | None:
@@ -3645,6 +3652,10 @@ def render_draft(
             f"held at reservation: ${review.held_usd}."
         ),
     ]
+    if review.funding_source:
+        # The source the review was pinned to (D94). Same line, so the
+        # posted Cost section carries it and the cost parser still matches.
+        lines[-1] += f" Funding source: {review.funding_source}."
     served = _ENDPOINT_SERVED.get(review.endpoint_class)
     if served:
         # Which endpoint class served the review (config slice S10),
