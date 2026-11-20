@@ -7,10 +7,12 @@ from decimal import Decimal
 import pytest
 
 from atlas_reviewer.funding import (
+    _MODEL_ID,
     _PROVIDER,
     ENV_FUNDING_BYOK,
     ENV_FUNDING_SOURCE,
     ENV_FUNDING_SOURCES,
+    ENV_MODEL,
     PILOT_KEY_ENV,
     FundingSource,
     configured_model,
@@ -19,7 +21,16 @@ from atlas_reviewer.funding import (
     noted_funding_source,
     sources_cover,
 )
-from atlas_reviewer.openrouter import _PROVIDER_SLUG, MODEL_ID
+from atlas_reviewer.openrouter import (
+    _MODEL_ID as ROUTE_MODEL_ID,
+)
+from atlas_reviewer.openrouter import (
+    _PROVIDER_SLUG,
+    MODEL_ID,
+)
+from atlas_reviewer.openrouter import (
+    ENV_MODEL as ROUTE_MODEL_ENV,
+)
 from atlas_reviewer.service import ServiceError, config_from_env
 
 SECRET = "webhook-secret-value"
@@ -189,7 +200,7 @@ def test_a_bad_provider_filter_or_ceiling_is_refused():
         load_funding_sources(_env(_source(model_filter="anthropic")))
     with pytest.raises(ValueError, match="filter"):
         load_funding_sources(_env(_source(model_filter="google-vertex/global/*")))
-    for ceiling in (0, -1, "195.00.1", True, 195.5, "10000.01"):
+    for ceiling in (0, -1, "195.00.1", True, 195.5, "10000.01", "1e3", "1_000"):
         with pytest.raises(ValueError, match="ceiling"):
             load_funding_sources(_env(_source(key_ceiling_usd=ceiling)))
     loaded = load_funding_sources(_env(_source(key_ceiling_usd="10000")))
@@ -198,8 +209,12 @@ def test_a_bad_provider_filter_or_ceiling_is_refused():
 
 
 def test_the_provider_slug_grammar_matches_the_route_layer():
-    """A slug the registry accepts is a slug the route layer accepts."""
+    """A slug, a model id, and the model variable the registry accepts
+    are the ones the route layer accepts. Kills a second grammar that
+    drifts from ``openrouter``."""
     assert _PROVIDER.pattern == _PROVIDER_SLUG.pattern
+    assert _MODEL_ID.pattern == ROUTE_MODEL_ID.pattern
+    assert ENV_MODEL == ROUTE_MODEL_ENV
 
 
 def test_no_source_matching_the_configured_model_is_a_boot_failure():
@@ -231,6 +246,7 @@ def test_a_noted_source_name_is_the_token_and_byok_is_only_the_word_true():
     assert noted_funding_source({ENV_FUNDING_SOURCE: "Subs-A"}) == ""
     assert noted_funding_source({ENV_FUNDING_SOURCE: "subs a"}) == ""
     assert funding_byok({}) is False
+    assert funding_byok({ENV_FUNDING_BYOK: "true"}) is True
     assert funding_byok({ENV_FUNDING_BYOK: "false"}) is False
-    assert funding_byok({ENV_FUNDING_BYOK: "TRUE"}) is True
+    assert funding_byok({ENV_FUNDING_BYOK: "TRUE"}) is False
     assert funding_byok({ENV_FUNDING_BYOK: "1"}) is False
