@@ -96,7 +96,7 @@ def test_evidence_requires_aware_fetch_time():
             good.head_sha,
             good.provenance,
             good.tool,
-            datetime(2026, 1, 1),  # noqa: DTZ001 -- deliberately naive; this is what the test asserts gets rejected
+            datetime(2026, 1, 1),
             good.conclusion,
             redact(""),
         )
