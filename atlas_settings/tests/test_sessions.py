@@ -419,3 +419,59 @@ def test_destroying_an_already_gone_session_is_a_no_op() -> None:
     )
     # The counters still tell the truth: a fresh sign-in is admitted.
     _session2, _value = store.start_login("s2", "v2")
+
+
+def test_the_sweep_never_leaves_the_counters_lying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The counters must track the table exactly: after a sweep has
+    emptied it, the next two sign-ins are admitted with no eviction at
+    all — the first new sign-in's row survives the second one (kills the
+    mutant that forgets the eviction's own counter decrement: its count
+    reads higher than the table, and the second sign-in evicts the
+    first's live row)."""
+    from atlas_settings import sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "_MAX_PRE_LOGIN_SESSIONS", 2)
+    clock = FakeClock()
+    store = _store(clock)
+    _first, first_cookie = store.start_login("s1", "v1")
+    store.start_login("s2", "v2")
+    # The eviction path runs while both rows are live: the third sign-in
+    # gives up the oldest.
+    _session, third_cookie = store.start_login("s3", "v3")
+    assert store.get(first_cookie) is None
+    clock.advance(601)
+    # The sweep drops the expired rows; the next sign-in is admitted
+    # with no eviction and no crash.
+    _session, fourth_cookie = store.start_login("s4", "v4")
+    assert store.get(third_cookie) is None
+    # A second sign-in right after: still no eviction — the first new
+    # row survives (the counters read the table, not the history).
+    _session, fifth_cookie = store.start_login("s5", "v5")
+    assert store.get(fourth_cookie) is not None
+    assert store.get(fifth_cookie) is not None
+
+
+def test_the_signed_in_eviction_is_least_recently_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The signed-in eviction keys on last use, not creation: refreshing
+    the oldest session's cookie keeps it and gives up the next one
+    (kills the created-order mutant)."""
+    from atlas_settings import sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 2)
+    clock = FakeClock()
+    store = _store(clock)
+    s1, _c1 = store.start_login("s1", "v1")
+    _signed1, v1 = store.upgrade(s1, 101, "u1")
+    s2, _c2 = store.start_login("s2", "v2")
+    _signed2, v2 = store.upgrade(s2, 102, "u2")
+    clock.advance(5)
+    store.get(v1)  # the oldest-created session is the most recently used
+    s3, _c3 = store.start_login("s3", "v3")
+    _signed3, v3 = store.upgrade(s3, 103, "u3")
+    assert store.get(v1) is not None  # refreshed: it stays
+    assert store.get(v2) is None  # the least recently used goes
+    assert store.get(v3) is not None

@@ -129,15 +129,17 @@ def test_two_hits_inside_one_window_kill_the_boundary_mutant() -> None:
     assert limiter.allow("key", 2, 60.0)
 
 
-def test_the_key_table_evicts_the_oldest_key_past_its_cap(
+def test_the_key_table_never_grows_past_its_cap_by_spending_live_budgets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The key table is bounded: past the cap the key with the oldest
-    newest-hit is evicted, and the full-table walk runs only on that
-    rare path — a call below the cap neither evicts nor walks, so the
-    work per call is bounded by the call's own key (the advisory's
-    bound). The table's interior is read for the eviction assertion
-    because eviction has no behavioral observable."""
+    """The key table is bounded, and the bound never spends a live
+    budget: with three keys each holding one hit under limit 3, a new
+    key at the cap is refused (the walk dropped nothing — every key is
+    inside its own window), and the table stays at three keys. The walk
+    runs only on this rare path, so the work per call is bounded by the
+    call's own key elsewhere (the round-2 advisory's bound). The table's
+    interior is read for the no-eviction assertion because refusal has
+    no other observable."""
     from atlas_settings import ratelimit as ratelimit_module
 
     monkeypatch.setattr(ratelimit_module, "_MAX_RATE_KEYS", 3)
@@ -150,14 +152,38 @@ def test_the_key_table_evicts_the_oldest_key_past_its_cap(
     for name in ("k1", "k2", "k3"):
         assert limiter.allow(name, 3, 60.0)
     ticks[0] = 1.0
-    assert limiter.allow("k4", 3, 60.0)
-    assert "k1" not in limiter._hits
-    assert "k4" in limiter._hits
-    # The next call at the cap gives up the next-oldest key; the table
-    # never grows past it.
-    assert limiter.allow("k5", 3, 60.0) is True
-    assert "k2" not in limiter._hits
-    assert {"k3", "k4", "k5"} <= set(limiter._hits)
-    assert limiter.allow("k6", 3, 60.0) is True
-    assert {"k4", "k5", "k6"} <= set(limiter._hits)
-    assert len(limiter._hits) <= 3
+    assert not limiter.allow("k4", 3, 60.0)
+    assert set(limiter._hits) == {"k1", "k2", "k3"}
+
+
+def test_a_spent_key_stays_refused_at_the_key_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At the key cap the eviction drops only keys whose newest hit is
+    outside that key's own window: a live key's hit log is its budget,
+    and deleting it would hand the caller a fresh allowance. With the
+    cap at 2 and limit 1, alternating two keys inside the window stays
+    refused, a third key is refused while those two are live, and a key
+    whose window has passed is dropped and allowed again (kills the
+    evict-the-oldest-live-key mutant)."""
+    from atlas_settings import ratelimit as ratelimit_module
+
+    monkeypatch.setattr(ratelimit_module, "_MAX_RATE_KEYS", 2)
+    ticks = [0.0]
+
+    def now() -> float:
+        return ticks[0]
+
+    limiter = RateLimiter(now=now)
+    assert limiter.allow("a", 1, 60.0)
+    assert limiter.allow("b", 1, 60.0)
+    # Both keys are live and spent: nothing is evicted, nobody passes.
+    ticks[0] = 1.0
+    assert not limiter.allow("a", 1, 60.0)
+    assert not limiter.allow("b", 1, 60.0)
+    # A brand-new key is refused too: the table is full of live budgets.
+    assert not limiter.allow("c", 1, 60.0)
+    assert "a" in limiter._hits and "b" in limiter._hits
+    # Once a key's window has passed, it is the drop the walk exists for.
+    ticks[0] = 61.0
+    assert limiter.allow("a", 1, 60.0)

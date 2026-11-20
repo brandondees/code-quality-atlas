@@ -146,10 +146,12 @@ class SessionStore:
         return session, self.cookie_value(session)
 
     def _sweep(self) -> None:
-        """Drop the expired rows under the caller's lock: a session whose
-        cookie never comes back — an abandoned sign-in tab, an attack —
-        is reclaimed by the next `start_login`, not parked until the
-        process restarts."""
+        """Drop the expired rows under the caller's lock. The walk runs
+        on the rare over-cap paths only (start_login at the pre-login
+        cap), so an abandoned sign-in — a dead tab, an attack — is
+        reclaimed when the table next fills, not by every insert and not
+        only by its own cookie's return; below the cap an expired row
+        leaves on its cookie's next presentation or the next sweep."""
         mono_now = self._mono()
         for sid, session in list(self._sessions.items()):
             age = mono_now - session.created_mono
