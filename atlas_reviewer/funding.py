@@ -15,12 +15,22 @@ operator list cannot name it.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
-from collections.abc import Mapping
-from dataclasses import dataclass
+import threading
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
+
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    KeyRefusedError,
+)
+from atlas_reviewer.pricing import KeyStatus, PricingUnknownError
 
 ENV_FUNDING_SOURCES = "ATLAS_FUNDING_SOURCES"
 # The chosen source's name and BYOK flag, handed to the one child that
@@ -184,6 +194,46 @@ def noted_funding_source(env: Mapping[str, str] | None = None) -> str:
     return raw
 
 
+_REFUSAL_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
+
+
+@dataclass(frozen=True)
+class FundingChoice:
+    """The one source a review was pinned to at claim time.
+
+    ``key`` is the credential the child receives as
+    ``ATLAS_OPENROUTER_API_KEY``. It is not logged and it is not written
+    on the draft."""
+
+    name: str
+    key: str = field(repr=False)
+    providers: tuple[str, ...]
+    require_zdr: bool
+    key_ceiling_usd: Decimal
+    byok: bool
+
+
+@dataclass(frozen=True)
+class FundingSelection:
+    """What claim time decided.
+
+    ``choice`` is the source the review runs on. ``refusal`` is a D92
+    cause, set only when every source that could serve the model has
+    refused or is out of credit: the service posts that error and does
+    not start a child. ``error`` is any other reason no source was
+    chosen — a probe that failed, a key over its ceiling — and the
+    review fails without a D92 post."""
+
+    choice: FundingChoice | None = None
+    refusal: str = ""
+    error: str = ""
+
+
+active_choice: contextvars.ContextVar[FundingChoice | None] = contextvars.ContextVar(
+    "atlas_funding_choice", default=None
+)
+
+
 def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     """True only when the child was handed a BYOK source.
 
@@ -207,6 +257,128 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field {key!r}")
         data[key] = value
     return data
+
+
+class FundingSelector:
+    """Picks the first source that can fund one review.
+
+    The unavailable set is this process's memory of keys that refused.
+    A restart forgets it, and the next probe decides again. Choosing and
+    marking share one lock: more than one review can be claimed at once.
+    """
+
+    def __init__(
+        self,
+        sources: tuple[FundingSource, ...],
+        env: Mapping[str, str],
+        probe: Callable[[str], KeyStatus],
+        model: str,
+    ) -> None:
+        self._sources = sources
+        self._env = env
+        self._probe = probe
+        self._model = model
+        self._lock = threading.Lock()
+        self._unavailable: set[str] = set()
+        self._causes: dict[str, str] = {}
+
+    def choose(self) -> FundingSelection:
+        return self._choose()
+
+    def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
+        """Remember that ``name`` refused. True when another source can
+        still serve the model. The refusal-advance step that calls this
+        lands in a later slice. ``cause`` is the D92 text a later claim
+        posts when nothing else can serve."""
+        with self._lock:
+            self._unavailable.add(name)
+            if cause in _REFUSAL_CAUSES:
+                self._causes[name] = cause
+            return self._another_available()
+
+    def _choose(self) -> FundingSelection:
+        """Walk the sources in order. The key probe runs outside the
+        lock, so one claim's HTTPS call does not stall another claim
+        or a refusal mark. Two claims can probe the same key; both may
+        take it."""
+        last_refusal = ""
+        blocked = False
+        for source in self._sources:
+            with self._lock:
+                if not source.allows(self._model) or source.name in self._unavailable:
+                    continue
+            outcome = self._probe_source(source)
+            with self._lock:
+                if source.name in self._unavailable:
+                    continue
+                if isinstance(outcome, FundingChoice):
+                    return FundingSelection(choice=outcome)
+                if outcome in _REFUSAL_CAUSES:
+                    self._refuse(source.name, outcome)
+                    last_refusal = outcome
+                    continue
+                blocked = True
+        with self._lock:
+            if blocked:
+                return FundingSelection(
+                    error="no funding source is available for this review"
+                )
+            cause = last_refusal or self._remembered_cause()
+        if cause:
+            return FundingSelection(refusal=cause)
+        return FundingSelection(error="no funding source is available for this review")
+
+    def _probe_source(self, source: FundingSource) -> FundingChoice | str:
+        """A choice, a D92 cause, or ``""`` when the source was skipped
+        without being marked unavailable. This does not touch the
+        unavailable set; the caller records a refusal under the lock."""
+        key = self._env.get(source.key_env, "")
+        if key.strip() == "":
+            return ""
+        try:
+            status = self._probe(key)
+        except KeyRefusedError as exc:
+            if exc.review_error not in _REFUSAL_CAUSES:
+                return ""
+            return exc.review_error
+        except (BoundaryError, PricingUnknownError):
+            # A 500, a non-JSON 200, or an unlimited key is not a refusal.
+            # The selection fails closed and the next claim can try again.
+            return ""
+        if status.limit > source.key_ceiling_usd:
+            return ""
+        if status.limit_remaining <= 0:
+            return KEY_OUT_OF_CREDIT
+        return FundingChoice(
+            source.name,
+            key,
+            source.providers,
+            source.require_zdr,
+            source.key_ceiling_usd,
+            source.byok,
+        )
+
+    def _refuse(self, name: str, cause: str) -> None:
+        self._unavailable.add(name)
+        self._causes[name] = cause
+
+    def _remembered_cause(self) -> str:
+        """The first refused source's cause, in spend order.
+
+        A later source's 401 does not replace an earlier source's
+        out-of-credit cause. The post names the source the registry
+        would have tried first.
+        """
+        for source in self._sources:
+            if source.allows(self._model) and source.name in self._causes:
+                return self._causes[source.name]
+        return ""
+
+    def _another_available(self) -> bool:
+        return any(
+            source.allows(self._model) and source.name not in self._unavailable
+            for source in self._sources
+        )
 
 
 def _source(item: object, index: int) -> FundingSource:

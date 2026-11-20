@@ -14,6 +14,9 @@ from atlas_reviewer.funding import (
     ENV_FUNDING_SOURCES,
     ENV_MODEL,
     PILOT_KEY_ENV,
+    FundingChoice,
+    FundingSelection,
+    FundingSelector,
     FundingSource,
     configured_model,
     funding_byok,
@@ -31,6 +34,13 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.openrouter import (
     ENV_MODEL as ROUTE_MODEL_ENV,
 )
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    KeyRefusedError,
+)
+from atlas_reviewer.pricing import KeyStatus
 from atlas_reviewer.service import ServiceError, config_from_env
 
 SECRET = "webhook-secret-value"
@@ -314,3 +324,204 @@ def test_a_noted_source_name_is_the_token_and_byok_is_only_the_word_true():
     assert funding_byok({ENV_FUNDING_BYOK: "false"}) is False
     assert funding_byok({ENV_FUNDING_BYOK: "TRUE"}) is False
     assert funding_byok({ENV_FUNDING_BYOK: "1"}) is False
+
+
+def test_a_refusal_mark_does_not_wait_for_the_probe_in_front_of_it():
+    """The key probe runs outside the selector lock. A refusal recorded
+    while a probe is in flight returns at once, and that source is not
+    the one the claim takes. Kills holding the lock across the HTTPS
+    call."""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def probe(key: str) -> KeyStatus:
+        started.set()
+        release.wait()
+        return _credit()
+
+    env = _env(
+        _source(),
+        _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"),
+    )
+    selector = _selector(env, probe)
+    chosen: list[str] = []
+
+    def claim() -> None:
+        selection = selector.choose()
+        assert selection.choice is not None
+        chosen.append(selection.choice.name)
+
+    claim_thread = threading.Thread(target=claim)
+    claim_thread.start()
+    assert started.wait(timeout=30)
+    marked = threading.Event()
+
+    def mark() -> None:
+        assert selector.mark_refused("subs-a") is True
+        marked.set()
+
+    mark_thread = threading.Thread(target=mark)
+    mark_thread.start()
+    # The probe is blocked in ``release.wait`` with no timeout of its
+    # own. This wait only fails when the mark cannot take the lock,
+    # which is the mutant that holds the lock across the probe.
+    assert marked.wait(timeout=30)
+    release.set()
+    claim_thread.join(timeout=30)
+    mark_thread.join(timeout=30)
+    assert not claim_thread.is_alive()
+    assert chosen == ["subs-b"]
+
+
+def _credit(limit: str = "50", remaining: str = "40") -> KeyStatus:
+    return KeyStatus(
+        limit=Decimal(limit),
+        limit_remaining=Decimal(remaining),
+        usage=Decimal(0),
+        counts_byok=True,
+    )
+
+
+def _selector(env: dict[str, str], probe) -> FundingSelector:
+    sources = load_funding_sources(env)
+    assert sources is not None
+    return FundingSelector(sources, env, probe, MODEL_ID)
+
+
+def test_claim_time_skips_a_dry_key_and_does_not_probe_a_model_the_source_cannot_serve():
+    """The first source with remaining credit is the one the review
+    uses. A source whose filter misses the model is not probed, and a
+    key over its ceiling is not a refusal. Kills probing every key, and
+    treating an over-ceiling key as out of credit."""
+    calls: list[str] = []
+
+    def probe(key: str) -> KeyStatus:
+        calls.append(key)
+        if key == "sk-or-v1-subs-a":
+            return _credit(remaining="0")
+        if key == "sk-or-v1-high":
+            return _credit(limit="500")
+        return _credit()
+
+    env = _env(
+        _source(),
+        _source(name="other", key_env="ATLAS_FUNDING_OTHER", model_filter="openai/*"),
+        _source(name="high", key_env="ATLAS_FUNDING_HIGH", key_ceiling_usd="195"),
+        _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"),
+    )
+    selection = _selector(env, probe).choose()
+    assert selection.choice is not None
+    assert selection.choice.name == "subs-b"
+    assert selection.choice.key == "sk-or-v1-subs-b"
+    assert selection.refusal == ""
+    assert calls == ["sk-or-v1-subs-a", "sk-or-v1-high", "sk-or-v1-subs-b"]
+
+
+def test_every_dry_or_refused_source_is_a_credit_or_auth_refusal_with_no_child_source():
+    """When nothing can pay, the selection carries the D92 cause and no
+    choice. A 401 is auth refused. A later claim does not probe a key
+    already known to be dry. Kills posting a choice anyway, and forgetting
+    the refusal so the same dry key is probed again."""
+    env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
+    calls: list[str] = []
+
+    def dry(key: str) -> KeyStatus:
+        calls.append(key)
+        return _credit(remaining="0")
+
+    selector = _selector(env, dry)
+    selection = selector.choose()
+    assert selection.choice is None
+    assert selection.refusal == KEY_OUT_OF_CREDIT
+    assert selection.error == ""
+    assert selector.choose().refusal == KEY_OUT_OF_CREDIT
+    assert calls == ["sk-or-v1-subs-a", "sk-or-v1-subs-b"]
+
+    def refused(key: str) -> KeyStatus:
+        raise KeyRefusedError("OpenRouter HTTP 401", review_error=KEY_AUTH_REFUSED)
+
+    auth = _selector(env, refused).choose()
+    assert auth.choice is None
+    assert auth.refusal == KEY_AUTH_REFUSED
+    assert "sk-or" not in auth.refusal
+
+
+def test_a_probe_that_fails_does_not_mark_the_source_unavailable():
+    """A 500 is not a refusal. The next claim can still choose that
+    source. When it is the only source, the selection is an error with
+    no D92 cause. Kills treating a transient failure as out of credit."""
+    env = _env(_source())
+    calls = {"n": 0}
+
+    def probe(key: str) -> KeyStatus:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise BoundaryError(
+                "OpenRouter HTTP 500 for https://openrouter.ai/api/v1/key"
+            )
+        return _credit()
+
+    selector = _selector(env, probe)
+    first = selector.choose()
+    assert first.choice is None
+    assert first.refusal == ""
+    assert first.error
+    second = selector.choose()
+    assert second.choice is not None
+    assert second.choice.name == "subs-a"
+
+
+def test_marking_a_source_refused_makes_the_next_claim_use_the_following_one():
+    env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
+    selector = _selector(env, lambda key: _credit())
+    first = selector.choose()
+    assert first.choice is not None
+    assert selector.mark_refused(first.choice.name, KEY_AUTH_REFUSED) is True
+    second = selector.choose()
+    assert second.choice is not None
+    assert second.choice.name == "subs-b"
+    assert selector.mark_refused("subs-b") is False
+
+
+def test_the_remembered_cause_is_the_first_refused_source_in_spend_order():
+    """The D92 post names the source the registry tries first. Kills
+    keeping the last source's cause instead."""
+    env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
+    selector = _selector(env, lambda key: _credit())
+    assert selector.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
+    assert selector.mark_refused("subs-b", KEY_AUTH_REFUSED) is False
+    selection = selector.choose()
+    assert selection.choice is None
+    assert selection.refusal == KEY_OUT_OF_CREDIT
+
+
+def test_a_probe_that_does_not_parse_fails_the_selection_without_crashing():
+    """A 200 the key parser cannot read, including an unlimited key, is
+    an error selection, not an exception out of ``choose``. Kills letting
+    ``PricingUnknownError`` escape into the claim handler."""
+    from atlas_reviewer.pricing import PricingUnknownError
+
+    def probe(key: str) -> KeyStatus:
+        raise PricingUnknownError("non-JSON response from the key endpoint")
+
+    selection = _selector(_env(_source()), probe).choose()
+    assert selection.choice is None
+    assert selection.refusal == ""
+    assert selection.error
+
+
+def test_a_choice_repr_does_not_contain_the_key():
+    """The dataclass repr is printable. The key value is not. Kills the
+    default repr, which would include the credential."""
+    choice = FundingChoice(
+        "subs-a",
+        "sk-or-v1-subs-a-secret",
+        ("anthropic",),
+        False,
+        Decimal(195),
+        True,
+    )
+    assert "sk-or-v1-subs-a-secret" not in repr(choice)
+    assert "sk-or-v1-subs-a-secret" not in repr(FundingSelection(choice=choice))
