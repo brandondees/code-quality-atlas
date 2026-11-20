@@ -65,10 +65,44 @@ def test_the_unset_installation_renders_the_consent_form_and_no_credentials() ->
     assert "Data policy:" in page
     assert 'action="/settings/consent"' in page
     assert 'type="checkbox"' in page
-    assert 'action="/settings/credentials"' in page
+    # The credentials form stays hidden until the consent is
+    # acknowledged: a key pasted into a form the server would refuse is
+    # a dropped secret (kills the always-render-form mutant).
+    assert 'action="/settings/credentials"' not in page
+    assert "appears once the data-policy consent" in page
     # Nothing stored yet: the danger section offers only the delete.
     assert 'action="/settings/revoke"' not in page
     assert 'action="/settings/delete"' in page
+
+
+def test_every_state_changing_form_is_a_post_with_the_csrf_token() -> None:
+    """Every form is `method="post"` carrying the session's CSRF token:
+    a mutant that deletes a token input or switches a form to GET fails
+    here (the review's not-posted finding, named)."""
+    for page in (
+        _render(),
+        _render(
+            has_credentials=True,
+            credentials_saved_at=NOW,
+            base_url="https://api.example.com/v1",
+            model="vendor/good-model",
+            consent_acknowledged_at=NOW,
+            daily_cap_usd="5.25",
+        ),
+    ):
+        actions = [
+            name
+            for name in ("consent", "credentials", "revoke", "cap", "delete")
+            if f'action="/settings/{name}"' in page
+        ]
+        assert actions
+        for action in actions:
+            form_at = page.index(f'action="/settings/{action}"')
+            form_start = page.rindex("<form", 0, form_at)
+            form_end = page.find("</form>", form_at)
+            form = page[form_start : form_end + 7]
+            assert 'method="post"' in form, action
+            assert 'name="csrf" value="csrf-token-value"' in form, action
 
 
 def test_the_stored_credentials_are_shown_without_the_key() -> None:
@@ -112,3 +146,60 @@ def test_the_text_and_attribute_escapers_differ_in_quote_handling() -> None:
     # characters pass through. Attribute values: the quotes escaped too.
     assert esc("a<b>&'\"") == "a&lt;b&gt;&amp;'\""
     assert esc_attr("a<b>&'\"") == "a&lt;b&gt;&amp;&#x27;&quot;"
+
+
+def test_a_stamp_in_another_offset_renders_in_utc() -> None:
+    """A stored time carries its own offset; the page shows it in UTC
+    (kills the literal-UTC-suffix mutant, which never converts: a 14:00
+    stamp at +02:00 is 12:00 UTC, not "14:00 UTC")."""
+    from datetime import timedelta, timezone
+
+    page = _render(
+        has_credentials=True,
+        credentials_saved_at=datetime(
+            2026, 11, 19, 14, 0, 0, tzinfo=timezone(timedelta(hours=2))
+        ),
+        base_url="https://api.example.com/v1",
+        model="vendor/good-model",
+        consent_acknowledged_at=NOW,
+    )
+    assert "Credentials last saved: 2026-11-19 12:00:00 UTC." in page
+
+
+def test_a_naive_stamp_is_not_on_record() -> None:
+    """The store requires an offset, so a naive value reaching the page
+    is not a fact to show."""
+    from datetime import datetime as dt
+
+    naive = dt(2026, 11, 19, 14, 0, 0)
+    page = _render(
+        has_credentials=True,
+        credentials_saved_at=naive,
+        base_url="https://api.example.com/v1",
+        model="vendor/good-model",
+        consent_acknowledged_at=NOW,
+    )
+    assert "Credentials last saved: not on record." in page
+
+
+def test_the_hostile_payload_escapes_in_every_field() -> None:
+    """The hostile probe rides every interpolated field — the element
+    texts and the attribute value with its quote — and nothing raw
+    survives (kills the field-uncovered mutant for base_url and model,
+    the values the page shows back)."""
+    payload = "<script>\"'&"
+    page = _render(
+        account_login=payload,
+        base_url=f"https://{payload}/v1",
+        model=payload,
+        consent_acknowledged_at=NOW,
+        has_credentials=True,
+        credentials_saved_at=NOW,
+        csrf=payload,
+        flash=payload,
+    )
+    text = page
+    assert "<script>" not in text
+    assert "onsubmit" not in text
+    # The attribute context escapes the quote and the apostrophe.
+    assert 'value="<script>' not in text
