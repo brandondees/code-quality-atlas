@@ -36,7 +36,16 @@ from atlas_reviewer.budget import (
 )
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
-from atlas_reviewer.funding import configured_model, load_funding_sources, sources_cover
+from atlas_reviewer.funding import (
+    FundingChoice,
+    FundingSelector,
+    active_choice,
+    configured_model,
+    funding_key_values,
+    key_probe,
+    load_funding_sources,
+    sources_cover,
+)
 from atlas_reviewer.head_change import (
     DECISION_CANCEL,
     DECISION_KEEP,
@@ -824,6 +833,9 @@ class Worker:
         now: Callable[[], float] | None = None,
         spend: DailySpend | None = None,
         installation: str = "",
+        *,
+        funding: FundingSelector | None = None,
+        tenant_active: Callable[[], bool] | None = None,
     ) -> None:
         self._board = board
         self._runner = runner
@@ -844,6 +856,11 @@ class Worker:
         # when GitHub sent it.
         self._spend = spend
         self._installation = installation
+        # The operator's funding list (D94). None is today's single key:
+        # the worker does not probe and does not name a source. A tenant
+        # run never consults the list.
+        self._funding = funding
+        self._tenant_active = tenant_active or (lambda: False)
 
     def healthy(self) -> bool:
         """False once a worker thread has died. ``/health`` then fails
@@ -991,6 +1008,55 @@ class Worker:
             error=note,
         )
 
+    def _begin_funding(
+        self,
+    ) -> tuple[ReviewRun | None, contextvars.Token[FundingChoice | None] | None]:
+        """Select the source for this claim, or a run that replaces the child.
+
+        No registry is today's single key: the child starts with whatever
+        ``ATLAS_OPENROUTER_API_KEY`` the parent already holds. A tenant
+        run does not select, and a store that cannot be read fails the
+        review instead of falling through to an operator source. Every
+        source refused posts the D92 error without a child. A probe that
+        failed, or a key over its ceiling, fails the review without that
+        post."""
+        if self._funding is None:
+            return None, None
+        try:
+            tenant = self._tenant_active()
+        except InstallationStoreError as exc:
+            return ReviewRun(False, error=f"the tenant path refused: {exc}"), None
+        if tenant:
+            return None, None
+        selection = self._funding.choose()
+        if selection.choice is not None:
+            return None, active_choice.set(selection.choice)
+        if selection.refusal:
+            return (
+                ReviewRun(
+                    True,
+                    ReviewReport(
+                        (),
+                        (),
+                        "",
+                        (),
+                        (),
+                        (),
+                        "",
+                        review_error=selection.refusal,
+                        coverage_complete=False,
+                    ),
+                ),
+                None,
+            )
+        return (
+            ReviewRun(
+                False,
+                error=selection.error or "no funding source is available",
+            ),
+            None,
+        )
+
     def _execute(self, job: Job) -> None:
         fields = _fields(job.event)
         if self._spend is not None:
@@ -1023,10 +1089,17 @@ class Worker:
             "runner named",
             {**fields, "runner": event_runner_name(job.event)},
         )
+        token: contextvars.Token[FundingChoice | None] | None = None
         try:
-            run = self._runner(job.event, job.cancel)
+            skipped, token = self._begin_funding()
+            run = (
+                skipped if skipped is not None else self._runner(job.event, job.cancel)
+            )
         except Exception as exc:  # noqa: BLE001 -- a review bug must not post
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            if token is not None:
+                active_choice.reset(token)
         if job.superseded:
             self._cost_event(job, None)
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
@@ -1628,6 +1701,29 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     )
 
 
+def _funding_selector(env: Mapping[str, str]) -> FundingSelector | None:
+    """The claim-time selector, or None when the operator set no list.
+
+    ``key_probe`` is the live ``GET /key``. A test replaces it on this
+    module; nothing here calls the network until a review is claimed."""
+    sources = load_funding_sources(env)
+    if sources is None:
+        return None
+    return FundingSelector(sources, env, key_probe, configured_model(env, MODEL_ID))
+
+
+def _installation_has_credentials(
+    source: Callable[[], TenantCredentials | None],
+) -> Callable[[], bool]:
+    """Whether this claim is a tenant run. A store error propagates, and
+    the worker fails the review rather than selecting an operator source."""
+
+    def active() -> bool:
+        return source() is not None
+
+    return active
+
+
 def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str, ...]:
     """Values the service log must never write. The comment scrubber is
     separate and also covers the App key and minted tokens."""
@@ -1640,6 +1736,9 @@ def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str
         value = env.get(name, "")
         if value:
             values.append(value)
+    for key in funding_key_values(env):
+        if key not in values:
+            values.append(key)
     return tuple(values)
 
 
@@ -1837,6 +1936,7 @@ def serve(
         posting_publisher = _post_config_publisher(
             publisher, post_config_fetcher, telemetry
         )
+        selector = _funding_selector(env)
         worker = Worker(
             board,
             runner,
@@ -1846,6 +1946,8 @@ def serve(
             config.state_dir,
             spend=spend,
             installation=env.get("ATLAS_GITHUB_INSTALLATION_ID", ""),
+            funding=selector,
+            tenant_active=_installation_has_credentials(tenant_source),
         )
         server = ReviewServer(config, board, log)
         server.worker = worker
@@ -2216,7 +2318,11 @@ def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
         "ATLAS_OPENROUTER_API_KEY",
         "ATLAS_GITHUB_INSTALLATION_TOKEN",
     )
-    return tuple(value for name in names if len(value := env.get(name, "")) >= 8)
+    held = [value for name in names if len(value := env.get(name, "")) >= 8]
+    for key in funding_key_values(env):
+        if key not in held:
+            held.append(key)
+    return tuple(held)
 
 
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
