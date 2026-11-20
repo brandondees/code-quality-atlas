@@ -156,6 +156,8 @@ def test_the_checked_in_runs_pass_and_are_not_a_model_measurement():
     assert report["failures"] == []
     assert [item["id"] for item in report["findings"]] == [
         "640-m1",
+        "640-m2",
+        "640-m3",
         "661-m1",
         "661-m2",
         "661-m3",

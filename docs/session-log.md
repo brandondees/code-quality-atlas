@@ -6068,13 +6068,14 @@ such pattern to fix.
 
 ## 2026-11-20 — parity key and the offline k-of-3 gate (#713, D71)
 
-Five protocol Minors are a checked-in key under
+The seven protocol Minors are a checked-in key under
 `atlas_reviewer/fixtures/parity-key/`, scored by `score_parity` and by
-`python -m atlas_reviewer eval-parity`. The Nov 14 trial named seven.
-`640-m2` and `640-m3` are not records: at `72c56eb` the hook raises
-`PostHookMissing` and the caller records the refusal, and both D46 lines
-already name D48. Grading those spans would fail a review that reports
-nothing there. A finding is found when a verified citation sits inside
+`python -m atlas_reviewer eval-parity`. #640 is anchored on `0fe45e5e`,
+the head the Nov 14 trial reviewed. `72c56eb` is the later merged head.
+At the reviewed commit a missing hook skips the head check, and D46 does
+not say it amends D48, so `640-m2` and `640-m3` are graded records. The
+four #661 defects were re-read at `674071a9` and are still those lines.
+A finding is found when a verified citation sits inside
 its span (`SPAN_SLACK` is 0) and the severity is at least minor. A
 citation of the whole function overlaps and is partial. The pull request
 body is found by an exact citation, and a paraphrase is lost. Partial is
