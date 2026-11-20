@@ -485,9 +485,13 @@ def score_parity(
     finding was found in ``found_in_at_least`` of them. Partial counts only
     when ``partial_counts_as_found`` is set. An automatic failure is recorded
     on its run and fails the gate on its own; it does not drop that run from
-    the sample.
+    the sample. A run whose ``head_sha`` is not that pull request's
+    ``reviewed_commit`` is one of those failures. A repeated run name, a
+    repeated pull request, model, and repetition, or two models in one pull
+    request's sample is refused.
     """
     _check_rule(runs_required, found_in_at_least)
+    _check_sample(runs)
     grouped = _group(findings)
     failures: list[str] = []
     run_rows: list[dict[str, Any]] = []
@@ -550,11 +554,41 @@ def automatic_failures(
     for stop in run.limit_stops:
         reasons.append(f"limit stop: {stop}")
     ran = set(run.lenses_run)
+    already = set(run.lenses_not_run) | set(run.lenses_failed)
     for finding in findings:
-        missing = [name for name in finding.lenses if name not in ran]
-        if missing:
-            reasons.append(f"lens {missing[0]} named by the key was not run")
+        for name in finding.lenses:
+            if name not in ran and name not in already:
+                reasons.append(f"lens {name} named by the key was not run")
+    for commit in dict.fromkeys(finding.reviewed_commit for finding in findings):
+        if run.head_sha != commit:
+            reasons.append(
+                f"head_sha {run.head_sha} is not the reviewed commit {commit}"
+            )
     return tuple(dict.fromkeys(reasons))
+
+
+def _check_sample(runs: Sequence[ParityRun]) -> None:
+    """One name, one (pull request, model, repetition), and one model per pull request."""
+    seen_names: set[str] = set()
+    seen_slots: set[tuple[int, str, int]] = set()
+    models: dict[int, str] = {}
+    for run in runs:
+        if run.name in seen_names:
+            raise EvalFormatError(f"run name {run.name} is recorded more than once")
+        seen_names.add(run.name)
+        slot = (run.pr, run.model, run.repetition)
+        if slot in seen_slots:
+            raise EvalFormatError(
+                f"pull request {run.pr} records {run.model} "
+                f"repetition {run.repetition} more than once"
+            )
+        seen_slots.add(slot)
+        prior = models.get(run.pr)
+        if prior is not None and prior != run.model:
+            raise EvalFormatError(
+                f"pull request {run.pr} mixes models {prior} and {run.model}"
+            )
+        models[run.pr] = run.model
 
 
 def _check_rule(runs_required: int, found_in_at_least: int) -> None:

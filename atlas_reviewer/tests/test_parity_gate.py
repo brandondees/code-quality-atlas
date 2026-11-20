@@ -68,6 +68,8 @@ def _run(
     lenses_not_run: tuple[str, ...] = (),
     lenses_failed: tuple[str, ...] = (),
     limit_stops: tuple[str, ...] = (),
+    model: str = "recorded-fixture",
+    head_sha: str | None = None,
     false_positive_majors: int | None = None,
     lenses_clean: int | None = None,
     lenses_planned: int | None = None,
@@ -81,9 +83,9 @@ def _run(
     return ParityRun(
         f"{number}-{repetition}.json" if name is None else name,
         number,
-        "recorded-fixture",
+        model,
         repetition,
-        _SHA,
+        findings[0].reviewed_commit if head_sha is None else head_sha,
         tuple(_hit(item) for item in findings) if candidates is None else candidates,
         coverage_complete,
         _lenses(findings) if lenses_run is None else lenses_run,
@@ -405,7 +407,7 @@ def test_the_report_carries_the_comparison_fields_and_echoes_an_explicit_count()
     assert blank["runs"][0]["previous_turn_misses"] is None
 
 
-def test_one_recorded_run_is_one_run_in_the_sample_message():
+def test_the_sample_message_counts_zero_and_one_run():
     findings = _of(640)[:1]
     report = _report(findings, [])
     assert any(
@@ -414,6 +416,99 @@ def test_one_recorded_run_is_one_run_in_the_sample_message():
     report = _report(findings, [_run(findings, 1, candidates=())], runs_required=3)
     assert any("has 1 run recorded" in item for item in report["failures"])
     assert any("640-m1 found in 0 of 1" in item for item in report["failures"])
+
+
+def test_a_run_of_another_commit_fails_the_gate():
+    findings = _of(640)
+    other = "674071a91513b4774c82350fb757d9c085f10baf"
+    reviewed = findings[0].reviewed_commit
+    assert reviewed != other
+    runs = [_run(findings, n, head_sha=other) for n in (1, 2, 3)]
+    report = _report(findings, runs)
+    assert report["gate_pass"] is False
+    assert all(item["passed"] is True for item in report["findings"])
+    assert report["runs"][0]["automatic_fail"] == [
+        f"head_sha {other} is not the reviewed commit {reviewed}"
+    ]
+
+
+def test_a_run_file_named_twice_is_refused():
+    findings = _of(640)
+    one = _run(findings, 1)
+    with pytest.raises(EvalFormatError, match="640-1.json is recorded more than once"):
+        score_parity(findings, [one, one, one])
+
+
+def test_one_model_repetition_recorded_twice_is_refused():
+    findings = _of(640)
+    original = _run(findings, 1)
+    copy = _run(findings, 1, name="640-copy.json")
+    with pytest.raises(EvalFormatError, match="repetition 1 more than once"):
+        score_parity(findings, [original, copy, _run(findings, 2)])
+
+
+def test_a_sample_that_mixes_models_is_refused():
+    findings = _of(640)
+    runs = [
+        _run(findings, 1, model="opus"),
+        _run(findings, 2, model="opus"),
+        _run(findings, 3, model="haiku"),
+    ]
+    with pytest.raises(EvalFormatError, match="mixes models opus and haiku"):
+        score_parity(findings, runs)
+
+
+def test_a_key_lens_already_not_run_is_not_reported_again():
+    findings = _of(640)
+    missing = "hunting-silent-failures"
+    ran = tuple(name for name in _lenses(findings) if name != missing)
+    runs = [
+        _run(findings, 1, lenses_run=ran, lenses_not_run=(missing,)),
+        _run(findings, 2),
+        _run(findings, 3),
+    ]
+    report = _report(findings, runs)
+    assert report["runs"][0]["automatic_fail"] == [f"lens {missing} was NOT RUN"]
+
+
+def test_a_key_lens_that_failed_is_not_also_named_missing():
+    findings = _of(640)
+    missing = "hunting-silent-failures"
+    ran = tuple(name for name in _lenses(findings) if name != missing)
+    runs = [
+        _run(findings, 1, lenses_run=ran, lenses_failed=(missing,)),
+        _run(findings, 2),
+        _run(findings, 3),
+    ]
+    report = _report(findings, runs)
+    assert report["runs"][0]["automatic_fail"] == [f"lens {missing} failed"]
+
+
+def test_every_unrun_lens_a_finding_names_is_reported():
+    finding = KeyFinding(
+        "a-m1",
+        1,
+        _SHA,
+        "a plan row",
+        "minor",
+        "one",
+        (Span("a.py", 10, 10),),
+        (Span("a.py", 1, 20),),
+        (),
+        ("reviewing-test-quality", "hunting-silent-failures"),
+        ("read",),
+    )
+    report = _report(
+        [finding],
+        [_run([finding], 1, lenses_run=())],
+        runs_required=1,
+        found_in_at_least=1,
+    )
+    named = [item for item in report["failures"] if "named by the key" in item]
+    assert named == [
+        "1-1.json: lens reviewing-test-quality named by the key was not run",
+        "1-1.json: lens hunting-silent-failures named by the key was not run",
+    ]
 
 
 def test_a_nonsense_pass_rule_is_refused():
