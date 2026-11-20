@@ -20,10 +20,12 @@ from atlas_reviewer.funding import (
     FundingSource,
     configured_model,
     funding_byok,
+    key_probe,
     load_funding_sources,
     noted_funding_source,
     sources_cover,
 )
+from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.openrouter import (
     _MODEL_ID as ROUTE_MODEL_ID,
 )
@@ -525,3 +527,56 @@ def test_a_choice_repr_does_not_contain_the_key():
     )
     assert "sk-or-v1-subs-a-secret" not in repr(choice)
     assert "sk-or-v1-subs-a-secret" not in repr(FundingSelection(choice=choice))
+
+
+def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypatch):
+    """The live probe's error is the status and the URL. The response
+    body and the bearer token stay out of it. A 500 is a boundary
+    error, not a key refusal. Kills classifying every non-200 as out of
+    credit, and putting the body on the error."""
+    secret = "sk-or-v1-probe-secret"
+    seen: dict[str, object] = {}
+
+    class Transport:
+        def __init__(self, *_args, **_kwargs) -> None:
+            return None
+
+        def request(self, method, url, headers, body, timeout_s):
+            seen["method"] = method
+            seen["url"] = url
+            seen["authorization"] = headers["Authorization"]
+            status = seen.get("status", 200)
+            return HttpResponse(status, {}, seen.get("payload", b"{}"))
+
+    monkeypatch.setattr("atlas_reviewer.funding.UrllibTransport", Transport)
+    payload = json.dumps(
+        {
+            "data": {
+                "limit": 50,
+                "limit_remaining": 40,
+                "usage": 10,
+                "include_byok_in_limit": True,
+            }
+        }
+    ).encode()
+    seen["payload"] = payload
+    status = key_probe(secret)
+    assert status.limit_remaining == Decimal(40)
+    assert seen["method"] == "GET"
+    assert seen["url"] == "https://openrouter.ai/api/v1/key"
+    assert seen["authorization"] == f"Bearer {secret}"
+    seen["status"] = 401
+    seen["payload"] = b'{"error":"the body names the key sk-or-v1-probe-secret"}'
+    with pytest.raises(KeyRefusedError) as refused:
+        key_probe(secret)
+    assert refused.value.review_error == KEY_AUTH_REFUSED
+    assert secret not in str(refused.value)
+    assert "the body" not in str(refused.value)
+    seen["status"] = 402
+    with pytest.raises(KeyRefusedError) as dry:
+        key_probe(secret)
+    assert dry.value.review_error == KEY_OUT_OF_CREDIT
+    seen["status"] = 500
+    with pytest.raises(BoundaryError) as failed:
+        key_probe(secret)
+    assert not isinstance(failed.value, KeyRefusedError)
