@@ -122,7 +122,9 @@ def _credentials_section(
         )
     else:
         status = "<p>No key is stored for this installation.</p>"
-    return f'<section id="credentials-state">{status}</section>'
+    return (
+        f'<section id="credentials-state"><h2>Stored credentials</h2>{status}</section>'
+    )
 
 
 def _consent_section(consent_acknowledged_at: datetime | None, csrf: str) -> str:
@@ -165,7 +167,7 @@ def _credentials_form_section(
 ) -> str:
     heading = "Rotate the key" if has_credentials else "Add credentials"
     if consent_acknowledged_at is None:
-        # The form stays hidden until the consent below is
+        # The form stays hidden until the consent above is
         # acknowledged: a key pasted into a form whose submit the
         # server would refuse is a dropped secret and a re-typed one.
         return """<section id="credentials-form">

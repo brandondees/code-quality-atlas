@@ -58,6 +58,24 @@ def test_the_error_page_carries_its_message_and_a_way_back() -> None:
     assert 'href="/"' in page
 
 
+def test_both_sections_carry_their_headings_in_both_states() -> None:
+    """The stored-credentials and consent headings render in both the
+    unset and stored states, so removing either heading fails in either
+    state (the review's surviving-mutant case)."""
+    for page in (
+        _render(),
+        _render(
+            has_credentials=True,
+            credentials_saved_at=NOW,
+            base_url="https://api.example.com/v1",
+            model="vendor/good-model",
+            consent_acknowledged_at=NOW,
+        ),
+    ):
+        assert "<h2>Stored credentials</h2>" in page
+        assert "<h2>Data-policy consent</h2>" in page
+
+
 def test_the_unset_installation_renders_the_consent_form_and_no_credentials() -> None:
     page = _render()
     assert "No key is stored" in page
