@@ -61,8 +61,14 @@ def test_a_malformed_port_or_label_refuses_under_any_resolver(url: str) -> None:
     no message."""
     from .harness import default_resolve
 
-    with pytest.raises(EgressRefused):
+    with pytest.raises(EgressRefused) as excinfo:
         checks.validate_endpoint(url, resolve=default_resolve)
+    message = str(excinfo.value)
+    # The URL's own text — its host and its port — is in no message.
+    host = url.split("/")[2].rsplit(":", 1)[0]
+    assert host not in message
+    assert "99999" not in message
+    assert "abc" not in message
 
 
 def test_the_real_egress_check_passes_a_public_numeric_host() -> None:

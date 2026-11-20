@@ -131,8 +131,12 @@ def test_one_undecodable_byte_does_not_blind_the_page(tmp_path: Path) -> None:
     path = tmp_path / "state" / "settings-audit.jsonl"
     with path.open("ab") as fh:
         fh.write(b"\xff\xfe\n")
-    log.record("store-credentials", "42", 11)
+    log.record("store-credentials", "43", 11)
+    # The good line after the bad byte is read, and a different
+    # installation's line is reachable too — one bad byte must not blind
+    # the page to every installation's record.
     assert log.last_credentials_at("42") is not None
+    assert log.last_credentials_at("43") is not None
 
 
 def test_corrupt_or_mistyped_entries_are_skipped_on_read_back(
@@ -171,10 +175,15 @@ def test_corrupt_or_mistyped_entries_are_skipped_on_read_back(
 def test_the_audit_file_is_bounded_and_keeps_the_newest_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Past the byte cap the oldest half is rotated away on the next
-    write: the file stays within its bound (plus the one write that
-    triggered the rotation), the newest entries survive, and the
-    read-back still answers."""
+    """Past the byte cap the oldest half is rotated away — repeatedly,
+    until the size is at or under the cap, which the hard cap pins
+    exactly (`st_size <= cap`, not cap-plus-one-write) — the newest
+    entries survive, the read-back still answers, and the rotated file
+    keeps its 0600 mode (kills the mode-0644 mutant the write_bytes
+    temp carried)."""
+    import os
+    import stat as stat_module
+
     from atlas_settings import audit as audit_module
 
     monkeypatch.setattr(audit_module, "_MAX_AUDIT_BYTES", 400)
@@ -182,11 +191,45 @@ def test_the_audit_file_is_bounded_and_keeps_the_newest_entries(
     for n in range(12):
         log.record("store-credentials", str(40 + n), 11)
     path = tmp_path / "state" / "settings-audit.jsonl"
-    assert path.stat().st_size <= 400 + 200
+    assert path.stat().st_size <= 400
+    mode = stat_module.S_IMODE(os.stat(path).st_mode)
+    assert mode == 0o600
     # The newest entry survived the rotation and still answers.
     assert log.last_credentials_at("51") is not None
     # The oldest entries are gone.
     assert log.last_credentials_at("40") is None
+
+
+def test_a_single_line_over_the_cap_is_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One line alone longer than the cap cannot be halved away: it is
+    dropped whole, and the file stays under the cap."""
+    from atlas_settings import audit as audit_module
+
+    monkeypatch.setattr(audit_module, "_MAX_AUDIT_BYTES", 100)
+    log = _log(tmp_path)
+    path = tmp_path / "state" / "settings-audit.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # One line alone over the cap, so the halving keeps a remainder that
+    # is itself one line over the cap and the single-line drop fires.
+    overlong = (
+        b'{"at": "2026-11-19T12:00:00+00:00", "action": "store-credentials", '
+        b'"installation_id": "42", "github_user_id": 11, "pad": "'
+        + b"y" * 250
+        + b'"}\n'
+    )
+    path.write_bytes(overlong)
+    # A cap smaller than one record line is the degenerate case: every
+    # record's own line is over it, so each rotation drops the line that
+    # triggered it — the hard cap is the stronger claim, the audit never
+    # errors, and nothing unreadable is left behind.
+    log.record("store-credentials", "43", 11)
+    assert path.stat().st_size <= 100
+    assert log.last_credentials_at("43") is None
+    log.record("store-credentials", "44", 11)
+    assert path.stat().st_size <= 100
+    assert log.last_credentials_at("44") is None
 
 
 def test_every_action_name_is_listed() -> None:
