@@ -46,9 +46,14 @@ def test_a_forged_or_truncated_cookie_is_an_expired_session() -> None:
     assert store.get(sid) is None  # signature dropped
     assert store.get(sid + "." + "0" * 64) is None  # forged signature
     assert store.get("garbage") is None
-    # A signature under a different key is a forgery, not a session.
+    # A signature under a different key is a forgery, not a session:
+    # the same session id, signed under the other key, must be refused
+    # by the real store while its own cookie still answers (kills the
+    # ignores-the-key mutant — an unknown-sid store would pass it).
     other = SessionStore(OTHER_KEY, clock.now)
-    assert other.get(value) is None
+    forged = other.cookie_value(session)
+    assert store.get(forged) is None
+    assert store.get(value) is session
 
 
 def test_a_signed_in_session_expires_at_its_idle_ttl() -> None:
@@ -136,7 +141,7 @@ def test_at_the_cap_a_new_sign_in_evicts_the_oldest_row(
     clock = FakeClock()
     store = _store(clock)
     first_session, first_cookie = store.start_login("s0", "v0")
-    cookies = [store.start_login(f"s{n}", "v{n}")[1] for n in range(1, 4)]
+    cookies = [store.start_login(f"s{n}", f"v{n}")[1] for n in range(1, 4)]
     # The 5th sign-in succeeds: the oldest row goes, nobody is refused.
     _session, newest_cookie = store.start_login("s4", "v4")
     assert store.get(first_cookie) is None
@@ -160,7 +165,7 @@ def test_the_signed_in_table_evicts_its_least_recently_used_row(
     store = _store(clock)
     signed_cookies = []
     for n in range(3):
-        session, _cookie = store.start_login(f"s{n}", "v{n}")
+        session, _cookie = store.start_login(f"s{n}", f"v{n}")
         _signed, signed_value = store.upgrade(session, 100 + n, f"u{n}")
         signed_cookies.append(signed_value)
     clock.advance(10)
@@ -318,8 +323,6 @@ def test_the_cleared_cookie_ends_the_session_in_the_browser() -> None:
 
 
 def test_an_empty_signing_key_refuses() -> None:
-    import pytest
-
     from atlas_settings.sessions import SessionError
 
     with pytest.raises(SessionError):
@@ -475,3 +478,54 @@ def test_the_signed_in_eviction_is_least_recently_used(
     assert store.get(v1) is not None  # refreshed: it stays
     assert store.get(v2) is None  # the least recently used goes
     assert store.get(v3) is not None
+
+
+def test_a_drifted_counter_is_a_no_op_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If a counter ever drifts above the real row count, the eviction's
+    min() finds nothing and the drift is a no-op — the sign-in and the
+    upgrade are both admitted, nobody is refused, nothing crashes (the
+    bot's hardening ask; kills the unguarded-min mutant)."""
+    from atlas_settings import sessions as sessions_module
+
+    monkeypatch.setattr(sessions_module, "_MAX_PRE_LOGIN_SESSIONS", 2)
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 2)
+    clock = FakeClock()
+    store = _store(clock)
+    store._pre_login_count = 5  # drifted: no pre-login rows exist
+    store._signed_in_count = 5  # drifted: no signed-in rows exist
+    session, _cookie = store.start_login("s", "v")
+    _signed, signed_value = store.upgrade(session, 11, "octo-admin")
+    assert store.get(signed_value) is not None
+
+
+def test_a_refused_upgrade_of_a_signed_in_session_destroys_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """upgrade() validates before it mutates: handing it an already
+    signed-in session raises and leaves everything untouched — the live
+    signed-in row still answers get(), both counters are unchanged, and
+    a later upgrade under a patched cap of 1 does not crash on an empty
+    eviction set (kills the pop-before-validate mutant, whose refused
+    call deleted the live row and drifted the count)."""
+    from atlas_settings import sessions as sessions_module
+    from atlas_settings.sessions import SessionError
+
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 2)
+    clock = FakeClock()
+    store = _store(clock)
+    pre_session, _pre_cookie = store.start_login("s", "v")
+    signed, signed_cookie = store.upgrade(pre_session, 11, "octo-admin")
+    assert signed.signed_in
+    with pytest.raises(SessionError, match="already consumed"):
+        store.upgrade(signed, 12, "someone-else")
+    # Nothing moved: the live session still answers, the counters read
+    # the table.
+    assert store.get(signed_cookie) is signed
+    assert store._signed_in_count == 1
+    assert store._pre_login_count == 0
+    # A later sign-in and upgrade succeed without any drift crash.
+    pre2, _c = store.start_login("s2", "v2")
+    _signed2, _v2 = store.upgrade(pre2, 12, "someone-else")
+    assert store.get(signed_cookie) is signed
