@@ -23,13 +23,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from atlas_reviewer.http import UrllibTransport, safe_url
 from atlas_reviewer.ports import (
     KEY_AUTH_REFUSED,
     KEY_OUT_OF_CREDIT,
     BoundaryError,
     KeyRefusedError,
 )
-from atlas_reviewer.pricing import KeyStatus, PricingUnknownError
+from atlas_reviewer.pricing import KeyStatus, PricingUnknownError, parse_key_status
 
 ENV_FUNDING_SOURCES = "ATLAS_FUNDING_SOURCES"
 # The chosen source's name and BYOK flag, handed to the one child that
@@ -194,6 +195,8 @@ def noted_funding_source(env: Mapping[str, str] | None = None) -> str:
     return raw
 
 
+KEY_URL = "https://openrouter.ai/api/v1/key"
+_PROBE_TIMEOUT_S = 15.0
 _REFUSAL_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
 
 
@@ -252,6 +255,72 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field")
         data[key] = value
     return data
+
+
+def accepted_source_name(value: object) -> str | None:
+    """A source name, ``""`` when the field is present and blank, None
+    when the value cannot be a source name."""
+    if value == "":
+        return ""
+    if isinstance(value, str) and _NAME.fullmatch(value) is not None:
+        return value
+    return None
+
+
+def funding_key_values(env: Mapping[str, str]) -> tuple[str, ...]:
+    """The funding keys a log has to scrub. A value shorter than 8
+    characters is left alone, the same bar the other secret scrubbing
+    uses. An unreadable document yields nothing: boot already refused it."""
+    try:
+        sources = load_funding_sources(env)
+    except ValueError:
+        return ()
+    if sources is None:
+        return ()
+    values: list[str] = []
+    for source in sources:
+        key = env.get(source.key_env, "")
+        if len(key) >= 8 and key not in values:
+            values.append(key)
+    return tuple(values)
+
+
+def key_probe(key: str) -> KeyStatus:
+    """``GET /api/v1/key`` for one OpenRouter key.
+
+    A 401 or 402 is a key refusal. Anything else that is not a 200 is a
+    boundary error, so the caller can try another source without
+    treating a transient failure as a dry key. The error text is the
+    status and the URL, never the body and never the key. The transport
+    does not follow redirects, so the bearer token stays on this host.
+    """
+    transport = UrllibTransport()
+    response = transport.request(
+        "GET",
+        KEY_URL,
+        {
+            "User-Agent": "code-quality-atlas-reviewer",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+        None,
+        _PROBE_TIMEOUT_S,
+    )
+    where = safe_url(KEY_URL)
+    message = f"OpenRouter HTTP {response.status} for {where}"
+    if response.status == 401:
+        raise KeyRefusedError(message, review_error=KEY_AUTH_REFUSED)
+    if response.status == 402:
+        raise KeyRefusedError(message, review_error=KEY_OUT_OF_CREDIT)
+    if response.status != 200:
+        raise BoundaryError(message)
+    try:
+        data = json.loads(response.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise PricingUnknownError(f"non-JSON response from {where}") from None
+    if not isinstance(data, dict):
+        raise PricingUnknownError(f"non-object response from {where}")
+    return parse_key_status(data)
 
 
 class FundingSelector:
