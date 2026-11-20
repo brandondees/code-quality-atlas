@@ -6084,9 +6084,10 @@ line, and it does not count. A finding passes when it was found in at
 least 2 of a 3-run sample. A missed key finding fails. An extra does not.
 A selected lens not run or failed, coverage not complete, a limit stop,
 or a lens the key names that the run did not select fails that run even
-when every finding was found. The report carries the comparison fields
-null when a run omits them, so a later Sonnet-versus-Haiku run can drop
-in without a report change. That comparison was not run. No model was
+when every finding was found. A run of another commit fails on its own,
+and a repeated run or a mix of models is refused. The report carries
+the comparison fields null when a run omits them, so a later
+Sonnet-versus-Haiku run can drop in without a report change. That comparison was not run. No model was
 called, and no Fly app, secret, or deploy changed. The six files under
 `atlas_reviewer/fixtures/parity-offline/` are scorer fixtures that find
 every graded finding; they are not a measurement. Spans were read at the
