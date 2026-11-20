@@ -924,16 +924,22 @@ def test_a_403_is_a_plain_per_call_error_and_never_a_key_refusal():
 # --- $3 reservation ----------------------------------------------------------
 
 
-def test_call_whose_worst_case_could_pass_three_dollars_is_refused():
+def test_a_timeout_whose_hold_would_push_the_retry_past_three_dollars_is_not_retried():
+    """A written request that never answered keeps its reservation (D58).
+    On a prompt whose one-call worst case is already over $1.50, that
+    hold makes the retry pass $3, so the retry is refused before it is
+    sent. A non-200 answer does not do this: it settles at $0 (issue
+    #797). Kills the mutant that releases a timeout at $0, which would
+    send the retry."""
     big = Prompt("s", "x" * 170_000)
     terms = parse_model_terms(catalog(), MODEL_ID)
     worst = worst_case_usd(
         input_token_bound(big.system + big.user), terms, CallLimits()
     )
     assert Decimal("1.5") < worst < Decimal(3)
-    fake = OpenRouterFake(reply({}, status=503), reply(completion()))
+    fake = OpenRouterFake(BoundaryError("timed out"), reply(completion()))
     p = provider(fake)
-    with pytest.raises(BoundaryError, match="HTTP 503"):
+    with pytest.raises(BoundaryError, match="timed out"):
         p.complete(big)
     assert len(fake.chat_requests()) == 1
     assert any(
@@ -1057,6 +1063,8 @@ def test_a_reasoning_count_outside_the_completion_count_keeps_the_reservation():
     p = provider(fake)
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():
@@ -1068,15 +1076,39 @@ def test_reservation_uses_the_highest_price_tier_and_cache_writes():
     assert worst == Decimal("0.01") + Decimal("0.54")
 
 
-def test_failed_attempts_stay_counted_at_their_full_reservation():
+def test_a_call_with_no_reported_actual_stays_at_its_reservation():
+    """A served call with no actual and a timeout both keep the
+    reservation on the in-review cap (D43, D58 item 5). Only the timeout
+    is a hold: the served call is a bill at its reservation (D93).
+    Kills a release that drops the unknown-cost case, and a settle that
+    marks every actual-less call held."""
     budget = ReviewBudget(CallLimits())
-    record = budget.reserve(Decimal("1.40"))
-    budget.settle(record, "HTTP 503 (retryable)")
-    budget.reserve(Decimal("1.40"))
+    served = budget.reserve(Decimal("1.40"))
+    budget.settle(served, "ok")
+    assert budget.held_usd() == Decimal(0)
+    assert budget.billed_usd() == Decimal("1.40")
+    budget.hold(budget.reserve(Decimal("1.40")), "transport error: timed out")
     with pytest.raises(BudgetRefusedError, match="over \\$3.00"):
         budget.reserve(Decimal("0.21"))
     budget.reserve(Decimal("0.20"))
     assert budget.committed_usd() == Decimal("3.00")
+    assert budget.held_usd() == Decimal("1.40")
+    assert budget.billed_usd() == Decimal("1.40")
+
+
+def test_a_released_non_200_does_not_count_toward_the_cap():
+    """Issue #797: `release` settles the call at $0, so refused answers
+    do not fill the review's dollar cap. Two refusals at $1.40 plus a
+    third reservation of $1.40 pass $3 if the refusals were still held,
+    and fit when they settled at $0. Kills `release` implemented as
+    `settle` without an actual."""
+    budget = ReviewBudget(CallLimits())
+    for _ in range(2):
+        record = budget.reserve(Decimal("1.40"))
+        ReviewBudget.release(record, "HTTP 402")
+    budget.reserve(Decimal("1.40"))
+    assert budget.committed_usd() == Decimal("1.40")
+    assert budget.held_usd() == Decimal(0)
 
 
 def test_a_one_shot_settle_above_its_reservation_is_flagged():
@@ -1111,17 +1143,64 @@ def test_settled_actuals_replace_reservations():
     assert budget.committed_usd() == Decimal("3.00")
 
 
-def test_key_remaining_credit_caps_retries_too():
+def test_an_oversized_response_is_a_bill_not_a_hold():
+    """`ResponseTooLargeError` is raised after the body arrived
+    (`http._read`). On the one-shot path that is a served call, so the
+    reservation is the bill and not a hold (D43). Kills catching it in
+    the transport `hold` branch (round-2 review of #799)."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+
     fake = OpenRouterFake(
-        reply({}, status=503),
+        *[ResponseTooLargeError("response exceeded 50 bytes") for _ in range(5)]
+    )
+    p = provider(fake)
+    with pytest.raises(ResponseTooLargeError):
+        p.complete(SMALL)
+    assert p.budget.calls
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
+    assert p.budget.billed_usd() > 0
+    assert all(record.held is False for record in p.budget.calls)
+
+
+def test_a_timeout_keeps_its_reservation_and_the_key_credit_caps_the_retry():
+    """A request that was written and never answered keeps its reservation
+    (D58 item 5). The key's remaining credit still counts that hold, so
+    the retry is refused before it is sent. Kills the mutant that
+    releases a timeout at $0, which would send the retry."""
+    fake = OpenRouterFake(
+        BoundaryError("timed out"),
         reply(completion()),
         key=reply(key_status(remaining=0.60)),
     )
     p = provider(fake)
-    with pytest.raises(BoundaryError, match="HTTP 503"):
+    with pytest.raises(BoundaryError, match="timed out"):
         p.complete(SMALL)
     assert len(fake.chat_requests()) == 1
     assert any("over $0.60" in line for line in p.usage_lines())
+    assert p.budget.held_usd() == p.budget.calls[0].reserved_usd
+    assert p.budget.committed_usd() == p.budget.held_usd()
+
+
+@pytest.mark.parametrize("status", [402, 429])
+def test_a_refused_answer_settles_at_zero(status):
+    """Issue #797: a non-200 answer is not spend. An all-402 stub stops
+    after one send (a key refusal is not retried); an all-429 stub uses
+    the call cap. Both leave committed and held at $0, so the picker
+    spend the review seeds is (n, 0, 0). Kills `settle` without an actual
+    on the terminal branch (402) and on the retryable branch (429), each
+    of which booked the refusal at its reservation."""
+    from atlas_reviewer.cli import _picker_spend
+
+    fake = OpenRouterFake(*[reply({}, status=status) for _ in range(5)])
+    p = provider(fake)
+    with pytest.raises(BoundaryError):
+        p.complete(SMALL)
+    n = 1 if status == 402 else 3
+    assert len(p.budget.calls) == n
+    assert p.budget.committed_usd() == Decimal(0)
+    assert p.budget.held_usd() == Decimal(0)
+    assert _picker_spend(p) == (n, Decimal(0), Decimal(0))
 
 
 def test_worst_case_over_the_key_remaining_credit_is_never_sent():
@@ -1339,6 +1418,8 @@ def test_a_byok_call_without_an_upstream_cost_keeps_its_reservation():
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
     assert "BYOK upstream cost not reported" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_an_unreadable_upstream_cost_keeps_the_reservation():
@@ -1351,6 +1432,8 @@ def test_an_unreadable_upstream_cost_keeps_the_reservation():
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_an_accepted_call_with_no_upstream_field_settles_usage_cost():
@@ -1656,9 +1739,16 @@ def test_cost_is_computed_from_catalog_rates_when_not_reported():
     "usage", [{}, {"prompt_tokens": -1_000_000, "completion_tokens": 5}]
 )
 def test_missing_usage_keeps_the_reservation_as_spent(usage):
+    """A 200 whose body has no usable usage was served. The reservation
+    is the bill, not a hold, so the figure the daily ledger records is
+    the reservation (round-1 review of #799). Kills settling that call
+    with hold set."""
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
+    assert p.budget.billed_usd() > 0
 
 
 @pytest.mark.parametrize(

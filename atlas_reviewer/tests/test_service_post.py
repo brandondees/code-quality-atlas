@@ -1529,7 +1529,7 @@ def test_a_delta_post_cites_the_review_it_builds_on_and_shows_the_carry():
         "note",
         (),
         (),
-        ("Model calls: 4; committed: $0.12.",),
+        ("Model calls: 4; settled: $0.12; held at reservation: $0.",),
         "COMMENT",
         findings=("**P1** [carried, blocker] calc.py:4 (lens): rounds per line",),
         resolved=(
@@ -1570,7 +1570,7 @@ def test_a_delta_post_lists_the_lens_decisions():
         "note",
         (),
         (),
-        ("Model calls: 2; committed: $0.04.",),
+        ("Model calls: 2; settled: $0.04; held at reservation: $0.",),
         "COMMENT",
         lens_decisions=(
             "`sweeping-for-security`: re-ran -- the delta touches the code",

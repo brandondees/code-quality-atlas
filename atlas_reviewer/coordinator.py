@@ -98,6 +98,7 @@ from atlas_reviewer.attestation import (
 )
 from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
+from atlas_reviewer.budget import valid_cost
 from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
 from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
 from atlas_reviewer.delta import (
@@ -137,6 +138,7 @@ from atlas_reviewer.domain import (
 from atlas_reviewer.head_change import (
     FIELD_CALLS,
     FIELD_COMMITTED_USD,
+    FIELD_HELD_USD,
     FIELD_LENS,
     FIELD_LENSES_DONE,
     FIELD_LENSES_TOTAL,
@@ -157,16 +159,17 @@ from atlas_reviewer.lens_loop import (
     LensJob,
     LensModel,
     Limits,
+    PickerSpend,
     Spend,
     TurnRequest,
     UserText,
     _refusal_cause,
     _reserve_call,
     _Reserved,
-    _valid_cost,
     finding_contract,
     retry_reasons,
     run_attempt,
+    spend_for_picker,
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.limit_stop import LimitHit
@@ -410,6 +413,14 @@ class AgenticReview:
     the incoming changes, never a fixed path-intersection rule; it is
     recorded here, in the telemetry and in the round record, and
     summarized in the post. Empty on a full review."""
+    billed_usd: str = "0"
+    """Known bills: the cost line's settled figure and the daily ledger's
+    amount (D93). A served call with no usable cost is included at its
+    reservation. $0 when every finished call was a refusal or a hold."""
+    held_usd: str = "0"
+    """Reservations kept because the request was written and never
+    answered (D93). Counted in `committed_usd` for the in-review
+    ceiling. Not a bill."""
     review_error: str = ""
     """The fixed cause a refused key halted the review with (D92):
     `model key out of credit` or `model key refused`, the spend's own
@@ -578,6 +589,8 @@ def synthesize(
         rerank_note=rerank_note,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
         endpoint_class=endpoint_class,
+        billed_usd="0" if spend is None else str(spend.billed_usd()),
+        held_usd="0" if spend is None else str(spend.held_usd),
         review_error="" if spend is None else spend.halted_cause,
     )
 
@@ -795,7 +808,7 @@ def review_lenses(
     contract: str | None = None,
     task_socket: str = SOCKET_PATH,
     model_for: Callable[[], LensModel] | None = None,
-    picker_spend: tuple[int, Decimal] = (0, Decimal(0)),
+    picker_spend: PickerSpend = (0, Decimal(0)),
     trace: ReviewTrace | None = None,
     evidence_digest: str | None = None,
     delta: DeltaScope | None = None,
@@ -902,13 +915,7 @@ def review_lenses(
         # draft and the posted comment name the fixed cause instead of
         # running a review that fails call after call into an
         # incomplete-looking stop.
-        spend = Spend(
-            derived,
-            picker_spend[0],
-            picker_spend[1],
-            derivation=derivation,
-            settled_usd=picker_spend[1],
-        )
+        spend = spend_for_picker(derived, picker_spend, derivation=derivation)
         spend.halt(refusal)
         stopped = tuple(
             LensResult(
@@ -1024,7 +1031,7 @@ def _review_lenses(
     model_for: Callable[[], LensModel] | None,
     resolved: Limits,
     derivation: Derivation,
-    picker_spend: tuple[int, Decimal],
+    picker_spend: PickerSpend,
     evidence_digest: str | None,
     delta: DeltaScope | None = None,
     path_ranks: PathRanks | None = None,
@@ -1042,16 +1049,11 @@ def _review_lenses(
     fence_nonce = nonce()
     # `resolved` is D68's derived review-wide limits: the Spend and the
     # review deadline run on them, and a limit stop names their derivation.
-    # The picker's committed dollars are settled spend -- real dollars, not
-    # a worst case waiting to come down -- so the in-flight backpressure
-    # does not wait on them.
-    spend = Spend(
-        resolved,
-        picker_spend[0],
-        picker_spend[1],
-        derivation=derivation,
-        settled_usd=picker_spend[1],
-    )
+    # The picker's calls are finished, so the in-flight backpressure does
+    # not wait on them. A reservation held because the request was
+    # written and never answered stays out of the billed figure (D93).
+    # A served call the picker could not price is a bill.
+    spend = spend_for_picker(resolved, picker_spend, derivation=derivation)
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []
@@ -1428,6 +1430,10 @@ def _record_progress(
         reading = set(_still_unread([ran.result for ran in runs], changed))
     text = cap_reading(sorted(reading))
     done = {ran.result.lens for ran in runs if ran.result.outcome is not None}
+    # One sample. `hold` writes settled and then held; reading them
+    # separately can book the hold as a bill in a crash backfill
+    # (round-1 review of #799).
+    committed, settled, held = spend.snapshot()
     telemetry.record(
         PROGRESS_PHASE,
         step,
@@ -1436,8 +1442,9 @@ def _record_progress(
             FIELD_LENSES_DONE: len(done),
             FIELD_LENSES_TOTAL: len(names),
             FIELD_CALLS: spend.calls,
-            FIELD_COMMITTED_USD: str(spend.committed_usd),
-            FIELD_SETTLED_USD: str(spend.settled_usd),
+            FIELD_COMMITTED_USD: str(committed),
+            FIELD_SETTLED_USD: str(settled),
+            FIELD_HELD_USD: str(held),
             FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
             FIELD_READING: text,
         },
@@ -1887,7 +1894,8 @@ def _reassess_call(
             Attestation.UNACKNOWLEDGED, frozenset({Cause.MODEL_ERROR}), detail=str(exc)
         )
     except TransportError as exc:
-        spend.settle(worst, None)
+        # Written and never answered: a hold, not a bill (D58, D93).
+        spend.hold(worst)
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
             frozenset({Cause.TRANSPORT_ERROR}),
@@ -1901,7 +1909,7 @@ def _reassess_call(
         # failed call, released at $0. Transport failures keep their
         # reservation on the branch above (D58 item 5).
         reported = exc.reported_cost
-        if reported is not None and _valid_cost(reported):
+        if reported is not None and valid_cost(reported):
             spend.settle(worst, reported)
         elif reported is not None:
             spend.settle(worst, None)
@@ -2313,8 +2321,9 @@ def _decision_call(
         raise
     except TransportError:
         # A written request may still have been billed (D58 item 5,
-        # restored by D92's fix round): the reservation is kept as spent.
-        spend.settle(worst, None)
+        # restored by D92's fix round): the reservation is kept, and it
+        # is a hold, not a bill (D93).
+        spend.hold(worst)
         raise
     except BoundaryError as exc:
         # The settle reads what the exception carries (D92's fix round):
@@ -2322,7 +2331,7 @@ def _decision_call(
         # served response with no usable usage keeps the reservation
         # (D43), and anything that never served a response releases at $0.
         reported = exc.reported_cost
-        if reported is not None and _valid_cost(reported):
+        if reported is not None and valid_cost(reported):
             spend.settle(worst, reported)
         elif reported is not None:
             spend.settle(worst, None)
@@ -2584,8 +2593,9 @@ def _carry_call(
         raise
     except TransportError:
         # A written request may still have been billed (D58 item 5,
-        # restored by D92's fix round): the reservation is kept as spent.
-        spend.settle(worst, None)
+        # restored by D92's fix round): the reservation is kept, and it
+        # is a hold, not a bill (D93).
+        spend.hold(worst)
         raise
     except BoundaryError as exc:
         # The settle reads what the exception carries (D92's fix round):
@@ -2593,7 +2603,7 @@ def _carry_call(
         # served response with no usable usage keeps the reservation
         # (D43), and anything that never served a response releases at $0.
         reported = exc.reported_cost
-        if reported is not None and _valid_cost(reported):
+        if reported is not None and valid_cost(reported):
             spend.settle(worst, reported)
         elif reported is not None:
             spend.settle(worst, None)
@@ -2721,6 +2731,8 @@ def _compose_carry(
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
         committed_usd=str(spend.committed_usd),
+        billed_usd=str(spend.billed_usd()),
+        held_usd=str(spend.held_usd),
         # The carry call settles after `synthesize` captured the overruns,
         # so the tripwire line is refreshed here with it (round-3 review
         # of #757) -- an overrun on a post-synthesis settle is counted in
@@ -3019,6 +3031,8 @@ def _with_reused_reassessment(
             ),
             model_calls=spend.calls,
             committed_usd=str(spend.committed_usd),
+            billed_usd=str(spend.billed_usd()),
+            held_usd=str(spend.held_usd),
             # The re-assessment call settles after `synthesize` captured
             # the overruns, so the tripwire line is refreshed here with it
             # (round-3 review of #757), the way the totals are.
@@ -3626,7 +3640,10 @@ def render_draft(
     ]
     lines += [
         "",
-        f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
+        (
+            f"Model calls: {review.model_calls}; settled: ${review.billed_usd}; "
+            f"held at reservation: ${review.held_usd}."
+        ),
     ]
     served = _ENDPOINT_SERVED.get(review.endpoint_class)
     if served:

@@ -6097,3 +6097,24 @@ reviewed commits. `661-m2` is `rounds.py` 202–209; the trial's
 `coordinator.py` range does not format the count. D71 records the
 anchors, the grade, and the tests. The stack is the key loader, the
 grade, the in-memory gate, then this command.
+
+## 2026-11-20 — refused calls settle at $0 (#797, D93)
+
+A non-200 answer on the one-shot client, the picker and the tenant
+`complete` path was settled with no actual, so the reservation was what
+got booked. The picker seeded that figure into the review, the cost line
+printed it as committed, and the daily ledger recorded it, including a
+crash backfill of the in-flight-inclusive committed figure. A key that
+refused every call reported about $25 committed, and the daily ledger
+counted that figure. `refused_bill` is the lens loop's dollar rule: a
+reported cost, or $0. `ReviewBudget.release` settles `Decimal(0)`. Only
+the lens loop's `settle_failure` and `fail_and_halt` call `refused_bill`.
+A timeout or a
+transport failure before a response stays held at the reservation
+(D58) and is not a bill. A served response that could not be priced,
+including a 200 with no usage, counts at its reservation (D43) and the
+daily ledger records it. An oversized body is that same served case on the one-shot and picker paths, not a hold. The cost line reports settled and held
+separately. The daily ledger records the settled bill. The in-review
+ceiling still counts a hold. The cost event's `committed_usd` stays
+the ceiling figure; the bill is `billed_usd`. D93 records the choice.
+No model was called, and no Fly app, secret, or deploy changed.

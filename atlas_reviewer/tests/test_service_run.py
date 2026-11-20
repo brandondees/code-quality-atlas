@@ -936,7 +936,7 @@ def test_an_agentic_draft_reports_selection_stops_and_cost():
         "- L1 tracing-correctness-and-invariants: **clean**; body sha256 ab12\n"
         "- L2 other-lens: **failed**; attestation: not_delivered\n"
         "\n"
-        "Model calls: 12; committed: $0.34.\n"
+        "Model calls: 12; settled: $0.34; held at reservation: $0.\n"
         "the derived reservation was clamped to the $10 ceiling\n"
     )
     report = summarize_draft(draft)
@@ -955,7 +955,9 @@ def test_an_agentic_draft_reports_selection_stops_and_cost():
     assert report.limit_stops[-1] == (
         "the derived reservation was clamped to the $10 ceiling"
     )
-    assert report.cost_lines == ("Model calls: 12; committed: $0.34.",)
+    assert report.cost_lines == (
+        "Model calls: 12; settled: $0.34; held at reservation: $0.",
+    )
     assert report.recommended_event == "COMMENT"
     assert report.findings == ()
 
@@ -1350,7 +1352,7 @@ def _delta_draft() -> str:
         "\n"
         "- L1 tracing lens: **clean**; body sha256 ab12\n"
         "\n"
-        "Model calls: 4; committed: $0.12.\n"
+        "Model calls: 4; settled: $0.12; held at reservation: $0.\n"
     )
 
 
@@ -1396,7 +1398,7 @@ def test_a_full_review_draft_has_no_delta_sections():
         "\n"
         "- L1 lens: **clean**; body sha256 ab12\n"
         "\n"
-        "Model calls: 4; committed: $0.12.\n"
+        "Model calls: 4; settled: $0.12; held at reservation: $0.\n"
     )
     report = summarize_draft(draft, expect="agentic")
     assert report.resolved == ()

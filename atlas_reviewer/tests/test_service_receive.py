@@ -2267,7 +2267,7 @@ REPORT_COST = ReviewReport(
     "note",
     (),
     (),
-    ("Model calls: 12; committed: $3.40.",),
+    ("Model calls: 12; settled: $3.40; held at reservation: $0.",),
     "COMMENT",
 )
 
@@ -2763,6 +2763,8 @@ def test_a_finished_review_logs_its_cost(tmp_path):
     # Mutant: the cost logging dropped, which loses the measure-first
     # numbers the decision's tuning reads.
     assert costs[0].fields["calls"] == 12
+    assert costs[0].fields["billed_usd"] == "3.40"
+    assert costs[0].fields["held_usd"] == "0"
     assert costs[0].fields["committed_usd"] == "3.40"
     assert costs[0].fields["measured"] == "final"
 
@@ -2828,6 +2830,12 @@ def test_a_cancelled_review_logs_the_cost_its_progress_recorded(tmp_path):
     # which would log every cancelled review as unknown.
     assert costs[0].fields["calls"] == 3
     assert costs[0].fields["measured"] == "partial"
+    # committed_usd stays the ceiling figure ($2.20, in-flight included).
+    # billed_usd is the settled bill ($1.10). Kills writing the bill into
+    # the committed field (round-1 review of #799).
+    assert costs[0].fields["committed_usd"] == "2.20"
+    assert costs[0].fields["billed_usd"] == "1.10"
+    assert costs[0].fields["settled_usd"] == "1.10"
 
 
 def test_a_review_whose_cost_is_nowhere_is_logged_as_unknown(tmp_path):
@@ -4739,12 +4747,12 @@ def test_a_queued_review_is_refused_again_at_preflight(tmp_path):
     assert published == []
 
 
-def test_a_settled_review_records_its_committed_spend_on_the_days_ledger(tmp_path):
-    """The counting: the finished review's committed spend -- the child's
+def test_a_settled_review_records_its_settled_bill_on_the_days_ledger(tmp_path):
+    """The counting: the finished review's settled bill -- the child's
     own token-counts-times-price-table figure from the draft's cost line
     -- is appended to the day's file, and the next admission sees it. The
-    finished draft's figure is the one recorded, not a stale progress
-    record's partial."""
+    finished draft's settled figure is the one recorded, not a stale
+    progress record's partial and not the reservation that record holds."""
     config = _config(tmp_path)
     board = Board(tmp_path / "queue.json")
     spend = _spend(tmp_path)
@@ -4788,7 +4796,10 @@ def test_a_settled_review_records_its_committed_spend_on_the_days_ledger(tmp_pat
     )
 
 
-def test_a_failed_review_records_the_spend_its_progress_recorded(tmp_path):
+def test_a_failed_review_records_the_settled_bill_its_progress_recorded(tmp_path):
+    """The progress record's committed figure still includes an in-flight
+    reservation ($2.20). The ledger records the settled bill ($1.10).
+    Kills the backfill that still books `committed_usd`."""
     board = Board(tmp_path / "queue.json")
     spend = _spend(tmp_path)
 
@@ -4822,7 +4833,139 @@ def test_a_failed_review_records_the_spend_its_progress_recorded(tmp_path):
     assert worker.run_one() is True
     total, gap = spend.committed(REPO)
     assert gap == ""
-    assert total == Decimal("2.20")
+    assert total == Decimal("1.10")
+
+
+def test_refused_calls_add_nothing_to_the_daily_ledger(tmp_path):
+    """Issue #797: a finished review whose calls were refused records the
+    settled figure, $0, and not the reservation the cost line holds.
+    Kills a parser that books the held amount, and one that adds held
+    to settled."""
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+    refused = dataclass_replace(
+        REPORT_COST,
+        cost_lines=("Model calls: 15; settled: $0; held at reservation: $24.90.",),
+    )
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, refused),
+        root=tmp_path,
+        spend=spend,
+    )
+    _deliver(config, board, _body(), spend=spend)
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal(0), "")
+
+
+def test_a_served_call_with_no_usage_counts_on_the_daily_ledger(tmp_path):
+    """A 200 with no usage is settled at its reservation and held $0
+    (what the one-shot and lens paths write). The ledger records that
+    reservation. Kills a backfill that records $0 whenever settled
+    equals the reservation, and one that subtracts a hold the record
+    does not carry (round-1 review of #799)."""
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 1,
+                    "settled_usd": "1.68",
+                    "held_usd": "0",
+                    "committed_usd": "1.68",
+                    "reservation_usd": "25",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal("1.68"), "")
+
+
+def test_a_finished_review_logs_the_bill_apart_from_what_it_holds(tmp_path):
+    """The cost event's committed_usd stays the ceiling (bill plus
+    hold). billed_usd is what the ledger records, and the hold is not
+    added to it. Kills writing the bill into committed_usd, and a
+    parser that adds the hold to the ledger."""
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    mixed = dataclass_replace(
+        REPORT_COST,
+        cost_lines=("Model calls: 4; settled: $1.10; held at reservation: $0.50.",),
+    )
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, mixed),
+        root=tmp_path,
+        telemetry=telemetry,
+        spend=spend,
+    )
+    _deliver(_config(tmp_path), board, _body(), spend=spend)
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    assert costs[0].fields["billed_usd"] == "1.10"
+    assert costs[0].fields["held_usd"] == "0.50"
+    assert costs[0].fields["committed_usd"] == "1.60"
+
+
+def test_a_crashed_review_of_only_held_reservations_adds_nothing(tmp_path):
+    """A crash whose progress is all held reservations -- settled equal
+    to held, the in-flight-inclusive committed figure beside them --
+    records $0. Kills the backfill that still books `committed_usd`, and
+    one that books `settled_usd` without subtracting held."""
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 15,
+                    "settled_usd": "24.90",
+                    "held_usd": "24.90",
+                    "committed_usd": "24.90",
+                    "reservation_usd": "25",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal(0), "")
 
 
 def test_a_review_with_no_cost_figure_records_nothing(tmp_path):
@@ -4928,10 +5071,11 @@ def _append_events(path: Path, *lines: str) -> None:
 def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_path):
     """M1: a review whose process died before the worker could settle it
     never reached the settle-time spend recording. The retry's pre-runner
-    pass reads the progress figure the crash left in the run directory --
-    the child's own token-counts-times-price-table accounting -- and
-    backfills it onto the day's ledger once, before the retry appends its
-    own run's events; the retry's own spend is then added on top."""
+    pass reads the progress the crash left in the run directory and
+    backfills the settled bill ($1.10) onto the day's ledger once -- not
+    the committed figure ($2.20) that still includes an in-flight
+    reservation -- before the retry appends its own run's events; the
+    retry's own settled bill is then added on top."""
     path = tmp_path / "queue.json"
     board = Board(path)
     spend = _spend(tmp_path)
@@ -4966,10 +5110,11 @@ def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_pa
     assert ran == [SHA_A]
     total, gap = spend.committed(REPO)
     assert gap == ""
-    assert total == Decimal("2.20") + Decimal("3.40")
+    assert total == Decimal("1.10") + Decimal("3.40")
     backs = [e for e in telemetry.events if e.step == "crashed spend"]
     assert backs and backs[0].fields["measured"] == "backfilled"
     assert backs[0].fields["committed_usd"] == "2.20"
+    assert backs[0].fields["billed_usd"] == "1.10"
 
 
 def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
@@ -4991,7 +5136,7 @@ def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
     telemetry = Telemetry(SystemClock())
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
-    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
     backs = [e for e in telemetry.events if e.step == "crashed spend"]
     assert len(backs) == 2
     assert backs[0].fields["measured"] == "backfilled"
@@ -5092,13 +5237,13 @@ def test_a_progress_less_retry_does_not_re_backfill_the_stale_tail(tmp_path):
     )
     telemetry = Telemetry(SystemClock())
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
-    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
     # Two further attempts append their startup events and die
     # progress-less; neither re-arms the backfill on the stale tail.
     for attempt in (2, 3):
         _append_events(run / "events.jsonl", _run_start_record(attempt=attempt))
         _backfill_crashed_spend(spend, tmp_path, event, telemetry)
-    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
     backs = [e for e in telemetry.events if e.step == "crashed spend"]
     assert len(backs) == 3
     assert backs[0].fields["measured"] == "backfilled"
@@ -5125,9 +5270,11 @@ def test_a_retry_s_identical_looking_progress_is_still_its_own(tmp_path):
     )
     telemetry = Telemetry(SystemClock())
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
-    assert spend.committed(REPO) == (Decimal("2.20"), "")
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
     # The second attempt dies after writing a byte-identical progress
     # record: a different attempt, a different key, its own record.
+    # Each records its settled bill ($1.10), not the committed figure
+    # ($2.20) that still includes an in-flight reservation.
     _append_events(
         run / "events.jsonl",
         _run_start_record(attempt=2),
@@ -5136,7 +5283,7 @@ def test_a_retry_s_identical_looking_progress_is_still_its_own(tmp_path):
     _backfill_crashed_spend(spend, tmp_path, event, telemetry)
     total, gap = spend.committed(REPO)
     assert gap == ""
-    assert total == Decimal("4.40")
+    assert total == Decimal("2.20")
 
 
 # ------------------------------- the installation store path (S10, part A)

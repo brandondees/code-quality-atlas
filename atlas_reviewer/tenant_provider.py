@@ -327,8 +327,17 @@ class TenantEndpointProvider:
                 body,
                 self._timeout_s,
             )
+        except ResponseTooLargeError as exc:
+            # The body arrived and then exceeded the read cap. The
+            # provider served it and may have billed it, so the
+            # reservation is the bill (D43), the same rule the lens
+            # adapter applies. It is not a hold.
+            ReviewBudget.settle(record, f"response too large: {exc}")
+            return exc, None
         except BoundaryError as exc:
-            ReviewBudget.settle(record, f"transport error: {exc}")
+            # Written and never answered: the reservation stays, and it
+            # is a hold, not a bill (D58 item 5, D93).
+            ReviewBudget.hold(record, f"transport error: {exc}")
             return exc, None
         return _response(resp, terms, record, self.model_id, url)
 
@@ -662,33 +671,33 @@ def _response(
     path are the endpoint's own account of its own charges and are not
     the operator's accounting (D81 §4)."""
     if resp.status in REDIRECT_STATUSES:
-        ReviewBudget.settle(record, f"HTTP {resp.status} (redirect refused)")
+        ReviewBudget.release(record, f"HTTP {resp.status} (redirect refused)")
         raise BoundaryError(
             f"the tenant endpoint redirected (HTTP {resp.status} for "
             f"{safe_url(url)}); redirects are refused"
         )
     if resp.status in AUTH_STATUSES:
-        ReviewBudget.settle(record, f"HTTP {resp.status} (auth error)")
+        ReviewBudget.release(record, f"HTTP {resp.status} (auth error)")
         raise KeyRefusedError(
             f"the tenant endpoint refused the key: auth error (HTTP {resp.status} "
             f"for {safe_url(url)})",
             review_error=KEY_AUTH_REFUSED,
         )
     if resp.status in QUOTA_STATUSES:
-        ReviewBudget.settle(record, f"HTTP {resp.status} (quota error)")
+        ReviewBudget.release(record, f"HTTP {resp.status} (quota error)")
         raise KeyRefusedError(
             f"the tenant endpoint refused the call: quota error (HTTP {resp.status} "
             f"for {safe_url(url)})",
             review_error=KEY_OUT_OF_CREDIT,
         )
     if resp.status in RETRYABLE:
-        ReviewBudget.settle(record, f"HTTP {resp.status} (retryable)")
+        ReviewBudget.release(record, f"HTTP {resp.status} (retryable)")
         return (
             BoundaryError(f"the tenant endpoint returned HTTP {resp.status}"),
             resp.header("Retry-After"),
         )
     if resp.status != 200:
-        ReviewBudget.settle(record, f"HTTP {resp.status}")
+        ReviewBudget.release(record, f"HTTP {resp.status}")
         raise BoundaryError(
             f"the tenant endpoint failed: HTTP {resp.status} for {safe_url(url)}"
         )

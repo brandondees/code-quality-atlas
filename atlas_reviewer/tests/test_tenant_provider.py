@@ -455,6 +455,34 @@ def test_a_transport_failure_names_the_endpoint():
     assert "connect refused" in str(exc.value)
     assert CREDENTIALS.key not in str(exc.value)
     assert "transport error: connect refused" in provider.budget.calls[0].outcome
+    # A request that was written and never answered keeps its reservation,
+    # including the retries the call cap allows (D58). Kills the mutant
+    # that releases every failure at $0.
+    assert provider.budget.committed_usd() > 0
+    assert provider.budget.held_usd() == provider.budget.committed_usd()
+    assert all(
+        record.committed_usd == record.reserved_usd for record in provider.budget.calls
+    )
+
+
+def test_an_oversized_response_on_complete_is_a_bill_not_a_hold():
+    """The tenant `complete` path's transport catch also sees
+    `ResponseTooLargeError`. The body arrived, so the reservation is
+    the bill and not a hold (D43). Kills holding that error the way a
+    connect failure is held (round-2 review of #799)."""
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    provider, _transport = _provider(
+        [ResponseTooLargeError("response exceeded 50 bytes")] * 5,
+        sleep=lambda _s: None,
+    )
+    provider.preflight()
+    with pytest.raises(ResponseTooLargeError):
+        provider.complete(PROMPT)
+    assert provider.budget.calls
+    assert provider.budget.held_usd() == Decimal(0)
+    assert provider.budget.billed_usd() == provider.budget.committed_usd()
+    assert provider.budget.billed_usd() > 0
 
 
 def test_a_redirect_is_refused_by_name():
@@ -487,6 +515,26 @@ def test_a_retryable_status_retries_within_the_call_cap():
     assert len(transport.calls) == 2
 
 
+@pytest.mark.parametrize(
+    ("status", "calls"),
+    [(302, 1), (400, 1), (401, 1), (402, 1), (403, 1), (429, 3), (500, 3), (503, 3)],
+)
+def test_a_non_200_answer_settles_at_zero(status, calls):
+    """Issue #797: every non-200 answer on the tenant complete path
+    settles at $0. A retryable status uses the call cap; a terminal
+    status is one call. Kills `settle` without an actual on each branch
+    the response walks (redirect, auth, quota, retryable, other), which
+    booked the reservation."""
+    provider, transport = _provider([(status, b"no")] * 5, sleep=lambda _s: None)
+    provider.preflight()
+    with pytest.raises(BoundaryError):
+        provider.complete(PROMPT)
+    assert len(transport.calls) == calls
+    assert provider.budget.committed_usd() == Decimal(0)
+    assert provider.budget.held_usd() == Decimal(0)
+    assert all(record.actual_usd == Decimal(0) for record in provider.budget.calls)
+
+
 def test_a_missing_usage_keeps_the_full_reservation():
     provider, _transport = _provider(
         [(200, _completion_body(prompt_tokens=None, completion_tokens=None))]
@@ -496,6 +544,13 @@ def test_a_missing_usage_keeps_the_full_reservation():
     (record,) = provider.budget.calls
     assert record.actual_usd is None
     assert record.committed_usd == record.reserved_usd
+    # The response was served, so the reservation is the bill and the
+    # daily ledger records it. Kills marking every actual-less settle
+    # as a hold, which would record $0 for a route that never reports
+    # usage (round-1 review of #799).
+    assert record.held is False
+    assert provider.budget.held_usd() == Decimal(0)
+    assert provider.budget.billed_usd() == record.reserved_usd
 
 
 # ------------------------------------------------------------ the adapter
