@@ -76,7 +76,13 @@ from atlas_reviewer.installation_store import (
 )
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.openrouter import MODEL_ID
-from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    NotFoundError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.repo_config import (
     DEFAULT_POST_CONFIG,
@@ -1057,6 +1063,29 @@ class Worker:
             None,
         )
 
+    def _advance_on_refusal(
+        self, job: Job, report: ReviewReport, choice: FundingChoice | None
+    ) -> bool:
+        """Re-queue this head on the next source after a key refusal.
+
+        True when this attempt was pinned to one source and another can
+        still serve the model. The settled bill is recorded and nothing
+        is posted. The D92 post is the attempt that finds no further
+        source. A tenant run has no choice, so its refusal never advances
+        onto an operator source. A review that failed for any other
+        reason, including a 429, is not this."""
+        if (
+            choice is None
+            or self._funding is None
+            or report.review_error not in {KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED}
+        ):
+            return False
+        if not self._funding.mark_refused(choice.name, report.review_error):
+            return False
+        self._cost_event(job, report)
+        self._stored_supersede(job, self._board.release_claim(job))
+        return True
+
     def _execute(self, job: Job) -> None:
         fields = _fields(job.event)
         if self._spend is not None:
@@ -1090,8 +1119,11 @@ class Worker:
             {**fields, "runner": event_runner_name(job.event)},
         )
         token: contextvars.Token[FundingChoice | None] | None = None
+        choice: FundingChoice | None = None
         try:
             skipped, token = self._begin_funding()
+            if token is not None:
+                choice = active_choice.get()
             run = (
                 skipped if skipped is not None else self._runner(job.event, job.cancel)
             )
@@ -1125,6 +1157,8 @@ class Worker:
                 status=ERROR,
                 error=run.error or "review failed",
             )
+            return
+        if self._advance_on_refusal(job, run.report, choice):
             return
         self._cost_event(job, run.report)
         if not self._board.still_current(job):
