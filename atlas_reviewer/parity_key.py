@@ -3,9 +3,9 @@
 
 A key file is one pull request's verified protocol findings. Adding a
 protocol-reviewed pull request is another JSON file in the same directory;
-the loader reads every file. Grading a candidate list against the key is a
-later step. This module only loads the records and refuses a record that
-does not match the schema.
+the loader reads every file. A record is a path and a line span, or the
+pull request body and the lines a citation has to quote. The grade that
+compares a verified finding with those spans is a later layer.
 """
 
 from __future__ import annotations
@@ -15,11 +15,12 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
-from atlas_reviewer.eval_harness import EvalFinding, EvalFormatError
+from atlas_reviewer.eval_harness import EvalFormatError
 
 KEY_DIR = Path(__file__).resolve().parent / "fixtures" / "parity-key"
-_MATCHES = frozenset({"place", "markers", "unscored"})
+BODY = "pull_request.body"
 _NEEDS = frozenset({"ci", "read", "run_tests", "mutate"})
 _SEVERITIES = frozenset({"blocker", "major", "minor", "nit"})
 _FILE_KEYS = frozenset({"pr", "reviewed_commit", "source", "findings"})
@@ -27,18 +28,27 @@ _FINDING_KEYS = frozenset(
     {
         "id",
         "severity",
-        "path",
         "summary",
+        "source",
         "lenses",
-        "markers",
         "needs",
-        "match",
-        "line",
-        "end_line",
+        "spans",
+        "encloses",
+        "citations",
     }
 )
+_SPAN_KEYS = frozenset({"path", "line", "end_line"})
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+@dataclass(frozen=True)
+class Span:
+    """One path and, for a file, the inclusive line span."""
+
+    path: str
+    line_start: int | None = None
+    line_end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -50,36 +60,20 @@ class KeyFinding:
     reviewed_commit: str
     source: str
     severity: str
-    path: str
     summary: str
-    match: str
-    line_start: int | None = None
-    line_end: int | None = None
-    lenses: tuple[str, ...] = ()
-    markers: tuple[str, ...] = ()
-    needs: tuple[str, ...] = ()
-
-    def as_eval(self) -> EvalFinding:
-        """The place record as a harness finding. Markers and unscored records raise."""
-        if self.match != "place":
-            raise EvalFormatError(
-                f"{self.id} is a {self.match} record and has no place to grade"
-            )
-        return EvalFinding(
-            self.severity,
-            self.path,
-            self.summary,
-            self.line_start,
-            self.line_end,
-            self.lenses,
-        )
+    spans: tuple[Span, ...]
+    encloses: tuple[Span, ...]
+    citations: tuple[str, ...]
+    lenses: tuple[str, ...]
+    needs: tuple[str, ...]
 
 
 def load_key(path: Path) -> tuple[KeyFinding, ...]:
     """Every ``*.json`` file in ``path``, in file name order.
 
-    A duplicate id, a key the schema does not name, or a place finding
-    with no line is refused. An empty directory is refused.
+    A duplicate id, a key the schema does not name, a code span with no
+    line, or a body record with no citation is refused. An empty directory
+    is refused.
     """
     if not path.is_dir():
         raise EvalFormatError(f"parity key is not a directory: {path}")
@@ -98,67 +92,115 @@ def load_key(path: Path) -> tuple[KeyFinding, ...]:
 
 
 def _load_file(path: Path) -> tuple[KeyFinding, ...]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        raise EvalFormatError(f"{path.name} cannot be read: {exc}") from exc
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise EvalFormatError(f"{path.name} is not JSON: {exc}") from exc
-    body = _object(payload, path.name)
+    body = _object(_read_json(path), path.name)
     _unknown(body, _FILE_KEYS, path.name)
     pr = _positive(body.get("pr"), f"{path.name} pr")
     commit = _commit(body.get("reviewed_commit"), path.name)
-    source = _text(body.get("source"), f"{path.name} source")
+    _text(body.get("source"), f"{path.name} source")
     raw = body.get("findings")
     if not isinstance(raw, list) or not raw:
         raise EvalFormatError(f"{path.name} needs a non-empty findings list")
     return tuple(
-        _finding(item, f"{path.name} findings[{index}]", pr, commit, source)
+        _finding(item, f"{path.name} findings[{index}]", pr, commit)
         for index, item in enumerate(raw)
     )
 
 
-def _finding(value: object, name: str, pr: int, commit: str, source: str) -> KeyFinding:
+def _finding(value: object, name: str, pr: int, commit: str) -> KeyFinding:
     body = _object(value, name)
     _unknown(body, _FINDING_KEYS, name)
-    match = body.get("match")
-    if not isinstance(match, str) or match not in _MATCHES:
-        raise EvalFormatError(f"{name} match must be place, markers or unscored")
     severity = body.get("severity")
     if not isinstance(severity, str) or severity not in _SEVERITIES:
         raise EvalFormatError(f"{name} severity must be blocker, major, minor or nit")
-    line = _optional_line(body.get("line"), f"{name} line")
-    end = _optional_line(body.get("end_line"), f"{name} end_line")
-    if match == "place" and line is None:
-        raise EvalFormatError(f"{name} place match needs a line")
-    if end is not None and (line is None or end < line):
-        raise EvalFormatError(f"{name} end_line must be at or after line")
-    markers = _strings(body.get("markers"), f"{name} markers")
-    if match == "markers" and not markers:
-        raise EvalFormatError(f"{name} marker match needs a marker")
-    record_id = _ident(body.get("id"), name)
-    if match == "unscored" and markers:
-        raise EvalFormatError(f"{record_id} is unscored and cannot carry markers")
-    needs = _strings(body.get("needs"), f"{name} needs")
-    if not needs or any(item not in _NEEDS for item in needs):
-        raise EvalFormatError(f"{name} needs must list ci, read, run_tests or mutate")
+    spans = _spans(body.get("spans"), f"{name} spans", allow_body=True)
+    encloses = _spans(body.get("encloses"), f"{name} encloses", allow_body=False)
+    citations = _strings(body.get("citations"), f"{name} citations")
+    _spans_cover(name, spans, encloses, citations)
     return KeyFinding(
-        id=record_id,
+        id=_ident(body.get("id"), name),
         pr=pr,
         reviewed_commit=commit,
-        source=source,
+        source=_text(body.get("source"), f"{name} source"),
         severity=severity,
-        path=_text(body.get("path"), f"{name} path"),
         summary=_text(body.get("summary"), f"{name} summary"),
-        match=match,
-        line_start=line,
-        line_end=end,
-        lenses=_strings(body.get("lenses"), f"{name} lenses"),
-        markers=markers,
-        needs=needs,
+        spans=spans,
+        encloses=encloses,
+        citations=citations,
+        lenses=_lens_names(body.get("lenses"), name),
+        needs=_needs(body.get("needs"), name),
     )
+
+
+def _spans(value: object, name: str, *, allow_body: bool) -> tuple[Span, ...]:
+    if not isinstance(value, list):
+        raise EvalFormatError(f"{name} must be a list")
+    return tuple(
+        _span(item, f"{name}[{index}]", allow_body) for index, item in enumerate(value)
+    )
+
+
+def _span(value: object, name: str, allow_body: bool) -> Span:
+    body = _object(value, name)
+    _unknown(body, _SPAN_KEYS, name)
+    path = _text(body.get("path"), f"{name} path")
+    line = _optional_line(body.get("line"), f"{name} line")
+    end = _optional_line(body.get("end_line"), f"{name} end_line")
+    if path == BODY:
+        if not allow_body:
+            raise EvalFormatError(f"{name} encloses a file, not the pull request body")
+        if line is not None or end is not None:
+            raise EvalFormatError(f"{name} body span has no line")
+        return Span(path)
+    if line is None or end is None or end < line:
+        raise EvalFormatError(f"{name} end_line must be at or after line")
+    return Span(path, line, end)
+
+
+def _spans_cover(
+    name: str,
+    spans: tuple[Span, ...],
+    encloses: tuple[Span, ...],
+    citations: tuple[str, ...],
+) -> None:
+    if not spans:
+        raise EvalFormatError(f"{name} needs a span")
+    body = [span for span in spans if span.path == BODY]
+    code = [span for span in spans if span.path != BODY]
+    if body and code:
+        raise EvalFormatError(f"{name} is a body record or a file record")
+    if body:
+        if len(body) != 1 or citations == ():
+            raise EvalFormatError(f"{name} body record needs one span and a citation")
+        if encloses:
+            raise EvalFormatError(f"{name} body record has no enclosing span")
+        return
+    if citations:
+        raise EvalFormatError(f"{name} file record has no citation")
+    for span in code:
+        if not any(_covers(outer, span) for outer in encloses):
+            raise EvalFormatError(f"{name} span is outside its enclosing function")
+
+
+def _covers(outer: Span, inner: Span) -> bool:
+    # A file span always has both lines. A body span never reaches here.
+    return outer.path == inner.path and (
+        cast(int, outer.line_start) <= cast(int, inner.line_start)
+        and cast(int, outer.line_end) >= cast(int, inner.line_end)
+    )
+
+
+def _lens_names(value: object, name: str) -> tuple[str, ...]:
+    lenses = _strings(value, f"{name} lenses")
+    if not lenses:
+        raise EvalFormatError(f"{name} needs a lens")
+    return lenses
+
+
+def _needs(value: object, name: str) -> tuple[str, ...]:
+    needs = _strings(value, f"{name} needs")
+    if not needs or any(item not in _NEEDS for item in needs):
+        raise EvalFormatError(f"{name} needs must list ci, read, run_tests or mutate")
+    return needs
 
 
 def _object(value: object, name: str) -> Mapping[str, object]:
@@ -189,9 +231,7 @@ def _ident(value: object, name: str) -> str:
 
 def _commit(value: object, name: str) -> str:
     if not isinstance(value, str) or _COMMIT.fullmatch(value) is None:
-        raise EvalFormatError(
-            f"{name} reviewed_commit must be 40 lowercase hex characters"
-        )
+        raise EvalFormatError(f"{name} reviewed_commit must be 40 lowercase hex")
     return value
 
 
@@ -208,8 +248,19 @@ def _optional_line(value: object, name: str) -> int | None:
 
 
 def _strings(value: object, name: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item.strip() for item in value
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) or not item.strip() for item in value
     ):
         raise EvalFormatError(f"{name} must be a list of non-empty strings")
     return tuple(value)
+
+
+def _read_json(path: Path) -> object:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise EvalFormatError(f"{path.name} cannot be read: {exc}") from exc
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise EvalFormatError(f"{path.name} is not JSON: {exc}") from exc

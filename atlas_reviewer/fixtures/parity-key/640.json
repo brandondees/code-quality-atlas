@@ -1,38 +1,46 @@
 {
   "pr": 640,
   "reviewed_commit": "72c56eb24d16025719c4d58ba921eadef94bb8a8",
-  "source": "docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md names m1, and names m2 and m3 only as a file the model skipped and a decision-lifecycle body. Issue #708 comment 6902255823 records that reviewing-decision-lifecycle was not picked on this pull request. The Nov 14 report mt14/report-draft.md is not in this repo, so m2 has no source path. m3 is the decision body at D46 on the reviewed head; the plan does not quote a separate defect.",
+  "source": "Checked at 72c56eb24d16025719c4d58ba921eadef94bb8a8. The Nov 14 trial scorer names the three Minors and their owner lenses. Each finding's source records the span chosen at that commit.",
   "findings": [
     {
       "id": "640-m1",
       "severity": "minor",
-      "path": "atlas_reviewer/service_queue.py",
-      "line": 329,
       "summary": "The begin_post cancel check is unpinned.",
+      "source": "begin_post's cancel check is service_queue.py line 329, `if job.superseded or job.cancel.is_set()`. The method is lines 323-340. The trial range 320-335 also includes still_current, which is a different method, so the span is line 329.",
       "lenses": ["reviewing-test-quality"],
-      "markers": ["begin_post", "cancel"],
       "needs": ["mutate"],
-      "match": "place"
+      "spans": [{"path": "atlas_reviewer/service_queue.py", "line": 329, "end_line": 329}],
+      "encloses": [{"path": "atlas_reviewer/service_queue.py", "line": 323, "end_line": 340}],
+      "citations": []
     },
     {
       "id": "640-m2",
       "severity": "minor",
-      "path": "unlocated",
-      "summary": "A protocol Minor that is visible by reading a file the model skipped. The plan records that cause and not a path.",
-      "lenses": [],
-      "markers": [],
+      "summary": "The head check raises when no hook is set.",
+      "source": "service_post.py lines 232-234 read `check = before_send.get()` and raise PostHookMissing when check is None. post is lines 218-244. The caller at service.py lines 430-431 records `post hook missing`. The trial calls the check silent; at this commit it raises and the refusal is recorded. The span is the None check.",
+      "lenses": ["hunting-silent-failures"],
       "needs": ["read"],
-      "match": "unscored"
+      "spans": [{"path": "atlas_reviewer/service_post.py", "line": 232, "end_line": 234}],
+      "encloses": [{"path": "atlas_reviewer/service_post.py", "line": 218, "end_line": 244}],
+      "citations": []
     },
     {
       "id": "640-m3",
       "severity": "minor",
-      "path": "docs/open-questions.md",
-      "summary": "A decision-lifecycle body. The plan names the finding and not a quoted defect.",
+      "summary": "D46's amendment of D48, and the README line that states it.",
+      "source": "At this commit D46 is docs/open-questions.md line 62 and already says `amends D24, D48's no-publish rule`. README line 14 says `D46, which amends D48's no-publish rule`. The Nov 14 partial reported D24 and D25 and missed D48. Either line counts. The D-entry is that one line. The README sentence is lines 13-16.",
       "lenses": ["reviewing-decision-lifecycle"],
-      "markers": [],
       "needs": ["read"],
-      "match": "unscored"
+      "spans": [
+        {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
+        {"path": "atlas_reviewer/README.md", "line": 14, "end_line": 14}
+      ],
+      "encloses": [
+        {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
+        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 16}
+      ],
+      "citations": []
     }
   ]
 }

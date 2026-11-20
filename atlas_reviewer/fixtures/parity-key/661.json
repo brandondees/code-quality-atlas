@@ -1,50 +1,54 @@
 {
   "pr": 661,
   "reviewed_commit": "674071a91513b4774c82350fb757d9c085f10baf",
-  "source": "docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md names m1, m3 and m4. Issue #708 comment 6902255823 names m2 as unreadable shown as \"1 line\". The Nov 14 report mt14/report-draft.md is not in this repo. Line anchors are the reviewed commit, not current main.",
+  "source": "Checked at 674071a91513b4774c82350fb757d9c085f10baf. The Nov 14 trial scorer and docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md name the four Minors. Each finding's source records the span chosen at that commit.",
   "findings": [
     {
       "id": "661-m1",
       "severity": "minor",
-      "path": "pull_request.body",
       "summary": "The pull request body's CI and stack lines are stale.",
+      "source": "The location is pull_request.body. At this head the body quotes `gate` on `674071a9` (run 43510666665) and the stack line pre-rebase head `61273b4f`. The Nov 14 score says an earlier body cited run 43429340358 on 61273b4f; that run id is not in the body now. A citation counts when the quote contains one of the two lines that are.",
       "lenses": ["reviewing-pr-and-process-hygiene"],
-      "markers": ["CI and stack lines are stale"],
       "needs": ["ci"],
-      "match": "markers"
+      "spans": [{"path": "pull_request.body"}],
+      "encloses": [],
+      "citations": [
+        "`gate` on `674071a9` (run 43510666665)",
+        "pre-rebase head `61273b4f`"
+      ]
     },
     {
       "id": "661-m2",
       "severity": "minor",
-      "path": "atlas_reviewer/rounds.py",
-      "line": 207,
       "summary": "unreadable shown as \"1 line\"",
+      "source": "The omission text is rounds.py lines 202-209, and line 207 is `{unreadable} line(s) could not be parsed`. The trial range coordinator.py 725-740 is `_result` and does not format that count, so it is not a span. The enclosing function is prior_blocks, lines 162-223.",
       "lenses": ["hunting-silent-failures"],
-      "markers": ["unreadable", "1 line"],
       "needs": ["read"],
-      "match": "place"
+      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 202, "end_line": 209}],
+      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
+      "citations": []
     },
     {
       "id": "661-m3",
       "severity": "minor",
-      "path": "atlas_reviewer/rounds.py",
-      "line": 186,
       "summary": "break instead of continue hides a current-head round.",
+      "source": "The defect is the break at rounds.py line 186 after continue for a superseded record, lines 184-186. prior_blocks is lines 162-223. The trial range 170-190 includes the function prologue, so the span is the continue and the break.",
       "lenses": ["tracing-correctness-and-invariants"],
-      "markers": ["break", "continue"],
       "needs": ["run_tests", "mutate"],
-      "match": "place"
+      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 184, "end_line": 186}],
+      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
+      "citations": []
     },
     {
       "id": "661-m4",
       "severity": "minor",
-      "path": "atlas_reviewer/rounds.py",
-      "line": 211,
       "summary": "The superseded findings_omitted gate is unpinned.",
+      "source": "The gate is rounds.py lines 210-219, `if record.findings_omitted and record.head_sha == current_head`. The trial range 200-212 also covers the unreadable omission, which is 661-m2, so this span starts at 210. prior_blocks is lines 162-223.",
       "lenses": ["reviewing-test-quality"],
-      "markers": ["findings_omitted", "superseded"],
       "needs": ["mutate"],
-      "match": "place"
+      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 210, "end_line": 219}],
+      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
+      "citations": []
     }
   ]
 }
