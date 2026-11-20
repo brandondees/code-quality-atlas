@@ -6086,6 +6086,47 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     assert total == Decimal("1.25")
 
 
+def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):
+    """Attempt 1 leaves progress in the run dir and is billed from the
+    draft. The re-queue drops that dir. Attempt 2 dies before its own
+    progress record, and the ledger stays at attempt 1's bill. Kills
+    the crash backfill and the failed-attempt progress read both
+    counting attempt 1 a second time."""
+    from atlas_reviewer.funding import active_choice
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        if choice.name == "subs-a":
+            run = run_dir(tmp_path, event)
+            run.mkdir(parents=True, exist_ok=True)
+            _append_events(
+                run / "events.jsonl",
+                _run_start_record(),
+                _progress_record("2.20", 3),
+            )
+            return ReviewRun(True, _refused_report("1.00"))
+        return ReviewRun(False, error="died before a progress record")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path)
+    worker = _worker(
+        board, runner, root=tmp_path, spend=spend, funding=_funding_pair()
+    )
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+    assert not run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)).exists()
+    first, first_gap = spend.committed(REPO)
+    assert first_gap == ""
+    assert first == Decimal("1.00")
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+
+
 def test_a_tenant_refusal_and_a_failed_run_do_not_advance_to_another_source(
     tmp_path,
 ):

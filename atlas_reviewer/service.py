@@ -1069,8 +1069,10 @@ class Worker:
         """Re-queue this head on the next source after a key refusal.
 
         True when this attempt was pinned to one source and another can
-        still serve the model. The settled bill is recorded and nothing
-        is posted. The D92 post is the attempt that finds no further
+        still serve the model. The settled bill is recorded, that
+        attempt's run directory is dropped so the next claim cannot
+        read the same progress back onto the ledger, and nothing is
+        posted. The D92 post is the attempt that finds no further
         source. A tenant run has no choice, so its refusal never advances
         onto an operator source. A review that failed for any other
         reason, including a 429, is not this."""
@@ -1083,6 +1085,7 @@ class Worker:
         if not self._funding.mark_refused(choice.name, report.review_error):
             return False
         self._cost_event(job, report)
+        self._drop_run_dir(job)
         self._stored_supersede(job, self._board.release_claim(job))
         return True
 
