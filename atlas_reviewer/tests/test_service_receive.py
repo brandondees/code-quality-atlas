@@ -6012,6 +6012,33 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     assert groups == (("subs-a", Decimal("1.00")), ("subs-b", Decimal("0.25")))
 
 
+def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
+    """A source name the ledger rejects does not drop the settled bill.
+    The line is written with no source. Kills letting ValueError escape
+    and leaving the day's total short."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    worker._record_spend(
+        Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+        (2, "1.25", "0"),
+        None,
+        {"repo": REPO},
+        "Not A Name",
+    )
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.25")
+    line = json.loads(spend.file(REPO).read_text(encoding="utf-8"))
+    assert "source" not in line
+
+
 def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):
     """Attempt 1 leaves progress in the run dir and is billed from the
     draft. The re-queue drops that dir. Attempt 2 dies before its own

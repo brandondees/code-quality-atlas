@@ -415,6 +415,28 @@ def test_a_ledger_line_names_its_funding_source_only_when_it_has_one(tmp_path):
     assert missing_gap == ""
 
 
+def test_a_source_that_is_not_a_name_does_not_say_the_budget_holds(tmp_path):
+    """A line with a valid bill and a source that is not a source name
+    makes the report unreadable, and the message names the source. The
+    day's total still adds the bill. Kills telling the operator the
+    budget is blocked when the total is known."""
+    import json
+
+    spend = _spend(tmp_path)
+    spend.record("o/r", Decimal("1.00"), 1)
+    path = spend.file("o/r")
+    line = json.loads(path.read_text(encoding="utf-8"))
+    line["source"] = "Nope"
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    groups, gap = spend.by_source("o/r")
+    assert groups is None
+    assert "unreadable source" in gap
+    assert "budget holds" not in gap
+    total, total_gap = spend.committed("o/r")
+    assert total_gap == ""
+    assert total == Decimal("1.00")
+
+
 def test_record_once_keeps_the_source_on_the_one_line_it_writes(tmp_path):
     spend = _spend(tmp_path)
     assert spend.record_once(

@@ -798,13 +798,31 @@ def _backfill_crashed_spend(
             "measured": "backfilled",
         }
     )
+    named = progress.source
     try:
         appended, gap = spend.record_once(
             event.repo,
             progress.billed_usd,
             progress.calls,
             key,
-            source=progress.source,
+            source=named,
+        )
+    except ValueError:
+        try:
+            appended, gap = spend.record_once(
+                event.repo, progress.billed_usd, progress.calls, key, source=""
+            )
+        except OSError as exc:
+            _record(
+                telemetry,
+                "crashed spend",
+                fields,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return
+        gap = gap or (
+            f"funding source {named!r} is not a source name; "
+            "the bill was recorded without it"
         )
     except OSError as exc:
         _record(
@@ -1269,6 +1287,27 @@ class Worker:
             return
         try:
             self._spend.record(job.event.repo, amount, calls, source=named)
+        except ValueError:
+            self._telemetry.record(
+                "service",
+                "spend source dropped",
+                fields,
+                status=ERROR,
+                error=(
+                    f"funding source {named!r} is not a source name; "
+                    "the bill was recorded without it"
+                ),
+            )
+            try:
+                self._spend.record(job.event.repo, amount, calls, source="")
+            except OSError as exc:
+                self._telemetry.record(
+                    "service",
+                    "spend not recorded",
+                    fields,
+                    status=ERROR,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         except OSError as exc:
             self._telemetry.record(
                 "service",
