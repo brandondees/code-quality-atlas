@@ -22,8 +22,9 @@ the counts-BYOK settle path already exists (D41). One child process
 still receives exactly one model credential (`service_run._CHILD_ALLOWED`).
 A tenant-path child still receives the installation's own credentials
 and still drops the operator key (D89). Neither path falls back to the
-other. The per-review ceiling and the per-repo daily budget (D81) still
-bound spend, and spend from a subscription source counts toward both.
+other. The per-repo daily budget (D81) still bounds spend, and every
+attempt's settled bill counts toward it. The per-review ceiling is the
+one child's cap for that attempt.
 A 401 or a 402 is still a key refusal (D92). A 403 stays a per-call
 error. A 429 with `retry-after` stays a transient retry (D49). A
 non-200 answer still settles at $0, and a hold stays a hold (D93).
@@ -40,9 +41,14 @@ names one source:
 - `name` — a short token (`subs-a`, `pilot`). It is what the cost line,
   the progress record, and the daily ledger record.
 - `key_env` — the name of the environment variable that holds the
-  OpenRouter key. The registry stores the name, never the key. A name
-  beginning with `ATLAS_TENANT` is refused. Two sources cannot share a
-  name or a key variable.
+  OpenRouter key. The registry stores the name, never the key. The
+  name is `ATLAS_OPENROUTER_API_KEY` or a longer name under
+  `ATLAS_FUNDING_` that is not the setting itself and not
+  `ATLAS_FUNDING_SOURCE` or `ATLAS_FUNDING_BYOK`. A tenant variable, a
+  GitHub variable, and the sprites token fall outside that shape and
+  are refused, so a typo cannot send one of those secrets to
+  OpenRouter as the bearer token. Two sources cannot share a name or
+  a key variable.
 - `providers` — the `provider.only` list for this source.
 - `require_zdr` — whether this source sends `zdr: true`.
 - `model_filter` — which model ids this source may serve (`*`,
@@ -61,6 +67,9 @@ The operator's order, once the keys exist, is the subscription whose
 billing cycle ends first, then the other subscription, then `pilot`.
 The cycle dates live in OpenRouter and the Console, not in this
 setting: Brandon puts the sooner subscription first in the array.
+The array is static, so when the sooner cycle flips he reorders the
+Fly secret and restarts the process. A per-source cycle day that
+would sort the list itself is deferred.
 
 A subscription source's route is `only: ["anthropic"]`, `require_zdr`
 false, `byok` true, and a model filter of `anthropic/*`. The pilot
@@ -101,16 +110,26 @@ retention policy of a review that had already sent part of the diff.
 When the child finishes with a key-refusal cause, the worker marks
 that source unavailable, records the attempt's settled bill (D93: a
 refused call is $0, and calls that were served before the refusal are
-billed to that source), and puts the same head back on the queue once.
-It does not post. The next claim probes again and takes the next
-source that still has credit. Only when no source remains does the
-worker post the D92 error, with the last refusal's cause.
+billed to that source), drops that attempt's run directory, and puts
+the same head back on the queue. It does not post. Each source is
+tried at most once while the worker process remembers the refusal, so
+a list of three sources can advance twice. The next claim takes the
+next source that still has credit. The D92 post is sent only when no
+source remains, with the last refusal's cause.
 
-Unavailable is process memory plus the next probe. A restart forgets
-the memory and the probe decides again. A source whose OpenRouter key
-still shows credit, but which Anthropic refused for a low balance, stays
+The memory is the worker process. It survives the re-queue, because
+the next claim is the same process, and a restart forgets it. The
+probe then decides again. A source whose OpenRouter key still shows
+credit, but which Anthropic refused for a low balance, stays
 unavailable for the life of the process so the next claim does not
-pick it again.
+pick it again. Topping up a key takes effect on the next start.
+
+The re-queued attempt is a new child with its own per-review ceiling.
+It does not inherit the earlier attempt's bill. That bill is already
+on the daily ledger, and the next claim's preflight reads the ledger,
+so the per-repo daily budget is what stops a repo after the sum of
+the attempts crosses it. One head can pay one review ceiling for each
+source that runs.
 
 On a BYOK source only, an HTTP 400 whose body carries
 `invalid_request_error` and the phrase "credit balance is too low"
@@ -145,5 +164,5 @@ someone asks for it.
 | F0 | This plan and D94. Docs only. |
 | F1 | `funding.py` parses `ATLAS_FUNDING_SOURCES`, fails closed, and treats unset as no registry. |
 | F2 | The worker selects a source at claim time, the child receives it through the existing variables, and the cost line and the progress record name it. A tenant run never sees it. |
-| F3 | A key refusal re-queues the same head once on the next source and suppresses the intermediate error post. The BYOK credit-balance 400 is a refusal. |
+| F3 | A key refusal marks that source unavailable, re-queues the same head on the next source, and suppresses the intermediate error post. The D92 post waits until no source remains. The BYOK credit-balance 400 is a refusal. |
 | F4 | Ledger lines carry `source`, and `funding-spend` reports the day's spend by source. |
