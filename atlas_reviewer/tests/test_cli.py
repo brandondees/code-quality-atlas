@@ -85,6 +85,17 @@ def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_p
     )
     assert usage == 2
     assert "owner/name" in usage_err
+    day, _, day_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-13-40",
+    )
+    assert day == 2
+    assert "YYYY-MM-DD" in day_err
 
 
 def test_review_rejects_an_agentic_limit_flag(capsys):
