@@ -105,6 +105,7 @@ def test_a_vendor_prefix_does_not_match_a_lookalike_vendor():
     source = load_funding_sources(_env(_source()))
     assert source is not None
     assert source[0].allows("anthropic/claude-sonnet-5.5")
+    assert source[0].allows("anthropic/claude-sonnet-5.5-20260928")
     assert source[0].allows("anthropic/claude-haiku-4.5")
     assert not source[0].allows("anthropic-lookalike/claude-sonnet-5.5")
     assert not source[0].allows("openai/gpt-4o")
@@ -113,6 +114,7 @@ def test_a_vendor_prefix_does_not_match_a_lookalike_vendor():
     )
     assert exact is not None
     assert exact[0].allows("anthropic/claude-sonnet-5.5")
+    assert not exact[0].allows("anthropic/claude-sonnet-5.5-20260928")
     assert not exact[0].allows("anthropic/claude-haiku-4.5")
     any_model = load_funding_sources(_env(_source(model_filter="*")))
     assert any_model is not None
@@ -141,6 +143,14 @@ def test_a_tenant_name_and_a_non_funding_key_variable_are_refused():
     for item in refused:
         with pytest.raises(ValueError):
             load_funding_sources(_env(item))
+    with pytest.raises(ValueError, match="short token"):
+        load_funding_sources(_env(_source(name="Subs-A")))
+    with pytest.raises(ValueError, match="short token"):
+        load_funding_sources(_env(_source(name=123)))
+    with pytest.raises(ValueError, match="not an ATLAS name"):
+        load_funding_sources(_env(_source(key_env=5)))
+    with pytest.raises(ValueError, match="filter is not a string"):
+        load_funding_sources(_env(_source(model_filter=5)))
 
 
 def test_a_missing_key_variable_duplicate_or_extra_field_is_refused():
@@ -187,6 +197,28 @@ def test_a_malformed_document_is_refused():
     ]
     with pytest.raises(ValueError, match="limit"):
         load_funding_sources(_env(*many))
+    eight = load_funding_sources(_env(*many[:8]))
+    assert eight is not None
+    assert len(eight) == 8
+    wide = "a" + "b" * 31
+    accepted = load_funding_sources(_env(_source(name=wide)))
+    assert accepted is not None
+    assert accepted[0].name == wide
+    with pytest.raises(ValueError, match="short token"):
+        load_funding_sources(_env(_source(name=wide + "c")))
+    duplicated = (
+        '[{"name": "subs-a", "name": "subs-b", "key_env": "ATLAS_FUNDING_SUBS_A", '
+        '"providers": ["anthropic"], "require_zdr": false, '
+        '"model_filter": "anthropic/*", "key_ceiling_usd": "195", "byok": true}]'
+    )
+    with pytest.raises(ValueError, match="repeats the field"):
+        load_funding_sources(
+            {ENV_FUNDING_SOURCES: duplicated, "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a"}
+        )
+    pasted = '[{"key": "sk-or-v1-secretsecret"}'
+    with pytest.raises(ValueError, match="not JSON") as raised:
+        load_funding_sources({ENV_FUNDING_SOURCES: pasted})
+    assert "sk-or-v1-secretsecret" not in str(raised.value)
 
 
 def test_a_bad_provider_filter_or_ceiling_is_refused():
@@ -238,6 +270,38 @@ def test_no_source_matching_the_configured_model_is_a_boot_failure():
         config_from_env({**base, **_env(_source(key_env="ATLAS_TENANT_MODEL_KEY"))})
     built = config_from_env({**base, **_env(_source())})
     assert built.provider == "offline"
+    with pytest.raises(ServiceError, match=MODEL_ID):
+        config_from_env(
+            {
+                **base,
+                **_env(_source(model_filter="openai/*")),
+                "ATLAS_MODEL": MODEL_ID,
+            }
+        )
+    covered = config_from_env(
+        {**base, **_env(_source(model_filter="anthropic/*")), "ATLAS_MODEL": MODEL_ID}
+    )
+    assert covered.provider == "offline"
+    with pytest.raises(ServiceError, match="not an ATLAS name"):
+        config_from_env({**base, **_env(_source(key_env=5))})
+    with pytest.raises(ServiceError, match="filter is not a string"):
+        config_from_env({**base, **_env(_source(model_filter=5))})
+
+
+def test_the_child_readers_default_to_the_process_environment(monkeypatch):
+    """The production call passes no mapping. Kills dropping the
+    ``os.environ`` fallback, which would make a handed source read as
+    unset inside the child."""
+    monkeypatch.delenv(ENV_FUNDING_SOURCE, raising=False)
+    monkeypatch.delenv(ENV_FUNDING_BYOK, raising=False)
+    assert noted_funding_source() == ""
+    assert funding_byok() is False
+    monkeypatch.setenv(ENV_FUNDING_SOURCE, "subs-a")
+    monkeypatch.setenv(ENV_FUNDING_BYOK, "true")
+    assert noted_funding_source() == "subs-a"
+    assert funding_byok() is True
+    monkeypatch.setenv(ENV_FUNDING_BYOK, "TRUE")
+    assert funding_byok() is False
 
 
 def test_a_noted_source_name_is_the_token_and_byok_is_only_the_word_true():
