@@ -124,7 +124,7 @@ def _finding(value: object, name: str, pr: int, commit: str, source: str) -> Key
     body = _object(value, name)
     _unknown(body, _FINDING_KEYS, name)
     match = body.get("match")
-    if match not in _MATCHES:
+    if not isinstance(match, str) or match not in _MATCHES:
         raise EvalFormatError(f"{name} match must be place, markers or unscored")
     severity = body.get("severity")
     if not isinstance(severity, str) or severity not in _SEVERITIES:
@@ -138,11 +138,14 @@ def _finding(value: object, name: str, pr: int, commit: str, source: str) -> Key
     markers = _strings(body.get("markers"), f"{name} markers")
     if match == "markers" and not markers:
         raise EvalFormatError(f"{name} marker match needs a marker")
+    record_id = _ident(body.get("id"), name)
+    if match == "unscored" and markers:
+        raise EvalFormatError(f"{record_id} is unscored and cannot carry markers")
     needs = _strings(body.get("needs"), f"{name} needs")
     if not needs or any(item not in _NEEDS for item in needs):
         raise EvalFormatError(f"{name} needs must list ci, read, run_tests or mutate")
     return KeyFinding(
-        id=_ident(body.get("id"), name),
+        id=record_id,
         pr=pr,
         reviewed_commit=commit,
         source=source,

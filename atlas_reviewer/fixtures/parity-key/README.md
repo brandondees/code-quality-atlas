@@ -1,6 +1,7 @@
 # Parity key
 
-The seven protocol Minors the parity gate scores a recorded review against.
+The directory holds the seven protocol Minors. The gate grades the five
+records whose `match` is `place` or `markers`.
 One JSON file is one pull request. A later protocol-reviewed pull request
 joins the key by adding another file in this directory; ids must stay unique.
 The loader is `atlas_reviewer.parity_key.load_key`. It checks the schema.
@@ -26,7 +27,7 @@ what reaching the finding took: `ci`, `read`, `run_tests`, or `mutate`.
 
 | Id | Reviewed commit | Anchor | What the record actually says |
 |---|---|---|---|
-| `661-m1` | `674071a91513b4774c82350fb757d9c085f10baf` | no source line; markers `stale` and `stack` | The pull request body's CI and stack lines are stale. Reaching it needs CI evidence. |
+| `661-m1` | `674071a91513b4774c82350fb757d9c085f10baf` | no source line; marker `CI and stack lines are stale` | The pull request body's CI and stack lines are stale. The marker is that phrase, because `stale` and `stack` also occur in ordinary review text and `stack` occurs inside `stacked`. Reaching it needs CI evidence. |
 | `661-m2` | same | `atlas_reviewer/rounds.py:207` | Issue #708 names it `unreadable shown as "1 line"`. The line is the omission text `"{unreadable} line(s) could not be parsed"`. |
 | `661-m3` | same | `atlas_reviewer/rounds.py:186` | `break` instead of `continue` hides a current-head round. The lines above it `continue` for a superseded record that does not fit. |
 | `661-m4` | same | `atlas_reviewer/rounds.py:211` | The superseded `findings_omitted` gate is unpinned. Reaching it needs `mutate`. |

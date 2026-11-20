@@ -9,7 +9,7 @@
       "path": "pull_request.body",
       "summary": "The pull request body's CI and stack lines are stale.",
       "lenses": ["reviewing-pr-and-process-hygiene"],
-      "markers": ["stale", "stack"],
+      "markers": ["CI and stack lines are stale"],
       "needs": ["ci"],
       "match": "markers"
     },

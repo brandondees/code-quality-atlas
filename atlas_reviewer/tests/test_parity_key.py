@@ -76,6 +76,7 @@ def test_the_checked_in_key_is_the_seven_protocol_minors():
     assert by_id["661-m1"].path == "pull_request.body"
     assert by_id["661-m1"].needs == ("ci",)
     assert "CI and stack lines are stale" in by_id["661-m1"].summary
+    assert by_id["661-m1"].markers == ("CI and stack lines are stale",)
     assert by_id["661-m2"].line_start == 207
     assert by_id["661-m2"].path == "atlas_reviewer/rounds.py"
     assert 'unreadable shown as "1 line"' in by_id["661-m2"].summary
@@ -116,6 +117,14 @@ def test_a_second_key_file_is_loaded_in_name_order(tmp_path: Path):
         (lambda body: body.update(note="x"), "unknown key"),
         (
             lambda body: body["findings"][0].update(match="fuzzy"),
+            "place, markers or unscored",
+        ),
+        (
+            lambda body: body["findings"][0].update(match=["place"]),
+            "place, markers or unscored",
+        ),
+        (
+            lambda body: body["findings"][0].update(match={}),
             "place, markers or unscored",
         ),
         (
@@ -180,8 +189,26 @@ def test_an_empty_directory_and_a_file_path_are_refused(tmp_path: Path):
 
 
 def test_a_finding_that_is_not_an_object_is_refused(tmp_path: Path):
-    _write(tmp_path, "one.json", _document(["nope"]))  # type: ignore[arg-type]
+    _write(tmp_path, "one.json", _document(["nope"]))
     with pytest.raises(EvalFormatError, match="is not an object"):
+        load_key(tmp_path)
+
+
+def test_an_end_line_equal_to_the_line_is_kept(tmp_path: Path):
+    _write(tmp_path, "one.json", _document([_finding(line=4, end_line=4)]))
+    loaded = load_key(tmp_path)
+    assert loaded[0].line_end == 4
+
+
+def test_an_unscored_record_with_markers_is_refused(tmp_path: Path):
+    body = _document()
+    findings = body["findings"]
+    assert isinstance(findings, list)
+    finding = findings[0]
+    assert isinstance(finding, dict)
+    finding.update(match="unscored", markers=["skipped"], line=None)
+    _write(tmp_path, "one.json", body)
+    with pytest.raises(EvalFormatError, match="1-m1 is unscored and cannot carry"):
         load_key(tmp_path)
 
 
