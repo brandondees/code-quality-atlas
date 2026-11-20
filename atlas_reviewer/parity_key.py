@@ -7,12 +7,14 @@ the loader reads every file. A record is a path and a line span, or the
 pull request body and the lines a citation has to quote.
 ``grade_findings`` compares one verified candidate list with those spans.
 ``score_parity`` counts found, partial, and lost across recorded runs.
-The command that reads a directory of runs is a later layer.
+``load_runs`` reads a directory of those runs, and
+``python -m atlas_reviewer eval-parity`` scores them offline.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -681,3 +683,153 @@ def _run_row(
 
 def _runs_word(count: int) -> str:
     return "run" if count == 1 else "runs"
+
+
+_RUN_KEYS = frozenset(
+    {
+        "pr",
+        "model",
+        "repetition",
+        "head_sha",
+        "coverage_complete",
+        "lenses_run",
+        "lenses_not_run",
+        "lenses_failed",
+        "limit_stops",
+        "findings",
+        "false_positive_majors",
+        "lenses_clean",
+        "lenses_planned",
+        "cost_usd",
+        "wall_seconds",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "previous_turn_misses",
+    }
+)
+_CANDIDATE_KEYS = frozenset(
+    {"severity", "path", "quote", "verified", "line", "end_line", "lens"}
+)
+
+
+def load_runs(path: Path) -> tuple[ParityRun, ...]:
+    """Every ``*.json`` file in ``path``, in file name order.
+
+    Two runs of one pull request may not share a repetition. ``verified``
+    is required and is not defaulted. Comparison fields may be null. A key
+    this schema does not name is refused.
+    """
+    if not path.is_dir():
+        raise EvalFormatError(f"parity runs are not a directory: {path}")
+    files = sorted(item for item in path.glob("*.json") if item.is_file())
+    if not files:
+        raise EvalFormatError(f"parity runs have no JSON files: {path}")
+    runs = tuple(_parse_run(file) for file in files)
+    seen: set[tuple[int, int]] = set()
+    for run in runs:
+        key = (run.pr, run.repetition)
+        if key in seen:
+            raise EvalFormatError(
+                f"{run.name} repeats repetition {run.repetition} for pull request {run.pr}"
+            )
+        seen.add(key)
+    return runs
+
+
+def _parse_run(path: Path) -> ParityRun:
+    body = _object(_read_json(path), path.name)
+    _unknown(body, _RUN_KEYS, path.name)
+    raw = body.get("findings")
+    if not isinstance(raw, list):
+        raise EvalFormatError(f"{path.name} needs a findings list")
+    return ParityRun(
+        name=path.name,
+        pr=_positive(body.get("pr"), f"{path.name} pr"),
+        model=_text(body.get("model"), f"{path.name} model"),
+        repetition=_positive(body.get("repetition"), f"{path.name} repetition"),
+        head_sha=_text(body.get("head_sha"), f"{path.name} head_sha"),
+        findings=tuple(
+            _candidate(item, f"{path.name} findings[{index}]")
+            for index, item in enumerate(raw)
+        ),
+        coverage_complete=_bool(
+            body.get("coverage_complete"), f"{path.name} coverage_complete"
+        ),
+        lenses_run=_strings(body.get("lenses_run"), f"{path.name} lenses_run"),
+        lenses_not_run=_strings(
+            body.get("lenses_not_run"), f"{path.name} lenses_not_run"
+        ),
+        lenses_failed=_strings(body.get("lenses_failed"), f"{path.name} lenses_failed"),
+        limit_stops=_strings(body.get("limit_stops"), f"{path.name} limit_stops"),
+        false_positive_majors=_optional_count(body, "false_positive_majors", path.name),
+        lenses_clean=_optional_count(body, "lenses_clean", path.name),
+        lenses_planned=_optional_count(body, "lenses_planned", path.name),
+        cost_usd=_optional_number(body, "cost_usd", path.name),
+        wall_seconds=_optional_number(body, "wall_seconds", path.name),
+        cache_read_tokens=_optional_count(body, "cache_read_tokens", path.name),
+        cache_write_tokens=_optional_count(body, "cache_write_tokens", path.name),
+        previous_turn_misses=_optional_count(body, "previous_turn_misses", path.name),
+    )
+
+
+def _candidate(value: object, name: str) -> CitedFinding:
+    body = _object(value, name)
+    _unknown(body, _CANDIDATE_KEYS, name)
+    severity = body.get("severity")
+    if not isinstance(severity, str) or severity not in _SEVERITIES:
+        raise EvalFormatError(f"{name} severity must be blocker, major, minor or nit")
+    verified = body.get("verified")
+    if not isinstance(verified, bool):
+        raise EvalFormatError(f"{name} verified must be true or false")
+    quote = body.get("quote")
+    if not isinstance(quote, str):
+        raise EvalFormatError(f"{name} quote must be a string")
+    line = _optional_line(body.get("line"), f"{name} line")
+    end = _optional_line(body.get("end_line"), f"{name} end_line")
+    if end is not None and (line is None or end < line):
+        raise EvalFormatError(f"{name} end_line must be at or after line")
+    lens = _text(body["lens"], f"{name} lens") if "lens" in body else None
+    return CitedFinding(
+        _text(body.get("path"), f"{name} path"),
+        quote,
+        severity,
+        verified,
+        line,
+        end,
+        lens,
+    )
+
+
+def _optional_count(body: Mapping[str, object], key: str, name: str) -> int | None:
+    if key not in body or body[key] is None:
+        return None
+    return _count(body[key], f"{name} {key}")
+
+
+def _optional_number(body: Mapping[str, object], key: str, name: str) -> float | None:
+    if key not in body or body[key] is None:
+        return None
+    return _number(body[key], f"{name} {key}")
+
+
+def _count(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EvalFormatError(f"{name} must be an integer that is at least 0")
+    return value
+
+
+def _number(value: object, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise EvalFormatError(f"{name} must be a finite number that is at least 0")
+    return float(value)
+
+
+def _bool(value: object, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise EvalFormatError(f"{name} must be true or false")
+    return value
