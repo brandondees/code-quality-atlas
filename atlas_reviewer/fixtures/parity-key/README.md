@@ -56,5 +56,5 @@ lost. Severity is compared case-insensitively. Partial does not count
 toward a pass. Anything else, including a finding that was not verified
 or a severity the record does not name, is **lost**. Each candidate is
 used at most once. Two lenses that report the same span count once. An
-unused major is an `extra_major`. An unused blocker is an extra and is
-not a major.
+unused major, in any capitalization, is an `extra_major`. An unused
+blocker is an extra and is not a major.

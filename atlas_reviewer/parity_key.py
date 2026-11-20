@@ -320,7 +320,7 @@ def grade_findings(
     are both found when each can take a different candidate. A find is a
     verified citation that sits inside the defect span. A citation of the
     whole function overlaps and is partial. ``extra_majors`` counts unused
-    majors only.
+    majors only, in any capitalization.
     """
     used: set[int] = set()
     grades = [LOST for _finding in findings]
@@ -329,7 +329,7 @@ def grade_findings(
     unused = [
         candidates[index] for index in range(len(candidates)) if index not in used
     ]
-    majors = sum(item.severity == "major" for item in unused)
+    majors = sum(_rank(item) == _RANK["major"] for item in unused)
     return FindingGrades(tuple(grades), len(unused), majors)
 
 

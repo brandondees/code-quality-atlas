@@ -446,9 +446,13 @@ def test_two_lenses_on_one_span_count_once_and_a_blocker_is_not_a_major():
     assert graded.grades == (FOUND,)
     assert graded.extras == 1
     assert graded.extra_majors == 0
-    unused = grade_findings([finding], [_cite(queue, 1, severity="major")])
+    unused = grade_findings([finding], [_cite(queue, 1, severity="Major")])
     assert unused.grades == (LOST,)
+    assert unused.extras == 1
     assert unused.extra_majors == 1
+    blocker = grade_findings([finding], [_cite(queue, 1, severity="Blocker")])
+    assert blocker.extras == 1
+    assert blocker.extra_majors == 0
 
 
 def _span_finding(finding_id: str, start: int, end: int) -> KeyFinding:
