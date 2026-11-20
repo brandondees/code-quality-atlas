@@ -454,3 +454,36 @@ def test_sign_in_is_rate_limited_per_ip(tmp_path: Path) -> None:
     assert limited.status == 429
     # A different IP still gets through.
     assert world.app.get("/login", "", "", "8.8.8.8").status == 302
+
+
+def test_a_refused_credentials_submit_refills_the_typed_fields(
+    tmp_path: Path,
+) -> None:
+    """The refusal render carries the endpoint and model the admin typed
+    (escaped into the value attributes), so only the key is re-typed;
+    the key itself is never echoed back (kills the blank-form mutant)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    csrf = world.csrf()
+    response = world.app.post(
+        "/settings/credentials",
+        {
+            "csrf": csrf,
+            "base_url": "https://api.example.com/v1",
+            "key": FAKE_KEY,
+            "model": UNKNOWN_MODEL,
+        },
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 400
+    body = response.body.decode()
+    assert 'value="https://api.example.com/v1"' in body
+    assert 'value="vendor/not-in-the-table"' in body
+    assert FAKE_KEY not in body

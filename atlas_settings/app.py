@@ -216,18 +216,30 @@ class SettingsApp:
                 session,
                 "the endpoint, the key and the model are all required",
                 400,
+                prefill_base_url=base_url,
+                prefill_model=model,
             )
         try:
             checks.validate_endpoint(base_url, resolve=self.resolve)
         except egress.EgressRefused as exc:
             return self._settings_render(
-                session, f"{ENDPOINT_REFUSED_PREFIX}{exc}", 400
+                session,
+                f"{ENDPOINT_REFUSED_PREFIX}{exc}",
+                400,
+                prefill_base_url=base_url,
+                prefill_model=model,
             )
         try:
             model_fn = self.validate_model_fn or checks.validate_model
             model_fn(model)
         except PricingUnknownError as exc:
-            return self._settings_render(session, f"{MODEL_REFUSED_PREFIX}{exc}", 400)
+            return self._settings_render(
+                session,
+                f"{MODEL_REFUSED_PREFIX}{exc}",
+                400,
+                prefill_base_url=base_url,
+                prefill_model=model,
+            )
         try:
             checks.check_key_against_controller_text(key)
             self.store.store_credentials(
@@ -393,6 +405,8 @@ class SettingsApp:
         session: Session,
         flash: str,
         status: int,
+        prefill_base_url: str = "",
+        prefill_model: str = "",
     ) -> Response:
         """A refused write re-rendered as the settings page with the
         fixed phrase. The authorization checks already ran in `post`;
@@ -410,7 +424,15 @@ class SettingsApp:
                 pages.error_page("Store unavailable", f"{STORE_REFUSED_PREFIX}{exc}"),
                 503,
             )
-        body = self._render_settings(account, 0, record, session.csrf, flash=flash)
+        body = self._render_settings(
+            account,
+            0,
+            record,
+            session.csrf,
+            flash=flash,
+            prefill_base_url=prefill_base_url,
+            prefill_model=prefill_model,
+        )
         return self._page(body, status)
 
     # ---- rendering and record helpers -------------------------------
@@ -422,16 +444,28 @@ class SettingsApp:
         record: InstallationRecord | None,
         csrf: str,
         flash: str | None,
+        prefill_base_url: str = "",
+        prefill_model: str = "",
     ) -> str:
+        """The settings page from the record: the stored-credentials fact
+        as the one value the page takes (or None), and — on a refused
+        credentials submit — the endpoint and model the admin typed,
+        refilled into the form."""
+        credentials = (
+            pages.StoredCredentials(
+                saved_at=self._credentials_saved_at(record),
+                base_url=record.base_url,
+                model=record.model,
+            )
+            if record is not None and record.has_credentials
+            else None
+        )
         return pages.settings_page(
             installation_id=self.config.installation_id,
             account_login=account.login,
             account_type=account.type,
             allowlisted_repo_count=covered,
-            has_credentials=bool(record is not None and record.has_credentials),
-            credentials_saved_at=self._credentials_saved_at(record),
-            base_url=record.base_url if record is not None else "",
-            model=record.model if record is not None else "",
+            credentials=credentials,
             consent_acknowledged_at=(
                 record.consent_acknowledged_at if record is not None else None
             ),
@@ -442,6 +476,8 @@ class SettingsApp:
             ),
             csrf=csrf,
             flash=flash,
+            prefill_base_url=prefill_base_url,
+            prefill_model=prefill_model,
         )
 
     def _load_record(self) -> InstallationRecord | None:
