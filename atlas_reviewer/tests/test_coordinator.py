@@ -2062,6 +2062,78 @@ def test_a_key_that_funds_the_planned_minimum_runs_the_review(tmp_path):
     assert result.lenses[0].state is LensState.CLEAN
 
 
+def test_a_reassess_call_settles_by_what_the_response_carried():
+    """D92's fix round 4: the re-assessment call's boundary branch runs
+    the same three-way settle the decision and carry calls run. An
+    overrun (reserved $0.10, reported $0.15) settles at the reported
+    cost, and an underrun ($0.03) at its own -- neither at the
+    reservation. Kills the always-keep-reservation mutant on the
+    re-assessment's boundary branch, which ignored `reported_cost`."""
+
+    class PricedThenRefused(ScriptedLensModel):
+        def __init__(self, reported):
+            super().__init__([])
+            self.reported = reported
+
+        def worst_case_usd(self, request):
+            return Decimal("0.10")
+
+        def turn(self, request):
+            exc = BoundaryError("model turn did not finish (finish_reason=error)")
+            exc.reported_cost = self.reported
+            raise exc
+
+    from atlas_reviewer.coordinator import _reassess_call
+
+    for reported, expected in (
+        (Decimal("0.15"), Decimal("0.15")),
+        (Decimal("0.03"), Decimal("0.03")),
+    ):
+        spend = Spend(LIMITS.resolve(cross_limits=False))
+        outcome = _reassess_call(
+            EVENT,
+            LENS,
+            BODY,
+            "FINDING CONTRACT",
+            "f00dfeed",
+            (),
+            [checked(Severity.MAJOR)],
+            trees(),
+            DIFF,
+            CHANGED,
+            PricedThenRefused(reported),
+            spend,
+            LIMITS.resolve(cross_limits=False),
+            FakeClock(),
+            600.0,
+        )
+        assert Cause.MODEL_ERROR in outcome.causes
+        assert spend.committed_usd == expected, reported
+        assert spend.settled_usd == expected, reported
+
+
+def test_a_credit_refused_delta_review_still_carries_the_prior_blocker(tmp_path):
+    """D92's fix round 4: a delta review that stops at the credit
+    preflight composes the earlier review's findings through the
+    carry-forward's fallback -- the carry call itself is refused on the
+    halted spend, so no model call is made -- and a prior Blocker keeps
+    its carried disposition: it counts for the verdict, the lenses stay
+    NOT RUN, and the credit refusal stays the review error. Kills the
+    dropped-carryforward mutant on the preflight refusal, which dropped
+    every prior finding, Blockers included."""
+    model = Credited([_acknowledge], remaining=Decimal("0.50"))
+    log = _round_log_with_prior(tmp_path, line=f"L1-F1 blocker calc.py:2 {PRIOR_TEXT}")
+    result, _sprites = _lenses(
+        tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
+    )
+    assert result.review_error == "model key out of credit"
+    assert [lens.state for lens in result.lenses] == [LensState.NOT_RUN]
+    assert result.verdict is Verdict.BLOCK
+    carried = [f for _i, f, _lens in result.carried_unverified]
+    assert len(carried) == 1
+    assert carried[0].severity is Severity.BLOCKER
+
+
 OTHER = "sweeping-for-security"
 OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
 _MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")

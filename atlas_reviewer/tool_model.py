@@ -416,12 +416,15 @@ class OpenRouterLensModel:
         included. This is the largest single reservation the plan holds
         against the key before any settle, and so the smallest credit the
         review must be able to fund to start at all. None when the
-        endpoint's terms cannot be read."""
+        endpoint's terms cannot be read or the per-call limits do not
+        resolve against them -- the credit check then accepts, and the
+        lens loop reports the limit the same way the turn path does
+        (D92's fix round 4)."""
         try:
             terms, _, _selected = self._ready()
+            bounds = resolve_per_call(self.per_call, terms)
         except BoundaryError:
             return None
-        bounds = resolve_per_call(self.per_call, terms)
         return worst_case_usd(bounds.max_input_tokens, terms, bounds)
 
 

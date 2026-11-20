@@ -6018,3 +6018,50 @@ StrEnum refactor (the bot's Nit).** The finding's fix paragraph says
 where it matters (the service's typed parse raises on anything outside
 it), and the refactor would touch six layers in a round whose other
 findings are behavioral. The owner can call for it separately.
+
+## 2026-11-20 (same day) — #783 fix round 4: the re-assessment's three-way settle, the preflight refusal's carry-forward, and the guarded credit figure
+
+CodeRabbit's three Majors on the rebased head, each verified against the
+code before the fix. Offline only: fakes, recorded HTTP and scripted
+models; no live model call, network call or secret read; no deployed
+service setting, Fly config value or secret changed.
+
+**The re-assessment's boundary branch (confirmed).** The decision and
+carry calls had run the three-way settle since fix round 1, but the
+re-assessment call's own boundary branch still settled every boundary
+error at its reservation, ignoring `reported_cost` — a priced 200 the
+turn rejected over-booked, and an unserved refusal never released. The
+branch now runs the same three-way (a priced cost settles at the parsed
+cost, a served-but-unpriced response keeps the reservation, a response
+that never arrived releases at $0), with the transport failure kept on
+its own reservation-retaining branch. Pinned by an overrun (reserved
+$0.10, reported $0.15 → committed $0.15) and an underrun ($0.03 →
+$0.03); the always-keep mutant dies.
+
+**The credit preflight's delta refusal composes the priors (confirmed).**
+The pre-fan-out refusal returned before `_delta_prelude` and
+`_with_carryforward`, so a delta review that stopped at the preflight
+dropped the earlier review's findings — Blockers and their carried
+dispositions with them — where the old refused-decision-call path's
+fallback had kept them. The refusal branch now composes the priors
+through `_with_carryforward` inside the traced body: the carry call
+itself is refused on the halted spend (`_reserve_call` returns the halt
+before any pricing), so the fallback composes with no model call, the
+lenses stay NOT RUN, the credit refusal stays the review error, and a
+prior Blocker keeps its carried disposition and counts for the verdict
+(pinned: the review's verdict is BLOCK and the carried severity is
+BLOCKER; the dropped-composition mutant dies).
+
+**The credit figure's unresolvable override (confirmed).**
+`largest_call_reservation` ran `resolve_per_call` outside its guarded
+read, so a per-call override above the endpoint's limit raised
+`LimitRefused` out of the credit check and killed the review before any
+lens started. The resolve now runs inside the same try: the adapter
+names no figure, `_credit_refusal` accepts, and the lens loop reports
+the limit the same way the turn path does. Pinned by an
+`ATLAS_MAX_OUTPUT_TOKENS` override above the fixture endpoint's
+completion limit (`largest_call_reservation()` is None; the
+outside-the-try mutant dies). The tenant adapter has no credit seam at
+all — no `largest_call_reservation` or `remaining_credit_usd`, the
+coordinator's attribute probe accepts it — so the tenant path has no
+such pattern to fix.

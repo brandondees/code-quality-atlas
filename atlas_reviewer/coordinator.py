@@ -922,7 +922,41 @@ def review_lenses(
             ceiling_note=derivation.ceiling_note,
             endpoint_class=endpoint_class(model),
         )
-        return _traced_review(event, trace, redactor, lambda active: error)
+
+        def refused(active: ReviewTrace) -> AgenticReview:
+            if delta is not None:
+                # A delta review that stops at the credit preflight still
+                # carries the earlier review's findings (D92's fix round
+                # 4): the carry-forward composes them through its fallback
+                # -- the carry call itself is refused on the halted spend,
+                # so no model call is made -- and a prior Blocker is never
+                # dropped because the lenses never ran. The lenses stay
+                # NOT RUN and the credit refusal stays the review error.
+                fence_nonce = nonce()
+                records, log_note = _records_at(round_log, event, delta.delta_from)
+                changed = frozenset(f.path for f in split_files(diff))
+                return _with_carryforward(
+                    error,
+                    event,
+                    delta,
+                    records,
+                    log_note,
+                    diff,
+                    trees,
+                    changed,
+                    model,
+                    spend,
+                    derived,
+                    clock,
+                    clock.monotonic() + derived.review_wall_s,
+                    fence_nonce,
+                    contract or finding_contract(),
+                    active,
+                    redactor,
+                )
+            return error
+
+        return _traced_review(event, trace, redactor, refused)
     return _traced_review(
         event,
         trace,
@@ -1860,7 +1894,19 @@ def _reassess_call(
             detail=str(exc),
         )
     except BoundaryError as exc:
-        spend.settle(worst, None)
+        # The same three-way settle the decision and carry calls run
+        # (D92's fix round 4): a priced 200 the turn rejected settles at
+        # the parsed cost, a served response with no usable usage keeps
+        # the reservation (D43), and a response that never arrived is a
+        # failed call, released at $0. Transport failures keep their
+        # reservation on the branch above (D58 item 5).
+        reported = exc.reported_cost
+        if reported is not None and _valid_cost(reported):
+            spend.settle(worst, reported)
+        elif reported is not None:
+            spend.settle(worst, None)
+        else:
+            spend.settle_failure(worst, None)
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
             frozenset({_refusal_cause(exc)}),

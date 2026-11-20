@@ -476,6 +476,24 @@ def test_a_too_large_response_keeps_its_reservation_in_the_loop(tmp_path):
     assert spend.committed_usd == 2 * worst
 
 
+def test_an_unresolvable_per_call_override_names_no_credit_figure():
+    """D92's fix round 4: `resolve_per_call` runs inside the same guarded
+    read as the terms, so a per-call override above the endpoint's limit
+    does not escape the credit check and kill the review before any lens
+    starts -- the adapter names no figure, the check accepts, and the lens
+    loop reports the limit the same way the turn path does. Kills the
+    outside-the-try mutant, which raised `LimitRefused` out of
+    `largest_call_reservation`."""
+    from atlas_reviewer.coordinator import limits_for_lens, model_for_lens
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import KEY, OpenRouterFake
+
+    limits = limits_for_lens({"ATLAS_MAX_OUTPUT_TOKENS": "99000"})
+    adapter = model_for_lens(OpenRouterProvider(OpenRouterFake(), KEY), limits)
+    assert adapter.largest_call_reservation() is None
+
+
 def test_a_priced_200_with_no_choices_carries_its_cost():
     """D92's fix round 2: `_choice`'s refusal sits between the cost
     computation and the `_priced` raises, so an empty `choices` list on a
