@@ -338,9 +338,9 @@ class FundingSelector:
 
     def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
         """Remember that ``name`` refused. True when another source can
-        still serve the model. The worker calls this when a review on
-        this source comes back as a key refusal, and ``cause`` is the
-        D92 text a later claim posts when nothing else can serve."""
+        still serve the model. The refusal-advance step that calls this
+        lands in a later slice. ``cause`` is the D92 text a later claim
+        posts when nothing else can serve."""
         with self._lock:
             self._unavailable.add(name)
             if cause in _REFUSAL_CAUSES:
