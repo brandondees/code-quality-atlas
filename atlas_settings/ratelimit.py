@@ -6,13 +6,19 @@ boundary) — refusing past the window's allowance with a fixed phrase.
 A window or limit that cannot be evaluated (zero or negative) refuses:
 a limit check that fails open is not a limit. The attempt is measured
 against this call's `window_s`, and the key remembers the last window
-it was measured under, which is what the eviction sweep reads. The
-table is bounded: past the key cap the oldest key is evicted, and the
-full-table sweep runs only on that rare path — the common call filters
-its own key's hits and walks nothing else, so the work per call is
-bounded by that key's hit list, not by the table. In-process state
-only: the limits bound one page process's traffic, which is the surface
-an attacker reaches directly."""
+it was measured under, which is what the at-cap walk reads. The table
+is bounded, and the bound never spends a live budget: past the key cap
+the walk drops only keys whose newest hit is already outside their own
+window, the caller's own row is never dropped, and a new key arriving
+at a table full of in-window keys is **refused** rather than evicting
+someone's allowance — the accepted tradeoff (D90's rate limits are the
+first line, the refusal is fail-closed and expires with the window, and
+the sign-in route's per-client limiter bounds how fast one address can
+fill the table). The walk runs only on that rare path — the common
+call filters its own key's hits and walks nothing else, so the work per
+call is bounded by that key's hit list, not by the table. In-process
+state only: the limits bound one page process's traffic, which is the
+surface an attacker reaches directly."""
 
 from __future__ import annotations
 
@@ -20,10 +26,10 @@ import threading
 import time
 from collections.abc import Callable
 
-# The key table's bound: past it the oldest key (the one whose newest
-# hit is furthest back) is evicted on the next call, and the one full
-# sweep that eviction needs runs then — a burst of distinct addresses
-# costs bounded memory and bounded per-call work, not an unbounded walk.
+# The key table's bound: past it the walk drops only keys whose newest
+# hit is outside their own window (a live key's hit log is its budget
+# and is never deleted), and a new key at a table full of in-window keys
+# is refused — the accepted lockout tradeoff, bounded by the window.
 _MAX_RATE_KEYS = 4096
 
 

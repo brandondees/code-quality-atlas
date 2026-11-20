@@ -127,9 +127,11 @@ class SessionStore:
                 oldest = min(
                     (s for s in self._sessions.values() if not s.signed_in),
                     key=lambda s: s.created_mono,
+                    default=None,
                 )
-                del self._sessions[oldest.sid]
-                self._pre_login_count -= 1
+                if oldest is not None:
+                    del self._sessions[oldest.sid]
+                    self._pre_login_count -= 1
             now, mono_now = self._now(), self._mono()
             session = Session(
                 sid=self._new_id(),
@@ -175,23 +177,29 @@ class SessionStore:
         new id (session fixation never carries the login across), a new
         CSRF token, the OAuth bindings dropped, the identity kept."""
         with self._lock:
-            popped = self._sessions.pop(session.sid, None)
-            # Single-use under overlapping callbacks: the row popped must
-            # be this very pre-login session; an already-upgraded or
-            # half-upgraded object is refused, so two callbacks presenting
-            # one state cannot both mint a signed-in session.
-            if popped is not session or session.signed_in:
+            # Single-use under overlapping callbacks, checked BEFORE any
+            # mutation: the live row must be this very pre-login session.
+            # A refused call — an already-upgraded or half-upgraded
+            # object — changes nothing: the table and both counters are
+            # untouched, so a refused upgrade can never destroy a live
+            # signed-in session or drift a counter that later feeds an
+            # eviction's min().
+            current = self._sessions.get(session.sid)
+            if current is not session or session.signed_in:
                 raise SessionError("the sign-in session is already consumed")
-            # The popped pre-login row's slot moves to the signed-in
+            del self._sessions[session.sid]
+            # The consumed pre-login row's slot moves to the signed-in
             # table with it.
             self._pre_login_count -= 1
             if self._signed_in_count >= _MAX_SIGNED_IN_SESSIONS:
                 least_recent = min(
                     (s for s in self._sessions.values() if s.signed_in),
                     key=lambda s: s.last_used_mono,
+                    default=None,
                 )
-                del self._sessions[least_recent.sid]
-                self._signed_in_count -= 1
+                if least_recent is not None:
+                    del self._sessions[least_recent.sid]
+                    self._signed_in_count -= 1
             now, mono_now = self._now(), self._mono()
             signed_in = Session(
                 sid=self._new_id(),

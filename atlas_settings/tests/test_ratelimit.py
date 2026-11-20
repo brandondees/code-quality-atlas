@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The rate limiter: the fixed window's allowance and its refusal, and
-the window's reset."""
+"""The rate limiter: the sliding window's allowance and its refusal,
+the window's expiry, the fail-closed guards, and the at-cap eviction
+that never spends a live budget."""
 
 import pytest
 
