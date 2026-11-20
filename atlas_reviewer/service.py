@@ -774,13 +774,15 @@ def _backfill_crashed_spend(
     fields.update(
         {
             "calls": progress.calls,
-            "committed_usd": str(progress.committed_usd),
+            "committed_usd": str(progress.billed_usd),
+            "settled_usd": str(progress.settled_usd),
+            "held_usd": str(progress.held_usd),
             "measured": "backfilled",
         }
     )
     try:
         appended, gap = spend.record_once(
-            event.repo, progress.committed_usd, progress.calls, key
+            event.repo, progress.billed_usd, progress.calls, key
         )
     except OSError as exc:
         _record(
@@ -1074,8 +1076,9 @@ class Worker:
                 fields.update(
                     {
                         "calls": progress.calls,
-                        "committed_usd": str(progress.committed_usd),
+                        "committed_usd": str(progress.billed_usd),
                         "settled_usd": str(progress.settled_usd),
+                        "held_usd": str(progress.held_usd),
                         "measured": "partial",
                     }
                 )
@@ -1091,12 +1094,13 @@ class Worker:
         progress: object,
         fields: dict[str, str | int],
     ) -> None:
-        """Append the review's committed spend to the day's ledger (config
-        slice S9, D81). The figure is the review child's own committed
-        accounting -- reported token counts priced at the operator's price
-        table, never a tenant-reported dollar figure -- from the finished
-        draft's cost line, or from the last progress record when the
-        review did not finish; the final-over-partial precedence is
+        """Append the review's settled bill to the day's ledger (config
+        slice S9, D81, D93). The figure is the review child's known bill
+        -- reported token counts priced at the operator's price table,
+        $0 for a non-200 answer, never a tenant-reported dollar figure
+        and never a reservation held because no cost was reported -- from
+        the finished draft's cost line, or from the last progress record
+        when the review did not finish; the final-over-partial precedence is
         `_cost_event`'s by construction, which reads the progress record
         only when the draft's cost line is absent, so this method never
         sees both figures for one review. A review with no figure in
@@ -1109,7 +1113,7 @@ class Worker:
         if cost is not None:
             amount, calls = Decimal(cost[1]), cost[0]
         elif isinstance(progress, Progress):
-            amount, calls = progress.committed_usd, progress.calls
+            amount, calls = progress.billed_usd, progress.calls
         else:
             return
         try:

@@ -143,7 +143,7 @@ from atlas_reviewer.bridge_args import (
     arg_names,
     required_args,
 )
-from atlas_reviewer.budget import BudgetRefusedError
+from atlas_reviewer.budget import BudgetRefusedError, refused_bill
 from atlas_reviewer.call_facts import (
     note_call_retry,
     note_nudge,
@@ -1158,7 +1158,10 @@ class Spend:
     never came back keeps it too (D58 item 5); a definite refusal -- the
     key's own, or a status that refused the request, neither of which
     billed anything -- releases the reservation it held only while in
-    flight and settles at $0 (D92, as its fix round settled the rule). `derivation` carries D68's
+    flight and settles at $0 (D92, as its fix round settled the rule).
+    The part of settled spend whose cost was never reported is `held_usd`;
+    the cost line's settled figure and the daily ledger record settled
+    minus held (D93). `derivation` carries D68's
     review-wide derivation when the coordinator derived this review's
     limits, and the two review-wide stops then name the derived values and
     the ceiling.
@@ -1180,6 +1183,11 @@ class Spend:
     committed_usd: Decimal = Decimal(0)
     derivation: Derivation | None = None
     settled_usd: Decimal = Decimal(0)
+    held_usd: Decimal = Decimal(0)
+    """Reservations kept because no usable cost was reported (D93): a
+    timeout, a request written and never answered, a served response
+    that could not be priced. Counted in `settled_usd` and
+    `committed_usd` for the in-review ceiling. Not a bill."""
     overruns: list[str] = field(default_factory=list)
     """Per-settle notes for calls whose reported cost came in above the
     worst case reserved for them (D82's tripwire, round-1 review of
@@ -1367,7 +1375,13 @@ class Spend:
                     )
             else:
                 self.settled_usd += worst_usd
+                self.held_usd += worst_usd
             self._settled.notify_all()
+
+    def billed_usd(self) -> Decimal:
+        """Known bills: settled spend minus the part held at its reservation."""
+        amount = self.settled_usd - self.held_usd
+        return amount if amount > 0 else Decimal(0)
 
     def settle_failure(self, worst_usd: Decimal, reported_usd: Any) -> None:
         """Settle a call that was never served: the worst case the
@@ -1387,11 +1401,9 @@ class Spend:
         cost above the reservation on a call that WAS served is `settle`'s
         D82 tripwire, not this."""
         with self._lock:
-            if _valid_cost(reported_usd):
-                self.committed_usd += reported_usd - worst_usd
-                self.settled_usd += reported_usd
-            else:
-                self.committed_usd -= worst_usd
+            bill = refused_bill(reported_usd)
+            self.committed_usd += bill - worst_usd
+            self.settled_usd += bill
             self._settled.notify_all()
 
     def fail_and_halt(self, worst_usd: Decimal, reported_usd: Any, cause: str) -> None:
@@ -1403,11 +1415,9 @@ class Spend:
         flag was up -- a call the key had already refused, booked at its
         full reservation, or sent."""
         with self._lock:
-            if _valid_cost(reported_usd):
-                self.committed_usd += reported_usd - worst_usd
-                self.settled_usd += reported_usd
-            else:
-                self.committed_usd -= worst_usd
+            bill = refused_bill(reported_usd)
+            self.committed_usd += bill - worst_usd
+            self.settled_usd += bill
             if cause:
                 self._halted_cause = cause
             self._halted.set()
@@ -1416,6 +1426,35 @@ class Spend:
 
 def _valid_cost(value: Any) -> bool:
     return isinstance(value, Decimal) and value.is_finite() and value >= 0
+
+
+# calls, the dollars the in-review ceiling counts, and -- when the third
+# element is present -- the part of those dollars held because no cost
+# was reported. A two-element tuple is a caller with no held figure; its
+# committed dollars are known bills.
+PickerSpend = tuple[int, Decimal] | tuple[int, Decimal, Decimal]
+
+
+def spend_for_picker(limits: Limits, picker_spend: PickerSpend, **extra: Any) -> Spend:
+    """The review's spend seeded with the picker's finished calls.
+
+    The picker's calls are finished, so they count as settled for the
+    in-flight backpressure: they will not come down. The held part stays
+    out of the billed figure the cost line and the daily ledger report
+    (D93). A two-element tuple holds nothing."""
+    calls = picker_spend[0]
+    committed = picker_spend[1]
+    held = Decimal(0)
+    if len(picker_spend) == 3:
+        held = picker_spend[2]
+    return Spend(
+        limits,
+        calls,
+        committed,
+        settled_usd=committed,
+        held_usd=held,
+        **extra,
+    )
 
 
 # ------------------------------------------------------------- the attempt

@@ -1006,13 +1006,13 @@ class OpenRouterProvider:
             ReviewBudget.settle(record, f"transport error: {exc}")
             return exc, None
         if resp.status in RETRYABLE:
-            ReviewBudget.settle(record, f"HTTP {resp.status} (retryable)")
+            ReviewBudget.release(record, f"HTTP {resp.status} (retryable)")
             return (
                 BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}"),
                 resp.header("Retry-After"),
             )
         if resp.status != 200:
-            ReviewBudget.settle(record, f"HTTP {resp.status}")
+            ReviewBudget.release(record, f"HTTP {resp.status}")
             raise key_refusal_or_boundary(
                 resp.status, f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
             )

@@ -72,6 +72,7 @@ FIELD_LENSES_TOTAL = "lenses_total"
 FIELD_CALLS = "calls"
 FIELD_COMMITTED_USD = "committed_usd"
 FIELD_SETTLED_USD = "settled_usd"
+FIELD_HELD_USD = "held_usd"
 FIELD_RESERVATION_USD = "reservation_usd"
 FIELD_READING = "reading"
 LENS_SETTLED_STEP = "lens settled"
@@ -226,6 +227,16 @@ class Progress:
     settled_usd: Decimal = Decimal(0)
     reservation_usd: Decimal = Decimal(0)
     reading: frozenset[str] = frozenset()
+    held_usd: Decimal = Decimal(0)
+    """Reservations kept because no cost was reported (D93). A progress
+    record that omits the field reads as held $0, so its settled figure
+    is the bill."""
+
+    @property
+    def billed_usd(self) -> Decimal:
+        """Known bills: settled spend minus the part held at its reservation."""
+        amount = self.settled_usd - self.held_usd
+        return amount if amount > 0 else Decimal(0)
 
 
 def read_progress(*paths: Path, max_bytes: int = PROGRESS_MAX_BYTES) -> Progress | None:
@@ -270,6 +281,7 @@ def _merge_progress(records: list[Mapping[str, object]]) -> Progress:
     settled = Decimal(0)
     reservation = Decimal(0)
     reading: frozenset[str] = frozenset()
+    held = Decimal(0)
     for fields in records:
         done = _int(fields.get(FIELD_LENSES_DONE), done)
         total = _int(fields.get(FIELD_LENSES_TOTAL), total)
@@ -278,7 +290,8 @@ def _merge_progress(records: list[Mapping[str, object]]) -> Progress:
         settled = _decimal(fields.get(FIELD_SETTLED_USD), settled)
         reservation = _decimal(fields.get(FIELD_RESERVATION_USD), reservation)
         reading = _reading(fields, reading)
-    return Progress(done, total, calls, committed, settled, reservation, reading)
+        held = _decimal(fields.get(FIELD_HELD_USD), held)
+    return Progress(done, total, calls, committed, settled, reservation, reading, held)
 
 
 def _is_run_start(line: str) -> bool:

@@ -2062,6 +2062,56 @@ def test_a_key_that_funds_the_planned_minimum_runs_the_review(tmp_path):
     assert result.lenses[0].state is LensState.CLEAN
 
 
+def test_a_key_that_refuses_every_call_posts_one_error_at_zero(tmp_path):
+    """Issue #797: a key that refuses every call posts one error review,
+    settled at $0, and does not stop on the dollar reservation. The
+    picker's own 402 is released before the review starts. Booking that
+    call at its reservation would put the first lens over the $1 ceiling
+    and the stop would be `reservation_usd` with no model call. Kills
+    that seeding mutant and a cost line that still reports the
+    reservation as the spend."""
+    from atlas_reviewer.cli import _picker_spend
+
+    from .test_openrouter import SMALL, OpenRouterFake, provider, reply
+
+    picker = provider(OpenRouterFake(reply({}, status=402)))
+    with pytest.raises(KeyRefusedError):
+        picker.complete(SMALL)
+    picker_spend = _picker_spend(picker)
+    assert picker_spend == (1, Decimal(0), Decimal(0))
+    # The reservation the mutant would seed. Added to the lens's own
+    # worst case it passes the review's dollar ceiling, so a kept
+    # reservation stops the lens before it sends.
+    assert (
+        picker.budget.calls[0].reserved_usd + Decimal("0.60") > LIMITS.reservation_usd
+    )
+    model = ScriptedLensModel(
+        [
+            KeyRefusedError(
+                "OpenRouter HTTP 402 for https://openrouter.ai/api/v1/chat/completions",
+                review_error="model key out of credit",
+            )
+        ],
+        worst_usd=Decimal("0.60"),
+    )
+    result, _ = _lenses(tmp_path, [LENS], model, picker_spend=picker_spend)
+    assert len(model.requests) == 1
+    assert result.review_error == "model key out of credit"
+    assert Decimal(result.committed_usd) == 0
+    assert Decimal(result.billed_usd) == 0
+    assert Decimal(result.held_usd) == 0
+    draft = render_draft(result, Redactor())
+    assert "REVIEW ERROR -- not a review" in draft
+    assert "settled: $0" in draft
+    assert "held at reservation: $0" in draft
+    hits = [
+        lens.outcome.limit_hit.limit
+        for lens in result.lenses
+        if lens.outcome is not None and lens.outcome.limit_hit is not None
+    ]
+    assert "reservation_usd" not in hits
+
+
 def test_a_reassess_call_settles_by_what_the_response_carried():
     """D92's fix round 4: the re-assessment call's boundary branch runs
     the same three-way settle the decision and carry calls run. An
@@ -3169,6 +3219,7 @@ def test_the_review_records_its_progress_for_the_service_to_read(tmp_path):
         assert fields["calls"] >= 1
         assert "committed_usd" in fields
         assert "settled_usd" in fields
+        assert "held_usd" in fields
         assert "reservation_usd" in fields
     progress = read_progress(tmp_path / "events.jsonl")
     assert progress is not None
@@ -5290,10 +5341,11 @@ def test_a_carry_calls_overrun_reaches_the_drafts_tripwire_line(tmp_path):
         "1 settle(s) reported a cost above their reservation (D82's tripwire)" in line
     )
     assert "settled $0.0200 above its $0.0100 worst case" in line
-    # The overrun is accounted: committed spend carries every call's
+    # The overrun is accounted: the settled bill carries every call's
     # reported actual (the decision call's scripted reply prices at
     # $0.10), and the carried section still renders.
-    assert "committed: $0.16." in line
+    assert "settled: $0.16;" in line
+    assert "held at reservation: $0." in line
     assert "## Carried, not re-verified" in draft
 
 
@@ -5462,7 +5514,8 @@ def test_the_endpoint_class_is_read_from_the_providers_name():
 
 def test_the_cost_line_still_parses_for_the_service_cost_event():
     """The endpoint sentence rides the same line, so the service's cost
-    regex still reads the calls and the committed dollars off it."""
+    regex still reads the calls and the settled dollars off it. The held
+    figure on the line is not the bill."""
     from atlas_reviewer.service_run import ReviewReport, review_cost
 
     report = ReviewReport(
@@ -5472,7 +5525,10 @@ def test_the_cost_line_still_parses_for_the_service_cost_event():
         (),
         (),
         (
-            "Model calls: 12; committed: $0.34. Served by the installation's own model endpoint.",
+            (
+                "Model calls: 12; settled: $0.34; held at reservation: $0. "
+                "Served by the installation's own model endpoint."
+            ),
         ),
         "COMMENT",
     )

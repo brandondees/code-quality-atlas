@@ -2601,7 +2601,7 @@ def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatc
     )  # fmt: skip
     assert code == cli.EXIT_INCOMPLETE, err.getvalue()
     assert made == [CallLimits(max_calls=2, budget_usd=Decimal("0.50"))]
-    assert "Model calls: 1; committed: $0.02." in out.getvalue()
+    assert "Model calls: 1; settled: $0.02; held at reservation: $0." in out.getvalue()
     assert "sk-or-v1-x" not in out.getvalue()
 
 

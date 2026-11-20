@@ -455,6 +455,14 @@ def test_a_transport_failure_names_the_endpoint():
     assert "connect refused" in str(exc.value)
     assert CREDENTIALS.key not in str(exc.value)
     assert "transport error: connect refused" in provider.budget.calls[0].outcome
+    # A request that was written and never answered keeps its reservation,
+    # including the retries the call cap allows (D58). Kills the mutant
+    # that releases every failure at $0.
+    assert provider.budget.committed_usd() > 0
+    assert provider.budget.held_usd() == provider.budget.committed_usd()
+    assert all(
+        record.committed_usd == record.reserved_usd for record in provider.budget.calls
+    )
 
 
 def test_a_redirect_is_refused_by_name():
@@ -485,6 +493,26 @@ def test_a_retryable_status_retries_within_the_call_cap():
     provider.preflight()
     provider.complete(PROMPT)
     assert len(transport.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("status", "calls"),
+    [(302, 1), (400, 1), (401, 1), (402, 1), (403, 1), (429, 3), (500, 3), (503, 3)],
+)
+def test_a_non_200_answer_settles_at_zero(status, calls):
+    """Issue #797: every non-200 answer on the tenant complete path
+    settles at $0. A retryable status uses the call cap; a terminal
+    status is one call. Kills `settle` without an actual on each branch
+    the response walks (redirect, auth, quota, retryable, other), which
+    booked the reservation."""
+    provider, transport = _provider([(status, b"no")] * 5, sleep=lambda _s: None)
+    provider.preflight()
+    with pytest.raises(BoundaryError):
+        provider.complete(PROMPT)
+    assert len(transport.calls) == calls
+    assert provider.budget.committed_usd() == Decimal(0)
+    assert provider.budget.held_usd() == Decimal(0)
+    assert all(record.actual_usd == Decimal(0) for record in provider.budget.calls)
 
 
 def test_a_missing_usage_keeps_the_full_reservation():

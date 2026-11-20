@@ -129,9 +129,10 @@ from atlas_reviewer.lens_loop import (
     AgenticLimits,
     FinalReply,
     LensModel,
-    Spend,
+    PickerSpend,
     TurnRequest,
     input_room_tokens,
+    spend_for_picker,
 )
 from atlas_reviewer.lens_script import (
     LensScript,
@@ -920,33 +921,32 @@ def _conversation_block(
     return block, (*collected.omissions, *omissions)
 
 
-def _picker_spend(picker_provider: ModelProvider) -> tuple[int, Decimal]:
-    """The calls and dollars the lens picker already committed (D68):
-    they count toward this review's `max_calls` and `reservation_usd`."""
+def _picker_spend(picker_provider: ModelProvider) -> PickerSpend:
+    """The picker's finished calls as (count, committed, held) (D68, D93).
+
+    Committed is what the in-review ceiling counts. Held is the part of
+    that whose cost was never reported. A non-200 answer is in neither:
+    it settled at $0."""
     budget = getattr(picker_provider, "budget", None)
-    return (
-        (len(budget.calls), budget.committed_usd())
-        if isinstance(budget, ReviewBudget)
-        else (0, Decimal(0))
-    )
+    if not isinstance(budget, ReviewBudget):
+        return (0, Decimal(0), Decimal(0))
+    return (len(budget.calls), budget.committed_usd(), budget.held_usd())
 
 
 def _key_refusal_review(
     cause: str,
     limits: AgenticLimits,
-    picker_spend: tuple[int, Decimal],
+    picker_spend: PickerSpend,
     model: LensModel,
 ) -> AgenticReview:
     """The error review a refused key renders when the review stopped
     before any lens was planned (D92): the picker's own call was the one
     refused, so no lens ran and none is listed -- the draft and the post
     name the fixed cause, and the review's spend records the picker's
-    committed dollars against the review's limits."""
-    spend = Spend(
+    calls against the review's limits. A refusal settles at $0 (D93)."""
+    spend = spend_for_picker(
         limits.resolve(cross_limits=False),
-        picker_spend[0],
-        picker_spend[1],
-        settled_usd=picker_spend[1],
+        picker_spend,
     )
     spend.halt(cause)
     return synthesize(

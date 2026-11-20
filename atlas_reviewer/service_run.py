@@ -342,13 +342,18 @@ def _deadline_bounds_message(raw: str) -> str:
     )
 
 
-_COST_LINE = re.compile(r"Model calls: (\d+); committed: \$([0-9]+(?:\.[0-9]+)?)")
+_COST_LINE = re.compile(
+    r"Model calls: (\d+); settled: \$([0-9]+(?:\.[0-9]+)?); "
+    r"held at reservation: \$[0-9]+(?:\.[0-9]+)?"
+)
 
 
 def review_cost(report: ReviewReport) -> tuple[int, str] | None:
-    """The (calls, committed dollars) the draft's cost lines record, or
+    """The (calls, settled dollars) the draft's cost line records, or
     None when none parses -- the cost event then falls back to the
-    progress records, and to "unknown" past those."""
+    progress records, and to "unknown" past those. The held figure on
+    the same line is not returned: the daily ledger records only the
+    settled bill (D93)."""
     for line in report.cost_lines:
         found = _COST_LINE.search(line)
         if found is not None:

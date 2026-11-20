@@ -6097,3 +6097,22 @@ reviewed commits. `661-m2` is `rounds.py` 202–209; the trial's
 `coordinator.py` range does not format the count. D71 records the
 anchors, the grade, and the tests. The stack is the key loader, the
 grade, the in-memory gate, then this command.
+
+## 2026-11-20 — refused calls settle at $0 (#797, D93)
+
+A non-200 answer on the one-shot client, the picker and the tenant
+`complete` path was settled with no actual, so the reservation was what
+got booked. The picker seeded that figure into the review, the cost line
+printed it as committed, and the daily ledger recorded it, including a
+crash backfill of the in-flight-inclusive committed figure. A key that
+refused every call reported about $25 committed, and the daily ledger
+counted that figure. `refused_bill` is now the one
+dollar rule: a reported cost, or $0. `ReviewBudget.release` and the lens
+loop's `settle_failure` and `fail_and_halt` all use it. A timeout, a
+transport failure before a response, and a served response that could
+not be priced stay held at the reservation (D58, D43). The cost line
+reports settled and held separately. The daily ledger records only the
+settled bill. The in-review ceiling still counts a hold. D93 records the
+choice a timeout's unknown cost is held, not settled, and is excluded
+from the daily budget. No model was called, and no Fly app, secret, or
+deploy changed.

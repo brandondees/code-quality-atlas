@@ -137,6 +137,7 @@ from atlas_reviewer.domain import (
 from atlas_reviewer.head_change import (
     FIELD_CALLS,
     FIELD_COMMITTED_USD,
+    FIELD_HELD_USD,
     FIELD_LENS,
     FIELD_LENSES_DONE,
     FIELD_LENSES_TOTAL,
@@ -157,6 +158,7 @@ from atlas_reviewer.lens_loop import (
     LensJob,
     LensModel,
     Limits,
+    PickerSpend,
     Spend,
     TurnRequest,
     UserText,
@@ -167,6 +169,7 @@ from atlas_reviewer.lens_loop import (
     finding_contract,
     retry_reasons,
     run_attempt,
+    spend_for_picker,
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.limit_stop import LimitHit
@@ -410,6 +413,12 @@ class AgenticReview:
     the incoming changes, never a fixed path-intersection rule; it is
     recorded here, in the telemetry and in the round record, and
     summarized in the post. Empty on a full review."""
+    billed_usd: str = "0"
+    """Known bills: the cost line's settled figure and the daily ledger's
+    amount (D93). $0 when every finished call was a refusal or a hold."""
+    held_usd: str = "0"
+    """Reservations kept because the cost is unknown (D93). Counted in
+    `committed_usd` for the in-review ceiling. Not a bill."""
     review_error: str = ""
     """The fixed cause a refused key halted the review with (D92):
     `model key out of credit` or `model key refused`, the spend's own
@@ -578,6 +587,8 @@ def synthesize(
         rerank_note=rerank_note,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
         endpoint_class=endpoint_class,
+        billed_usd="0" if spend is None else str(spend.billed_usd()),
+        held_usd="0" if spend is None else str(spend.held_usd),
         review_error="" if spend is None else spend.halted_cause,
     )
 
@@ -795,7 +806,7 @@ def review_lenses(
     contract: str | None = None,
     task_socket: str = SOCKET_PATH,
     model_for: Callable[[], LensModel] | None = None,
-    picker_spend: tuple[int, Decimal] = (0, Decimal(0)),
+    picker_spend: PickerSpend = (0, Decimal(0)),
     trace: ReviewTrace | None = None,
     evidence_digest: str | None = None,
     delta: DeltaScope | None = None,
@@ -902,13 +913,7 @@ def review_lenses(
         # draft and the posted comment name the fixed cause instead of
         # running a review that fails call after call into an
         # incomplete-looking stop.
-        spend = Spend(
-            derived,
-            picker_spend[0],
-            picker_spend[1],
-            derivation=derivation,
-            settled_usd=picker_spend[1],
-        )
+        spend = spend_for_picker(derived, picker_spend, derivation=derivation)
         spend.halt(refusal)
         stopped = tuple(
             LensResult(
@@ -1024,7 +1029,7 @@ def _review_lenses(
     model_for: Callable[[], LensModel] | None,
     resolved: Limits,
     derivation: Derivation,
-    picker_spend: tuple[int, Decimal],
+    picker_spend: PickerSpend,
     evidence_digest: str | None,
     delta: DeltaScope | None = None,
     path_ranks: PathRanks | None = None,
@@ -1042,16 +1047,10 @@ def _review_lenses(
     fence_nonce = nonce()
     # `resolved` is D68's derived review-wide limits: the Spend and the
     # review deadline run on them, and a limit stop names their derivation.
-    # The picker's committed dollars are settled spend -- real dollars, not
-    # a worst case waiting to come down -- so the in-flight backpressure
-    # does not wait on them.
-    spend = Spend(
-        resolved,
-        picker_spend[0],
-        picker_spend[1],
-        derivation=derivation,
-        settled_usd=picker_spend[1],
-    )
+    # The picker's calls are finished, so the in-flight backpressure does
+    # not wait on them. A reservation held because no cost was reported
+    # stays out of the billed figure (D93).
+    spend = spend_for_picker(resolved, picker_spend, derivation=derivation)
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []
@@ -1438,6 +1437,7 @@ def _record_progress(
             FIELD_CALLS: spend.calls,
             FIELD_COMMITTED_USD: str(spend.committed_usd),
             FIELD_SETTLED_USD: str(spend.settled_usd),
+            FIELD_HELD_USD: str(spend.held_usd),
             FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
             FIELD_READING: text,
         },
@@ -2721,6 +2721,8 @@ def _compose_carry(
         delta_note=_merge_note(review.delta_note, note),
         model_calls=spend.calls,
         committed_usd=str(spend.committed_usd),
+        billed_usd=str(spend.billed_usd()),
+        held_usd=str(spend.held_usd),
         # The carry call settles after `synthesize` captured the overruns,
         # so the tripwire line is refreshed here with it (round-3 review
         # of #757) -- an overrun on a post-synthesis settle is counted in
@@ -3019,6 +3021,8 @@ def _with_reused_reassessment(
             ),
             model_calls=spend.calls,
             committed_usd=str(spend.committed_usd),
+            billed_usd=str(spend.billed_usd()),
+            held_usd=str(spend.held_usd),
             # The re-assessment call settles after `synthesize` captured
             # the overruns, so the tripwire line is refreshed here with it
             # (round-3 review of #757), the way the totals are.
@@ -3626,7 +3630,10 @@ def render_draft(
     ]
     lines += [
         "",
-        f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
+        (
+            f"Model calls: {review.model_calls}; settled: ${review.billed_usd}; "
+            f"held at reservation: ${review.held_usd}."
+        ),
     ]
     served = _ENDPOINT_SERVED.get(review.endpoint_class)
     if served:

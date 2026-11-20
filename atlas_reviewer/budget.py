@@ -4,9 +4,12 @@
 Every attempt -- first call or retry -- must `reserve` its worst-case cost
 before it is sent. A reservation is refused if it would be call number
 `max_calls + 1`, or if it would push committed spend (settled actuals,
-reserved worst cases where the actual is unknown, plus this reservation)
-past `budget_usd`. A failed or unparseable attempt keeps its full
-reservation as spent, since it may still have been billed.
+including $0 for a non-200 answer, reserved worst cases where the actual
+is unknown, plus this reservation) past `budget_usd`. A non-200 answer
+settles at $0 through `release`: the server answered and billed nothing
+(issue #797, D93). A timeout or a request written but never answered
+keeps its reservation, since it may still have been billed, and so does
+a served response whose usage cannot be priced.
 
 The per-tenant daily spend bounds (config slice S9, D81) live here too:
 the day's committed-spend ledger and the refusal the bounds produce. The
@@ -18,9 +21,10 @@ distinct owner/repo pairs never share a file (`a-b/c` and `a/b-c` are
 distinct, and the joining `-` is unambiguous because a literal `-` inside
 a segment always reads `%2D`). The date in the file name makes the UTC
 reset structural, and a lost file loses only the day's total. The counted
-spend is what the review child's own accounting committed -- reported
-token counts priced at the operator's price table -- never a
-tenant-reported dollar figure.
+spend is the review child's settled bill -- reported token counts priced
+at the operator's price table, $0 for a non-200 answer -- never a
+tenant-reported dollar figure and never a reservation held because no
+cost was reported (D93).
 
 `InputTokenMeter` bounds a growing agentic conversation's next prompt from
 the last response's reported `prompt_tokens` plus the bytes of the
@@ -325,6 +329,18 @@ class CallRecord:
         return self.reserved_usd if self.actual_usd is None else self.actual_usd
 
 
+def refused_bill(reported: object) -> Decimal:
+    """The dollars a refused call settles at (issue #797, D93).
+
+    A finite, non-negative figure the response reported is the bill.
+    Anything else -- no figure, or one that is not a cost -- is $0: a
+    non-200 answer billed nothing. `ReviewBudget.release` and the lens
+    loop's failure settles both call this, so the rule has one home."""
+    if isinstance(reported, Decimal) and reported.is_finite() and reported >= 0:
+        return reported
+    return Decimal(0)
+
+
 @dataclass
 class ReviewBudget:
     limits: CallLimits = field(default_factory=CallLimits)
@@ -333,6 +349,24 @@ class ReviewBudget:
 
     def committed_usd(self) -> Decimal:
         return sum((c.committed_usd for c in self.calls), Decimal(0))
+
+    def held_usd(self) -> Decimal:
+        """Reservations kept after the call finished because no actual was
+        reported. An in-flight call is not held yet: its reservation is
+        still the bound, and it settles one way or the other."""
+        return sum(
+            (
+                record.reserved_usd
+                for record in self.calls
+                if record.outcome != "in flight" and record.actual_usd is None
+            ),
+            Decimal(0),
+        )
+
+    def billed_usd(self) -> Decimal:
+        """Known bills: committed spend minus the part held at its reservation."""
+        amount = self.committed_usd() - self.held_usd()
+        return amount if amount > 0 else Decimal(0)
 
     def reserve(
         self, worst_case: Decimal, ceiling_usd: Decimal | None = None
@@ -382,6 +416,12 @@ class ReviewBudget:
                 f"(settled ${actual:.4f} above its "
                 f"${record.reserved_usd:.4f} reservation; D82's tripwire)"
             )
+
+    @staticmethod
+    def release(record: CallRecord, outcome: str) -> None:
+        """A non-200 answer billed nothing. Settle at $0 so the reservation
+        does not count as spend (issue #797, D93)."""
+        ReviewBudget.settle(record, outcome, refused_bill(None))
 
     def report(self) -> tuple[str, ...]:
         lines = [
@@ -573,7 +613,7 @@ class DailySpend:
         *,
         at: datetime | None = None,
     ) -> None:
-        """Append one settled review's committed spend to the day's file.
+        """Append one settled review's bill to the day's file.
         One `os.write` of one line under `O_APPEND` is the append; a
         write that raises leaves the file as it was and the caller names
         the gap."""
