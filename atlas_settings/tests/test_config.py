@@ -243,14 +243,13 @@ def test_control_characters_in_the_base_url_are_refused() -> None:
         settings_config(env)
 
 
-_REDACTION_MIN_CHARS = 8
-
-
 def test_the_duplicated_constants_match_their_part_a_sources() -> None:
-    """The page is a separate process and keeps its own constant copies
-    rather than importing the service's modules (the r1 review declined
-    the import as process coupling); the copies are pinned to their
-    part A sources here, so a rename on either side fails this test."""
+    """The page is a separate process and keeps local copies of the
+    service's env-var names and defaults — pinned here to their part A
+    sources, so a rename on either side fails this test. The one
+    deliberate exception is ENV_STORE_KEY, which is imported from part
+    A's store module itself (the module this page already depends on;
+    no new coupling), recorded in D90's bot-findings update."""
     from atlas_reviewer import cli, service
     from atlas_settings import config
 
@@ -386,16 +385,24 @@ def test_every_long_public_phrase_is_in_the_redaction_guard() -> None:
         and name not in ("DELETE_CONFIRM_WORD",)
     ]
     assert public_strings, "the phrases module exposes its constants"
-    for phrase in public_strings:
-        if len(phrase) > 7:
-            assert phrase in phrases.REDACTION_GUARD_TEXTS, name_of(phrase)
+    for name, phrase in _public_phrases(phrases):
+        if len(phrase) >= _REDACTION_MIN_CHARS:
+            assert phrase in phrases.REDACTION_GUARD_TEXTS, name
     # The cap phrase names the config bound; the two cannot drift.
     assert "$10000" in CAP_REFUSED
     assert MAX_CAP_USD == Decimal(10000)
 
 
-def name_of(phrase: str) -> str:
-    for name, value in vars(phrases).items():
-        if value is phrase:
-            return name
-    return "?"
+_REDACTION_MIN_CHARS = 8
+"""The redaction register's floor: a phrase shorter than this can never
+be registered for scrubbing, so it needs no guard entry."""
+
+
+def _public_phrases(module: object) -> list[tuple[str, str]]:
+    return [
+        (name, value)
+        for name, value in vars(module).items()
+        if not name.startswith("_")
+        and isinstance(value, str)
+        and name != "DELETE_CONFIRM_WORD"
+    ]
