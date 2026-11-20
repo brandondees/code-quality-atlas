@@ -274,7 +274,15 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         def turn(self, request):
             raise BoundaryError("the model refused")
 
-    for model in (Refused(), TransportFails()):
+    # The output cap was served and billed at its reservation, so it is
+    # a bill (held $0). The transport failure was written and never
+    # answered, so the same reservation is a hold and not a bill.
+    # Kills settling a served call into held_usd, and holding a timeout
+    # as if it were a bill.
+    for model, held in (
+        (Refused(), Decimal(0)),
+        (TransportFails(), Decimal("0.10")),
+    ):
         spend = Spend(LIMITS.resolve())
         clock = FakeClock()
         outcome = run_attempt(
@@ -285,6 +293,8 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         assert spend.calls == 1
         assert spend.committed_usd == Decimal("0.10")
         assert spend.settled_usd == Decimal("0.10"), model.name
+        assert spend.held_usd == held, model.name
+        assert spend.billed_usd() == spend.settled_usd - held, model.name
     # A model error is retried once (D49): each failed call releases its
     # reservation and settles at $0 -- no served response, nothing billed
     # (D92) -- and the retry is still its own reserved, settled call
@@ -313,6 +323,8 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
     assert spend.calls == 2
     assert spend.committed_usd == Decimal("0.20")
     assert spend.settled_usd == Decimal("0.20")
+    assert spend.held_usd == Decimal("0.20")
+    assert spend.billed_usd() == Decimal(0)
     assert Cause.TRANSPORT_ERROR in outcome.causes
 
 

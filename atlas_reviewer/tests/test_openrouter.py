@@ -1063,6 +1063,8 @@ def test_a_reasoning_count_outside_the_completion_count_keeps_the_reservation():
     p = provider(fake)
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():
@@ -1075,18 +1077,23 @@ def test_reservation_uses_the_highest_price_tier_and_cache_writes():
 
 
 def test_a_call_with_no_reported_actual_stays_at_its_reservation():
-    """A timeout, or any call that finished with no actual, keeps its
-    reservation (D58 item 5, D43). `settle` without an actual is that
-    path. Kills a release that also drops the unknown-cost case."""
+    """A served call with no actual and a timeout both keep the
+    reservation on the in-review cap (D43, D58 item 5). Only the timeout
+    is a hold: the served call is a bill at its reservation (D93).
+    Kills a release that drops the unknown-cost case, and a settle that
+    marks every actual-less call held."""
     budget = ReviewBudget(CallLimits())
-    record = budget.reserve(Decimal("1.40"))
-    budget.settle(record, "transport error: timed out")
-    budget.reserve(Decimal("1.40"))
+    served = budget.reserve(Decimal("1.40"))
+    budget.settle(served, "ok")
+    assert budget.held_usd() == Decimal(0)
+    assert budget.billed_usd() == Decimal("1.40")
+    budget.hold(budget.reserve(Decimal("1.40")), "transport error: timed out")
     with pytest.raises(BudgetRefusedError, match="over \\$3.00"):
         budget.reserve(Decimal("0.21"))
     budget.reserve(Decimal("0.20"))
     assert budget.committed_usd() == Decimal("3.00")
     assert budget.held_usd() == Decimal("1.40")
+    assert budget.billed_usd() == Decimal("1.40")
 
 
 def test_a_released_non_200_does_not_count_toward_the_cap():
@@ -1391,6 +1398,8 @@ def test_a_byok_call_without_an_upstream_cost_keeps_its_reservation():
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
     assert "BYOK upstream cost not reported" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_an_unreadable_upstream_cost_keeps_the_reservation():
@@ -1403,6 +1412,8 @@ def test_an_unreadable_upstream_cost_keeps_the_reservation():
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
 
 
 def test_an_accepted_call_with_no_upstream_field_settles_usage_cost():
@@ -1708,9 +1719,16 @@ def test_cost_is_computed_from_catalog_rates_when_not_reported():
     "usage", [{}, {"prompt_tokens": -1_000_000, "completion_tokens": 5}]
 )
 def test_missing_usage_keeps_the_reservation_as_spent(usage):
+    """A 200 whose body has no usable usage was served. The reservation
+    is the bill, not a hold, so the figure the daily ledger records is
+    the reservation (round-1 review of #799). Kills settling that call
+    with hold set."""
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert p.budget.held_usd() == Decimal(0)
+    assert p.budget.billed_usd() == p.budget.committed_usd()
+    assert p.budget.billed_usd() > 0
 
 
 @pytest.mark.parametrize(

@@ -2763,6 +2763,8 @@ def test_a_finished_review_logs_its_cost(tmp_path):
     # Mutant: the cost logging dropped, which loses the measure-first
     # numbers the decision's tuning reads.
     assert costs[0].fields["calls"] == 12
+    assert costs[0].fields["billed_usd"] == "3.40"
+    assert costs[0].fields["held_usd"] == "0"
     assert costs[0].fields["committed_usd"] == "3.40"
     assert costs[0].fields["measured"] == "final"
 
@@ -2828,6 +2830,12 @@ def test_a_cancelled_review_logs_the_cost_its_progress_recorded(tmp_path):
     # which would log every cancelled review as unknown.
     assert costs[0].fields["calls"] == 3
     assert costs[0].fields["measured"] == "partial"
+    # committed_usd stays the ceiling figure ($2.20, in-flight included).
+    # billed_usd is the settled bill ($1.10). Kills writing the bill into
+    # the committed field (round-1 review of #799).
+    assert costs[0].fields["committed_usd"] == "2.20"
+    assert costs[0].fields["billed_usd"] == "1.10"
+    assert costs[0].fields["settled_usd"] == "1.10"
 
 
 def test_a_review_whose_cost_is_nowhere_is_logged_as_unknown(tmp_path):
@@ -4851,6 +4859,75 @@ def test_refused_calls_add_nothing_to_the_daily_ledger(tmp_path):
     assert spend.committed(REPO) == (Decimal(0), "")
 
 
+def test_a_served_call_with_no_usage_counts_on_the_daily_ledger(tmp_path):
+    """A 200 with no usage is settled at its reservation and held $0
+    (what the one-shot and lens paths write). The ledger records that
+    reservation. Kills a backfill that records $0 whenever settled
+    equals the reservation, and one that subtracts a hold the record
+    does not carry (round-1 review of #799)."""
+    board = Board(tmp_path / "queue.json")
+    spend = _spend(tmp_path)
+
+    def runner(event, cancel):
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        (run / "events.jsonl").write_text(
+            json.dumps(
+                {
+                    "seq": 1,
+                    "phase": "progress",
+                    "step": "lens settled",
+                    "status": "ok",
+                    "lens": "tracing",
+                    "lenses_done": 1,
+                    "lenses_total": 4,
+                    "calls": 1,
+                    "settled_usd": "1.68",
+                    "held_usd": "0",
+                    "committed_usd": "1.68",
+                    "reservation_usd": "25",
+                    "reading": "src/x.py",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError("runner blew up")
+
+    worker = _worker(board, runner, root=tmp_path, spend=spend)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal("1.68"), "")
+
+
+def test_a_finished_review_logs_the_bill_apart_from_what_it_holds(tmp_path):
+    """The cost event's committed_usd stays the ceiling (bill plus
+    hold). billed_usd is what the ledger records, and the hold is not
+    added to it. Kills writing the bill into committed_usd, and a
+    parser that adds the hold to the ledger."""
+    board = Board(tmp_path / "queue.json")
+    telemetry = Telemetry(SystemClock())
+    spend = _spend(tmp_path)
+    mixed = dataclass_replace(
+        REPORT_COST,
+        cost_lines=("Model calls: 4; settled: $1.10; held at reservation: $0.50.",),
+    )
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, mixed),
+        root=tmp_path,
+        telemetry=telemetry,
+        spend=spend,
+    )
+    _deliver(_config(tmp_path), board, _body(), spend=spend)
+    assert worker.run_one() is True
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
+    costs = [e for e in telemetry.events if e.step == "review cost"]
+    assert costs[0].fields["billed_usd"] == "1.10"
+    assert costs[0].fields["held_usd"] == "0.50"
+    assert costs[0].fields["committed_usd"] == "1.60"
+
+
 def test_a_crashed_review_of_only_held_reservations_adds_nothing(tmp_path):
     """A crash whose progress is all held reservations -- settled equal
     to held, the in-flight-inclusive committed figure beside them --
@@ -5036,7 +5113,8 @@ def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_pa
     assert total == Decimal("1.10") + Decimal("3.40")
     backs = [e for e in telemetry.events if e.step == "crashed spend"]
     assert backs and backs[0].fields["measured"] == "backfilled"
-    assert backs[0].fields["committed_usd"] == "1.10"
+    assert backs[0].fields["committed_usd"] == "2.20"
+    assert backs[0].fields["billed_usd"] == "1.10"
 
 
 def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):

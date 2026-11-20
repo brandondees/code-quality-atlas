@@ -524,6 +524,13 @@ def test_a_missing_usage_keeps_the_full_reservation():
     (record,) = provider.budget.calls
     assert record.actual_usd is None
     assert record.committed_usd == record.reserved_usd
+    # The response was served, so the reservation is the bill and the
+    # daily ledger records it. Kills marking every actual-less settle
+    # as a hold, which would record $0 for a route that never reports
+    # usage (round-1 review of #799).
+    assert record.held is False
+    assert provider.budget.held_usd() == Decimal(0)
+    assert provider.budget.billed_usd() == record.reserved_usd
 
 
 # ------------------------------------------------------------ the adapter

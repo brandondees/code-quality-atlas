@@ -5532,4 +5532,4 @@ def test_the_cost_line_still_parses_for_the_service_cost_event():
         ),
         "COMMENT",
     )
-    assert review_cost(report) == (12, "0.34")
+    assert review_cost(report) == (12, "0.34", "0")

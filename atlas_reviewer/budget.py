@@ -8,8 +8,10 @@ including $0 for a non-200 answer, reserved worst cases where the actual
 is unknown, plus this reservation) past `budget_usd`. A non-200 answer
 settles at $0 through `release`: the server answered and billed nothing
 (issue #797, D93). A timeout or a request written but never answered
-keeps its reservation, since it may still have been billed, and so does
-a served response whose usage cannot be priced.
+keeps its reservation through `hold`, since it may still have been
+billed, and that hold is not a bill. A served response whose usage
+cannot be priced keeps the reservation too, and that one is a bill:
+the response was served (D43).
 
 The per-tenant daily spend bounds (config slice S9, D81) live here too:
 the day's committed-spend ledger and the refusal the bounds produce. The
@@ -22,9 +24,10 @@ distinct, and the joining `-` is unambiguous because a literal `-` inside
 a segment always reads `%2D`). The date in the file name makes the UTC
 reset structural, and a lost file loses only the day's total. The counted
 spend is the review child's settled bill -- reported token counts priced
-at the operator's price table, $0 for a non-200 answer -- never a
-tenant-reported dollar figure and never a reservation held because no
-cost was reported (D93).
+at the operator's price table, $0 for a non-200 answer, the reservation
+for a served response that could not be priced -- never a
+tenant-reported dollar figure and never a reservation held because the
+request was written and never answered (D93).
 
 `InputTokenMeter` bounds a growing agentic conversation's next prompt from
 the last response's reported `prompt_tokens` plus the bytes of the
@@ -74,7 +77,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
@@ -317,12 +320,30 @@ def worst_case_usd(
     )
 
 
+# CallRecord.outcome's default, and the value a call still in flight
+# carries. Named so a comparison against the default cannot drift from
+# the spelling the record is born with (round-1 review of #799).
+OUTCOME_IN_FLIGHT = "in flight"
+
+
+def valid_cost(value: object) -> TypeGuard[Decimal]:
+    """A figure that is a cost: a finite, non-negative Decimal.
+
+    `refused_bill` and the lens loop's settle both ask this, so "is this
+    a cost" has one home (round-1 review of #799)."""
+    return isinstance(value, Decimal) and value.is_finite() and value >= 0
+
+
 @dataclass
 class CallRecord:
     reserved_usd: Decimal
     actual_usd: Decimal | None = None
-    outcome: str = "in flight"
+    outcome: str = OUTCOME_IN_FLIGHT
     usage: str = ""
+    held: bool = False
+    """True when the reservation is kept because the request was written
+    and never answered (D93). A served call with no actual is not held:
+    its reservation is the bill."""
 
     @property
     def committed_usd(self) -> Decimal:
@@ -334,9 +355,9 @@ def refused_bill(reported: object) -> Decimal:
 
     A finite, non-negative figure the response reported is the bill.
     Anything else -- no figure, or one that is not a cost -- is $0: a
-    non-200 answer billed nothing. `ReviewBudget.release` and the lens
-    loop's failure settles both call this, so the rule has one home."""
-    if isinstance(reported, Decimal) and reported.is_finite() and reported >= 0:
+    non-200 answer billed nothing. The lens loop's failure settles call
+    this, so the rule has one home."""
+    if valid_cost(reported):
         return reported
     return Decimal(0)
 
@@ -351,21 +372,30 @@ class ReviewBudget:
         return sum((c.committed_usd for c in self.calls), Decimal(0))
 
     def held_usd(self) -> Decimal:
-        """Reservations kept after the call finished because no actual was
-        reported. An in-flight call is not held yet: its reservation is
-        still the bound, and it settles one way or the other."""
+        """Reservations kept because the request was written and never
+        answered. An in-flight call is not held yet, and a served call
+        with no actual is a bill at its reservation, not a hold."""
         return sum(
-            (
-                record.reserved_usd
-                for record in self.calls
-                if record.outcome != "in flight" and record.actual_usd is None
-            ),
+            (record.reserved_usd for record in self.calls if record.held),
             Decimal(0),
         )
 
     def billed_usd(self) -> Decimal:
-        """Known bills: committed spend minus the part held at its reservation."""
-        amount = self.committed_usd() - self.held_usd()
+        """Known bills: finished calls that are not holds. A served call
+        with no actual counts at its reservation. An in-flight call is
+        not a bill yet."""
+        amount = sum(
+            (
+                (
+                    record.actual_usd
+                    if record.actual_usd is not None
+                    else record.reserved_usd
+                )
+                for record in self.calls
+                if record.outcome != OUTCOME_IN_FLIGHT and not record.held
+            ),
+            Decimal(0),
+        )
         return amount if amount > 0 else Decimal(0)
 
     def reserve(
@@ -399,9 +429,17 @@ class ReviewBudget:
 
     @staticmethod
     def settle(
-        record: CallRecord, outcome: str, actual: Decimal | None = None, usage: str = ""
+        record: CallRecord,
+        outcome: str,
+        actual: Decimal | None = None,
+        usage: str = "",
+        *,
+        hold: bool = False,
     ) -> None:
         record.outcome, record.actual_usd, record.usage = outcome, actual, usage
+        # A hold is an unanswered request. A reported cost, including $0,
+        # is a bill, so it cannot also be a hold.
+        record.held = hold and actual is None
         if (
             isinstance(actual, Decimal)
             and actual.is_finite()
@@ -418,10 +456,17 @@ class ReviewBudget:
             )
 
     @staticmethod
+    def hold(record: CallRecord, outcome: str) -> None:
+        """A timeout or a request written and never answered. The
+        reservation stays on the in-review cap and is not a bill
+        (issue #797, D93)."""
+        ReviewBudget.settle(record, outcome, hold=True)
+
+    @staticmethod
     def release(record: CallRecord, outcome: str) -> None:
         """A non-200 answer billed nothing. Settle at $0 so the reservation
         does not count as spend (issue #797, D93)."""
-        ReviewBudget.settle(record, outcome, refused_bill(None))
+        ReviewBudget.settle(record, outcome, Decimal(0))
 
     def report(self) -> tuple[str, ...]:
         lines = [

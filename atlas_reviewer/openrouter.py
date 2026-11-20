@@ -1003,7 +1003,9 @@ class OpenRouterProvider:
                 self._timeout_s,
             )
         except BoundaryError as exc:
-            ReviewBudget.settle(record, f"transport error: {exc}")
+            # Written and never answered: the reservation stays, and it
+            # is a hold, not a bill (D58 item 5, D93).
+            ReviewBudget.hold(record, f"transport error: {exc}")
             return exc, None
         if resp.status in RETRYABLE:
             ReviewBudget.release(record, f"HTTP {resp.status} (retryable)")

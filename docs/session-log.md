@@ -6108,11 +6108,12 @@ crash backfill of the in-flight-inclusive committed figure. A key that
 refused every call reported about $25 committed, and the daily ledger
 counted that figure. `refused_bill` is now the one
 dollar rule: a reported cost, or $0. `ReviewBudget.release` and the lens
-loop's `settle_failure` and `fail_and_halt` all use it. A timeout, a
-transport failure before a response, and a served response that could
-not be priced stay held at the reservation (D58, D43). The cost line
-reports settled and held separately. The daily ledger records only the
-settled bill. The in-review ceiling still counts a hold. D93 records the
-choice a timeout's unknown cost is held, not settled, and is excluded
-from the daily budget. No model was called, and no Fly app, secret, or
-deploy changed.
+loop's `settle_failure` and `fail_and_halt` all use it. A timeout or a
+transport failure before a response stays held at the reservation
+(D58) and is not a bill. A served response that could not be priced,
+including a 200 with no usage, counts at its reservation (D43) and the
+daily ledger records it. The cost line reports settled and held
+separately. The daily ledger records the settled bill. The in-review
+ceiling still counts a hold. The cost event's `committed_usd` stays
+the ceiling figure; the bill is `billed_usd`. D93 records the choice.
+No model was called, and no Fly app, secret, or deploy changed.

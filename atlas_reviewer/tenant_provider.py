@@ -328,7 +328,9 @@ class TenantEndpointProvider:
                 self._timeout_s,
             )
         except BoundaryError as exc:
-            ReviewBudget.settle(record, f"transport error: {exc}")
+            # Written and never answered: the reservation stays, and it
+            # is a hold, not a bill (D58 item 5, D93).
+            ReviewBudget.hold(record, f"transport error: {exc}")
             return exc, None
         return _response(resp, terms, record, self.model_id, url)
 

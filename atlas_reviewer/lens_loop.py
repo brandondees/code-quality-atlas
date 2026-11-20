@@ -37,8 +37,9 @@ bridge refuses whatever the model still calls. A retried call
 reserves and settles like any other call, and a failed call settles by
 what its response carried (D92, as its fix round settled the rule): a
 priced 200 the turn rejected at the parsed cost, a served response with
-no usable usage at its reservation (D43), a written request that never
-came back at its reservation too (D58 item 5), and a definite refusal --
+no usable usage at its reservation, which is a bill (D43), a written
+request that never came back at its reservation too, which is a hold
+and not a bill (D58 item 5, D93), and a definite refusal --
 the key's own, or a status that refused the request -- released at $0. A
 call the reservation cannot cover at its
 full output cap is sent with the largest cap it can cover, when that is
@@ -143,7 +144,7 @@ from atlas_reviewer.bridge_args import (
     arg_names,
     required_args,
 )
-from atlas_reviewer.budget import BudgetRefusedError, refused_bill
+from atlas_reviewer.budget import BudgetRefusedError, refused_bill, valid_cost
 from atlas_reviewer.call_facts import (
     note_call_retry,
     note_nudge,
@@ -1155,13 +1156,14 @@ class Spend:
     attempt. A call is reserved at its worst case before it is sent and
     settled at its reported cost. A served call whose cost was never
     reported keeps its reservation as spent (D43); a written request that
-    never came back keeps it too (D58 item 5); a definite refusal -- the
+    never came back keeps it too (D58 item 5); a     definite refusal -- the
     key's own, or a status that refused the request, neither of which
     billed anything -- releases the reservation it held only while in
     flight and settles at $0 (D92, as its fix round settled the rule).
-    The part of settled spend whose cost was never reported is `held_usd`;
-    the cost line's settled figure and the daily ledger record settled
-    minus held (D93). `derivation` carries D68's
+    `held_usd` is the part of settled spend whose request was written
+    and never answered. A served call with no usable cost is a bill at
+    its reservation, so it stays in the cost line's settled figure and
+    in the daily ledger; a hold does not (D93). `derivation` carries D68's
     review-wide derivation when the coordinator derived this review's
     limits, and the two review-wide stops then name the derived values and
     the ceiling.
@@ -1184,10 +1186,11 @@ class Spend:
     derivation: Derivation | None = None
     settled_usd: Decimal = Decimal(0)
     held_usd: Decimal = Decimal(0)
-    """Reservations kept because no usable cost was reported (D93): a
-    timeout, a request written and never answered, a served response
-    that could not be priced. Counted in `settled_usd` and
-    `committed_usd` for the in-review ceiling. Not a bill."""
+    """Reservations kept because the request was written and never
+    answered (D93): a timeout, a transport failure before a response.
+    Counted in `settled_usd` and `committed_usd` for the in-review
+    ceiling. Not a bill. A served response that could not be priced is
+    a bill at its reservation and is not held."""
     overruns: list[str] = field(default_factory=list)
     """Per-settle notes for calls whose reported cost came in above the
     worst case reserved for them (D82's tripwire, round-1 review of
@@ -1365,7 +1368,7 @@ class Spend:
         reservation priced -- D82's subset assumption failing on that
         route, the revisit trigger's condition."""
         with self._lock:
-            if _valid_cost(actual_usd):
+            if valid_cost(actual_usd):
                 self.committed_usd += actual_usd - worst_usd
                 self.settled_usd += actual_usd
                 if actual_usd > worst_usd:
@@ -1374,12 +1377,25 @@ class Spend:
                         f"${worst_usd:.4f} worst case"
                     )
             else:
+                # Served, and no usable cost (D43). The reservation is
+                # the bill: the response arrived, so this is not a hold.
                 self.settled_usd += worst_usd
-                self.held_usd += worst_usd
+            self._settled.notify_all()
+
+    def hold(self, worst_usd: Decimal) -> None:
+        """A timeout or a transport failure before a response (D58 item
+        5). The reservation stays in settled spend for the in-review
+        ceiling and in `held_usd`, so the cost line names it and the
+        daily ledger does not record it (D93)."""
+        with self._lock:
+            self.settled_usd += worst_usd
+            self.held_usd += worst_usd
             self._settled.notify_all()
 
     def billed_usd(self) -> Decimal:
-        """Known bills: settled spend minus the part held at its reservation."""
+        """Known bills: settled spend minus the part held because the
+        request was written and never answered. A served call with no
+        usable cost is included, at its reservation."""
         amount = self.settled_usd - self.held_usd
         return amount if amount > 0 else Decimal(0)
 
@@ -1424,10 +1440,6 @@ class Spend:
             self._settled.notify_all()
 
 
-def _valid_cost(value: Any) -> bool:
-    return isinstance(value, Decimal) and value.is_finite() and value >= 0
-
-
 # calls, the dollars the in-review ceiling counts, and -- when the third
 # element is present -- the part of those dollars held because no cost
 # was reported. A two-element tuple is a caller with no held figure; its
@@ -1439,9 +1451,11 @@ def spend_for_picker(limits: Limits, picker_spend: PickerSpend, **extra: Any) ->
     """The review's spend seeded with the picker's finished calls.
 
     The picker's calls are finished, so they count as settled for the
-    in-flight backpressure: they will not come down. The held part stays
-    out of the billed figure the cost line and the daily ledger report
-    (D93). A two-element tuple holds nothing."""
+    in-flight backpressure: they will not come down. The held part --
+    a request written and never answered -- stays out of the billed
+    figure the cost line and the daily ledger report (D93). A served
+    call the picker could not price is in the committed figure and is
+    a bill. A two-element tuple holds nothing."""
     calls = picker_spend[0]
     committed = picker_spend[1]
     held = Decimal(0)
@@ -1758,7 +1772,7 @@ def _fit_to_reservation(
         worst = model.worst_case_usd(fitted)
     except (LimitRefused, BoundaryError):
         return refused
-    if not _valid_cost(worst):
+    if not valid_cost(worst):
         return refused
     return fitted, worst, spend.reserve(worst, clock=clock, wait_until=wait_until)
 
@@ -1858,9 +1872,10 @@ def _place_call(
     except TransportTimeoutError as first:
         # The timed-out request keeps its full reservation as spent
         # (D58 item 5, restored by D92's fix round): the request was
-        # written, and the provider may still have billed it. The one
-        # retry is unchanged.
-        spend.settle(worst, None)
+        # written, and the provider may still have billed it. That
+        # reservation is a hold, not a bill (D93). The one retry is
+        # unchanged.
+        spend.hold(worst)
         if not _retry_earned(
             request, retried_request, model, clock, lens_deadline,
             review_deadline,
@@ -1870,8 +1885,9 @@ def _place_call(
     except TransportError as exc:
         # A written request may still have been billed, whatever the
         # transport then did (D58 item 5's booking, restored by D92's fix
-        # round): the reservation is kept as spent.
-        spend.settle(worst, None)
+        # round): the reservation is kept, and it is a hold, not a bill
+        # (D93).
+        spend.hold(worst)
         return p.cut(Cause.TRANSPORT_ERROR, str(exc))
     except BoundaryError as exc:
         # The settle reads what the exception carries (D92's fix round,
@@ -1883,7 +1899,7 @@ def _place_call(
         # refused the request before any body was served -- is a failed
         # call, released at $0.
         reported = exc.reported_cost
-        if reported is not None and _valid_cost(reported):
+        if reported is not None and valid_cost(reported):
             spend.settle(worst, reported)
         elif reported is not None:
             spend.settle(worst, None)
@@ -2243,7 +2259,7 @@ def _reserve_call(
     # The estimate can wait on the catalog while another lens halts.
     if spend.halted:
         return Cause.MODEL_ERROR, HALTED_CALL
-    if not _valid_cost(worst):
+    if not valid_cost(worst):
         return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
     refused = spend.reserve(worst, clock=clock, wait_until=wait_until)
     if spend.halted:

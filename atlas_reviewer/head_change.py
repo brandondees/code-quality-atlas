@@ -228,13 +228,15 @@ class Progress:
     reservation_usd: Decimal = Decimal(0)
     reading: frozenset[str] = frozenset()
     held_usd: Decimal = Decimal(0)
-    """Reservations kept because no cost was reported (D93). A progress
-    record that omits the field reads as held $0, so its settled figure
-    is the bill."""
+    """Reservations kept because the request was written and never
+    answered (D93). A served call with no usage is not in this figure.
+    A progress record that omits the field reads as held $0, so its
+    settled figure is the bill."""
 
     @property
     def billed_usd(self) -> Decimal:
-        """Known bills: settled spend minus the part held at its reservation."""
+        """Known bills: settled spend minus holds. A served call with no
+        usage is in `settled_usd` and not in `held_usd`, so it counts."""
         amount = self.settled_usd - self.held_usd
         return amount if amount > 0 else Decimal(0)
 

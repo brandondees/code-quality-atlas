@@ -774,7 +774,8 @@ def _backfill_crashed_spend(
     fields.update(
         {
             "calls": progress.calls,
-            "committed_usd": str(progress.billed_usd),
+            "committed_usd": str(progress.committed_usd),
+            "billed_usd": str(progress.billed_usd),
             "settled_usd": str(progress.settled_usd),
             "held_usd": str(progress.held_usd),
             "measured": "backfilled",
@@ -1067,8 +1068,18 @@ class Worker:
         cost = review_cost(report) if report is not None else None
         progress = None
         if cost is not None:
+            billed = Decimal(cost[1])
+            held = Decimal(cost[2])
             fields.update(
-                {"calls": cost[0], "committed_usd": cost[1], "measured": "final"}
+                {
+                    "calls": cost[0],
+                    "billed_usd": cost[1],
+                    "held_usd": cost[2],
+                    # Nothing is in flight on a finished draft, so the
+                    # ceiling figure is the bill plus what is still held.
+                    "committed_usd": str(billed + held),
+                    "measured": "final",
+                }
             )
         else:
             progress = read_progress(*_progress_paths(self._state_root, job.event))
@@ -1076,7 +1087,8 @@ class Worker:
                 fields.update(
                     {
                         "calls": progress.calls,
-                        "committed_usd": str(progress.billed_usd),
+                        "committed_usd": str(progress.committed_usd),
+                        "billed_usd": str(progress.billed_usd),
                         "settled_usd": str(progress.settled_usd),
                         "held_usd": str(progress.held_usd),
                         "measured": "partial",
@@ -1090,16 +1102,18 @@ class Worker:
     def _record_spend(
         self,
         job: Job,
-        cost: tuple[int, str] | None,
+        cost: tuple[int, str, str] | None,
         progress: object,
         fields: dict[str, str | int],
     ) -> None:
         """Append the review's settled bill to the day's ledger (config
         slice S9, D81, D93). The figure is the review child's known bill
         -- reported token counts priced at the operator's price table,
-        $0 for a non-200 answer, never a tenant-reported dollar figure
-        and never a reservation held because no cost was reported -- from
-        the finished draft's cost line, or from the last progress record
+        $0 for a non-200 answer, the reservation for a served response
+        that could not be priced, never a tenant-reported dollar figure
+        and never a reservation held because the request was written and
+        never answered -- from the finished draft's cost line, or from
+        the last progress record
         when the review did not finish; the final-over-partial precedence is
         `_cost_event`'s by construction, which reads the progress record
         only when the draft's cost line is absent, so this method never
