@@ -5802,7 +5802,9 @@ unchanged, but a failed call no longer shrinks the next send's cap: the
 resend prices against the remainder the failure left, and the two
 refit-tracking tests now pin that the resend takes the model's cap again.
 The up-front check (`_credit_refusal` over the adapter's
-`remaining_credit_usd` and `smallest_call_reservation`) refuses before
+`remaining_credit_usd` and `largest_call_reservation` -- named
+`smallest_call_reservation` when this entry was first written; the fix
+round renamed it for what it computes) refuses before
 fan-out when the key's remaining credit is below the planned review's
 minimum — the smaller of one call's largest reservation and the per-lens
 dollar budget — with every planned lens NOT RUN on the fixed reason and
@@ -5811,8 +5813,11 @@ credit figure to compare against, and a model with no key-credit seam,
 accepts. **Mutants, each applied by hand and killed** (bytecode cache
 deleted first): `settle_failure` keeping the worst case
 (`test_a_failed_call_settles_at_the_cost_its_response_reported`); the
-timeout handler keeping its reservation
-(`test_a_timeout_resend_takes_the_models_cap_again`); the pre-fan-out
+timeout handler releasing its reservation
+(`test_a_timeout_resend_takes_the_models_cap_again`, restated below:
+D92's fix round reversed this booking, and the restored keep is now what
+`test_a_timeout_resend_refits_against_the_remainder_then_left` pins);
+the pre-fan-out
 check dropped (the coordinator's
 `test_a_key_short_of_the_planned_minimum_refuses_before_any_lens_runs`
 and the CLI's test of the same behavior); the credit comparison closed
@@ -5929,9 +5934,12 @@ so the waiter hits `_reserve_call`'s own halted check and never reaches
 `reserve`. A new test parks the waiter inside `reserve`'s backpressure
 wait itself (a clock that signals the wait loop's first monotonic read),
 fails the held call with the refusal while it waits, and pins the halt
-outcome, an empty `sent`, the call count and the $0 — then reserves once
-more after the halt, which pins the pre-wait check the first phase cannot
-reach; each guard's deletion fails it now. The entry's fitted-release
+outcome, an empty `sent`, the call count and the $0. (This entry first
+said the test's post-halt phase pinned the pre-wait check; the round-3
+review showed that phase went through `_reserve_call`, which returns at
+its own halted check and never reaches `reserve` — so the phase now calls
+`spend.reserve` directly after the halt and pins the reservation stop,
+the call count and the $0, and each guard's deletion fails the test.) The entry's fitted-release
 claim was accurate but untested; the new fitted-reservation test (a
 full-cap reserve refused, the fitted reserve committing, the halt landing
 inside it) kills the dropped-fitted-release mutant. The `_choice`

@@ -1835,12 +1835,14 @@ def _place_call(
         spend.settle(worst, None)
         return p.cut(Cause.TRANSPORT_ERROR, str(exc))
     except BoundaryError as exc:
-        # The settle reads what the exception carries (D92's fix round). A
-        # priced 200 the turn then rejected settles at the parsed cost --
-        # the real bill; a served response with no usable usage keeps the
-        # reservation (D43); anything that never served a response -- a
-        # non-retryable status refusal, a body that never parsed far
-        # enough to price -- is a failed call, released at $0.
+        # The settle reads what the exception carries (D92's fix round,
+        # restated by round 3). A priced 200 the turn then rejected
+        # settles at the parsed cost -- the real bill; a response that
+        # arrived but never priced -- unparseable, or over the transport's
+        # size cap -- was served and keeps the reservation (D43); only a
+        # response that never arrived -- a non-retryable status that
+        # refused the request before any body was served -- is a failed
+        # call, released at $0.
         reported = exc.reported_cost
         if reported is not None and _valid_cost(reported):
             spend.settle(worst, reported)

@@ -437,6 +437,45 @@ def test_the_largest_call_reservation_is_the_per_call_cap_priced():
     )
 
 
+def test_a_too_large_response_keeps_its_reservation_in_the_loop(tmp_path):
+    """D92's fix round 3, the loop-level pin: a `ResponseTooLargeError`
+    turn was served, so its reservation stays committed -- the review's
+    committed spend ends at the reservation, not at $0. Kills the release
+    mutant that the adapter-level attachment alone does not reach (a
+    settle that released despite the attached `UNPRICED`)."""
+    from decimal import Decimal
+
+    from atlas_reviewer.lens_loop import Spend
+    from atlas_reviewer.ports import ResponseTooLargeError
+
+    from .test_lens_loop import CONTRACT, NONCE, job, lens_system
+
+    # Two steps: the too-large call is retried once (D49), and both
+    # attempts are served-but-unpriced reservations that stay committed.
+    lens, _fake = model(
+        ResponseTooLargeError("response exceeded 50 bytes"),
+        ResponseTooLargeError("response exceeded 50 bytes"),
+    )
+    ask = TurnRequest(
+        lens_system(
+            "tracing-correctness-and-invariants", BODY, CONTRACT, None, nonce=NONCE
+        ),
+        (UserText(job().first_turn),),
+        tool_schemas(),
+    )
+    worst = lens.worst_case_usd(ask)
+    outcome, _m, spend = attempt(
+        tmp_path,
+        [],
+        model=lens,
+        spend=Spend(
+            replace(LIMITS, reservation_usd=Decimal(5), lens_wall_s=600).resolve()
+        ),
+    )
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert spend.committed_usd == 2 * worst
+
+
 def test_a_priced_200_with_no_choices_carries_its_cost():
     """D92's fix round 2: `_choice`'s refusal sits between the cost
     computation and the `_priced` raises, so an empty `choices` list on a
@@ -467,13 +506,19 @@ def test_a_priced_200_with_no_choices_carries_its_cost():
 
 def test_a_response_too_large_is_not_a_transport_error():
     """Review Minor 2: `ResponseTooLargeError` is raised after the response
-    arrived, so it is a model-level error, not a retryable transport one."""
+    arrived, so it is a model-level error, not a retryable transport one.
+    D92's fix round 3: the converted error is served-but-unpriced -- the
+    provider generated the body and may have billed it -- so it carries
+    `UNPRICED` and the settle keeps the reservation instead of releasing
+    it at $0. Kills the unset-cost mutant on the too-large rewrap."""
     from atlas_reviewer.ports import ResponseTooLargeError
+    from atlas_reviewer.tool_model import UNPRICED
 
     lens, fake = model(ResponseTooLargeError("response exceeded 50 bytes"))
     with pytest.raises(BoundaryError, match="too large") as excinfo:
         lens.turn(request())
     assert not isinstance(excinfo.value, TransportError)
+    assert excinfo.value.reported_cost is UNPRICED
     assert len(fake.chat_requests()) == 1
 
 

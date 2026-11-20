@@ -501,7 +501,12 @@ class TenantLensModel:
         except TransportTimeoutError:
             raise
         except ResponseTooLargeError as exc:
-            raise BoundaryError(f"the tenant endpoint's response: {exc}") from exc
+            # The response arrived and may have been billed: served but
+            # unpriced, so the settle keeps the reservation (D43, D92's
+            # fix round 3).
+            raise _priced(
+                BoundaryError(f"the tenant endpoint's response: {exc}"), UNPRICED
+            ) from exc
         except BoundaryError as exc:
             raise TransportError(f"the tenant endpoint transport error: {exc}") from exc
 
@@ -574,8 +579,12 @@ def _tenant_turn(
     try:
         data = _json_object(raw)
     except BoundaryError:
-        raise BoundaryError(
-            "the tenant endpoint returned a non-JSON response"
+        # The 200 arrived -- the provider served it and may have billed it
+        # -- so the error is served-but-unpriced: the settle keeps the
+        # reservation (D43), it does not release at $0 (D92's fix round 3).
+        raise _priced(
+            BoundaryError("the tenant endpoint returned a non-JSON response"),
+            UNPRICED,
         ) from None
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}

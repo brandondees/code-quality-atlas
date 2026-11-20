@@ -366,7 +366,13 @@ class OpenRouterLensModel:
         except TransportTimeoutError:
             raise
         except ResponseTooLargeError as exc:
-            raise BoundaryError(f"OpenRouter response too large: {exc}") from exc
+            # The response arrived -- the provider served it and may have
+            # billed it -- so the converted error is served-but-unpriced:
+            # the settle keeps the reservation (D43), it does not release
+            # at $0 (D92's fix round 3).
+            raise _priced(
+                BoundaryError(f"OpenRouter response too large: {exc}"), UNPRICED
+            ) from exc
         except BoundaryError as exc:
             raise TransportError(f"OpenRouter transport error: {exc}") from exc
 

@@ -1850,9 +1850,15 @@ def test_a_waiter_inside_the_reserve_wait_commits_nothing_when_the_key_refuses()
     assert sent == []
     assert spend.calls == 1
     # Phase 2: a reserve entered after the halt commits nothing either --
-    # the pre-wait check is what this phase pins.
-    after = _reserve_call(Waiter(), ask, spend, FakeClock(), time.monotonic() + 5)
-    assert after == (Cause.MODEL_ERROR, HALTED_CALL)
+    # `spend.reserve` itself, so the pre-wait check is what this phase
+    # pins (`_reserve_call` returns at its own halted check and would
+    # never reach it). The refusal is a reservation stop, no call slot is
+    # taken, and nothing is committed.
+    from atlas_reviewer.limit_stop import LimitHit
+
+    after = spend.reserve(Decimal("2.00"))
+    assert isinstance(after, LimitHit)
+    assert after.limit == "reservation_usd"
     assert spend.calls == 1
     assert spend.committed_usd == Decimal("0.00")
 

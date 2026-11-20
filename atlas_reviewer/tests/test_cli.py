@@ -2852,12 +2852,11 @@ def test_a_key_short_of_its_planned_minimum_refuses_before_any_lens_fans_out(
 
 def test_a_key_refused_mid_review_halts_and_posts_the_error(tmp_path, monkeypatch):
     """D92: a 402 during the lenses stops the review at once -- the
-    refused call is sent once, the spend halts with the fixed cause, the
-    second lens never starts, and the child exits incomplete with the
-    error draft instead of a review whose empty Findings read clean. This
-    layer keeps the refused call's reservation as spent (D43's settle
-    rule); the failed-call accounting that books the refusal at $0 is
-    part 2's. Kills the retry mutant (a second send) and the dropped-halt
+    refused call is sent once, settles at $0 through `fail_and_halt` (the
+    settle and the halt under one lock), the spend halts with the fixed
+    cause, the second lens never starts, and the child exits incomplete
+    with the error draft instead of a review whose empty Findings read
+    clean. Kills the retry mutant (a second send) and the dropped-halt
     mutant."""
     from contextlib import ExitStack
 
