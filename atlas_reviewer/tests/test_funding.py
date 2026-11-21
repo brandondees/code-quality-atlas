@@ -513,15 +513,14 @@ def test_claim_time_skips_a_dry_key_and_does_not_probe_a_model_the_source_cannot
     assert selection.choice is not None
     assert selection.choice.name == "subs-b"
     assert selection.choice.key == "sk-or-v1-subs-b"
-    assert selection.refusal == ""
     assert calls == ["sk-or-v1-subs-a", "sk-or-v1-high", "sk-or-v1-subs-b"]
 
 
 def test_every_dry_or_refused_source_is_a_credit_or_auth_refusal_with_no_child_source():
-    """When nothing can pay, the selection carries the D92 cause and no
-    choice. A 401 is auth refused. A later claim does not probe a key
-    already known to be dry. Kills posting a choice anyway, and forgetting
-    the refusal so the same dry key is probed again."""
+    """When nothing can pay, the selection has no choice and the notice
+    names the cause. A 401 is auth refused. A later claim does not probe
+    a key already known to be dry. Kills posting a choice anyway, and
+    forgetting the refusal so the same dry key is probed again."""
     env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
     calls: list[str] = []
 
@@ -532,18 +531,26 @@ def test_every_dry_or_refused_source_is_a_credit_or_auth_refusal_with_no_child_s
     selector = _selector(env, dry)
     selection = selector.choose()
     assert selection.choice is None
-    assert selection.refusal == KEY_OUT_OF_CREDIT
-    assert selection.error == ""
-    assert selector.choose().refusal == KEY_OUT_OF_CREDIT
+    assert selection.error == "no funding source is available for this review"
+    assert selector.unavailable_notice() == (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key out of credit"
+    )
+    assert selector.choose().choice is None
     assert calls == ["sk-or-v1-subs-a", "sk-or-v1-subs-b"]
 
     def refused(key: str) -> KeyStatus:
         raise KeyRefusedError("OpenRouter HTTP 401", review_error=KEY_AUTH_REFUSED)
 
-    auth = _selector(env, refused).choose()
+    auth_selector = _selector(env, refused)
+    auth = auth_selector.choose()
     assert auth.choice is None
-    assert auth.refusal == KEY_AUTH_REFUSED
-    assert "sk-or" not in auth.refusal
+    notice = auth_selector.unavailable_notice()
+    assert notice == (
+        "no funding source is available: "
+        "subs-a: model key refused; subs-b: model key refused"
+    )
+    assert "sk-or" not in notice
 
 
 def test_a_probe_that_fails_does_not_mark_the_source_unavailable():
@@ -564,7 +571,6 @@ def test_a_probe_that_fails_does_not_mark_the_source_unavailable():
     selector = _selector(env, probe)
     first = selector.choose()
     assert first.choice is None
-    assert first.refusal == ""
     assert "subs-a: the key probe failed" in first.error
     assert "sk-or" not in first.error
     second = selector.choose()
@@ -584,21 +590,25 @@ def test_marking_a_source_refused_makes_the_next_claim_use_the_following_one():
     assert selector.mark_refused("subs-b") is False
 
 
-def test_the_remembered_cause_is_the_first_refused_source_in_spend_order():
-    """The D92 post names the source the registry tries first. Kills
-    keeping the last source's cause instead."""
+def test_the_notice_names_each_refused_source_in_spend_order():
+    """The notice names every refused source, earlier sources first.
+    Kills keeping only the last source's cause, and reversing the
+    spend order."""
     env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
     selector = _selector(env, lambda key: _credit())
     assert selector.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
     assert selector.mark_refused("subs-b", KEY_AUTH_REFUSED) is False
     selection = selector.choose()
     assert selection.choice is None
-    assert selection.refusal == KEY_OUT_OF_CREDIT
+    assert selector.unavailable_notice() == (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key refused"
+    )
 
 
-def test_one_walk_keeps_the_first_refusal_when_a_later_source_returns_401():
-    """A dry source and then a 401, in one ``choose``, post the dry
-    source's cause. Kills remembering the last refusal in the walk."""
+def test_one_walk_records_both_causes_when_a_later_source_returns_401():
+    """A dry source and then a 401, in one ``choose``, both appear in
+    the notice, in spend order. Kills keeping only the last refusal."""
     env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
 
     def probe(key: str) -> KeyStatus:
@@ -606,10 +616,13 @@ def test_one_walk_keeps_the_first_refusal_when_a_later_source_returns_401():
             return _credit(remaining="0")
         raise KeyRefusedError("OpenRouter HTTP 401", review_error=KEY_AUTH_REFUSED)
 
-    selection = _selector(env, probe).choose()
+    selector = _selector(env, probe)
+    selection = selector.choose()
     assert selection.choice is None
-    assert selection.refusal == KEY_OUT_OF_CREDIT
-    assert selection.error == ""
+    assert selector.unavailable_notice() == (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key refused"
+    )
 
 
 def test_a_blank_key_is_skipped_and_can_be_chosen_once_it_is_set():
@@ -626,7 +639,6 @@ def test_a_blank_key_is_skipped_and_can_be_chosen_once_it_is_set():
     env["ATLAS_FUNDING_SUBS_A"] = "   "
     first = selector.choose()
     assert first.choice is None
-    assert first.refusal == ""
     assert "subs-a: the key is unset" in first.error
     assert calls == []
     env["ATLAS_FUNDING_SUBS_A"] = "sk-or-v1-subs-a"
@@ -654,7 +666,6 @@ def test_an_unrecognized_probe_error_does_not_become_a_refusal():
     selector = _selector(env, probe)
     first = selector.choose()
     assert first.choice is None
-    assert first.refusal == ""
     assert "subs-a: the probe refused for a reason that is not a key refusal" in (
         first.error
     )
@@ -675,7 +686,6 @@ def test_a_probe_that_does_not_parse_fails_the_selection_without_crashing():
 
     selection = _selector(_env(_source()), probe).choose()
     assert selection.choice is None
-    assert selection.refusal == ""
     assert "subs-a: the key probe failed" in selection.error
 
 

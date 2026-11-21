@@ -229,19 +229,17 @@ class FundingChoice:
 class FundingSelection:
     """What claim time decided.
 
-    ``choice`` is the source the review runs on. ``refusal`` is a D92
-    cause, set only when every source that could serve the model has
-    refused or is out of credit. ``error`` is any other reason no
-    source was chosen — a probe that failed, a key over its ceiling.
-    That selection is not itself a D92 post. The worker posts one when
-    this head already advanced, and the cause is the one recorded for
-    this head. When every source is already unavailable and this head
-    has no recorded cause, the worker posts the selector's notice:
-    no funding source is available, then each source and its cause.
-    A probe failure while a source is still eligible posts nothing."""
+    ``choice`` is the source the review runs on. ``error`` is why no
+    source was chosen: a probe that failed, a blank key, a key over
+    its ceiling, or every matching source already refused. The
+    selection is not itself a D92 post. The worker posts one when this
+    head already advanced, and the cause is the one recorded for this
+    head. When every matching source is already unavailable and this
+    head has no recorded cause, the worker posts the selector's
+    notice. A probe failure while a source is still eligible posts
+    nothing."""
 
     choice: FundingChoice | None = None
-    refusal: str = ""
     error: str = ""
 
 
@@ -364,8 +362,9 @@ class FundingSelector:
         """Walk the sources in order. The key probe runs outside the
         lock, so one claim's HTTPS call does not stall another claim
         or a refusal mark. Two claims can probe the same key; both may
-        take it. The refusal, when every matching source has refused,
-        is the first refused source's cause in spend order."""
+        take it. When every matching source has refused, the selection
+        carries no choice. The post, if this head has no recorded
+        cause, is ``unavailable_notice``."""
         reasons: list[str] = []
         for source in self._sources:
             with self._lock:
@@ -389,9 +388,6 @@ class FundingSelector:
                         + "; ".join(reasons)
                     )
                 )
-            cause = self._remembered_cause()
-        if cause:
-            return FundingSelection(refusal=cause)
         return FundingSelection(error="no funding source is available for this review")
 
     def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
@@ -410,14 +406,17 @@ class FundingSelector:
             return self._another_available()
 
     def unavailable_notice(self) -> str:
-        """The D92 text when every source this model can use is already
-        unavailable, or empty when one can still be probed.
+        """The exhaustion notice, or empty when a matching source can
+        still be probed.
 
-        Each name is paired with its recorded cause, in spend order. A
-        cause is the fixed D92 text. The notice carries no key. Empty
-        when a source is still eligible, including one whose last probe
-        failed: that source is not marked unavailable, so the next claim
-        can try it."""
+        The text is ``no funding source is available: ``, then each
+        source whose filter matches the configured model, as
+        ``name: cause``, joined by ``; ``, in spend order. The cause
+        is the recorded refusal, or ``unavailable`` when the mark
+        stored none. A source the filter excludes is left out. The
+        notice carries no key. Empty when a matching source is still
+        eligible, including one whose last probe failed: that source
+        is not marked unavailable, so the next claim can try it."""
         with self._lock:
             parts: list[str] = []
             for source in self._sources:
@@ -479,18 +478,6 @@ class FundingSelector:
     def _refuse(self, name: str, cause: str) -> None:
         self._unavailable.add(name)
         self._causes[name] = cause
-
-    def _remembered_cause(self) -> str:
-        """The first refused source's cause, in spend order.
-
-        A later source's 401 does not replace an earlier source's
-        out-of-credit cause. The post names the source the registry
-        would have tried first.
-        """
-        for source in self._sources:
-            if source.allows(self._model) and source.name in self._causes:
-                return self._causes[source.name]
-        return ""
 
     def _another_available(self) -> bool:
         return any(
