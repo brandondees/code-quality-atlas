@@ -830,11 +830,12 @@ class OpenRouterProvider:
         model_id: str = MODEL_ID,
         allow_safety_retention: bool = False,
         key_ceiling: Decimal = KEY_LIMIT_MAX_USD,
-        byok_source: bool = False,
     ) -> None:
         self._transport = transport
         self._key = api_key
-        self.byok_source = byok_source
+        # Set by the CLI from ATLAS_FUNDING_BYOK after construction. Unset
+        # is the pilot's own behavior.
+        self.byok_source = False
         self._api_url = api_url.rstrip("/")
         self._timeout_s = timeout_s
         self._sleep = sleep

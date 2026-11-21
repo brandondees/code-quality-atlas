@@ -386,15 +386,32 @@ class FundingSelector:
         """Remember that ``name`` refused. True when another source can
         still serve the model.
 
-        This slice's lock test calls it while a probe is in flight, and
-        the next-claim test calls it to skip a source. A later slice's
-        worker calls it when a review's key refuses. ``cause`` is the
-        D92 text a later claim posts when nothing else can serve."""
+        The selector's lock test calls it while a probe is in flight, and
+        the next-claim test calls it to skip a source.
+        ``Worker._advance_on_refusal`` calls it when a review's key
+        refuses. ``cause`` is the D92 text a later claim posts when
+        nothing else can serve."""
         with self._lock:
             self._unavailable.add(name)
             if cause in _REFUSAL_CAUSES:
                 self._causes[name] = cause
             return self._another_available()
+
+    def remembered_cause(self) -> str:
+        """The D92 cause a later claim should post, or empty when no
+        source has refused yet."""
+        with self._lock:
+            return self._remembered_cause()
+
+    def unavailable_names(self) -> tuple[str, ...]:
+        """Sources this model would skip because they already refused,
+        in spend order. Names only."""
+        with self._lock:
+            return tuple(
+                source.name
+                for source in self._sources
+                if source.allows(self._model) and source.name in self._unavailable
+            )
 
     def _probe_source(self, source: FundingSource) -> FundingChoice | str:
         """A choice, a D92 cause, or a reason the source was skipped

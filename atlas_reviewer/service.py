@@ -824,6 +824,21 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
     return lowered.get(name.lower())
 
 
+def _key_refusal_report(cause: str) -> ReviewReport:
+    """The posted review when a key refusal is the whole outcome (D92)."""
+    return ReviewReport(
+        (),
+        (),
+        "",
+        (),
+        (),
+        (),
+        "",
+        review_error=cause,
+        coverage_complete=False,
+    )
+
+
 class Worker:
     """Claims queued jobs and runs them. A publisher, when set, is called
     only after a review that was not superseded and did not fail."""
@@ -1038,23 +1053,13 @@ class Worker:
         if selection.choice is not None:
             return None, active_choice.set(selection.choice)
         if selection.refusal:
-            return (
-                ReviewRun(
-                    True,
-                    ReviewReport(
-                        (),
-                        (),
-                        "",
-                        (),
-                        (),
-                        (),
-                        "",
-                        review_error=selection.refusal,
-                        coverage_complete=False,
-                    ),
-                ),
-                None,
-            )
+            return ReviewRun(True, _key_refusal_report(selection.refusal)), None
+        # A source already refused this head. A probe skip on the next
+        # claim (a 500, a blank key, a limit over the ceiling) would
+        # otherwise fail the job and post nothing.
+        remembered = self._funding.remembered_cause()
+        if remembered:
+            return ReviewRun(True, _key_refusal_report(remembered)), None
         return (
             ReviewRun(
                 False,
@@ -1104,33 +1109,57 @@ class Worker:
         self._stored_supersede(job, self._board.release_claim(job))
         return True
 
+    def _budget_stops(self, job: Job, fields: dict[str, str | int]) -> bool:
+        """True when the day's budget stops this claim before a review.
+
+        The crash backfill runs first, so a crashed attempt's spend
+        counts against the bounds the retry is admitted under. With no
+        funding refusal behind the stop, nothing is posted. A head that
+        already advanced off a refused source still posts that source's
+        D92 cause."""
+        if self._spend is None:
+            return False
+        _backfill_crashed_spend(
+            self._spend, self._state_root, job.event, self._telemetry
+        )
+        refusal, gap = self._spend.refusal(job.event.repo, self._installation)
+        if not refusal:
+            return False
+        self._telemetry.record(
+            "service",
+            "review skipped",
+            {**fields, "reason": skip_reason(refusal)},
+            status=ERROR,
+            error=f"{refusal} ({gap})" if gap else refusal,
+        )
+        remembered = (
+            self._funding.remembered_cause() if self._funding is not None else ""
+        )
+        if remembered:
+            self._publish(job, _key_refusal_report(remembered))
+            return True
+        committed = self._settle(job, JobState.FAILED)
+        if committed is JobState.SUPERSEDED:
+            self._note(job, committed, fields)
+        return True
+
+    def _note_skipped_sources(self, fields: dict[str, str | int]) -> None:
+        """One event naming the sources this claim will not probe."""
+        if self._funding is None:
+            return
+        names = self._funding.unavailable_names()
+        if not names:
+            return
+        self._telemetry.record(
+            "service",
+            "funding source skipped",
+            {**fields, "sources": ",".join(names)},
+        )
+
     def _execute(self, job: Job) -> None:
         fields = _fields(job.event)
-        if self._spend is not None:
-            # The crash backfill runs before the preflight check, so a
-            # crashed attempt's spend counts against the bounds the retry
-            # is admitted under, and before the runner starts, so the
-            # evidence it reads is still the crashed attempt's.
-            _backfill_crashed_spend(
-                self._spend, self._state_root, job.event, self._telemetry
-            )
-            refusal, gap = self._spend.refusal(job.event.repo, self._installation)
-            if refusal:
-                # The preflight re-check (config slice S9): the delivery
-                # was admitted under a total that has since been spent.
-                # The review never starts, nothing is posted, and the
-                # record says plainly what refused it.
-                self._telemetry.record(
-                    "service",
-                    "review skipped",
-                    {**fields, "reason": skip_reason(refusal)},
-                    status=ERROR,
-                    error=f"{refusal} ({gap})" if gap else refusal,
-                )
-                committed = self._settle(job, JobState.FAILED)
-                if committed is JobState.SUPERSEDED:
-                    self._note(job, committed, fields)
-                return
+        if self._budget_stops(job, fields):
+            return
         self._telemetry.record(
             "service",
             "runner named",
@@ -1140,6 +1169,7 @@ class Worker:
         choice: FundingChoice | None = None
         try:
             skipped, token = self._begin_funding()
+            self._note_skipped_sources(fields)
             if token is not None:
                 choice = active_choice.get()
             run = (
