@@ -338,11 +338,20 @@ class SettingsApp:
             confirm.encode("utf-8"), DELETE_CONFIRM_WORD.encode("utf-8")
         ):
             return self._settings_render(session, DELETE_MISMATCH, 400)
-        self._write(
-            session,
-            "delete-installation",
-            lambda: self.store.delete(self.config.installation_id),
-        )
+        try:
+            self._write(
+                session,
+                "delete-installation",
+                lambda: self.store.delete(self.config.installation_id),
+            )
+        except AuthorizationRefused as refused:
+            if refused.response.status == 500:
+                # The audit gap — the one 500 `_write` raises: the store
+                # delete landed and only its record failed. The session
+                # ends with the delete it caused; an authenticated
+                # session must not outlive the record it deleted.
+                self.sessions.destroy(session)
+            return refused.response
         # The record is gone; the session ends with the delete too.
         self.sessions.destroy(session)
         return self._redirect("/", set_cookie=cleared_cookie_header())

@@ -363,23 +363,30 @@ class InstallationStore:
                 self.clock(),
             )
 
-        return self._write_record(ident, compose)
+        record = self._write_record(ident, compose)
+        assert record is not None  # this compose never answers None
+        return record
 
-    def revoke_credentials(self, installation: str) -> InstallationRecord:
+    def revoke_credentials(self, installation: str) -> InstallationRecord | None:
         """Remove the installation's credentials, keeping its cap and
         consent (part B's revoke). A record it has none for is a
-        no-op."""
+        no-op: nothing is written and the answer is `None` -- a revoke
+        cannot materialize an empty record out of nothing."""
         ident = installation_id(installation)
         return self._write_record(
             ident,
-            lambda current: InstallationRecord(
-                ident,
-                "",
-                "",
-                "",
-                current.daily_cap_usd if current is not None else None,
-                (current.consent_acknowledged_at if current is not None else None),
-                self.clock(),
+            lambda current: (
+                None
+                if current is None
+                else InstallationRecord(
+                    ident,
+                    "",
+                    "",
+                    "",
+                    current.daily_cap_usd,
+                    current.consent_acknowledged_at,
+                    self.clock(),
+                )
             ),
         )
 
@@ -399,7 +406,7 @@ class InstallationStore:
                 "the installation's daily cap must be a positive dollar "
                 "amount or nothing"
             )
-        return self._write_record(
+        record = self._write_record(
             ident,
             lambda current: InstallationRecord(
                 ident,
@@ -411,6 +418,8 @@ class InstallationStore:
                 self.clock(),
             ),
         )
+        assert record is not None  # this compose never answers None
+        return record
 
     def record_consent(
         self, installation: str, at: datetime | None = None
@@ -419,7 +428,7 @@ class InstallationStore:
         §7 decision 3), now unless the caller names the moment."""
         ident = installation_id(installation)
         moment = at if at is not None else self.clock()
-        return self._write_record(
+        record = self._write_record(
             ident,
             lambda current: InstallationRecord(
                 ident,
@@ -431,6 +440,8 @@ class InstallationStore:
                 self.clock(),
             ),
         )
+        assert record is not None  # this compose never answers None
+        return record
 
     def delete(self, installation: str) -> None:
         """Delete the installation's stored state -- the credentials,
@@ -573,15 +584,18 @@ class InstallationStore:
     def _write_record(
         self,
         ident: str,
-        compose: Callable[[InstallationRecord | None], InstallationRecord],
-    ) -> InstallationRecord:
+        compose: Callable[[InstallationRecord | None], InstallationRecord | None],
+    ) -> InstallationRecord | None:
         """Read-modify-write one record under its per-installation
         `fcntl.flock`: the composed record replaces the stored one
         atomically, and two writers -- the service process and, from
         part B on, the settings page's process -- cannot lose an update
-        or resurrect a deleted record under each other. A store that
-        cannot encrypt -- unconfigured or broken -- refuses the write
-        with the named reason."""
+        or resurrect a deleted record under each other. A compose that
+        answers None writes nothing and the method answers None -- the
+        no-op revoke's shape, decided inside the lock so a concurrent
+        writer's record cannot be resurrected or lost by a pre-check
+        outside it. A store that cannot encrypt -- unconfigured or
+        broken -- refuses the write with the named reason."""
         if self.broken_reason:
             raise InstallationStoreError(self.broken_reason)
         if self.fernet is None:
@@ -589,6 +603,8 @@ class InstallationStore:
         with self._process_lock(ident):
             current = self._read(ident)
             record = compose(current)
+            if record is None:
+                return None
             path = self._path(ident)
             make_private_dirs(path.parent)
             payload = {

@@ -179,6 +179,18 @@ def test_revoking_keeps_the_cap_and_consent_and_drops_the_credentials(tmp_path):
         record.credentials()
 
 
+def test_revoking_a_missing_record_writes_nothing(tmp_path):
+    """The no-op the docstring promises: a revoke of an installation the
+    store has no record for answers None and materializes nothing — no
+    empty record, no file (kills the materialize-an-empty-record
+    mutant, which left a recordless installation's empty file and a
+    phantom revoke record behind)."""
+    store = _store(tmp_path)
+    assert store.revoke_credentials("12345") is None
+    assert store.load("12345") is None
+    assert not (store_root(tmp_path) / "12345.json").exists()
+
+
 def test_a_cap_can_be_set_without_credentials(tmp_path):
     store = _store(tmp_path)
     store.set_cap("12345", Decimal("5.00"))

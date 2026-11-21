@@ -9,10 +9,15 @@ suite's first file."""
 
 from __future__ import annotations
 
+import http.client
 import json
+import threading
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
+from atlas_settings.audit import AUDIT_FILE_NAME, AuditLog
 from atlas_settings.phrases import (
     ADMIN_REFUSED,
     DELETE_MISMATCH,
@@ -20,6 +25,7 @@ from atlas_settings.phrases import (
     GITHUB_CHECK_FAILED,
     SESSION_EXPIRED,
 )
+from atlas_settings.server import serve
 
 from .harness import (
     ADMIN_ID,
@@ -93,11 +99,13 @@ def test_a_csrf_failure_changes_nothing(tmp_path: Path) -> None:
     assert not (world.state_dir / "installations" / "42.json").exists()
 
 
-def test_the_csrf_check_is_constant_time_against_a_matching_length(
+def test_a_same_length_forged_csrf_token_is_refused_the_same_way(
     tmp_path: Path,
 ) -> None:
     """The check runs even when the submitted token is the right shape:
-    a wrong token of the same length is refused the same way."""
+    a wrong token of the same length is refused the same way (403).
+    Constant-timeness itself is `compare_digest`'s guarantee, not this
+    test's subject."""
     world = build_world(tmp_path)
     sign_in(world)
     csrf = world.csrf()
@@ -379,6 +387,49 @@ def test_a_non_ascii_confirmation_is_a_mismatch_not_a_crash(
     assert world.app.store.load("42") is not None
 
 
+def test_the_delete_audit_gap_still_ends_the_session(tmp_path: Path) -> None:
+    """The delete lands and the audit line cannot be written: the answer
+    is the audit-gap 500, and the session still ends with the delete it
+    caused — no authenticated session outlives the record it deleted
+    (kills the keep-the-session mutant, which left the admin signed in
+    over a deleted installation)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+
+    class UnwritableAudit(AuditLog):
+        def record(
+            self,
+            action: str,
+            installation_id: str,
+            github_user_id: int,
+            at: datetime | None = None,
+        ) -> None:
+            raise OSError("the audit file is unwritable")
+
+    world.app.audit = UnwritableAudit(
+        world.state_dir / AUDIT_FILE_NAME, world.clock.now
+    )
+    response = world.app.post(
+        "/settings/delete",
+        {"csrf": world.csrf(), "confirm": "DELETE"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 500
+    assert "was applied but could not be recorded" in response.body.decode()
+    assert world.app.store.load("42") is None
+    assert world.app.sessions.get(world.cookie) is None
+
+
 # ---- rate limits -----------------------------------------------------
 
 
@@ -456,6 +507,21 @@ def test_the_fake_key_and_tokens_appear_nowhere_across_every_flow(
             )
         )
     )
+    # The log lines are a swept surface too, and the leg is live: one
+    # flow runs through the real `serve()` with the sink wired, so a
+    # secret that reached a request log would fail here — an
+    # always-empty log list would not.
+    server = serve(world.app, "127.0.0.1", 0, lambda line: world.logs.append(line))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        surfaces.append(_socket_surface(server, "/", None))
+        surfaces.append(_socket_surface(server, "/settings", world.cookie))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert world.logs, "the socket flow reached the handler's log sink"
     surfaces.extend(world.logs)
     audit_path = world.state_dir / "settings-audit.jsonl"
     if audit_path.exists():
@@ -476,3 +542,19 @@ def _surface(response: object) -> str:
     if response.set_cookie is not None:
         parts.append(response.set_cookie)
     return "\n".join(parts)
+
+
+def _socket_surface(server: Any, path: str, cookie: str | None) -> str:
+    """One GET over the real socket, its body and headers as a surface —
+    the serve()-routed leg of the redaction sweep."""
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", server.server_address[1], timeout=10
+    )
+    headers = {"Cookie": f"atlas_settings_session={cookie}"} if cookie else {}
+    connection.request("GET", path, headers=headers)
+    response = connection.getresponse()
+    body = response.read().decode("utf-8", errors="replace")
+    set_cookie = response.getheader("Set-Cookie") or ""
+    location = response.getheader("Location") or ""
+    connection.close()
+    return "\n".join(part for part in (body, set_cookie, location) if part)
