@@ -716,8 +716,10 @@ def test_a_choice_repr_does_not_contain_the_key():
 def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypatch):
     """The live probe's error is the status and the URL. The response
     body and the bearer token stay out of it. A 500 is a boundary
-    error, not a key refusal. Kills classifying every non-200 as out of
-    credit, and putting the body on the error."""
+    error, not a key refusal. A 200 that is not a JSON object is not
+    remaining credit. Kills classifying every non-200 as out of credit,
+    putting the body on the error, and treating a malformed 200 as a
+    key that still has credit."""
     secret = "sk-or-v1-probe-secret"
     seen: dict[str, object] = {}
 
@@ -764,3 +766,23 @@ def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypa
     with pytest.raises(BoundaryError) as failed:
         key_probe(secret)
     assert not isinstance(failed.value, KeyRefusedError)
+    from atlas_reviewer.pricing import PricingUnknownError
+
+    seen["status"] = 200
+    seen["payload"] = b"not json, and the body names sk-or-v1-probe-secret"
+    with pytest.raises(PricingUnknownError) as unparsed:
+        key_probe(secret)
+    assert secret not in str(unparsed.value)
+    assert "not json" not in str(unparsed.value)
+    seen["payload"] = b"\xff\xfe"
+    with pytest.raises(PricingUnknownError) as unreadable:
+        key_probe(secret)
+    assert secret not in str(unreadable.value)
+    seen["payload"] = b"[1, 2]"
+    with pytest.raises(PricingUnknownError) as array:
+        key_probe(secret)
+    assert secret not in str(array.value)
+    seen["payload"] = b"null"
+    with pytest.raises(PricingUnknownError) as null_body:
+        key_probe(secret)
+    assert secret not in str(null_body.value)
