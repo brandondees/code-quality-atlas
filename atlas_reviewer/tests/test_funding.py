@@ -133,10 +133,10 @@ def test_a_tenant_name_and_a_non_funding_key_variable_are_refused():
     """The operator list cannot name an installation credential, and it
     cannot point a source at the GitHub key or at the handoff variables.
     Kills a mutant that accepts any ``ATLAS_`` name."""
+    with pytest.raises(ValueError, match="tenant credential"):
+        load_funding_sources(_env(_source(key_env="ATLAS_TENANT_MODEL_KEY")))
     refused = (
-        _source(key_env="ATLAS_TENANT_MODEL_KEY"),
         _source(key_env="ATLAS_GITHUB_APP_PRIVATE_KEY"),
-        _source(key_env="ATLAS_FUNDING_SOURCE"),
         _source(key_env="ATLAS_SPRITES_TOKEN"),
         _source(name="atlas-tenant-a"),
     )
@@ -219,6 +219,32 @@ def test_a_malformed_document_is_refused():
     with pytest.raises(ValueError, match="not JSON") as raised:
         load_funding_sources({ENV_FUNDING_SOURCES: pasted})
     assert "sk-or-v1-secretsecret" not in str(raised.value)
+    secret = "sk-or-v1-secretsecret"
+    for field, value in (
+        ("model_filter", secret),
+        ("key_ceiling_usd", secret),
+        ("name", f"{secret}!"),
+        ("providers", [f"{secret}!"]),
+    ):
+        with pytest.raises(ValueError) as echoed:
+            load_funding_sources(_env(_source(**{field: value})))
+        assert secret not in str(echoed.value)
+
+
+@pytest.mark.parametrize(
+    "key_env",
+    ("ATLAS_FUNDING_SOURCES", "ATLAS_FUNDING_SOURCE", "ATLAS_FUNDING_BYOK"),
+)
+def test_a_document_or_handoff_name_is_not_a_funding_key(key_env):
+    """Each denylisted name is refused as a key variable. Kills dropping
+    any one of them from the denylist, which would accept the document
+    or a handoff flag as the source's key."""
+    item = _source(key_env=key_env)
+    env = {ENV_FUNDING_SOURCES: json.dumps([item])}
+    if key_env != ENV_FUNDING_SOURCES:
+        env[key_env] = "sk-or-v1-subs-a"
+    with pytest.raises(ValueError, match="is not a key"):
+        load_funding_sources(env)
 
 
 def test_a_bad_provider_filter_or_ceiling_is_refused():
@@ -266,7 +292,7 @@ def test_no_source_matching_the_configured_model_is_a_boot_failure():
         "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
         "ATLAS_SERVICE_PROVIDER": "offline",
     }
-    with pytest.raises(ServiceError, match="ATLAS_TENANT"):
+    with pytest.raises(ServiceError, match="tenant credential"):
         config_from_env({**base, **_env(_source(key_env="ATLAS_TENANT_MODEL_KEY"))})
     built = config_from_env({**base, **_env(_source())})
     assert built.provider == "offline"

@@ -222,9 +222,9 @@ def _source(item: object, index: int) -> FundingSource:
         )
     name = item["name"]
     if not isinstance(name, str) or _NAME.fullmatch(name) is None:
-        raise ValueError(f"{where} has a name that is not a short token: {name!r}")
-    if name.startswith(("atlas-tenant", "atlas_tenant")):
-        raise ValueError(f"{where} name {name!r} is in the tenant namespace")
+        raise ValueError(f"{where} has a name that is not a short token")
+    if name.startswith("atlas-tenant"):
+        raise ValueError(f"{where} name is in the tenant namespace")
     key_env = _key_env(item["key_env"], where)
     providers = _providers(item["providers"], where)
     require_zdr = _bool(item["require_zdr"], where, "require_zdr")
@@ -262,7 +262,7 @@ def _providers(value: object, where: str) -> tuple[str, ...]:
     slugs: list[str] = []
     for slug in value:
         if not isinstance(slug, str) or _PROVIDER.fullmatch(slug) is None:
-            raise ValueError(f"{where} has a provider slug {slug!r}")
+            raise ValueError(f"{where} has a provider slug that is not a slug")
         if slug in slugs:
             raise ValueError(f"{where} repeats the provider slug {slug!r}")
         slugs.append(slug)
@@ -285,12 +285,10 @@ def _filter(value: object, where: str) -> str:
     if value.endswith("/*"):
         prefix = value[:-2]
         if _PROVIDER.fullmatch(prefix) is None or "/" in prefix:
-            raise ValueError(f"{where} model filter {value!r} is not a vendor prefix")
+            raise ValueError(f"{where} model filter is not a vendor prefix")
         return value
     if _MODEL_ID.fullmatch(value) is None:
-        raise ValueError(
-            f"{where} model filter {value!r} is not a model id or a prefix"
-        )
+        raise ValueError(f"{where} model filter is not a model id or a prefix")
     return value
 
 
@@ -301,7 +299,7 @@ def _ceiling(value: object, where: str) -> Decimal:
         )
     raw = value.strip() if isinstance(value, str) else str(value)
     if _DOLLAR_AMOUNT.fullmatch(raw) is None:
-        raise ValueError(f"{where} key ceiling {value!r} is not a dollar amount")
+        raise ValueError(f"{where} key ceiling is not a dollar amount")
     amount = Decimal(raw)
     if not amount.is_finite() or amount <= 0 or amount > _MAX_CEILING:
         raise ValueError(
