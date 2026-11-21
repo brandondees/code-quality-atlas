@@ -578,6 +578,7 @@ def synthesize(
     ceiling_note: str = "",
     rerank_note: str = "",
     endpoint_class: str = "",
+    funding_source: str = "",
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -597,7 +598,7 @@ def synthesize(
         endpoint_class=endpoint_class,
         billed_usd="0" if spend is None else str(spend.billed_usd()),
         held_usd="0" if spend is None else str(spend.held_usd),
-        funding_source=noted_funding_source(),
+        funding_source=funding_source,
         review_error="" if spend is None else spend.halted_cause,
     )
 
@@ -739,6 +740,7 @@ def review_lens(
     installation admins pre-approve on the S10 settings page, part B --
     no live approval during a review), and the production default
     approves nothing until part B lands."""
+    funding = noted_funding_source()
     resolved = limits.resolve()
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
@@ -782,6 +784,7 @@ def review_lens(
             context_omissions=omissions,
             other_pull_requests=other_pull_requests,
             endpoint_class=endpoint_class(model),
+            funding_source=funding,
         )
         # The evidence digest is stored with the record (D73) whether the
         # review ran one lens or the whole plan: a later delta review's
@@ -903,6 +906,7 @@ def review_lenses(
     fixes marked resolved on evidence the delta removed their cited
     code, everything else carried as it was recorded, never silently
     dropped."""
+    funding = noted_funding_source()
     read = review_md_ceiling(trees.base)
     effective, clamp_note = clamp_repo_ceiling(read.value, operator_ceiling_max)
     derived, derivation = derive_review_wide(
@@ -935,6 +939,7 @@ def review_lenses(
             spend=spend,
             ceiling_note=derivation.ceiling_note,
             endpoint_class=endpoint_class(model),
+            funding_source=funding,
         )
 
         def refused(active: ReviewTrace) -> AgenticReview:
@@ -1045,6 +1050,7 @@ def _review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
 ) -> AgenticReview:
+    funding = noted_funding_source()
     files = split_files(diff)
     changed = frozenset(f.path for f in files)
     blocks, omissions, other_pull_requests = _review_context(
@@ -1157,12 +1163,22 @@ def _review_lenses(
             ran = future.result()
             completed[ran.result.index] = ran
             runs = [completed[index] for index in sorted(completed)]
-            _record_progress(telemetry, names, runs, spend, changed)
+            _record_progress(
+                telemetry, names, runs, spend, changed, funding_source=funding
+            )
     runs = _continuation_rounds(
         runs, run, changed, library, spend, resolved, clock, deadline,
-        telemetry, names,
+        telemetry, names, funding,
     )  # fmt: skip
-    _record_progress(telemetry, names, runs, spend, changed, step=PROGRESS_REVIEW_STEP)
+    _record_progress(
+        telemetry,
+        names,
+        runs,
+        spend,
+        changed,
+        step=PROGRESS_REVIEW_STEP,
+        funding_source=funding,
+    )
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
     reports = tuple(ran.report for ran in runs if ran.report is not None)
@@ -1177,6 +1193,7 @@ def _review_lenses(
         ceiling_note=derivation.ceiling_note,
         rerank_note=_rerank_note(files, path_ranks, redactor),
         endpoint_class=endpoint_class(model),
+        funding_source=funding,
     )
     if decisions:
         review = replace(review, lens_decisions=decisions)
@@ -1279,6 +1296,7 @@ def _continuation_rounds(
     deadline: float,
     telemetry: Telemetry | None,
     names: Sequence[str],
+    funding_source: str = "",
 ) -> list[_LensRun]:
     """The continuation rounds (D44): each round hands every lens with
     unread files its own continuation, for up to `MAX_CONTINUATIONS`
@@ -1302,7 +1320,9 @@ def _continuation_rounds(
         before = _pending_pairs(pending)
         for lens, paths in pending.items():
             runs.append(run(lens, paths, len(runs) + 1))
-            _record_progress(telemetry, names, runs, spend, changed)
+            _record_progress(
+                telemetry, names, runs, spend, changed, funding_source=funding_source
+            )
         after = {
             lens: paths
             for lens, paths in _pending_by_lens(
@@ -1397,6 +1417,7 @@ def _record_progress(
     changed: frozenset[str],
     *,
     step: str = LENS_SETTLED_STEP,
+    funding_source: str = "",
 ) -> None:
     """One progress record into the run's events file (#702, D79), after
     a lens settles and once when the lens loop ends.
@@ -1452,9 +1473,8 @@ def _record_progress(
         FIELD_RESERVATION_USD: str(spend.limits.reservation_usd),
         FIELD_READING: text,
     }
-    source = noted_funding_source()
-    if source:
-        fields[FIELD_SOURCE] = source
+    if funding_source:
+        fields[FIELD_SOURCE] = funding_source
     telemetry.record(PROGRESS_PHASE, step, fields)
 
 
