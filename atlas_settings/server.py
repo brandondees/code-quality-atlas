@@ -11,8 +11,10 @@ response or a log."""
 
 from __future__ import annotations
 
+import socket
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, cast
 
 from atlas_settings.app import (
     MAX_BODY_BYTES,
@@ -23,6 +25,71 @@ from atlas_settings.app import (
 )
 
 _FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
+# The bounded server: how many requests are handled at once, and how
+# long one request may take to arrive before its connection is closed.
+_MAX_CONCURRENT_REQUESTS = 20
+_REQUEST_TIMEOUT_S = 30.0
+
+
+class SettingsServer(ThreadingHTTPServer):
+    """The page's server: a thread per request, but never more than
+    `max_concurrent` handlers running — a connection arriving while all
+    the slots are taken is answered 503 and closed, not queued without
+    bound."""
+
+    daemon_threads = True
+    max_concurrent = _MAX_CONCURRENT_REQUESTS
+
+    def __init__(
+        self,
+        *args: Any,
+        max_concurrent: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self._slots = threading.BoundedSemaphore(
+            self.max_concurrent if max_concurrent is None else max_concurrent
+        )
+
+    def process_request(
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int] | str,
+    ) -> None:
+        if not self._slots.acquire(blocking=False):
+            self._refuse_busy(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:  # pragma: no cover - a failed thread start is defensive
+            # The handler thread was never started, so its `finally`
+            # will not run: hand the slot back here instead.
+            self._slots.release()
+            raise
+
+    def process_request_thread(
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int] | str,
+    ) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+    def _refuse_busy(
+        self, request: socket.socket | tuple[bytes, socket.socket]
+    ) -> None:
+        peer = cast("socket.socket", request)
+        try:
+            peer.sendall(
+                b"HTTP/1.1 503 Service Unavailable\r\n"
+                b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+        except OSError:
+            pass
+        finally:
+            self.shutdown_request(request)
 
 
 class SettingsHandler(BaseHTTPRequestHandler):
@@ -116,28 +183,48 @@ class SettingsHandler(BaseHTTPRequestHandler):
         query, and nothing else — a log line can never carry a secret."""
 
     def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
-        path = self.path.partition("?")[0]
-        self.log_sink(f"{self.command} {path} {code}")
+        # `getattr`: a request line that failed to parse never set
+        # `path`, and `send_error` logs before and after that point —
+        # the malformed-request log line must not raise of its own.
+        path = getattr(self, "path", "").partition("?")[0]
+        command = getattr(self, "command", "") or "-"
+        self.log_sink(f"{command} {path} {code}")
 
     def log_error(self, format: str, *args: object) -> None:
-        path = self.path.partition("?")[0]
-        self.log_sink(f"{self.command} {path} error")
+        command = getattr(self, "command", "") or "-"
+        path = getattr(self, "path", "").partition("?")[0]
+        self.log_sink(f"{command} {path} error")
 
 
-def serve(app: SettingsApp, host: str, port: int, log_sink: Any) -> ThreadingHTTPServer:
-    """The page's server: threads per request (the page's own state is
-    lock-guarded; the store's per-installation `flock` serializes
-    against the review service's writes), bound to the operator's
-    host and port."""
+def serve(
+    app: SettingsApp,
+    host: str,
+    port: int,
+    log_sink: Any,
+    *,
+    max_concurrent: int | None = None,
+    request_timeout_s: float | None = None,
+) -> ThreadingHTTPServer:
+    """The page's server: threads per request, bounded — at most
+    `_MAX_CONCURRENT_REQUESTS` requests are handled at once, and a
+    connection arriving while every handler is busy is answered 503 and
+    closed rather than queued without bound (excess capacity is the
+    socket backlog's). Each request's socket read is bounded by
+    `_REQUEST_TIMEOUT_S`, so a client that opens a connection and never
+    finishes its request line cannot hold a handler forever. The page's
+    own state is lock-guarded; the store's per-installation `flock`
+    serializes against the review service's writes."""
 
     class Bound(SettingsHandler):
         pass
 
+    Bound.timeout = (
+        _REQUEST_TIMEOUT_S if request_timeout_s is None else request_timeout_s
+    )
     Bound.app = app
     # staticmethod: a plain function assigned to a class attribute
     # becomes a method, and the sink's first argument would be the
     # handler itself.
     Bound.log_sink = staticmethod(log_sink)
-    server = ThreadingHTTPServer((host, port), Bound)
-    server.daemon_threads = True
+    server = SettingsServer((host, port), Bound, max_concurrent=max_concurrent)
     return server
