@@ -224,9 +224,11 @@ class FundingSelection:
     ``choice`` is the source the review runs on. ``refusal`` is a D92
     cause, set only when every source that could serve the model has
     refused or is out of credit: the service posts that error and does
-    not start a child. ``error`` is any other reason no source was
-    chosen — a probe that failed, a key over its ceiling — and the
-    review fails without a D92 post."""
+    not start a child.     ``error`` is any other reason no source was
+    chosen — a probe that failed, a key over its ceiling. That
+    selection is not itself a D92 post. The worker posts one only when
+    this head already advanced off a refused source, and the cause is
+    the one recorded for this head."""
 
     choice: FundingChoice | None = None
     refusal: str = ""
@@ -396,12 +398,6 @@ class FundingSelector:
             if cause in _REFUSAL_CAUSES:
                 self._causes[name] = cause
             return self._another_available()
-
-    def remembered_cause(self) -> str:
-        """The D92 cause a later claim should post, or empty when no
-        source has refused yet."""
-        with self._lock:
-            return self._remembered_cause()
 
     def unavailable_names(self) -> tuple[str, ...]:
         """Sources this model would skip because they already refused,
