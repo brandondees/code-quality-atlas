@@ -32,6 +32,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TextIO, cast
@@ -44,6 +45,7 @@ from atlas_reviewer.budget import (
     BUDGET_CEILING_USD,
     MAX_CALLS_CEILING,
     CallLimits,
+    DailySpend,
     ReviewBudget,
 )
 from atlas_reviewer.ci_block import ci_block
@@ -87,6 +89,7 @@ from atlas_reviewer.delta import (
 )
 from atlas_reviewer.diffs import PathRanks, diff_paths
 from atlas_reviewer.domain import (
+    _REPO,
     CleanupStatus,
     InvalidEventError,
     Omission,
@@ -2211,13 +2214,8 @@ def _cmd_eval_parity(args: argparse.Namespace, run: _Run) -> int:
 def _cmd_funding_spend(args: argparse.Namespace, run: _Run) -> int:
     """Print settled spend grouped by funding source. Reads the ledger
     and writes nothing. Exit 2 when the ledger cannot be read."""
-    from datetime import date
-
-    from atlas_reviewer.budget import DailySpend
-
     repo = args.repo.strip()
-    owner, slash, name = repo.partition("/")
-    if slash != "/" or not owner or not name or "/" in name:
+    if _REPO.fullmatch(repo) is None:
         raise UsageError("--repo must be owner/name")
     day = None
     if args.day:

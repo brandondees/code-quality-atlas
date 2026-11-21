@@ -6184,6 +6184,32 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     assert groups == (("subs-a", Decimal("1.00")), ("subs-b", Decimal("0.25")))
 
 
+def test_a_progress_bill_keeps_its_source_when_the_choice_name_is_empty(tmp_path):
+    """A claim with no choice name bills the progress record's source.
+    An explicit source wins over that record. Kills dropping
+    ``progress.source`` and ignoring the choice name."""
+    from atlas_reviewer.head_change import Progress
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    job = Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING)
+    progress = Progress(calls=2, settled_usd=Decimal("1.10"), source="subs-a")
+    worker._record_spend(job, None, progress, {"repo": REPO})
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
+    worker._record_spend(job, None, progress, {"repo": REPO}, "subs-b")
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")), ("subs-b", Decimal("1.10")))
+
+
 def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
     """A source name the ledger rejects does not drop the settled bill.
     The line is written with no source. Kills letting ``SourceNameError``
