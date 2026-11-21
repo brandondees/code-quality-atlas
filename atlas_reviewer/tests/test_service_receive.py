@@ -5762,7 +5762,6 @@ def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_pat
     never starts. Kills starting a child on a dry list, and failing the
     job with no post."""
     from atlas_reviewer.funding import FundingSelector, load_funding_sources
-    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
     from atlas_reviewer.pricing import KeyStatus
 
     document = json.dumps(
@@ -6089,6 +6088,14 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     assert advances[0].fields["source"] == "subs-a"
     assert advances[0].fields["cause"] == cause
     assert "sk-or" not in str(advances[0].fields)
+    skipped = [
+        event
+        for event in worker._telemetry.events
+        if event.step == "funding source skipped"
+    ]
+    assert len(skipped) == 1
+    assert skipped[0].fields["sources"] == "subs-a"
+    assert "sk-or" not in str(skipped[0].fields)
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("1.25")
@@ -6140,7 +6147,6 @@ def test_a_tenant_refusal_and_a_failed_run_do_not_advance_to_another_source(
     operator source. A run that failed for another reason stays failed.
     Kills advancing either of those."""
     from atlas_reviewer.funding import active_choice
-    from atlas_reviewer.ports import KEY_OUT_OF_CREDIT
 
     posted: list[str] = []
 
@@ -6202,3 +6208,136 @@ def test_a_finished_review_on_a_funding_source_is_not_requeued(tmp_path):
     assert calls["n"] == 1
     assert posted == [""]
     assert board.states() == ((SHA_A, JobState.DONE),)
+
+
+def test_a_later_probe_failure_posts_the_remembered_refusal(tmp_path):
+    """subs-a refuses and the re-queued claim's probe of subs-b fails.
+    The job posts the remembered D92 cause. Kills failing that claim
+    with no post."""
+    from atlas_reviewer.funding import (
+        FundingSelector,
+        active_choice,
+        load_funding_sources,
+    )
+    from atlas_reviewer.ports import BoundaryError
+    from atlas_reviewer.pricing import KeyStatus
+
+    def probe(key):
+        if "subs-b" in key:
+            raise BoundaryError("OpenRouter HTTP 500")
+        return KeyStatus(Decimal(50), Decimal(40), Decimal(0), True)
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+            {
+                "name": "subs-b",
+                "key_env": "ATLAS_FUNDING_SUBS_B",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
+        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    funding = FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5")
+    started: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        started.append(choice.name)
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(board, runner, publisher=publisher, root=tmp_path, funding=funding)
+    assert worker.run_one() is True
+    assert started == ["subs-a"]
+    assert posted == []
+    assert worker.run_one() is True
+    assert started == ["subs-a"]
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert "sk-or" not in posted[0]
+
+
+def test_a_budget_stop_after_a_refusal_posts_the_remembered_cause(tmp_path):
+    """The re-queued claim is over the day's budget. It posts the
+    remembered refusal instead of failing with no post. A budget stop
+    with nothing remembered still posts nothing. Kills both directions."""
+    from atlas_reviewer.funding import active_choice
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path, budget=Decimal("0.50"))
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        spend=spend,
+        funding=_funding_pair(),
+    )
+    assert worker.run_one() is True
+    assert posted == []
+    assert worker.run_one() is True
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+
+    fresh = Board(tmp_path / "fresh.json")
+    fresh.enqueue(PrEvent(REPO, 8, SHA_A))
+    quiet = _spend(tmp_path / "quiet", budget=Decimal("0.50"))
+    quiet.record(REPO, Decimal("1.00"), 1)
+    called = {"n": 0}
+
+    def untouched(event, cancel):
+        called["n"] += 1
+        return ReviewRun(True, REPORT)
+
+    silent: list[str] = []
+    other = _worker(
+        fresh,
+        untouched,
+        publisher=lambda event, report: silent.append(report.review_error) or True,
+        root=tmp_path / "quiet-root",
+        spend=quiet,
+        funding=_funding_pair(),
+    )
+    assert other.run_one() is True
+    assert called["n"] == 0
+    assert silent == []
+    assert fresh.states() == ((SHA_A, JobState.FAILED),)
