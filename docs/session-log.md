@@ -6131,8 +6131,10 @@ app reads remaining credit through the existing key preflight. One
 review stays on the source chosen at claim time. A key refusal marks
 that source unavailable. Each source is tried at most once while the
 worker remembers, so three sources can advance twice, and the D92
-error is posted only when no source remains, and a later claim that
-ends without a review still posts the cause the selector remembered.
+error is posted when no source remains, and a later claim of the
+same head that ends without a review still posts the cause recorded
+for that head. A different head does not receive it. A first claim
+with nothing remembered fails and posts nothing.
 A mark lasts until the process restarts. Each advance records a
 `refusal advance` event with the source and the cause and no key. A
 tenant run never reads the list. Unset `ATLAS_FUNDING_SOURCES` stays

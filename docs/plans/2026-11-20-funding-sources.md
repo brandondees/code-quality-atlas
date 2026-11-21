@@ -146,15 +146,21 @@ claim takes the next source that still has credit. Exhaustion is
 decided in two places. A refusal whose source is the last eligible
 one ends the advance: the worker posts and does not release the claim
 again. A claim that finds no eligible source is exhausted at claim
-time and does not release the claim either. The selector keeps each
-refused source's cause, and the post carries the first refused
-source's cause in spend order. When a later claim ends without a
-review after a source has already refused — the next probe fails, the
-key is blank, the key is over its ceiling, or the daily budget skips
-the claim — that same cause is posted, so the earlier refusal is not
-left unposted. F3's test that every source refused posts the error,
-and its test that a later probe failure still posts the remembered
-cause, pin those two endings. Each advance records one `refusal
+time and does not release the claim either. A first claim in that
+state, with nothing remembered for that head, fails the job and posts
+nothing; its telemetry names the skipped sources. The selector keeps
+each refused source's cause, and the post carries the first refused
+source's cause in spend order. The worker also records that cause for
+the head that advanced, keyed by repository, pull request, and head,
+and clears the record when the job settles. When a later claim of
+that same head ends without a review — the next probe fails, the key
+is blank, the key is over its ceiling, or the daily budget skips the
+claim — the worker posts the cause recorded for that head, so the
+earlier refusal is not left unposted. A different head does not
+receive it. F3's test that every source refused posts the error, its
+test that a later probe failure still posts that head's cause, and
+its test that another repository's budget stop or probe skip posts
+nothing, pin those endings. Each advance records one `refusal
 advance` telemetry event naming the source and the cause and carrying
 no key. Unsetting `ATLAS_FUNDING_SOURCES` and restarting is the
 rollback to today's single key.
