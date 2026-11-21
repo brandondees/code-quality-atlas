@@ -225,6 +225,8 @@ def test_a_malformed_document_is_refused():
         ("key_ceiling_usd", secret),
         ("name", f"{secret}!"),
         ("providers", [f"{secret}!"]),
+        ("require_zdr", secret),
+        ("byok", secret),
     ):
         with pytest.raises(ValueError) as echoed:
             load_funding_sources(_env(_source(**{field: value})))

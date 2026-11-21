@@ -272,7 +272,7 @@ def _providers(value: object, where: str) -> tuple[str, ...]:
 def _bool(value: object, where: str, field: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(  # noqa: TRY004
-            f"{where} field {field} must be a boolean, not {value!r}"
+            f"{where} field {field} must be a boolean"
         )
     return value
 
