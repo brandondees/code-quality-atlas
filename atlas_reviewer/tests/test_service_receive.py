@@ -5784,13 +5784,15 @@ def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_pat
     sources = load_funding_sources(env)
     assert sources is not None
     posted: list[str] = []
+    started: list[str] = []
 
     def publisher(event, report):
         posted.append(report.review_error)
         return True
 
     def runner(event, cancel):
-        raise AssertionError("a dry list must not start a child")
+        started.append("child")
+        return ReviewRun(True, REPORT)
 
     board = Board(tmp_path / "queue.json")
     board.enqueue(PrEvent(REPO, 7, SHA_A))
@@ -5808,6 +5810,7 @@ def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_pat
     )
     assert worker.run_one() is True
     assert posted == [KEY_OUT_OF_CREDIT]
+    assert started == []
     assert board.states() == ((SHA_A, JobState.DONE),)
 
 
@@ -5815,9 +5818,13 @@ def test_an_unreadable_installation_store_does_not_select_an_operator_source(
     tmp_path,
 ):
     """A store the parent cannot read fails the review. It does not fall
-    through to the operator list. Kills that fallback."""
+    through to the operator list. Kills that fallback: the probe and the
+    runner record calls instead of raising, because the worker's broad
+    ``except Exception`` would swallow an AssertionError and still fail
+    the job."""
     from atlas_reviewer.funding import FundingSelector, load_funding_sources
     from atlas_reviewer.installation_store import InstallationStoreError
+    from atlas_reviewer.pricing import KeyStatus
 
     document = json.dumps(
         [
@@ -5838,12 +5845,16 @@ def test_an_unreadable_installation_store_does_not_select_an_operator_source(
     }
     sources = load_funding_sources(env)
     assert sources is not None
+    probed: list[str] = []
+    started: list[str] = []
 
     def probe(key):
-        raise AssertionError("a broken store must not probe an operator key")
+        probed.append(key)
+        return KeyStatus(Decimal(10), Decimal(10), Decimal(0), True)
 
     def runner(event, cancel):
-        raise AssertionError("a broken store must not start a child")
+        started.append("child")
+        return ReviewRun(True, REPORT)
 
     def tenant_active():
         raise InstallationStoreError("the installation record did not decrypt")
@@ -5858,4 +5869,6 @@ def test_an_unreadable_installation_store_does_not_select_an_operator_source(
         tenant_active=tenant_active,
     )
     assert worker.run_one() is True
+    assert probed == []
+    assert started == []
     assert board.states() == ((SHA_A, JobState.FAILED),)
