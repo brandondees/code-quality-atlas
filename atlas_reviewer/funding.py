@@ -257,34 +257,6 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return data
 
 
-def accepted_source_name(value: object) -> str | None:
-    """A source name, ``""`` when the field is present and blank, None
-    when the value cannot be a source name."""
-    if value == "":
-        return ""
-    if isinstance(value, str) and _NAME.fullmatch(value) is not None:
-        return value
-    return None
-
-
-def funding_key_values(env: Mapping[str, str]) -> tuple[str, ...]:
-    """The funding keys a log has to scrub. A value shorter than 8
-    characters is left alone, the same bar the other secret scrubbing
-    uses. An unreadable document yields nothing: boot already refused it."""
-    try:
-        sources = load_funding_sources(env)
-    except ValueError:
-        return ()
-    if sources is None:
-        return ()
-    values: list[str] = []
-    for source in sources:
-        key = env.get(source.key_env, "")
-        if len(key) >= 8 and key not in values:
-            values.append(key)
-    return tuple(values)
-
-
 def key_probe(key: str) -> KeyStatus:
     """``GET /api/v1/key`` for one OpenRouter key.
 
