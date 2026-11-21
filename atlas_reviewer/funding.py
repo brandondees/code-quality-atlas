@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from atlas_reviewer.http import UrllibTransport, safe_url
+from atlas_reviewer.openrouter import _json_object, key_refusal_or_boundary
 from atlas_reviewer.ports import (
     KEY_AUTH_REFUSED,
     KEY_OUT_OF_CREDIT,
@@ -280,19 +281,9 @@ def key_probe(key: str) -> KeyStatus:
     )
     where = safe_url(KEY_URL)
     message = f"OpenRouter HTTP {response.status} for {where}"
-    if response.status == 401:
-        raise KeyRefusedError(message, review_error=KEY_AUTH_REFUSED)
-    if response.status == 402:
-        raise KeyRefusedError(message, review_error=KEY_OUT_OF_CREDIT)
     if response.status != 200:
-        raise BoundaryError(message)
-    try:
-        data = json.loads(response.body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise PricingUnknownError(f"non-JSON response from {where}") from None
-    if not isinstance(data, dict):
-        raise PricingUnknownError(f"non-object response from {where}")
-    return parse_key_status(data)
+        raise key_refusal_or_boundary(response.status, message)
+    return parse_key_status(_json_object(response.body, where, PricingUnknownError))
 
 
 class FundingSelector:

@@ -719,7 +719,8 @@ def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypa
     error, not a key refusal. A 200 that is not a JSON object is not
     remaining credit. Kills classifying every non-200 as out of credit,
     putting the body on the error, and treating a malformed 200 as a
-    key that still has credit."""
+    key that still has credit. The 401, 402, 403, and 500 classifications
+    agree with the route layer's map. Kills a second copy of that map."""
     secret = "sk-or-v1-probe-secret"
     seen: dict[str, object] = {}
 
@@ -786,3 +787,17 @@ def test_the_key_probe_classifies_401_and_402_and_never_echoes_the_body(monkeypa
     with pytest.raises(PricingUnknownError) as null_body:
         key_probe(secret)
     assert secret not in str(null_body.value)
+    from atlas_reviewer.openrouter import key_refusal_or_boundary
+
+    where = "https://openrouter.ai/api/v1/key"
+    for status_code in (401, 402, 403, 500):
+        seen["status"] = status_code
+        mapped = key_refusal_or_boundary(
+            status_code, f"OpenRouter HTTP {status_code} for {where}"
+        )
+        with pytest.raises(type(mapped)) as agreed:
+            key_probe(secret)
+        assert type(agreed.value) is type(mapped)
+        assert getattr(agreed.value, "review_error", "") == getattr(
+            mapped, "review_error", ""
+        )
