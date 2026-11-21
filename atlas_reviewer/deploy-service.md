@@ -79,9 +79,10 @@ Machine. They are not secrets, and they do not belong in `service.env`.
 the OpenRouter keys an operator review spends, in order. The key
 variables that array names belong in the secret file. Unset, the
 service keeps today's single `ATLAS_OPENROUTER_API_KEY` and today's
-route. A source that refuses stays skipped until the process
-restarts, and a restart probes it again, so a topped-up key is used
-on the next start. `ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the provider list.
+route. A source that refuses stays skipped until the process restarts,
+and a restart probes it again, so a topped-up key is used on the next
+start. `ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the
+provider list.
 `ATLAS_ALLOW_SAFETY_RETENTION` opts into provider retention.
 `ATLAS_REQUIRE_ZDR` set to `false` turns off the zero-data-retention
 requirement; unset keeps it on. `ATLAS_KEY_CEILING_USD` is the most the
