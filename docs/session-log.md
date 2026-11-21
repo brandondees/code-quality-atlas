@@ -6133,8 +6133,12 @@ that source unavailable. Each source is tried at most once while the
 worker remembers, so three sources can advance twice, and the D92
 error is posted when no source remains, and a later claim of the
 same head that ends without a review still posts the cause recorded
-for that head. A different head does not receive it. A first claim
-with nothing remembered fails and posts nothing.
+for that head. A different head does not receive it. A later head
+whose first claim finds every source already unavailable posts that
+no funding source is available, naming each source and its cause in
+spend order. A probe failure, or a budget stop, with nothing
+remembered for that head still posts nothing: those sources are not
+exhausted.
 A mark lasts until the process restarts. Each advance records a
 `refusal advance` event with the source and the cause and no key. A
 tenant run never reads the list. Unset `ATLAS_FUNDING_SOURCES` stays
