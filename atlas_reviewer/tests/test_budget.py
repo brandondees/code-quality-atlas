@@ -156,6 +156,32 @@ def test_a_record_cannot_be_negative(tmp_path):
         _spend(tmp_path).record("o/r", Decimal("-0.01"), 1)
 
 
+def test_a_negative_call_count_writes_nothing(tmp_path):
+    """A negative call count is refused before the append, on both
+    record paths. Kills checking only the amount."""
+    spend = _spend(tmp_path)
+    with pytest.raises(ValueError, match="call count"):
+        spend.record("o/r", Decimal(1), -3)
+    with pytest.raises(ValueError, match="call count"):
+        spend.record_once("o/r", Decimal(1), -3, "attempt")
+    assert spend.committed("o/r") == (Decimal(0), "")
+
+
+def test_a_non_utf8_ledger_is_unreadable(tmp_path):
+    """Bytes that are not UTF-8 are an unreadable ledger, for the day's
+    total and for the per-source grouping. Kills catching only OSError."""
+    path = spend_file(tmp_path, "o/r", DAY)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff\xfe")
+    spend = _spend(tmp_path)
+    total, gap = spend.committed("o/r")
+    assert total is None
+    assert "could not be read" in gap
+    groups, source_gap = spend.by_source("o/r")
+    assert groups is None
+    assert "could not be read" in source_gap
+
+
 # ------------------------------------------------------- the daily budget
 
 

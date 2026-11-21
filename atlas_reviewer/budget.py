@@ -635,7 +635,7 @@ class DailySpend:
             text = self.file(repo).read_text(encoding="utf-8")
         except FileNotFoundError:
             return Decimal(0), ""
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return None, f"the day's spend file could not be read: {exc}"
         total = Decimal(0)
         for number, line in enumerate(text.splitlines(), 1):
@@ -663,7 +663,9 @@ class DailySpend:
         """Append one settled review's bill to the day's file.
         One `os.write` of one line under `O_APPEND` is the append; a
         write that raises leaves the file as it was and the caller names
-        the gap.         ``source`` is the funding source the bill came from.
+        the gap.
+
+        ``source`` is the funding source the bill came from.
         Empty omits the field, so a line from before sources, and a
         review that had no list, stay unattributed. A ``source`` that
         is not a source name raises ``SourceNameError`` and writes
@@ -671,6 +673,8 @@ class DailySpend:
         and writes nothing."""
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
+        if calls < 0:
+            raise ValueError("a call count cannot be negative")
         self._append(
             repo,
             {
@@ -713,6 +717,8 @@ class DailySpend:
             raise ValueError("a once-only record needs a key")
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
+        if calls < 0:
+            raise ValueError("a call count cannot be negative")
         total, gap = self.committed(repo)
         if total is None:
             return False, gap
@@ -812,7 +818,7 @@ class DailySpend:
             text = path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return (), ""
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return None, f"the day's spend file could not be read: {exc}"
         order: list[str] = []
         totals: dict[str, Decimal] = {}
