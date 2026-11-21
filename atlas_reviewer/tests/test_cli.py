@@ -31,7 +31,9 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
-def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_path):
+def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(
+    tmp_path, monkeypatch
+):
     """The report is the ledger, grouped in first-seen order. A missing
     file is zero and exits 0. An unreadable file exits 2. No model call
     and no write. Kills printing a source that was not recorded, and
@@ -55,6 +57,7 @@ def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_p
     assert code == 0
     assert err == ""
     assert out == "(unset) 0.40\nsubs-a 1.25\n"
+    monkeypatch.setattr("atlas_reviewer.budget._utc_today", lambda: date(2026, 11, 20))
     today = DailySpend(tmp_path)
     today.record("acme/today", Decimal("1.25"), 1, source="subs-a")
     default_code, default_out, default_err = run_cli(
@@ -105,6 +108,11 @@ def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_p
     )
     assert usage == 2
     assert "owner/name" in usage_err
+    traversal, _, traversal_err = run_cli(
+        "--state-dir", str(tmp_path), "funding-spend", "--repo", "../x"
+    )
+    assert traversal == 2
+    assert "owner/name" in traversal_err
     day, _, day_err = run_cli(
         "--state-dir",
         str(tmp_path),
