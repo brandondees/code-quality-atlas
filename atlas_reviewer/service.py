@@ -1081,9 +1081,13 @@ class Worker:
         source refused posts the D92 error without a child. This head's
         recorded cause, when it has one, is the post, including when
         every source is now unavailable. When every source is already
-        unavailable and this head has no recorded cause, the post says
-        no funding source is available and names each source with its
-        cause, in spend order. That post is the selector's state. A
+        unavailable and this head has no recorded cause, the post is
+        the selector's notice: ``no funding source is available: ``,
+        then each source whose filter matches, as ``name: cause``,
+        joined by ``; ``, in spend order. The cause is the recorded
+        refusal, or ``unavailable`` when the mark stored none. A
+        source the filter excludes is left out. That post is the
+        selector's state. A
         probe that failed, a blank key, or a key over its ceiling does
         not mark the source unavailable, so that claim fails without a
         post: the next claim can try the source, and a post would say
