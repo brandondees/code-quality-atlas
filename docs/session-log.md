@@ -6118,3 +6118,31 @@ separately. The daily ledger records the settled bill. The in-review
 ceiling still counts a hold. The cost event's `committed_usd` stays
 the ceiling figure; the bill is `billed_usd`. D93 records the choice.
 No model was called, and no Fly app, secret, or deploy changed.
+
+## 2026-11-20 — funding sources, decision and plan (D94)
+
+The operator model budget will be spent from an ordered list of
+OpenRouter keys: the Claude subscription whose billing cycle ends
+first, then the other subscription, then today's pilot key. Brandon
+decided that order, that a subscription-funded review may be non-ZDR
+(`only: ["anthropic"]`, `zdr: false`, never a false ZDR declaration),
+and that each subscription key's monthly cap stays in OpenRouter. The
+app reads remaining credit through the existing key preflight. One
+review stays on the source chosen at claim time. A key refusal marks
+that source unavailable. Each source is tried at most once while the
+worker remembers, so three sources can advance twice, and the D92
+error is posted when no source remains, and a later claim of the
+same head that ends without a review still posts the cause recorded
+for that head. A different head does not receive it. A later head
+whose first claim finds every source already unavailable posts that
+no funding source is available, naming each source and its cause in
+spend order. A probe failure, or a budget stop, with nothing
+remembered for that head still posts nothing: those sources are not
+exhausted.
+A mark lasts until the process restarts. Each advance records a
+`refusal advance` event with the source and the cause and no key. A
+tenant run never reads the list. Unset `ATLAS_FUNDING_SOURCES` stays
+today's behavior. D94
+records it. The plan is
+`docs/plans/2026-11-20-funding-sources.md`. No code in this slice, no
+model call, and no Fly app, secret, or deploy changed.
