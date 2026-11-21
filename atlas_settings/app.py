@@ -483,7 +483,7 @@ class SettingsApp:
         session: Session,
         flash: str,
         status: int,
-        covered: int = 0,
+        covered: int,
         prefill_base_url: str = "",
         prefill_model: str = "",
     ) -> Response:
