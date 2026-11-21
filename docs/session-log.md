@@ -6135,9 +6135,9 @@ error is posted when no source remains, and a later claim of the
 same head that ends without a review still posts the cause recorded
 for that head. A different head does not receive it. A later head
 whose first claim finds every matching source already unavailable
-posts the selector's notice: `no funding source is available: `, then
-each source whose model filter matches, as `name: cause`, joined by
-`; `, in spend order. The cause is the recorded refusal, or
+posts the selector's notice. It starts with `no funding source is available:`
+and a space, then each source whose model filter matches, as `name: cause`,
+joined by a semicolon and a space, in spend order. The cause is the recorded refusal, or
 `unavailable` when the mark stored none. A source the filter excludes
 is left out, and the notice carries no key. A probe failure, or a
 budget stop, with nothing
@@ -6183,9 +6183,9 @@ source, and nothing is posted in between. The D92 error is posted when
 no source remains, and a later claim of the same head that cannot
 review posts the cause recorded for that head. A different head does
 not receive it. A later head whose first claim finds every matching
-source already unavailable posts the selector's notice: `no funding
-source is available: `, then each source whose model filter matches,
-as `name: cause`, joined by `; `, in spend order. The cause is the
+source already unavailable posts the selector's notice. It starts with `no funding
+source is available:` and a space, then each source whose model filter
+matches, as `name: cause`, joined by a semicolon and a space, in spend order. The cause is the
 recorded refusal, or `unavailable` when the mark stored none. A source
 the filter excludes is left out, and the notice carries no key. A
 probe failure, or a budget

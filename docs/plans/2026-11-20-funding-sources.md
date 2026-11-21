@@ -148,8 +148,9 @@ one ends the advance: the worker posts and does not release the claim
 again. A claim that finds no eligible source is exhausted at claim
 time and does not release the claim either. When every source whose model filter matches is already marked
 unavailable and nothing is remembered for that head, the worker posts
-the selector's notice: `no funding source is available: `, then each
-matching source as `name: cause`, joined by `; `, in spend order. The
+the selector's notice. It starts with `no funding source is available:`
+and a space, then each matching source as `name: cause`, joined by a
+semicolon and a space, in spend order. The
 cause is the recorded refusal, or `unavailable` when the mark stored
 none. A source the filter excludes is left out. The notice carries no
 key. The post is the selector's current state, not a refusal of
