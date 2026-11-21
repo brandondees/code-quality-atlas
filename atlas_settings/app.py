@@ -308,7 +308,9 @@ class SettingsApp:
             return refused.response
         return self._redirect("/settings")
 
-    def _post_revoke(self, session: Session, form: dict[str, str]) -> Response:
+    def _post_revoke(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
         del form
         self._write(
             session,
@@ -317,11 +319,13 @@ class SettingsApp:
         )
         return self._redirect("/settings")
 
-    def _post_cap(self, session: Session, form: dict[str, str]) -> Response:
+    def _post_cap(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
         try:
             cap = parse_daily_cap(form.get("cap_usd", ""))
         except CapRejectedError as exc:
-            return self._settings_render(session, str(exc), 400)
+            return self._settings_render(session, str(exc), 400, covered)
         self._write(
             session,
             "set-cap",
@@ -329,7 +333,9 @@ class SettingsApp:
         )
         return self._redirect("/settings")
 
-    def _post_delete(self, session: Session, form: dict[str, str]) -> Response:
+    def _post_delete(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
         confirm = form.get("confirm", "").strip()
         # Compared as encoded bytes: `compare_digest` refuses non-ASCII
         # `str` outright, and a hostile confirm value is not allowed to
@@ -337,7 +343,7 @@ class SettingsApp:
         if not hmac.compare_digest(
             confirm.encode("utf-8"), DELETE_CONFIRM_WORD.encode("utf-8")
         ):
-            return self._settings_render(session, DELETE_MISMATCH, 400)
+            return self._settings_render(session, DELETE_MISMATCH, 400, covered)
         try:
             self._write(
                 session,
