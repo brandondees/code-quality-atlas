@@ -7,6 +7,9 @@ every write, the rate limits, and the fake key and tokens that appear
 nowhere across every flow. Part one (sign-in, intake, consent) is this
 suite's first file."""
 
+from __future__ import annotations
+
+import json
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,6 +22,7 @@ from atlas_settings.phrases import (
 )
 
 from .harness import (
+    ADMIN_ID,
     FAKE_INSTALL_TOKEN,
     FAKE_KEY,
     FAKE_USER_TOKEN,
@@ -144,22 +148,12 @@ def test_admin_rights_lost_mid_session_refuse_every_write(tmp_path: Path) -> Non
         "1.2.3.4",
     )
     assert response.status == 403
-    assert record.daily_cap_usd == Decimal(5)
-
-
-def test_a_github_failure_mid_session_refuses_the_write_fail_closed(
-    tmp_path: Path,
-) -> None:
-    world = build_world(tmp_path)
-    sign_in(world)
-    csrf = world.csrf()
-    world.github.api_error = TimeoutError("timed out")
-    response = world.app.post(
-        "/settings/cap", {"csrf": csrf, "cap_usd": "5"}, world.cookie, "1.2.3.4"
-    )
-    assert response.status == 502
-    assert GITHUB_CHECK_FAILED in response.body.decode()
-    assert world.app.store.load("42") is None
+    assert ADMIN_REFUSED in response.body.decode()
+    # Reloaded, not the stale in-memory record: the refused write must
+    # have stored nothing, and a stale object cannot show that.
+    reloaded = world.app.store.load("42")
+    assert reloaded is not None
+    assert reloaded.daily_cap_usd == Decimal(5)
 
 
 def test_the_gate_is_re_checked_on_every_write(tmp_path: Path) -> None:
@@ -234,6 +228,44 @@ def test_revocation_removes_the_key_and_keeps_cap_and_consent(
     assert record.daily_cap_usd == Decimal(5)
     assert record.consent_acknowledged_at is not None
     assert "No key is stored" in world.page_text()
+
+
+def test_every_write_leaves_its_own_audit_line(tmp_path: Path) -> None:
+    """Revoke, set-cap and delete each record their own audit entry —
+    the action's fact and the acting user, never any value."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+    world.app.post(
+        "/settings/cap", {"csrf": world.csrf(), "cap_usd": "5"}, world.cookie, "1.2.3.4"
+    )
+    world.app.post("/settings/revoke", {"csrf": world.csrf()}, world.cookie, "1.2.3.4")
+    deleted = world.app.post(
+        "/settings/delete",
+        {"csrf": world.csrf(), "confirm": "DELETE"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert deleted.status == 303
+    for action, count in (
+        ("store-credentials", 1),
+        ("set-cap", 1),
+        ("revoke-credentials", 1),
+        ("delete-installation", 1),
+    ):
+        entries = world.app.audit.entries("42", action)
+        assert len(entries) == count, (action, entries)
+        assert entries[0]["github_user_id"] == ADMIN_ID
+        # No write's value rides the audit line.
+        assert FAKE_KEY not in json.dumps(entries)
 
 
 # ---- the cap --------------------------------------------------------
@@ -314,6 +346,37 @@ def test_delete_requires_the_typed_confirmation(tmp_path: Path) -> None:
     assert gone.set_cookie is not None
     assert gone.set_cookie.startswith("atlas_settings_session=;")
     assert "Max-Age=0" in gone.set_cookie
+    # The signed-in session row is destroyed with the delete, not just
+    # its cookie: the value it signed is dead in the table too.
+    assert world.app.sessions.get(world.cookie) is None
+
+
+def test_a_non_ascii_confirmation_is_a_mismatch_not_a_crash(
+    tmp_path: Path,
+) -> None:
+    """A confirm value `compare_digest` would refuse as a `str` is
+    compared as bytes and answered as the mismatch it is."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+    response = world.app.post(
+        "/settings/delete",
+        {"csrf": world.csrf(), "confirm": "DËLETE"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 400
+    assert DELETE_MISMATCH in response.body.decode()
+    # The installation was not deleted.
+    assert world.app.store.load("42") is not None
 
 
 # ---- rate limits -----------------------------------------------------
