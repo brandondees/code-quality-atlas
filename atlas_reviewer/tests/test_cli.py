@@ -31,6 +31,101 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
+def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(
+    tmp_path, monkeypatch
+):
+    """The report is the ledger, grouped in first-seen order. A missing
+    file is zero and exits 0. An unreadable file exits 2. No model call
+    and no write. Kills printing a source that was not recorded, and
+    treating a broken ledger as an empty day."""
+    from datetime import date
+
+    from atlas_reviewer.budget import DailySpend, spend_file
+
+    spend = DailySpend(tmp_path, today=lambda: date(2026, 11, 20))
+    spend.record("acme/app", Decimal("0.40"), 1)
+    spend.record("acme/app", Decimal("1.25"), 2, source="subs-a")
+    code, out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-11-20",
+    )
+    assert code == 0
+    assert err == ""
+    assert out == "(unset) 0.40\nsubs-a 1.25\n"
+    monkeypatch.setattr("atlas_reviewer.budget._utc_today", lambda: date(2026, 11, 20))
+    today = DailySpend(tmp_path)
+    today.record("acme/today", Decimal("1.25"), 1, source="subs-a")
+    default_code, default_out, default_err = run_cli(
+        "--state-dir", str(tmp_path), "funding-spend", "--repo", "acme/today"
+    )
+    assert default_code == 0
+    assert default_err == ""
+    assert default_out == "subs-a 1.25\n"
+    missing, missing_out, missing_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/none",
+        "--day",
+        "2026-01-01",
+    )
+    assert missing == 0
+    assert missing_out == ""
+    assert missing_err == ""
+    path = spend_file(tmp_path, "acme/app", date(2026, 11, 20))
+    path.write_text(path.read_text(encoding="utf-8") + "nope\n", encoding="utf-8")
+    bad, _bad_out, bad_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-11-20",
+    )
+    assert bad == 2
+    assert "unreadable" in bad_err
+    path.write_bytes(b"\xff\xfe")
+    decoded, _decoded_out, decoded_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-11-20",
+    )
+    assert decoded == 2
+    assert "could not be read" in decoded_err
+    usage, _, usage_err = run_cli(
+        "--state-dir", str(tmp_path), "funding-spend", "--repo", "noslash"
+    )
+    assert usage == 2
+    assert "owner/name" in usage_err
+    traversal, _, traversal_err = run_cli(
+        "--state-dir", str(tmp_path), "funding-spend", "--repo", "../x"
+    )
+    assert traversal == 2
+    assert "owner/name" in traversal_err
+    day, _, day_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-13-40",
+    )
+    assert day == 2
+    assert "YYYY-MM-DD" in day_err
+
+
 def test_review_rejects_an_agentic_limit_flag(capsys):
     with pytest.raises(SystemExit) as raised:
         cli.main(

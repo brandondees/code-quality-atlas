@@ -32,6 +32,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TextIO, cast
@@ -44,6 +45,7 @@ from atlas_reviewer.budget import (
     BUDGET_CEILING_USD,
     MAX_CALLS_CEILING,
     CallLimits,
+    DailySpend,
     ReviewBudget,
 )
 from atlas_reviewer.ci_block import ci_block
@@ -87,6 +89,7 @@ from atlas_reviewer.delta import (
 )
 from atlas_reviewer.diffs import PathRanks, diff_paths
 from atlas_reviewer.domain import (
+    _REPO,
     CleanupStatus,
     InvalidEventError,
     Omission,
@@ -2006,6 +2009,16 @@ def build_parser() -> argparse.ArgumentParser:
     _events_arg(probe)
     _first_frame_arg(probe)
     probe.set_defaults(handler=_cmd_probe)
+    funding = sub.add_parser(
+        "funding-spend",
+        help="print one day's settled spend by funding source",
+    )
+    funding.add_argument("--repo", required=True, help="owner/name")
+    funding.add_argument(
+        "--day",
+        help="UTC day YYYY-MM-DD (default: today)",
+    )
+    funding.set_defaults(handler=_cmd_funding_spend)
     return parser
 
 
@@ -2196,6 +2209,27 @@ def _cmd_eval_parity(args: argparse.Namespace, run: _Run) -> int:
         raise UsageError(str(exc)) from exc
     run.out.write(json.dumps(report, indent=2) + "\n")
     return EXIT_OK if report["gate_pass"] else 1
+
+
+def _cmd_funding_spend(args: argparse.Namespace, run: _Run) -> int:
+    """Print settled spend grouped by funding source. Reads the ledger
+    and writes nothing. Exit 2 when the ledger cannot be read."""
+    repo = args.repo.strip()
+    if _REPO.fullmatch(repo) is None:
+        raise UsageError("--repo must be owner/name")
+    day = None
+    if args.day:
+        try:
+            day = date.fromisoformat(args.day)
+        except ValueError:
+            raise UsageError("--day must be YYYY-MM-DD") from None
+    groups, gap = DailySpend(_state_dir(args, run.env)).by_source(repo, day=day)
+    if groups is None:
+        run.err.write(f"atlas_reviewer: {gap}\n")
+        return EXIT_USAGE
+    for source, amount in groups:
+        run.out.write(f"{source or '(unset)'} {format(amount, 'f')}\n")
+    return EXIT_OK
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (

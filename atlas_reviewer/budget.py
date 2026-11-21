@@ -79,6 +79,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, TypeGuard
 
+from atlas_reviewer.funding import accepted_source_name
 from atlas_reviewer.installation_store import InstallationStoreError
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError
@@ -634,7 +635,7 @@ class DailySpend:
             text = self.file(repo).read_text(encoding="utf-8")
         except FileNotFoundError:
             return Decimal(0), ""
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             return None, f"the day's spend file could not be read: {exc}"
         total = Decimal(0)
         for number, line in enumerate(text.splitlines(), 1):
@@ -657,13 +658,23 @@ class DailySpend:
         calls: int,
         *,
         at: datetime | None = None,
+        source: str = "",
     ) -> None:
         """Append one settled review's bill to the day's file.
         One `os.write` of one line under `O_APPEND` is the append; a
         write that raises leaves the file as it was and the caller names
-        the gap."""
+        the gap.
+
+        ``source`` is the funding source the bill came from.
+        Empty omits the field, so a line from before sources, and a
+        review that had no list, stay unattributed. A ``source`` that
+        is not a source name raises ``SourceNameError`` and writes
+        nothing. A negative amount or call count raises ``ValueError``
+        and writes nothing."""
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
+        if calls < 0:
+            raise ValueError("a call count cannot be negative")
         self._append(
             repo,
             {
@@ -672,6 +683,7 @@ class DailySpend:
                 ).isoformat(),
                 "calls": calls,
                 "committed_usd": str(amount_usd),
+                **_source_fields(source),
             },
         )
 
@@ -683,6 +695,7 @@ class DailySpend:
         key: str,
         *,
         at: datetime | None = None,
+        source: str = "",
     ) -> tuple[bool, str]:
         """Append one attempt's committed spend to the day's file **once
         per key**, as `(appended, gap)`.
@@ -696,11 +709,16 @@ class DailySpend:
         itself, so no crash between an append and a bookkeeping step can
         double-count. An unreadable ledger is not appended to -- its
         total is unknown and the refusal already holds -- and the gap is
-        returned so the caller can name it."""
+        returned so the caller can name it. A ``source`` that is not a
+        source name raises ``SourceNameError`` and writes nothing. A
+        negative amount or call count raises ``ValueError`` and writes
+        nothing."""
         if not key:
             raise ValueError("a once-only record needs a key")
         if amount_usd < 0:
             raise ValueError("a settled spend cannot be negative")
+        if calls < 0:
+            raise ValueError("a call count cannot be negative")
         total, gap = self.committed(repo)
         if total is None:
             return False, gap
@@ -715,6 +733,7 @@ class DailySpend:
                 "calls": calls,
                 "committed_usd": str(amount_usd),
                 "key": key,
+                **_source_fields(source),
             },
         )
         return True, ""
@@ -783,17 +802,108 @@ class DailySpend:
             return CAP_REACHED, ""
         return "", ""
 
+    def by_source(
+        self, repo: str, *, day: date | None = None
+    ) -> tuple[tuple[tuple[str, Decimal], ...] | None, str]:
+        """Settled spend grouped by funding source, in first-seen order.
+
+        A line with no source is the group ``""``. The groups sum to
+        ``committed`` for the same file. An unreadable line is
+        ``(None, gap)``, the same fail-closed reading as ``committed``.
+        A missing file is no spend."""
+        path = (
+            self.file(repo) if day is None else spend_file(self.state_root, repo, day)
+        )
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return (), ""
+        except (OSError, UnicodeDecodeError) as exc:
+            return None, f"the day's spend file could not be read: {exc}"
+        order: list[str] = []
+        totals: dict[str, Decimal] = {}
+        for number, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                parsed = _record_source(line)
+            except SourceNameError:
+                return None, (
+                    f"the day's spend file has an unreadable source (line {number})"
+                )
+            if parsed is None:
+                return None, (
+                    "the day's spend file has an unreadable record (line "
+                    f"{number}), so the day's total is unknown and the "
+                    "budget holds until the file is repaired"
+                )
+            amount, source = parsed
+            if source not in totals:
+                order.append(source)
+                totals[source] = Decimal(0)
+            totals[source] += amount
+        return tuple((name, totals[name]) for name in order), ""
+
+
+class SourceNameError(ValueError):
+    """``source`` is not a source name. Nothing was written."""
+
+
+def _source_fields(source: str) -> dict[str, str]:
+    """The ledger's source field, or nothing when the review had no source.
+
+    A name that is not a source name is refused rather than written."""
+    if source == "":
+        return {}
+    if accepted_source_name(source) != source:
+        raise SourceNameError(f"funding source {source!r} is not a source name")
+    return {"source": source}
+
+
+def _record_source(line: str) -> tuple[Decimal, str] | None:
+    """One line's bill and source, or None when the line is not a record.
+
+    A missing source is unattributed. A source that is not a source name
+    raises ``SourceNameError``: the amount is readable, and the report
+    names the field instead of treating the day's total as unknown.
+    The line is parsed once."""
+    data = _record_object(line)
+    if data is None:
+        return None
+    amount = _amount_of(data)
+    if amount is None:
+        return None
+    if "source" not in data:
+        return amount, ""
+    source = accepted_source_name(data.get("source"))
+    if source is None:
+        raise SourceNameError(
+            f"funding source {data.get('source')!r} is not a source name"
+        )
+    return amount, source
+
 
 def _record_amount(line: str) -> Decimal | None:
     """The `committed_usd` figure of one ledger line, or None when the
     line is not a record this module wrote: not JSON, not an object, the
     field missing or not a non-negative decimal string."""
+    data = _record_object(line)
+    if data is None:
+        return None
+    return _amount_of(data)
+
+
+def _record_object(line: str) -> dict[str, object] | None:
     try:
         data = json.loads(line)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
         return None
     if not isinstance(data, dict):
         return None
+    return data
+
+
+def _amount_of(data: Mapping[str, object]) -> Decimal | None:
     raw = data.get("committed_usd")
     if not isinstance(raw, str):
         return None

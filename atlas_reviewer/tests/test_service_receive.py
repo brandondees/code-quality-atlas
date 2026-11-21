@@ -5038,23 +5038,24 @@ def test_config_from_env_parses_the_per_tenant_bounds(tmp_path):
 # ------------------------------------------------- the crash backfill (M1)
 
 
-def _progress_record(committed: str, calls: int, seq: int = 2) -> str:
-    return json.dumps(
-        {
-            "seq": seq,
-            "phase": "progress",
-            "step": "lens settled",
-            "status": "ok",
-            "lens": "tracing",
-            "lenses_done": 1,
-            "lenses_total": 4,
-            "calls": calls,
-            "settled_usd": "1.10",
-            "committed_usd": committed,
-            "reservation_usd": "10",
-            "reading": "src/x.py",
-        }
-    )
+def _progress_record(committed: str, calls: int, seq: int = 2, source: str = "") -> str:
+    fields: dict[str, object] = {
+        "seq": seq,
+        "phase": "progress",
+        "step": "lens settled",
+        "status": "ok",
+        "lens": "tracing",
+        "lenses_done": 1,
+        "lenses_total": 4,
+        "calls": calls,
+        "settled_usd": "1.10",
+        "committed_usd": committed,
+        "reservation_usd": "10",
+        "reading": "src/x.py",
+    }
+    if source:
+        fields["source"] = source
+    return json.dumps(fields)
 
 
 def _run_start_record(attempt: int = 1) -> str:
@@ -5127,6 +5128,80 @@ def test_a_crashed_attempt_s_spend_is_backfilled_and_the_retry_s_is_added(tmp_pa
     assert backs and backs[0].fields["measured"] == "backfilled"
     assert backs[0].fields["committed_usd"] == "2.20"
     assert backs[0].fields["billed_usd"] == "1.10"
+
+
+def test_a_backfilled_crash_keeps_the_source_the_progress_named(tmp_path):
+    """The crash backfill attributes the bill to the source the progress
+    record named, and a record with no source writes no source field.
+    Kills dropping the name on the way into the ledger."""
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    _backfill_crashed_spend(spend, tmp_path, event, Telemetry(SystemClock()))
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
+    bare = PrEvent(OTHER, 9, SHA_B)
+    other = run_dir(tmp_path, bare)
+    other.mkdir(parents=True)
+    _append_events(
+        other / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3),
+    )
+    _backfill_crashed_spend(spend, tmp_path, bare, Telemetry(SystemClock()))
+    line = json.loads(spend.file(OTHER).read_text(encoding="utf-8").splitlines()[-1])
+    assert "source" not in line
+    assert spend.committed(OTHER) == (Decimal("1.10"), "")
+
+
+def test_a_backfill_that_drops_a_bad_source_still_calls_the_bill_backfilled(
+    tmp_path,
+):
+    """When the ledger refuses the source name, the bill is written
+    without it and the record stays a backfill. Kills marking that bill
+    as an unknown measurement."""
+    from atlas_reviewer.budget import SourceNameError
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    class _RefuseNamed(DailySpend):
+        def record_once(self, repo, amount_usd, calls, key, *, at=None, source=""):
+            if source:
+                raise SourceNameError("funding source")
+            return super().record_once(
+                repo, amount_usd, calls, key, at=at, source=source
+            )
+
+    spend = _RefuseNamed(
+        tmp_path,
+        Decimal("100.00"),
+        cap_for=no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert spend.committed(REPO) == (Decimal("1.10"), "")
+    line = json.loads(spend.file(REPO).read_text(encoding="utf-8"))
+    assert "source" not in line
+    recorded = [item for item in telemetry.events if item.step == "crashed spend"]
+    assert recorded[-1].fields["measured"] == "backfilled"
+    assert "subs-a" in recorded[-1].error
 
 
 def test_a_second_backfill_of_the_same_crash_adds_nothing(tmp_path):
@@ -6144,6 +6219,202 @@ def test_a_key_refusal_requeues_once_and_posts_only_when_every_source_refused(
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("1.25")
+    groups, group_gap = spend.by_source(REPO)
+    assert group_gap == ""
+    assert groups == (("subs-a", Decimal("1.00")), ("subs-b", Decimal("0.25")))
+
+
+def test_a_progress_bill_keeps_its_source_when_the_choice_name_is_empty(tmp_path):
+    """A claim with no choice name bills the progress record's source.
+    An explicit source wins over that record. Kills dropping
+    ``progress.source`` and ignoring the choice name."""
+    from atlas_reviewer.head_change import Progress
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    job = Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING)
+    progress = Progress(calls=2, settled_usd=Decimal("1.10"), source="subs-a")
+    worker._record_spend(job, None, progress, {"repo": REPO})
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
+    worker._record_spend(job, None, progress, {"repo": REPO}, "subs-b")
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")), ("subs-b", Decimal("1.10")))
+
+
+def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
+    """A source name the ledger rejects does not drop the settled bill.
+    The line is written with no source. Kills letting ``SourceNameError``
+    escape and leaving the day's total short."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    worker._record_spend(
+        Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+        (2, "1.25", "0"),
+        None,
+        {"repo": REPO},
+        "Not A Name",
+    )
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.25")
+    line = json.loads(spend.file(REPO).read_text(encoding="utf-8"))
+    assert "source" not in line
+
+
+def test_a_keyed_settlement_keeps_its_source_and_is_not_recorded_twice(tmp_path):
+    """The attempt key and the source are one record. A second
+    settlement of the same key adds nothing, and a name the ledger
+    refuses still records that bill once, with no source. Kills billing
+    the keyed path through an undefined name, and dropping the source
+    on that path."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    job = Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING)
+    worker._record_spend(
+        job, (1, "1.00", "0"), None, {"repo": REPO}, "subs-a", "attempt-1"
+    )
+    worker._record_spend(
+        job, (1, "1.00", "0"), None, {"repo": REPO}, "subs-a", "attempt-1"
+    )
+    assert spend.committed(REPO) == (Decimal("1.00"), "")
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.00")),)
+    worker._record_spend(
+        job, (1, "0.40", "0"), None, {"repo": REPO}, "Not A Name", "attempt-2"
+    )
+    assert spend.committed(REPO) == (Decimal("1.40"), "")
+    written = json.loads(spend.file(REPO).read_text(encoding="utf-8").splitlines()[-1])
+    assert "source" not in written
+    assert any(
+        event.step == "spend source dropped" for event in worker._telemetry.events
+    )
+
+
+def test_a_negative_bill_is_not_logged_as_a_dropped_source(tmp_path):
+    """A negative amount is a ``ValueError``, not a refused source name.
+    Kills catching every ``ValueError`` and logging ``spend source
+    dropped`` for it."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    with pytest.raises(ValueError, match="negative"):
+        worker._record_spend(
+            Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+            (-2, "-1.25", "0"),
+            None,
+            {"repo": REPO},
+            "subs-a",
+        )
+    assert not any(
+        event.step == "spend source dropped" for event in worker._telemetry.events
+    )
+    assert spend.committed(REPO) == (Decimal(0), "")
+
+
+def test_a_negative_backfill_is_not_logged_as_a_dropped_source(tmp_path, monkeypatch):
+    """The crash backfill lets a negative bill raise. Kills the same
+    broad ``ValueError`` catch on that path."""
+    from atlas_reviewer.head_change import Progress
+    from atlas_reviewer.service import _backfill_crashed_spend
+
+    monkeypatch.setattr(Progress, "billed_usd", property(lambda self: Decimal("-1.25")))
+    spend = _spend(tmp_path)
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    with pytest.raises(ValueError, match="negative"):
+        _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    assert not any("not a source name" in event.error for event in telemetry.events)
+
+
+def test_a_dropped_source_whose_retry_cannot_be_written_is_named(tmp_path):
+    """The retry after a refused name has its own write-error record.
+    Kills deleting the inner ``OSError`` handler."""
+    from atlas_reviewer.budget import DailySpend, SourceNameError
+    from atlas_reviewer.service import _backfill_crashed_spend
+    from atlas_reviewer.service_queue import Job
+
+    class _DiskOnBlank(DailySpend):
+        def record(self, repo, amount_usd, calls, *, at=None, source=""):
+            if source:
+                raise SourceNameError("funding source 'x' is not a source name")
+            raise OSError("disk")
+
+        def record_once(self, repo, amount_usd, calls, key, *, at=None, source=""):
+            if source:
+                raise SourceNameError("funding source 'x' is not a source name")
+            raise OSError("disk")
+
+    spend = _DiskOnBlank(
+        tmp_path,
+        Decimal("100.00"),
+        cap_for=no_installation_cap,
+        today=lambda: _BUDGET_DAY,
+    )
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    worker._record_spend(
+        Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING),
+        (2, "1.25", "0"),
+        None,
+        {"repo": REPO},
+        "Not A Name",
+    )
+    steps = [event.step for event in worker._telemetry.events]
+    assert "spend source dropped" in steps
+    assert "spend not recorded" in steps
+    event = PrEvent(REPO, 9, SHA_B)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3, source="subs-a"),
+    )
+    telemetry = Telemetry(SystemClock())
+    _backfill_crashed_spend(spend, tmp_path, event, telemetry)
+    crashed = [item for item in telemetry.events if item.step == "crashed spend"]
+    assert crashed[-1].error.startswith("OSError:")
 
 
 def test_a_requeued_refusal_does_not_bill_the_first_attempt_again(tmp_path):
