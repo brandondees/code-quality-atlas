@@ -15,7 +15,6 @@ operator list cannot name it.
 
 from __future__ import annotations
 
-import contextvars
 import json
 import os
 import re
@@ -230,11 +229,6 @@ class FundingSelection:
     error: str = ""
 
 
-active_choice: contextvars.ContextVar[FundingChoice | None] = contextvars.ContextVar(
-    "atlas_funding_choice", default=None
-)
-
-
 def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     """True only when the child was handed a BYOK source.
 
@@ -284,25 +278,11 @@ class FundingSelector:
         self._causes: dict[str, str] = {}
 
     def choose(self) -> FundingSelection:
-        return self._choose()
-
-    def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
-        """Remember that ``name`` refused. True when another source can
-        still serve the model. The refusal-advance step that calls this
-        lands in a later slice. ``cause`` is the D92 text a later claim
-        posts when nothing else can serve."""
-        with self._lock:
-            self._unavailable.add(name)
-            if cause in _REFUSAL_CAUSES:
-                self._causes[name] = cause
-            return self._another_available()
-
-    def _choose(self) -> FundingSelection:
         """Walk the sources in order. The key probe runs outside the
         lock, so one claim's HTTPS call does not stall another claim
         or a refusal mark. Two claims can probe the same key; both may
-        take it."""
-        last_refusal = ""
+        take it. The refusal, when every matching source has refused,
+        is the first refused source's cause in spend order."""
         blocked = False
         for source in self._sources:
             with self._lock:
@@ -316,7 +296,6 @@ class FundingSelector:
                     return FundingSelection(choice=outcome)
                 if outcome in _REFUSAL_CAUSES:
                     self._refuse(source.name, outcome)
-                    last_refusal = outcome
                     continue
                 blocked = True
         with self._lock:
@@ -324,10 +303,24 @@ class FundingSelector:
                 return FundingSelection(
                     error="no funding source is available for this review"
                 )
-            cause = last_refusal or self._remembered_cause()
+            cause = self._remembered_cause()
         if cause:
             return FundingSelection(refusal=cause)
         return FundingSelection(error="no funding source is available for this review")
+
+    def mark_refused(self, name: str, cause: str = KEY_OUT_OF_CREDIT) -> bool:
+        """Remember that ``name`` refused. True when another source can
+        still serve the model.
+
+        This slice's lock test calls it while a probe is in flight, and
+        the next-claim test calls it to skip a source. A later slice's
+        worker calls it when a review's key refuses. ``cause`` is the
+        D92 text a later claim posts when nothing else can serve."""
+        with self._lock:
+            self._unavailable.add(name)
+            if cause in _REFUSAL_CAUSES:
+                self._causes[name] = cause
+            return self._another_available()
 
     def _probe_source(self, source: FundingSource) -> FundingChoice | str:
         """A choice, a D92 cause, or ``""`` when the source was skipped

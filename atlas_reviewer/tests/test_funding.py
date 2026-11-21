@@ -422,6 +422,21 @@ def test_a_noted_source_name_is_the_token_and_byok_is_only_the_word_true():
     assert funding_byok({ENV_FUNDING_BYOK: "1"}) is False
 
 
+def _credit(limit: str = "50", remaining: str = "40") -> KeyStatus:
+    return KeyStatus(
+        limit=Decimal(limit),
+        limit_remaining=Decimal(remaining),
+        usage=Decimal(0),
+        counts_byok=True,
+    )
+
+
+def _selector(env: dict[str, str], probe) -> FundingSelector:
+    sources = load_funding_sources(env)
+    assert sources is not None
+    return FundingSelector(sources, env, probe, MODEL_ID)
+
+
 def test_a_refusal_mark_does_not_wait_for_the_probe_in_front_of_it():
     """The key probe runs outside the selector lock. A refusal recorded
     while a probe is in flight returns at once, and that source is not
@@ -469,21 +484,6 @@ def test_a_refusal_mark_does_not_wait_for_the_probe_in_front_of_it():
     mark_thread.join(timeout=30)
     assert not claim_thread.is_alive()
     assert chosen == ["subs-b"]
-
-
-def _credit(limit: str = "50", remaining: str = "40") -> KeyStatus:
-    return KeyStatus(
-        limit=Decimal(limit),
-        limit_remaining=Decimal(remaining),
-        usage=Decimal(0),
-        counts_byok=True,
-    )
-
-
-def _selector(env: dict[str, str], probe) -> FundingSelector:
-    sources = load_funding_sources(env)
-    assert sources is not None
-    return FundingSelector(sources, env, probe, MODEL_ID)
 
 
 def test_claim_time_skips_a_dry_key_and_does_not_probe_a_model_the_source_cannot_serve():
@@ -591,6 +591,72 @@ def test_the_remembered_cause_is_the_first_refused_source_in_spend_order():
     selection = selector.choose()
     assert selection.choice is None
     assert selection.refusal == KEY_OUT_OF_CREDIT
+
+
+def test_one_walk_keeps_the_first_refusal_when_a_later_source_returns_401():
+    """A dry source and then a 401, in one ``choose``, post the dry
+    source's cause. Kills remembering the last refusal in the walk."""
+    env = _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_B"))
+
+    def probe(key: str) -> KeyStatus:
+        if key == "sk-or-v1-subs-a":
+            return _credit(remaining="0")
+        raise KeyRefusedError("OpenRouter HTTP 401", review_error=KEY_AUTH_REFUSED)
+
+    selection = _selector(env, probe).choose()
+    assert selection.choice is None
+    assert selection.refusal == KEY_OUT_OF_CREDIT
+    assert selection.error == ""
+
+
+def test_a_blank_key_is_skipped_and_can_be_chosen_once_it_is_set():
+    """A blank key is not probed and is not remembered as refused.
+    Kills treating a missing value as out of credit."""
+    env = _env(_source())
+    calls: list[str] = []
+
+    def probe(key: str) -> KeyStatus:
+        calls.append(key)
+        return _credit()
+
+    selector = _selector(env, probe)
+    env["ATLAS_FUNDING_SUBS_A"] = "   "
+    first = selector.choose()
+    assert first.choice is None
+    assert first.refusal == ""
+    assert first.error
+    assert calls == []
+    env["ATLAS_FUNDING_SUBS_A"] = "sk-or-v1-subs-a"
+    second = selector.choose()
+    assert second.choice is not None
+    assert second.choice.name == "subs-a"
+    assert calls == ["sk-or-v1-subs-a"]
+
+
+def test_an_unrecognized_probe_error_does_not_become_a_refusal():
+    """A ``KeyRefusedError`` whose cause is not a D92 cause skips the
+    source without remembering it. Kills posting that text as the
+    review error."""
+    env = _env(_source())
+    calls = {"n": 0}
+
+    def probe(key: str) -> KeyStatus:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise KeyRefusedError(
+                "OpenRouter HTTP 403", review_error="provider flagged the input"
+            )
+        return _credit()
+
+    selector = _selector(env, probe)
+    first = selector.choose()
+    assert first.choice is None
+    assert first.refusal == ""
+    assert first.error
+    assert "flagged" not in first.error
+    second = selector.choose()
+    assert second.choice is not None
+    assert second.choice.name == "subs-a"
 
 
 def test_a_probe_that_does_not_parse_fails_the_selection_without_crashing():
