@@ -529,3 +529,28 @@ def test_a_refused_upgrade_of_a_signed_in_session_destroys_nothing(
     pre2, _c = store.start_login("s2", "v2")
     _signed2, _v2 = store.upgrade(pre2, 12, "someone-else")
     assert store.get(signed_cookie) is signed
+
+
+def test_a_refused_upgrade_leaves_the_next_one_working_at_the_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bot's drift-crash scenario at the tightest cap (1): a refused
+    upgrade of the live signed-in session changes nothing, and the next
+    legitimate sign-in and upgrade at that same cap succeeds without an
+    empty-eviction ValueError (kills the crash mutant whose drifted
+    count makes every later upgrade fail)."""
+    from atlas_settings import sessions as sessions_module
+    from atlas_settings.sessions import SessionError
+
+    monkeypatch.setattr(sessions_module, "_MAX_SIGNED_IN_SESSIONS", 1)
+    clock = FakeClock()
+    store = _store(clock)
+    pre, _pre_cookie = store.start_login("s", "v")
+    signed, _signed_cookie = store.upgrade(pre, 11, "octo-admin")
+    with pytest.raises(SessionError, match="already consumed"):
+        store.upgrade(signed, 12, "someone-else")
+    # The refused call left the live session intact and the counters
+    # true; the next legitimate upgrade at the same cap succeeds.
+    pre2, _c = store.start_login("s2", "v2")
+    _signed2, signed_value2 = store.upgrade(pre2, 12, "someone-else")
+    assert store.get(signed_value2) is not None
