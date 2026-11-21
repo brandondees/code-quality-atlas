@@ -1622,6 +1622,101 @@ def test_the_child_env_gains_the_tenant_variables_and_loses_the_operator_key():
     assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
 
 
+def test_a_funding_choice_overlays_the_one_key_and_hides_the_other(tmp_path):
+    """The child receives the chosen key in the variable it already
+    reads, plus the route and the source name. The other source's
+    variable and its value stay in the parent. A pilot choice sets ZDR
+    and clears BYOK, and two providers are joined. Kills copying every
+    funding key into the child, forgetting the source name, hard-coding
+    ``ATLAS_REQUIRE_ZDR`` to ``false``, hard-coding ``ATLAS_FUNDING_BYOK``
+    to ``true``, and joining only the first provider."""
+    from decimal import Decimal
+
+    from atlas_reviewer.funding import FundingChoice, active_choice
+
+    choice = FundingChoice(
+        "subs-a",
+        "sk-or-v1-subs-a-secret",
+        ("anthropic",),
+        False,
+        Decimal(195),
+        True,
+    )
+    parent = {
+        "ATLAS_OPENROUTER_API_KEY": "sk-operator-secret",
+        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
+        "ATLAS_FUNDING_SOURCE": "leftover",
+        "PATH": "/usr/bin",
+    }
+    env = child_env(parent, funding=choice)
+    assert env["ATLAS_OPENROUTER_API_KEY"] == "sk-or-v1-subs-a-secret"
+    assert env["ATLAS_PROVIDERS"] == "anthropic"
+    assert env["ATLAS_REQUIRE_ZDR"] == "false"
+    assert env["ATLAS_KEY_CEILING_USD"] == "195"
+    assert env["ATLAS_FUNDING_SOURCE"] == "subs-a"
+    assert env["ATLAS_FUNDING_BYOK"] == "true"
+    assert "ATLAS_FUNDING_SUBS_B" not in env
+    assert "sk-or-v1-subs-b-secret" not in env.values()
+    pilot = FundingChoice(
+        "pilot",
+        "sk-or-v1-pilot-secret",
+        ("google-vertex/global", "amazon-bedrock"),
+        True,
+        Decimal(5),
+        False,
+    )
+    pilot_env = child_env(parent, funding=pilot)
+    assert pilot_env["ATLAS_REQUIRE_ZDR"] == "true"
+    assert pilot_env["ATLAS_FUNDING_BYOK"] == "false"
+    assert pilot_env["ATLAS_PROVIDERS"] == "google-vertex/global,amazon-bedrock"
+    assert pilot_env["ATLAS_OPENROUTER_API_KEY"] == "sk-or-v1-pilot-secret"
+    bare = child_env({"ATLAS_OPENROUTER_API_KEY": "sk-or", "PATH": "/usr/bin"})
+    assert "ATLAS_FUNDING_SOURCE" not in bare
+    assert "ATLAS_FUNDING_BYOK" not in bare
+    stray = child_env(
+        {
+            "ATLAS_OPENROUTER_API_KEY": "sk-or",
+            "ATLAS_FUNDING_SOURCE": "leftover",
+            "ATLAS_FUNDING_BYOK": "true",
+            "PATH": "/usr/bin",
+        }
+    )
+    assert "ATLAS_FUNDING_SOURCE" not in stray
+    assert "ATLAS_FUNDING_BYOK" not in stray
+    assert "leftover" not in stray.values()
+    tenant = child_env(
+        {**parent, "ATLAS_FUNDING_BYOK": "true"},
+        tenant=_tenant_credentials(),
+        funding=choice,
+    )
+    assert "ATLAS_OPENROUTER_API_KEY" not in tenant
+    assert "ATLAS_FUNDING_SOURCE" not in tenant
+    assert "ATLAS_FUNDING_BYOK" not in tenant
+    assert "sk-or-v1-subs-a-secret" not in tenant.values()
+
+    seen: dict[str, object] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    runner = make_runner(
+        RunConfig("openrouter", True, tmp_path),
+        parent,
+        popen=popen,
+        read_token=lambda _env, _event: ("", ""),
+    )
+    token = active_choice.set(choice)
+    try:
+        runner(PrEvent(REPO, 7, SHA), threading.Event())
+    finally:
+        active_choice.reset(token)
+    handed = seen["env"]
+    assert handed["ATLAS_OPENROUTER_API_KEY"] == "sk-or-v1-subs-a-secret"
+    assert handed["ATLAS_FUNDING_SOURCE"] == "subs-a"
+    assert "sk-or-v1-subs-b-secret" not in handed.values()
+
+
 def test_the_child_env_without_a_tenant_run_carries_no_tenant_variables():
     env = child_env({"ATLAS_OPENROUTER_API_KEY": "sk-or", "PATH": "/usr/bin"})
     assert env["ATLAS_OPENROUTER_API_KEY"] == "sk-or"
