@@ -6277,6 +6277,43 @@ def test_a_source_name_the_ledger_refuses_still_records_the_bill(tmp_path):
     assert "source" not in line
 
 
+def test_a_keyed_settlement_keeps_its_source_and_is_not_recorded_twice(tmp_path):
+    """The attempt key and the source are one record. A second
+    settlement of the same key adds nothing, and a name the ledger
+    refuses still records that bill once, with no source. Kills billing
+    the keyed path through an undefined name, and dropping the source
+    on that path."""
+    from atlas_reviewer.service_queue import Job
+
+    spend = _spend(tmp_path)
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, REPORT),
+        root=tmp_path,
+        spend=spend,
+    )
+    job = Job(PrEvent(REPO, 7, SHA_A), JobState.RUNNING)
+    worker._record_spend(
+        job, (1, "1.00", "0"), None, {"repo": REPO}, "subs-a", "attempt-1"
+    )
+    worker._record_spend(
+        job, (1, "1.00", "0"), None, {"repo": REPO}, "subs-a", "attempt-1"
+    )
+    assert spend.committed(REPO) == (Decimal("1.00"), "")
+    groups, gap = spend.by_source(REPO)
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.00")),)
+    worker._record_spend(
+        job, (1, "0.40", "0"), None, {"repo": REPO}, "Not A Name", "attempt-2"
+    )
+    assert spend.committed(REPO) == (Decimal("1.40"), "")
+    written = json.loads(spend.file(REPO).read_text(encoding="utf-8").splitlines()[-1])
+    assert "source" not in written
+    assert any(
+        event.step == "spend source dropped" for event in worker._telemetry.events
+    )
+
+
 def test_a_negative_bill_is_not_logged_as_a_dropped_source(tmp_path):
     """A negative amount is a ``ValueError``, not a refused source name.
     Kills catching every ``ValueError`` and logging ``spend source

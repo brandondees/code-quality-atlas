@@ -1318,7 +1318,7 @@ class Worker:
                 )
             else:
                 fields["measured"] = "unknown"
-        self._record_spend(job, cost, progress, fields, attempt_key, source)
+        self._record_spend(job, cost, progress, fields, source, attempt_key)
         self._telemetry.record("service", "review cost", fields)
 
     def _record_spend(
@@ -1327,8 +1327,8 @@ class Worker:
         cost: tuple[int, str, str] | None,
         progress: object,
         fields: dict[str, str | int],
-        attempt_key: str = "",
         source: str = "",
+        attempt_key: str = "",
     ) -> None:
         """Append the review's settled bill to the day's ledger (config
         slice S9, D81, D93). The figure is the review child's known bill
@@ -1363,8 +1363,25 @@ class Worker:
         if attempt_key:
             try:
                 _appended, gap = self._spend.record_once(
-                    job.event.repo, amount, calls, attempt_key, source=named
+                    job.event.repo, amount, calls, attempt_key, source=source_name
                 )
+            except SourceNameError:
+                self._telemetry.record(
+                    "service",
+                    "spend source dropped",
+                    fields,
+                    status=ERROR,
+                    error=(
+                        f"funding source {source_name!r} is not a source name; "
+                        "the bill was recorded without it"
+                    ),
+                )
+                try:
+                    _appended, gap = self._spend.record_once(
+                        job.event.repo, amount, calls, attempt_key, source=""
+                    )
+                except OSError as exc:
+                    gap = f"{type(exc).__name__}: {exc}"
             except OSError as exc:
                 gap = f"{type(exc).__name__}: {exc}"
             if gap:
