@@ -6,7 +6,8 @@ that all go through part A's store API.
 Only POST changes state, and every POST is a form post carrying the
 session's CSRF token; GET never writes. The request handler applies the
 decided security headers to every response, and any refusal is a fixed
-phrase — no submitted value is ever echoed back."""
+phrase — no submitted value is echoed back except the non-secret
+endpoint and model, escaped, on a refused credentials submit."""
 
 from __future__ import annotations
 
@@ -43,6 +44,7 @@ from atlas_settings.phrases import (
     ENDPOINT_REFUSED_PREFIX,
     GATE_REFUSED,
     GITHUB_CHECK_FAILED,
+    KEY_REFUSED,
     LOGIN_FAILED,
     MODEL_REFUSED_PREFIX,
     RATE_LIMITED,
@@ -113,9 +115,10 @@ class SettingsApp:
     # The named seam for part B2 (the per-repo pre-approved command list,
     # D88's 12:05 PM CT update): part B2's management actions slot into
     # this dispatch beside these actions, on the same page and the same
-    # session/admin/gate machinery, when #775 merges.
-    write_actions: dict[str, Callable[[Session, dict[str, str]], Response]] = field(
-        default_factory=dict
+    # session/admin/gate machinery, when #775 merges. The third argument
+    # is the allowlist coverage `post` verified for the request.
+    write_actions: dict[str, Callable[[Session, dict[str, str], int], Response]] = (
+        field(default_factory=dict)
     )
 
     # ---- GET -------------------------------------------------------
@@ -158,7 +161,12 @@ class SettingsApp:
         ):
             return self._page(pages.error_page("Refused", RATE_LIMITED), 429)
         submitted = form.get("csrf", "")
-        if not submitted or not hmac.compare_digest(submitted, session.csrf):
+        # Compared as encoded bytes: `compare_digest` refuses non-ASCII
+        # `str` outright, and a hostile token is not allowed to become
+        # a 500 — it is just a mismatch (#794's review's sibling check).
+        if not submitted or not hmac.compare_digest(
+            submitted.encode("utf-8"), session.csrf.encode("utf-8")
+        ):
             return self._page(pages.error_page("Refused", CSRF_REFUSED_PHRASE), 403)
         handler = self._action_handler(action)
         if handler is None:
@@ -170,18 +178,22 @@ class SettingsApp:
             self._require_admin_user(
                 GitHubUser(session.user_id or 0, session.login or "")
             )
-            self._require_gate()
+            covered = self._require_gate()
         except AuthorizationRefused as refused:
             return refused.response
         try:
-            return handler(session, form)
+            # The gate's just-verified coverage rides along: a refusal
+            # re-render shows the real count, not a hardcoded zero.
+            return handler(session, form, covered)
         except AuthorizationRefused as refused:
             return refused.response
 
     def _action_handler(
         self, action: str
-    ) -> Callable[[Session, dict[str, str]], Response] | None:
-        builtins: dict[str, Callable[[Session, dict[str, str]], Response]] = {
+    ) -> Callable[[Session, dict[str, str], int], Response] | None:
+        # The `covered` argument is the allowlist count `post` verified
+        # moments before the handler ran; part B2's actions take it too.
+        builtins: dict[str, Callable[[Session, dict[str, str], int], Response]] = {
             "consent": self._post_consent,
             "credentials": self._post_credentials,
         }
@@ -189,9 +201,11 @@ class SettingsApp:
 
     # ---- actions ---------------------------------------------------
 
-    def _post_consent(self, session: Session, form: dict[str, str]) -> Response:
+    def _post_consent(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
         if form.get("acknowledge", "") != "1":
-            return self._settings_render(session, CONSENT_UNCHECKED, 400)
+            return self._settings_render(session, CONSENT_UNCHECKED, 400, covered)
         self._write(
             session,
             "record-consent",
@@ -199,7 +213,9 @@ class SettingsApp:
         )
         return self._redirect("/settings")
 
-    def _post_credentials(self, session: Session, form: dict[str, str]) -> Response:
+    def _post_credentials(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
         try:
             record = self._load_record()
         except InstallationStoreError as exc:
@@ -208,7 +224,7 @@ class SettingsApp:
             # Saving credentials without consent stores nothing and says
             # why (D90): the refusal names the consent, never the form's
             # values.
-            return self._settings_render(session, CONSENT_REFUSED, 403)
+            return self._settings_render(session, CONSENT_REFUSED, 403, covered)
         base_url = form.get("base_url", "").strip()
         key = form.get("key", "")
         model = form.get("model", "").strip()
@@ -217,6 +233,7 @@ class SettingsApp:
                 session,
                 "the endpoint, the key and the model are all required",
                 400,
+                covered,
                 prefill_base_url=base_url,
                 prefill_model=model,
             )
@@ -227,6 +244,7 @@ class SettingsApp:
                 session,
                 f"{ENDPOINT_REFUSED_PREFIX}{exc}",
                 400,
+                covered,
                 prefill_base_url=base_url,
                 prefill_model=model,
             )
@@ -238,11 +256,26 @@ class SettingsApp:
                 session,
                 f"{MODEL_REFUSED_PREFIX}{exc}",
                 400,
+                covered,
                 prefill_base_url=base_url,
                 prefill_model=model,
             )
         try:
             checks.check_key_against_controller_text(key)
+        except InstallationStoreError:
+            # The page's own intake check, not a store condition: the
+            # refusal is a 400 with its own phrase and the same prefill
+            # as the other intake refusals, not a store-attributed 503
+            # with a blank form.
+            return self._settings_render(
+                session,
+                KEY_REFUSED,
+                400,
+                covered,
+                prefill_base_url=base_url,
+                prefill_model=model,
+            )
+        try:
             # Every write goes through `_write`: the store refusal, the
             # unconfigured store, and the audit line are one path, so a
             # stored key can never be answered with a bare 500 as if
@@ -257,8 +290,6 @@ class SettingsApp:
             )
         except AuthorizationRefused as refused:
             return refused.response
-        except InstallationStoreError as exc:
-            return self._store_refused(session, exc)
         return self._redirect("/settings")
 
     def _write(
@@ -366,7 +397,12 @@ class SettingsApp:
             or session.signed_in
             or session.state is None
             or not state
-            or not hmac.compare_digest(state, session.state)
+            # Compared as encoded bytes: `compare_digest` refuses
+            # non-ASCII `str` outright, and a hostile state is not
+            # allowed to become a 500 — it is just a mismatch.
+            or not hmac.compare_digest(
+                state.encode("utf-8"), session.state.encode("utf-8")
+            )
         ):
             return self._page(pages.error_page("Refused", LOGIN_FAILED), 403)
         if not code:
@@ -434,6 +470,7 @@ class SettingsApp:
         session: Session,
         flash: str,
         status: int,
+        covered: int = 0,
         prefill_base_url: str = "",
         prefill_model: str = "",
     ) -> Response:
@@ -441,7 +478,11 @@ class SettingsApp:
         fixed phrase. The authorization checks already ran in `post`;
         this render only reads the store, the audit, and the
         installation's account, and anything that cannot be read renders
-        the plain error page instead."""
+        the plain error page instead. On a GitHub failure the account
+        row renders with placeholder dashes — the refusal's own phrase
+        is the message, and the render must not fail trying to name the
+        account. `covered` is the allowlist count `post` verified for
+        this request, so the coverage row shows the verified fact."""
         try:
             account = self.github.installation_account()
         except GitHubRefused:
@@ -455,7 +496,7 @@ class SettingsApp:
             )
         body = self._render_settings(
             account,
-            0,
+            covered,
             record,
             session.csrf,
             flash=flash,

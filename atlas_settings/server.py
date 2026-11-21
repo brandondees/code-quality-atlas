@@ -25,6 +25,20 @@ from atlas_settings.app import (
 )
 
 _FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
+# The decided security headers, applied to every response the handler
+# sends — its own and the stdlib's error pages alike.
+_SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
+    (
+        "Content-Security-Policy",
+        "default-src 'none'; style-src 'self'; form-action 'self'; "
+        "frame-ancestors 'none'",
+    ),
+    ("X-Frame-Options", "DENY"),
+    ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
+    ("Referrer-Policy", "no-referrer"),
+    ("Cache-Control", "no-store"),
+    ("X-Content-Type-Options", "nosniff"),
+)
 # The bounded server: how many requests are handled at once, and how
 # long one request may take to arrive before its connection is closed.
 _MAX_CONCURRENT_REQUESTS = 20
@@ -82,9 +96,17 @@ class SettingsServer(ThreadingHTTPServer):
     ) -> None:
         peer = cast("socket.socket", request)
         try:
+            # The headers are spelled out because no handler object
+            # exists on this path: the connection is refused before one
+            # is ever started, and the refusal is still a response this
+            # page sends.
             peer.sendall(
                 b"HTTP/1.1 503 Service Unavailable\r\n"
-                b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+                + b"".join(
+                    f"{name}: {value}\r\n".encode("ascii")
+                    for name, value in _SECURITY_HEADERS
+                )
+                + b"Content-Length: 0\r\nConnection: close\r\n\r\n"
             )
         except OSError:
             pass
@@ -110,6 +132,9 @@ class SettingsHandler(BaseHTTPRequestHandler):
             response = self._dispatch(method)
         except Exception as exc:  # noqa: BLE001 -- a bug must not echo values
             self.log_sink(f"internal error handling {method}: {type(exc).__name__}")
+            # The one bare inline body in the layer, deliberately: the
+            # app is failing, so building the error through a full page
+            # render could fail again; fixed text, nothing echoed.
             response = Response(500, b"<html><body><p>internal error</p></body></html>")
         self._send(response)
 
@@ -146,7 +171,11 @@ class SettingsHandler(BaseHTTPRequestHandler):
             length = int(raw_length)
         except ValueError:
             return Response(400, b"<html><body><p>bad request</p></body></html>")
-        if length < 0 or length > MAX_BODY_BYTES:
+        if length < 0:
+            # A negative length is a malformed request, not an oversized
+            # body — it answers 400, the honest status.
+            return Response(400, b"<html><body><p>bad request</p></body></html>")
+        if length > MAX_BODY_BYTES:
             return Response(
                 413, b"<html><body><p>request body too large</p></body></html>"
             )
@@ -157,32 +186,50 @@ class SettingsHandler(BaseHTTPRequestHandler):
         self.send_response(response.status)
         self.send_header("Content-Type", response.content_type)
         self.send_header("Content-Length", str(len(response.body)))
-        self.send_header(
-            "Content-Security-Policy",
-            "default-src 'none'; style-src 'self'; form-action 'self'; "
-            "frame-ancestors 'none'",
-        )
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header(
-            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
-        )
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
         if response.location is not None:
             self.send_header("Location", response.location)
         if response.set_cookie is not None:
             self.send_header("Set-Cookie", response.set_cookie)
+        # `end_headers` adds the decided security headers, for this
+        # response and for every other response the handler sends.
         self.end_headers()
         if response.body:
             self.wfile.write(response.body)
 
+    def end_headers(self) -> None:
+        """The decided security headers ride every response this handler
+        sends — its own, and the stdlib-generated error pages (`send_error`'s
+        400/501/505), which flush through here too. One source: a header
+        added to `_send` alone would skip the error pages."""
+        for name, value in _SECURITY_HEADERS:
+            self.send_header(name, value)
+        super().end_headers()
+
+    def send_error(
+        self,
+        code: int,
+        message: str | None = None,
+        explain: str | None = None,
+    ) -> None:
+        """The stdlib's error pages, sent as real HTTP/1.x replies. A
+        request line that failed to parse leaves `request_version` at
+        the HTTP/0.9 default, under which the stdlib sends a bare body
+        with no status line and no headers at all — an error answer is
+        still a response this page sends, so it goes out with a status
+        line and the decided security headers. The body stays the
+        stdlib's fixed error page; nothing from the request is echoed."""
+        self.request_version = "HTTP/1.1"
+        super().send_error(code, message, explain)
+
     def log_message(self, format: str, *args: object) -> None:
-        """Never the request line: it carries the OAuth code and state
-        in the query. What is logged is the method, the path without its
-        query, and nothing else — a log line can never carry a secret."""
+        """Never runs: the stdlib's default access-log line would carry
+        the request line's query, and the query is where the OAuth code
+        and state live."""
 
     def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        """The request log: the method, the path without its query, and
+        the status — never the query itself, so a log line can never
+        carry a secret."""
         # `getattr`: a request line that failed to parse never set
         # `path`, and `send_error` logs before and after that point —
         # the malformed-request log line must not raise of its own.

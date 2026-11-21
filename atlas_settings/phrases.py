@@ -63,6 +63,15 @@ ENDPOINT_REFUSED_PREFIX = "the endpoint was refused: "
 
 MODEL_REFUSED_PREFIX = "the model was refused: "
 
+# The key-collision refusal, the page's own intake check (not a store
+# condition): a key that would collide with the fixed log text is
+# refused before the store is touched, with the typed endpoint and
+# model prefilled back like every other intake refusal.
+KEY_REFUSED = (
+    "the API key was refused: it would collide with the service's own "
+    "fixed log text, so nothing was stored"
+)
+
 DELETE_CONFIRM_WORD = "DELETE"
 
 DELETE_CONFIRM_PROMPT = (
@@ -113,6 +122,7 @@ REDACTION_GUARD_TEXTS: tuple[str, ...] = (
     STORE_REFUSED_PREFIX,
     ENDPOINT_REFUSED_PREFIX,
     MODEL_REFUSED_PREFIX,
+    KEY_REFUSED,
     CONSENT_REQUIRED,
     STORE_BROKEN,
     BUDGET_REACHED,

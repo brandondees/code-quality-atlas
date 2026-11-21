@@ -13,23 +13,34 @@ from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from atlas_reviewer.installation_store import InstallationStore
+from atlas_reviewer.installation_store import InstallationStore, InstallationStoreError
 from atlas_reviewer.tenant_provider import PricingUnknownError
-from atlas_settings.app import LOGIN_LIMIT
+from atlas_settings.app import (
+    CSRF_REFUSED_PHRASE,
+    LOGIN_LIMIT,
+    WRITE_SESSION_LIMIT,
+)
 from atlas_settings.audit import AUDIT_FILE_NAME, AuditLog
+from atlas_settings.checks import REDACTION_GUARD_TEXTS
 from atlas_settings.phrases import (
     ADMIN_REFUSED,
     CONSENT_REFUSED,
     CONSENT_STATEMENT,
     CONSENT_UNCHECKED,
     GATE_REFUSED,
+    GITHUB_CHECK_FAILED,
+    KEY_REFUSED,
     LOGIN_FAILED,
+    RATE_LIMITED,
+    SESSION_EXPIRED,
+    STORE_REFUSED_PREFIX,
 )
 from atlas_settings.sessions import Session
 
 from .harness import (
     ADMIN_ID,
     ADMIN_LOGIN,
+    ALLOWLISTED_REPO,
     FAKE_KEY,
     GOOD_ENDPOINT,
     GOOD_MODEL,
@@ -298,6 +309,262 @@ def test_a_post_outside_the_settings_scope_is_a_not_found(tmp_path: Path) -> Non
         "/settings/a/b", {"csrf": world.csrf()}, world.cookie, "1.2.3.4"
     )
     assert response.status == 404
+
+
+# ---- the write path's own refusals -----------------------------------
+
+
+def test_a_post_with_an_expired_session_refuses(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.bump_time(1801)
+    response = world.app.post(
+        "/settings/consent", {"csrf": "x", "acknowledge": "1"}, world.cookie, "1.2.3.4"
+    )
+    assert response.status == 403
+    assert SESSION_EXPIRED in response.body.decode()
+
+
+def test_a_write_past_the_session_allowance_answers_429(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    # Refused posts consume the session's budget too — the limiter runs
+    # before the CSRF check — so the allowance is spent either way.
+    for _ in range(WRITE_SESSION_LIMIT):
+        world.app.post("/settings/consent", {"csrf": "wrong"}, world.cookie, "1.2.3.4")
+    response = world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 429
+    assert RATE_LIMITED in response.body.decode()
+
+
+def test_a_wrong_csrf_token_is_refused_and_changes_nothing(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    response = world.app.post(
+        "/settings/consent",
+        {"csrf": "not-the-token", "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 403
+    assert CSRF_REFUSED_PHRASE in response.body.decode()
+    assert world.app.store.load("42") is None
+
+
+def test_a_non_ascii_csrf_token_is_a_refusal_not_a_500(tmp_path: Path) -> None:
+    """A non-ASCII submitted token is compared as bytes and refused with
+    the fixed phrase — `compare_digest` on `str` would raise TypeError
+    and answer a 500 (kills the str-compare mutant)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    response = world.app.post(
+        "/settings/consent",
+        {"csrf": "tökén", "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 403
+    assert CSRF_REFUSED_PHRASE in response.body.decode()
+
+
+def test_a_non_ascii_state_is_a_refusal_not_a_500(tmp_path: Path) -> None:
+    """A non-ASCII OAuth state is compared as bytes and refused with the
+    fixed login refusal (kills the str-compare mutant on the state
+    check)."""
+    world = build_world(tmp_path)
+    started = world.app.get("/login", "", "", "1.2.3.4")
+    cookie = world.cookie_from(started)
+    response = world.app.get(
+        "/callback", "code=fake-code&state=t%C3%A4te", cookie, "1.2.3.4"
+    )
+    assert response.status == 403
+    assert LOGIN_FAILED in response.body.decode()
+
+
+def test_a_refused_write_shows_the_verified_allowlist_count(
+    tmp_path: Path,
+) -> None:
+    """The refusal re-render carries the allowlist count the request's
+    own gate check just verified — not a hardcoded zero (kills the
+    keep-the-zero mutant, which reports no coverage on every refused
+    write)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    response = world.app.post(
+        "/settings/consent", {"csrf": world.csrf()}, world.cookie, "1.2.3.4"
+    )
+    assert response.status == 400
+    assert "1 repo(s) on the reviewer's allowlist" in response.body.decode()
+
+
+def test_credentials_missing_a_field_refuse_with_the_prefill(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    response = world.app.post(
+        "/settings/credentials",
+        {"csrf": world.csrf(), "base_url": GOOD_ENDPOINT, "key": FAKE_KEY},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 400
+    assert "are all required" in response.body.decode()
+    # The typed endpoint is kept in the form; the key is not echoed.
+    assert 'value="https://api.example.com/v1"' in response.body.decode()
+    assert FAKE_KEY not in response.body.decode()
+
+
+def test_an_unconfigured_store_refuses_the_consent_write(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.store = InstallationStore.open(world.state_dir, {})
+    response = world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 503
+    assert STORE_REFUSED_PREFIX in response.body.decode()
+
+
+def test_a_store_write_error_refuses_the_consent_write(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise InstallationStoreError("the write did not land")
+
+    world.app.store.record_consent = explode  # type: ignore[method-assign]
+    response = world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 503
+    assert STORE_REFUSED_PREFIX in response.body.decode()
+
+
+def test_a_github_failure_on_the_write_path_refuses_fail_closed(
+    tmp_path: Path,
+) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    csrf = world.csrf()
+    world.github.api_error = TimeoutError("timed out")
+    response = world.app.post(
+        "/settings/consent", {"csrf": csrf, "acknowledge": "1"}, world.cookie, "1.2.3.4"
+    )
+    assert response.status == 502
+    assert GITHUB_CHECK_FAILED in response.body.decode()
+    assert world.app.store.load("42") is None
+
+
+def test_a_lost_gate_on_the_write_path_refuses(tmp_path: Path) -> None:
+    world = build_world(tmp_path)
+    sign_in(world)
+    csrf = world.csrf()
+    world.github.repos = [OTHER_REPO]
+    response = world.app.post(
+        "/settings/consent", {"csrf": csrf, "acknowledge": "1"}, world.cookie, "1.2.3.4"
+    )
+    assert response.status == 403
+    assert GATE_REFUSED in response.body.decode()
+    assert world.app.store.load("42") is None
+
+
+def test_the_settings_read_refuses_when_the_authorization_cannot_be_verified(
+    tmp_path: Path,
+) -> None:
+    """The settings page's read re-verifies the admin, the gate and the
+    store; each refusal answers with its own fixed phrase and status."""
+    world = build_world(tmp_path)
+    sign_in(world, org=True)
+    world.github.membership = {"role": "member", "state": "active"}
+    demoted = world.app.get("/settings", "", world.cookie, "1.2.3.4")
+    assert demoted.status == 403
+    assert ADMIN_REFUSED in demoted.body.decode()
+    world.github.membership = {"role": "admin", "state": "active"}
+    world.github.repos = [OTHER_REPO]
+    refused = world.app.get("/settings", "", world.cookie, "1.2.3.4")
+    assert refused.status == 403
+    assert GATE_REFUSED in refused.body.decode()
+    world.github.repos = [ALLOWLISTED_REPO]
+    world.github.api_error = TimeoutError("timed out")
+    failed = world.app.get("/settings", "", world.cookie, "1.2.3.4")
+    assert failed.status == 502
+    assert GITHUB_CHECK_FAILED in failed.body.decode()
+
+
+def test_the_stylesheet_route_serves_css_and_unknown_paths_are_not_found(
+    tmp_path: Path,
+) -> None:
+    world = build_world(tmp_path)
+    stylesheet = world.app.get("/static/styles.css", "", "", "1.2.3.4")
+    assert stylesheet.status == 200
+    assert stylesheet.content_type == "text/css; charset=utf-8"
+    missing = world.app.get("/nowhere", "", "", "1.2.3.4")
+    assert missing.status == 404
+    assert "there is no such page" in missing.body.decode()
+
+
+def test_the_saved_time_falls_back_to_the_record(tmp_path: Path) -> None:
+    """When the audit cannot answer — a fresh log with no entries — the
+    shown time falls back to the record's own timestamp instead of
+    claiming "not on record" (kills the drop-the-fallback mutant)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+    world.app.audit = AuditLog(world.state_dir / "other-audit.jsonl", world.clock.now)
+    assert "Credentials last saved: 2026-11-19 12:00:00 UTC." in world.page_text()
+
+
+def test_a_key_colliding_with_the_controller_text_is_an_intake_refusal(
+    tmp_path: Path,
+) -> None:
+    """The key-collision check is the page's own intake refusal: it
+    answers 400 with its own fixed phrase and the same prefill as the
+    other intake refusals — not a store-attributed 503 with a blank
+    form (kills the store-refusal-shape mutant)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    response = world.app.post(
+        "/settings/credentials",
+        _credentials_form(world, key=REDACTION_GUARD_TEXTS[0][:12]),
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert response.status == 400
+    assert KEY_REFUSED in response.body.decode()
+    assert "the installation store refused" not in response.body.decode()
+    assert 'value="https://api.example.com/v1"' in response.body.decode()
+    record = world.app.store.load("42")
+    assert record is None or not record.has_credentials
 
 
 # ---- consent --------------------------------------------------------

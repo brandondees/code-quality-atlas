@@ -105,7 +105,9 @@ def test_the_log_lines_never_carry_a_query_string(tmp_path: Path) -> None:
 def test_a_malformed_request_line_still_gets_an_answer(tmp_path: Path) -> None:
     """A request line that fails to parse must still be answered 400 by
     the server, not dropped: the error log fires before `path` and
-    `command` exist, and must not raise of its own."""
+    `command` exist, and must not raise of its own. The error answer is
+    a real HTTP/1.x reply carrying the decided security headers — the
+    stdlib's HTTP/0.9-style bare body is not what this page sends."""
     world = build_world(tmp_path)
     server, thread = _serve(world, tmp_path)
     try:
@@ -120,12 +122,76 @@ def test_a_malformed_request_line_still_gets_an_answer(tmp_path: Path) -> None:
                 break
             raw += chunk
         sock.close()
+        assert raw.startswith(b"HTTP/1.0 400 "), raw[:60]
+        # The decided security headers ride the error answer too.
+        assert b"Content-Security-Policy: default-src 'none'" in raw
+        assert b"X-Frame-Options: DENY" in raw
+        assert b"Cache-Control: no-store" in raw
         # Before the guard, the handler's own log_error raised on this
         # path and the connection was dropped with no answer at all.
-        assert raw.startswith(b"<!DOCTYPE HTML>"), raw[:60]
-        # The error log lines went out with the placeholders — no path,
-        # no traceback to the worker thread's stderr.
-        assert world.logs == ["-  error", "-  400"], world.logs
+        # Membership, not exact order: the sequence is the stdlib's
+        # contract, not this code's.
+        assert any(line.endswith(" error") for line in world.logs), world.logs
+        assert any(line.endswith(" 400") for line in world.logs), world.logs
+        assert all("GARBAGE" not in line for line in world.logs), world.logs
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_an_unsupported_method_gets_the_headers_too(tmp_path: Path) -> None:
+    """A parseable request whose method has no handler answers the
+    stdlib's 501 — with the decided security headers, because the
+    docstring's "every response" is meant literally."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        sock = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        sock.sendall(b"BREW / HTTP/1.1\r\nHost: x\r\n\r\n")
+        raw = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+        assert raw.startswith(b"HTTP/1.0 501 "), raw[:60]
+        assert b"X-Frame-Options: DENY" in raw
+        assert b"Cache-Control: no-store" in raw
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_bad_content_length_is_answered_400_not_413(tmp_path: Path) -> None:
+    """A negative or non-numeric Content-Length is a malformed request,
+    not an oversized body: both answer 400 (kills the
+    negative-is-oversized mutant, which answered 413)."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        for header in (b"Content-Length: -5\r\n", b"Content-Length: abc\r\n"):
+            sock = socket.create_connection(
+                ("127.0.0.1", server.server_address[1]), timeout=10
+            )
+            sock.sendall(
+                b"POST /settings/cap HTTP/1.0\r\nHost: x\r\n"
+                b"Content-Type: application/x-www-form-urlencoded\r\n"
+                + header
+                + b"\r\n"
+            )
+            raw = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+            sock.close()
+            assert raw.startswith(b"HTTP/1.0 400 "), (header, raw[:60])
     finally:
         server.shutdown()
         server.server_close()
@@ -206,9 +272,18 @@ def test_an_overflow_request_is_refused_not_queued(tmp_path: Path) -> None:
             ("127.0.0.1", server.server_address[1]), timeout=10
         )
         overflow.sendall(b"GET / HTTP/1.0\r\n\r\n")
-        raw = overflow.recv(4096)
+        raw = b""
+        while True:
+            chunk = overflow.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
         overflow.close()
         assert raw.startswith(b"HTTP/1.1 503 "), raw[:60]
+        # The refusal is a response this page sends: it carries the
+        # decided security headers even though no handler exists yet.
+        assert b"X-Frame-Options: DENY" in raw
+        assert b"Content-Security-Policy: default-src 'none'" in raw
         release.set()
         busy.join(timeout=10)
         assert first_response[0].status == 200
