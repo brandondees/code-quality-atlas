@@ -181,7 +181,7 @@ def test_the_refusal_render_falls_back_when_the_account_cannot_be_read(
     # read that fails shows the placeholder instead of failing the
     # refusal render.
     world.github.api_error = TimeoutError("timed out")
-    response = world.app._settings_render(session, "the refusal phrase", 400)
+    response = world.app._settings_render(session, "the refusal phrase", 400, 1)
     assert response.status == 400
     assert "the refusal phrase" in response.body.decode()
     assert "<td>- (-)</td>" in response.body.decode()
