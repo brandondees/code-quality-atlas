@@ -6073,6 +6073,7 @@ named `GitHubRefused` refusal — and the absolute session lifetime was
 computed from `created` with no sliding window at all, so "refreshed on
 use" was words without code; the TTL is idle time since the last use,
 capped by the absolute lifetime, and both are pinned.
+
 ## 2026-11-20 — #782/#783 fix round 3: the 403 mapping, the restored historical line, and the partial predicate as one rule
 
 The live code-quality-atlas bot reviewed both heads; its findings were
