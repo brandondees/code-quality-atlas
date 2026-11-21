@@ -5903,9 +5903,12 @@ def _two_sources() -> tuple[object, dict[str, str]]:
 
 def test_a_probe_failure_fails_the_review_and_names_each_source(tmp_path):
     """Every probe fails, so the job fails, nothing is posted, and the
-    error names each source and the probe failure. Kills posting a D92
-    cause for a transient probe error, starting a child anyway, and
-    collapsing every skip into one unattributed string."""
+    error names each source and the probe failure. The sources stay
+    eligible: a probe failure does not mark one unavailable, so the next
+    claim can try it, and a post would say the sources are exhausted
+    when they are not. Kills posting a D92 cause for a transient probe
+    error, starting a child anyway, and collapsing every skip into one
+    unattributed string."""
     from atlas_reviewer.funding import FundingSelector
     from atlas_reviewer.ports import BoundaryError
 
@@ -6433,3 +6436,91 @@ def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
     assert started == [REPO]
     assert board.states().count((SHA_B, JobState.FAILED)) == 2
     assert "sk-or" not in posted[0][1]
+
+
+def test_a_later_head_posts_the_exhausted_funding_state(tmp_path):
+    """PR A exhausts both sources by refusing each one. PR B's first
+    claim posts that no funding source is available and names each
+    source with its cause, in spend order. The text is the selector's
+    state, and it goes out on the D92 error post. Kills dropping that
+    post, and kills posting only the first cause."""
+    from atlas_reviewer.funding import active_choice
+    from atlas_reviewer.service_post import render_comment
+
+    started: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        started.append(event.repo)
+        cause = KEY_OUT_OF_CREDIT if choice.name == "subs-a" else KEY_AUTH_REFUSED
+        settled = "1.00" if choice.name == "subs-a" else "0.25"
+        return ReviewRun(True, _refused_report(settled, cause))
+
+    posted: list[tuple[str, ReviewReport]] = []
+
+    def publisher(event, report):
+        posted.append((event.repo, report))
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    assert worker.run_one() is True
+    assert posted == []
+    assert worker.run_one() is True
+    assert [item[0] for item in posted] == [REPO]
+    assert posted[0][1].review_error == KEY_AUTH_REFUSED
+    board.enqueue(PrEvent(OTHER, 9, SHA_B))
+    assert worker.run_one() is True
+    assert started == [REPO, REPO]
+    assert [item[0] for item in posted] == [REPO, OTHER]
+    notice = posted[1][1].review_error
+    assert notice == (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key refused"
+    )
+    assert "sk-or" not in notice
+    assert (SHA_B, JobState.DONE) in board.states()
+    body = render_comment(posted[1][1], f"{OTHER}#9#{SHA_B}", lambda text: text)
+    assert "REVIEW ERROR -- not a review" in body
+    assert f"Cause: {notice}." in body
+    assert "error -->" in body
+    assert "sk-or" not in body
+
+
+def test_a_heads_recorded_cause_wins_over_the_exhausted_notice(tmp_path):
+    """subs-a refuses, then both sources are unavailable before the
+    re-queued claim. That claim posts the cause recorded for this head,
+    not the selector's notice. Kills posting the notice on a head that
+    already advanced."""
+    from atlas_reviewer.funding import active_choice
+
+    funding = _funding_pair()
+    started: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        started.append(choice.name)
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(board, runner, publisher=publisher, root=tmp_path, funding=funding)
+    assert worker.run_one() is True
+    assert posted == []
+    assert funding.mark_refused("subs-b", KEY_AUTH_REFUSED) is False
+    assert worker.run_one() is True
+    assert started == ["subs-a"]
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert "no funding source is available" not in posted[0]
+    assert board.states() == ((SHA_A, JobState.DONE),)

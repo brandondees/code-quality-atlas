@@ -6178,8 +6178,11 @@ recorded and put back on the queue. The next claim uses the next
 source, and nothing is posted in between. The D92 error is posted when
 no source remains, and a later claim of the same head that cannot
 review posts the cause recorded for that head. A different head does
-not receive it. A first claim with nothing remembered fails and posts
-nothing. On a BYOK source, Anthropic's HTTP 400 that
+not receive it. A later head whose first claim finds every source
+already unavailable posts that no funding source is available, naming
+each source and its cause in spend order. A probe failure, or a budget
+stop, with nothing remembered for that head still posts nothing: those
+sources are not exhausted. On a BYOK source, Anthropic's HTTP 400 that
 says the credit balance is too low is that same refusal; the pilot
 key's 400 stays a per-call error, and a 429 does not move the review.
 A tenant refusal stays on the tenant path. No model was called.
