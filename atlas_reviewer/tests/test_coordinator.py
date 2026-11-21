@@ -5705,10 +5705,16 @@ def test_a_progress_record_names_the_source_only_when_one_was_chosen():
 def test_the_review_entries_pass_the_funding_source_through(tmp_path, monkeypatch):
     """The source is resolved at each review entry and passed into the
     draft and the progress records, including a continuation and a key
-    refusal that stops before any lens. Kills dropping that argument at
-    any of those sites."""
+    refusal that stops before any lens. The continuation uses its own
+    state directory, so the first review's attested reads do not make
+    that round a no-op. Kills dropping that argument at any of those
+    sites, including the continuation round."""
     from atlas_reviewer.cli import _key_refusal_review
-    from atlas_reviewer.head_change import FIELD_SOURCE, PROGRESS_PHASE
+    from atlas_reviewer.head_change import (
+        FIELD_SOURCE,
+        LENS_SETTLED_STEP,
+        PROGRESS_PHASE,
+    )
     from atlas_reviewer.telemetry import Telemetry
 
     monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "subs-a")
@@ -5716,16 +5722,19 @@ def test_the_review_entries_pass_the_funding_source_through(tmp_path, monkeypatc
     assert "Funding source: subs-a." in render_draft(result, Redactor())
 
     continued = Telemetry(FakeClock())
+    continuation = tmp_path / "continuation"
+    continuation.mkdir()
     many, _sprites = _lenses(
-        tmp_path,
+        continuation,
         [LENS],
         ScriptedLensModel([final(), final()]),
         telemetry=continued,
     )
     assert "Funding source: subs-a." in render_draft(many, Redactor())
     progress = [event for event in continued.events if event.phase == PROGRESS_PHASE]
-    assert len(progress) >= 2
-    assert all(event.fields.get(FIELD_SOURCE) == "subs-a" for event in progress)
+    settled = [event for event in progress if event.step == LENS_SETTLED_STEP]
+    assert len(settled) >= 2
+    assert settled[1].fields.get(FIELD_SOURCE) == "subs-a"
 
     refused = _key_refusal_review(
         "model key out of credit",
