@@ -5872,3 +5872,109 @@ def test_an_unreadable_installation_store_does_not_select_an_operator_source(
     assert probed == []
     assert started == []
     assert board.states() == ((SHA_A, JobState.FAILED),)
+
+
+def _two_sources() -> tuple[object, dict[str, str]]:
+    from atlas_reviewer.funding import load_funding_sources
+
+    document = json.dumps(
+        [
+            {
+                "name": name,
+                "key_env": f"ATLAS_FUNDING_{name.upper().replace('-', '_')}",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+            for name in ("subs-a", "subs-b")
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
+        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    return sources, env
+
+
+def test_a_probe_failure_fails_the_review_and_names_each_source(tmp_path):
+    """Every probe fails, so the job fails, nothing is posted, and the
+    error names each source and the probe failure. Kills posting a D92
+    cause for a transient probe error, starting a child anyway, and
+    collapsing every skip into one unattributed string."""
+    from atlas_reviewer.funding import FundingSelector
+    from atlas_reviewer.ports import BoundaryError
+
+    sources, env = _two_sources()
+    posted: list[str] = []
+    started: list[str] = []
+
+    def probe(key):
+        raise BoundaryError("OpenRouter HTTP 500")
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    def runner(event, cancel):
+        started.append("child")
+        return ReviewRun(True, REPORT)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        funding=FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5"),
+    )
+    assert worker.run_one() is True
+    assert posted == []
+    assert started == []
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    failed = [
+        event for event in worker._telemetry.events if event.step == "review failed"
+    ]
+    assert failed
+    assert "subs-a: the key probe failed" in failed[0].error
+    assert "subs-b: the key probe failed" in failed[0].error
+    assert "sk-or" not in failed[0].error
+
+
+def test_a_raised_runner_clears_the_funding_choice(tmp_path):
+    """The choice is cleared when the runner raises, not only when it
+    returns. Kills deleting the ``finally`` that resets the context, which
+    would hand the previous review's key to the next claim on this thread."""
+    from atlas_reviewer.funding import FundingSelector, active_choice
+    from atlas_reviewer.pricing import KeyStatus
+
+    sources, env = _two_sources()
+
+    def runner(event, cancel):
+        raise RuntimeError("runner blew up")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board,
+        runner,
+        root=tmp_path,
+        funding=FundingSelector(
+            sources,
+            env,
+            lambda key: KeyStatus(Decimal(50), Decimal(40), Decimal(0), True),
+            "anthropic/claude-sonnet-5.5",
+        ),
+    )
+    try:
+        assert worker.run_one() is True
+        assert board.states() == ((SHA_A, JobState.FAILED),)
+        assert active_choice.get() is None
+    finally:
+        if active_choice.get() is not None:
+            active_choice.set(None)
