@@ -6134,8 +6134,8 @@ worker remembers, so three sources can advance twice, and the D92
 error is posted when no source remains, and a later claim of the
 same head that ends without a review still posts the cause recorded
 for that head. A different head does not receive it. A later head
-whose first claim finds every matching source already unavailable
-posts the selector's notice. It starts with `no funding source is available:`
+whose first claim finds at least one matching source, and every one
+of them already unavailable, posts the selector's notice. It starts with `no funding source is available:`
 and a space, then each source whose model filter matches, as `name: cause`,
 joined by a semicolon and a space, in spend order. The cause is the recorded refusal, or
 `unavailable` when the mark stored none. A source the filter excludes
@@ -6182,8 +6182,8 @@ recorded and put back on the queue. The next claim uses the next
 source, and nothing is posted in between. The D92 error is posted when
 no source remains, and a later claim of the same head that cannot
 review posts the cause recorded for that head. A different head does
-not receive it. A later head whose first claim finds every matching
-source already unavailable posts the selector's notice. It starts with `no funding
+not receive it. A later head whose first claim finds at least one matching
+source, and every one of them already unavailable, posts the selector's notice. It starts with `no funding
 source is available:` and a space, then each source whose model filter
 matches, as `name: cause`, joined by a semicolon and a space, in spend order. The cause is the
 recorded refusal, or `unavailable` when the mark stored none. A source

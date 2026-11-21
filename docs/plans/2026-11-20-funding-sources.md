@@ -146,8 +146,8 @@ claim takes the next source that still has credit. Exhaustion is
 decided in two places. A refusal whose source is the last eligible
 one ends the advance: the worker posts and does not release the claim
 again. A claim that finds no eligible source is exhausted at claim
-time and does not release the claim either. When every source whose model filter matches is already marked
-unavailable and nothing is remembered for that head, the worker posts
+time and does not release the claim either. When at least one source matches the model and every one of them is
+marked unavailable, and nothing is remembered for that head, the worker posts
 the selector's notice. It starts with `no funding source is available:`
 and a space, then each matching source as `name: cause`, joined by a
 semicolon and a space, in spend order. The

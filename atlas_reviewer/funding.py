@@ -234,10 +234,10 @@ class FundingSelection:
     its ceiling, or every matching source already refused. The
     selection is not itself a D92 post. The worker posts one when this
     head already advanced, and the cause is the one recorded for this
-    head. When every matching source is already unavailable and this
-    head has no recorded cause, the worker posts the selector's
-    notice. A probe failure while a source is still eligible posts
-    nothing."""
+    head. When at least one source matches the model and every one of
+    them is marked unavailable, and this head has no recorded cause,
+    the worker posts the selector's notice. A probe failure while a
+    source is still eligible posts nothing."""
 
     choice: FundingChoice | None = None
     error: str = ""
@@ -362,9 +362,9 @@ class FundingSelector:
         """Walk the sources in order. The key probe runs outside the
         lock, so one claim's HTTPS call does not stall another claim
         or a refusal mark. Two claims can probe the same key; both may
-        take it. When every matching source has refused, the selection
-        carries no choice. The post, if this head has no recorded
-        cause, is ``unavailable_notice``."""
+        take it. When at least one source matches and every one of them
+        has refused, the selection carries no choice. The post, if this
+        head has no recorded cause, is ``unavailable_notice``."""
         reasons: list[str] = []
         for source in self._sources:
             with self._lock:
@@ -414,9 +414,10 @@ class FundingSelector:
         ``name: cause``, joined by ``; ``, in spend order. The cause
         is the recorded refusal, or ``unavailable`` when the mark
         stored none. A source the filter excludes is left out. The
-        notice carries no key. Empty when a matching source is still
-        eligible, including one whose last probe failed: that source
-        is not marked unavailable, so the next claim can try it."""
+        notice carries no key. Empty when no source matches the model,
+        and when a matching source is still eligible, including one
+        whose last probe failed: that source is not marked unavailable,
+        so the next claim can try it."""
         with self._lock:
             parts: list[str] = []
             for source in self._sources:
