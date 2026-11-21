@@ -15,6 +15,7 @@ operator list cannot name it.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import re
@@ -232,6 +233,13 @@ class FundingSelection:
     error: str = ""
 
 
+# The source the worker pinned for this claim. The child handoff reads
+# it. Unset is no operator source.
+active_choice: contextvars.ContextVar[FundingChoice | None] = contextvars.ContextVar(
+    "atlas_funding_choice", default=None
+)
+
+
 def funding_byok(env: Mapping[str, str] | None = None) -> bool:
     """True only when the child was handed a BYOK source.
 
@@ -255,6 +263,16 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field")
         data[key] = value
     return data
+
+
+def accepted_source_name(value: object) -> str | None:
+    """A source name, ``""`` when the field is present and blank, None
+    when the value cannot be a source name."""
+    if value == "":
+        return ""
+    if isinstance(value, str) and _NAME.fullmatch(value) is not None:
+        return value
+    return None
 
 
 def key_probe(key: str) -> KeyStatus:
