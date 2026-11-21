@@ -283,7 +283,7 @@ class FundingSelector:
         or a refusal mark. Two claims can probe the same key; both may
         take it. The refusal, when every matching source has refused,
         is the first refused source's cause in spend order."""
-        blocked = False
+        reasons: list[str] = []
         for source in self._sources:
             with self._lock:
                 if not source.allows(self._model) or source.name in self._unavailable:
@@ -297,11 +297,14 @@ class FundingSelector:
                 if outcome in _REFUSAL_CAUSES:
                     self._refuse(source.name, outcome)
                     continue
-                blocked = True
+                reasons.append(outcome)
         with self._lock:
-            if blocked:
+            if reasons:
                 return FundingSelection(
-                    error="no funding source is available for this review"
+                    error=(
+                        "no funding source is available for this review: "
+                        + "; ".join(reasons)
+                    )
                 )
             cause = self._remembered_cause()
         if cause:
@@ -323,24 +326,28 @@ class FundingSelector:
             return self._another_available()
 
     def _probe_source(self, source: FundingSource) -> FundingChoice | str:
-        """A choice, a D92 cause, or ``""`` when the source was skipped
-        without being marked unavailable. This does not touch the
-        unavailable set; the caller records a refusal under the lock."""
+        """A choice, a D92 cause, or a reason the source was skipped
+        without being marked unavailable. The reason names the source
+        and not the key. This does not touch the unavailable set; the
+        caller records a refusal under the lock."""
         key = self._env.get(source.key_env, "")
         if key.strip() == "":
-            return ""
+            return f"{source.name}: the key is unset"
         try:
             status = self._probe(key)
         except KeyRefusedError as exc:
             if exc.review_error not in _REFUSAL_CAUSES:
-                return ""
+                return (
+                    f"{source.name}: the probe refused for a reason "
+                    "that is not a key refusal"
+                )
             return exc.review_error
         except (BoundaryError, PricingUnknownError):
             # A 500, a non-JSON 200, or an unlimited key is not a refusal.
             # The selection fails closed and the next claim can try again.
-            return ""
+            return f"{source.name}: the key probe failed"
         if status.limit > source.key_ceiling_usd:
-            return ""
+            return f"{source.name}: the key limit is over the source ceiling"
         if status.limit_remaining <= 0:
             return KEY_OUT_OF_CREDIT
         return FundingChoice(

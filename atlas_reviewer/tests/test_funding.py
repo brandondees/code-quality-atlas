@@ -563,7 +563,8 @@ def test_a_probe_that_fails_does_not_mark_the_source_unavailable():
     first = selector.choose()
     assert first.choice is None
     assert first.refusal == ""
-    assert first.error
+    assert "subs-a: the key probe failed" in first.error
+    assert "sk-or" not in first.error
     second = selector.choose()
     assert second.choice is not None
     assert second.choice.name == "subs-a"
@@ -624,7 +625,7 @@ def test_a_blank_key_is_skipped_and_can_be_chosen_once_it_is_set():
     first = selector.choose()
     assert first.choice is None
     assert first.refusal == ""
-    assert first.error
+    assert "subs-a: the key is unset" in first.error
     assert calls == []
     env["ATLAS_FUNDING_SUBS_A"] = "sk-or-v1-subs-a"
     second = selector.choose()
@@ -652,7 +653,9 @@ def test_an_unrecognized_probe_error_does_not_become_a_refusal():
     first = selector.choose()
     assert first.choice is None
     assert first.refusal == ""
-    assert first.error
+    assert "subs-a: the probe refused for a reason that is not a key refusal" in (
+        first.error
+    )
     assert "flagged" not in first.error
     second = selector.choose()
     assert second.choice is not None
@@ -671,7 +674,26 @@ def test_a_probe_that_does_not_parse_fails_the_selection_without_crashing():
     selection = _selector(_env(_source()), probe).choose()
     assert selection.choice is None
     assert selection.refusal == ""
-    assert selection.error
+    assert "subs-a: the key probe failed" in selection.error
+
+
+def test_two_skips_keep_both_sources_and_both_reasons():
+    """A probe failure and an over-ceiling key are different reasons.
+    Kills collapsing every skip into one unattributed string."""
+    env = _env(
+        _source(),
+        _source(name="high", key_env="ATLAS_FUNDING_HIGH", key_ceiling_usd="195"),
+    )
+
+    def probe(key: str) -> KeyStatus:
+        if key == "sk-or-v1-subs-a":
+            raise BoundaryError("OpenRouter HTTP 500")
+        return _credit(limit="500")
+
+    selection = _selector(env, probe).choose()
+    assert "subs-a: the key probe failed" in selection.error
+    assert "high: the key limit is over the source ceiling" in selection.error
+    assert "sk-or" not in selection.error
 
 
 def test_a_choice_repr_does_not_contain_the_key():
