@@ -377,15 +377,13 @@ def test_the_allowlist_parses_the_way_the_service_parses_it() -> None:
 def test_every_long_public_phrase_is_in_the_redaction_guard() -> None:
     from atlas_settings.config import MAX_CAP_USD
 
-    public_strings = [
-        value
-        for name, value in vars(phrases).items()
-        if not name.startswith("_")
-        and isinstance(value, str)
-        and name not in ("DELETE_CONFIRM_WORD",)
-    ]
+    # One enumeration for the guard and the loop: a broken helper fails
+    # the non-empty assert instead of silently checking nothing (kills
+    # the broken-filter mutant, which left the test green over an empty
+    # loop).
+    public_strings = _public_phrases(phrases)
     assert public_strings, "the phrases module exposes its constants"
-    for name, phrase in _public_phrases(phrases):
+    for name, phrase in public_strings:
         if len(phrase) >= _REDACTION_MIN_CHARS:
             assert phrase in phrases.REDACTION_GUARD_TEXTS, name
     # The cap phrase names the config bound; the two cannot drift.

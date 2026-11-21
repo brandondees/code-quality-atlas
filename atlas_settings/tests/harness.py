@@ -3,7 +3,7 @@
 page's tests import — the obviously fake keys, tokens, ids, endpoints,
 and the base environment. The vocabulary is declared here whole, at the
 bottom layer, because every value is inert data the whole stack's tests
-read; the harness's later pieces (the fake clock, the fake GitHub
+read; the harness's later pieces (the fake GitHub
 transport, the resolver, and the world builder) land with their first
 user in the layers that need them.
 
