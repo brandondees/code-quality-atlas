@@ -119,6 +119,7 @@ from atlas_reviewer.service_run import (
     MODE_AGENTIC,
     MODE_ONESHOT,
     WEBHOOK_SECRET_ENV,
+    DraftParseError,
     ReviewReport,
     ReviewRun,
     RunConfig,
@@ -129,6 +130,7 @@ from atlas_reviewer.service_run import (
     run_dir,
     service_deadline,
     service_mode,
+    summarize_draft,
 )
 from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, OK, Event, EventSink, JsonlSink, Telemetry
@@ -1315,7 +1317,11 @@ class Worker:
         either records
         nothing: the amount is never guessed, and the gap the cost event
         carries is where the miss stays visible. A write failure is a
-        named gap and leaves the total short rather than wrong."""
+        named gap and leaves the total short rather than wrong. When the
+        attempt has progress evidence, the bill is recorded once under
+        that evidence's key. An unreadable ledger is not appended to:
+        its total is unknown, the gap is logged as spend not recorded,
+        and the day's budget already holds."""
         if self._spend is None:
             return
         if cost is not None:
@@ -1467,13 +1473,14 @@ class Worker:
         )
 
     def _save_refusal_draft(self, job: Job, cause: str) -> None:
-        """Write the synthetic refusal as the draft a retry posts, when
-        the run directory has no draft yet. A child that already wrote
-        one keeps it. The status line is the agentic shape `summarize_draft`
-        reads back, and the cause is one `known_review_error` already
-        accepted, so the retry posts that same text."""
+        """Write the synthetic refusal as the draft a retry posts. A
+        draft already there is kept when it carries this same cause, and
+        replaced when it carries another, so a directory a failed drop
+        kept cannot make the retry post the earlier attempt. The status
+        line is the agentic shape `summarize_draft` reads back, and the
+        cause is one `known_review_error` already accepted."""
         path = run_dir(self._state_root, job.event) / "draft.md"
-        if path.is_file():
+        if path.is_file() and self._draft_cause(path) == cause:
             return
         make_private_dirs(path.parent)
         status = {
@@ -1485,6 +1492,15 @@ class Worker:
             f"{STATUS_PREFIX}{json.dumps(status, sort_keys=True)} -->\n",
             encoding="utf-8",
         )
+
+    def _draft_cause(self, path: Path) -> str:
+        """The cause a saved draft would post, or empty when it is not
+        one this service can read."""
+        try:
+            report = summarize_draft(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, DraftParseError, ValueError):
+            return ""
+        return report.review_error
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is

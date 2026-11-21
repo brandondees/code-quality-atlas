@@ -62,6 +62,11 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.funding import (
     ENV_FUNDING_BYOK,
     ENV_FUNDING_SOURCE,
+    NOTICE_CAUSE_MARK,
+    NOTICE_PREFIX,
+    NOTICE_SEPARATOR,
+    SOURCE_NAME,
+    UNAVAILABLE_CAUSE,
     FundingChoice,
     active_choice,
 )
@@ -709,14 +714,10 @@ def _status_flag(status: Mapping[str, object], key: str) -> Any:
 
 
 REVIEW_ERROR_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
-# The selector's exhaustion notice (D92, D94): a fixed prefix, then one
-# or more `name: cause` parts in spend order, joined by `; `. A cause is
-# one of the two fixed key causes or the word `unavailable`. A source
-# name is the document's own grammar. Anything else, including a key,
-# stays out of a post.
-_NOTICE_PREFIX = "no funding source is available: "
-_SOURCE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-_NOTICE_TAILS = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED, "unavailable"})
+# The notice grammar lives in funding.py. A cause is one of the two
+# fixed key causes or `UNAVAILABLE_CAUSE`. Anything else, including a
+# key, stays out of a post.
+_NOTICE_TAILS = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED, UNAVAILABLE_CAUSE})
 
 
 def known_review_error(value: str) -> bool:
@@ -726,16 +727,16 @@ def known_review_error(value: str) -> bool:
     are unknown."""
     if value in REVIEW_ERROR_CAUSES:
         return True
-    if not value.startswith(_NOTICE_PREFIX):
+    if not value.startswith(NOTICE_PREFIX):
         return False
-    parts = value[len(_NOTICE_PREFIX) :].split("; ")
+    parts = value[len(NOTICE_PREFIX) :].split(NOTICE_SEPARATOR)
     if not parts or any(part == "" for part in parts):
         return False
     for part in parts:
-        name, sep, cause = part.partition(": ")
+        name, sep, cause = part.partition(NOTICE_CAUSE_MARK)
         if (
-            sep != ": "
-            or _SOURCE_NAME.fullmatch(name) is None
+            sep != NOTICE_CAUSE_MARK
+            or SOURCE_NAME.fullmatch(name) is None
             or cause not in _NOTICE_TAILS
         ):
             return False

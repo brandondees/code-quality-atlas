@@ -6490,6 +6490,47 @@ def test_a_failed_run_dir_drop_does_not_bill_the_attempt_twice(tmp_path, monkeyp
     assert total == Decimal("1.00")
 
 
+def test_an_unreadable_ledger_is_not_appended_when_the_attempt_has_progress(
+    tmp_path,
+):
+    """Settlement of an attempt that left progress evidence goes through
+    `record_once`. An unreadable day's file is left as it is, and the
+    gap is named. The claim itself never reaches this: an unreadable
+    file already holds the budget. Kills appending that bill with
+    `record`."""
+    from atlas_reviewer.service_queue import Job
+
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3),
+    )
+    spend = _spend(tmp_path)
+    ledger = spend.file(REPO)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("{not a record\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, _refused_report("1.00")),
+        root=tmp_path,
+        spend=spend,
+        funding=_funding_pair(),
+    )
+    worker._cost_event(Job(event, JobState.RUNNING), _refused_report("1.00"))
+    assert ledger.read_bytes() == before
+    named = [
+        event
+        for event in worker._telemetry.events
+        if event.step == "spend not recorded"
+    ]
+    assert named
+    assert "unreadable record" in named[0].error
+
+
 def test_a_failed_later_attempt_does_not_rebill_the_kept_span(tmp_path, monkeypatch):
     """The directory stays after a failed drop. The next attempt writes
     only its own run-start line and fails before a progress record.
@@ -6536,6 +6577,29 @@ def test_a_failed_later_attempt_does_not_rebill_the_kept_span(tmp_path, monkeypa
     assert total == Decimal("1.00")
 
 
+def test_the_selector_notice_is_a_cause_the_draft_reader_accepts():
+    """The notice the selector builds is a cause the draft reader
+    accepts, including a source with no recorded cause. Kills a second
+    copy of that grammar that the selector's own notice no longer
+    matches."""
+    from atlas_reviewer.funding import NOTICE_PREFIX
+    from atlas_reviewer.service_run import known_review_error
+
+    funding = _funding_pair()
+    assert funding.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
+    assert funding.mark_refused("subs-b", KEY_AUTH_REFUSED) is False
+    notice = funding.unavailable_notice()
+    assert notice.startswith(NOTICE_PREFIX)
+    assert known_review_error(notice) is True
+    assert "sk-or" not in notice
+    quiet = _funding_pair()
+    assert quiet.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
+    assert quiet.mark_refused("subs-b", "probe failed") is False
+    unmarked = quiet.unavailable_notice()
+    assert known_review_error(unmarked) is True
+    assert unmarked.endswith("subs-b: unavailable")
+
+
 def test_a_rate_limited_refusal_retries_the_saved_cause(tmp_path):
     """The remembered cause's post is rate-limited. The retry posts
     that same cause from the draft the first attempt saved. Kills
@@ -6576,6 +6640,68 @@ def test_a_rate_limited_refusal_retries_the_saved_cause(tmp_path):
     worker._retry_post()
     assert posted == [KEY_OUT_OF_CREDIT]
     assert board.states() == ((SHA_A, JobState.DONE),)
+    assert "sk-or" not in posted[0]
+
+
+def test_a_kept_draft_retries_the_new_cause(tmp_path, monkeypatch):
+    """A failed drop keeps attempt 1's draft. Attempt 2 posts a
+    different cause and is rate-limited. The retry posts attempt 2's
+    cause. Kills keeping whatever draft is already in the directory."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.funding import active_choice
+    from atlas_reviewer.verdict import STATUS_PREFIX
+
+    def boom(*_args, **_kwargs):
+        raise OSError("directory busy")
+
+    monkeypatch.setattr(service_mod.shutil, "rmtree", boom)
+
+    def status(cause: str) -> str:
+        body = json.dumps(
+            {"coverage_complete": False, "mode": "agentic", "review_error": cause},
+            sort_keys=True,
+        )
+        return f"{STATUS_PREFIX}{body} -->\n"
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        if choice.name == "subs-a":
+            run = run_dir(tmp_path, event)
+            run.mkdir(parents=True, exist_ok=True)
+            (run / "draft.md").write_text(status(KEY_OUT_OF_CREDIT), encoding="utf-8")
+            return ReviewRun(True, _refused_report("1.00", KEY_OUT_OF_CREDIT))
+        return ReviewRun(True, _refused_report("0.25", KEY_AUTH_REFUSED))
+
+    clock = {"t": 1_000_000.0}
+    posted: list[str] = []
+    calls = {"n": 0}
+
+    def publisher(event, report):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RateLimited("slow down", 1.0)
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    worker._now = lambda: clock["t"]
+    assert worker.run_one() is True
+    assert posted == []
+    assert worker.run_one() is True
+    assert posted == []
+    draft = (run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)) / "draft.md").read_text(
+        encoding="utf-8"
+    )
+    assert KEY_AUTH_REFUSED in draft
+    assert KEY_OUT_OF_CREDIT not in draft
+    clock["t"] += 10_000
+    worker._retry_post()
+    assert posted == [KEY_AUTH_REFUSED]
     assert "sk-or" not in posted[0]
 
 
