@@ -88,6 +88,18 @@ def test_funding_spend_prints_each_source_and_refuses_an_unreadable_ledger(tmp_p
     )
     assert bad == 2
     assert "unreadable" in bad_err
+    path.write_bytes(b"\xff\xfe")
+    decoded, _decoded_out, decoded_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "funding-spend",
+        "--repo",
+        "acme/app",
+        "--day",
+        "2026-11-20",
+    )
+    assert decoded == 2
+    assert "could not be read" in decoded_err
     usage, _, usage_err = run_cli(
         "--state-dir", str(tmp_path), "funding-spend", "--repo", "noslash"
     )
