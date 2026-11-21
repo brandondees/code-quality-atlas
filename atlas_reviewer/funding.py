@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from atlas_reviewer.http import UrllibTransport, safe_url
-from atlas_reviewer.openrouter import _json_object, key_refusal_or_boundary
 from atlas_reviewer.ports import (
     KEY_AUTH_REFUSED,
     KEY_OUT_OF_CREDIT,
@@ -267,6 +266,10 @@ def key_probe(key: str) -> KeyStatus:
     status and the URL, never the body and never the key. The transport
     does not follow redirects, so the bearer token stays on this host.
     """
+    # openrouter imports budget. Keeping this import in the function lets
+    # budget import this module without a cycle.
+    from atlas_reviewer.openrouter import _json_object, key_refusal_or_boundary
+
     transport = UrllibTransport()
     response = transport.request(
         "GET",
