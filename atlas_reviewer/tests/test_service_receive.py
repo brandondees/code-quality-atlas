@@ -6693,7 +6693,11 @@ def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
     # checks while X's cause is still the recorded one.
     board._jobs.append(Job(PrEvent(REPO, 7, SHA_B), JobState.QUEUED))
     for _ in range(4):
+        job_y = next(job for job in board._jobs if job.state is JobState.QUEUED)
         assert worker.run_one() is True
+        # While X's cause is still recorded. A cause written for this
+        # unrelated head and cleared before the final dict check fails here.
+        assert worker._head_cause(job_y) == ""
     assert posted == []
     assert started == [REPO]
     assert worker._head_causes == cause
