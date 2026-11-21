@@ -28,23 +28,32 @@ def _store(clock: FakeClock, **kwargs: int) -> SessionStore:
 
 def test_an_expired_pre_login_row_cannot_be_upgraded() -> None:
     """The pre-login binding's 10-minute lifetime is enforced on the
-    upgrade path too: a caller holding a `Session` object past the mark
-    — without the fresh `get()` that would have expired it — is
-    refused, and the refusal changes nothing (kills the
+    upgrade path too, at the same boundary `get()` uses: a caller
+    holding a `Session` object one second inside the lifetime can still
+    upgrade it, at exactly the lifetime it is refused, and past it the
+    refusal stands with nothing changed (kills the `>=`-to-`>`
+    mutant — the 601-only probe survived it — and the
     drop-the-TTL-check mutant, which minted a signed-in session from a
     binding that had expired)."""
     clock = FakeClock()
     store = _store(clock, pre_login_ttl_s=600)
     session, _value = store.start_login("state-abc", "verifier-abc")
-    clock.advance(601)
+    clock.advance(599)
+    # One second inside the lifetime: the upgrade is allowed.
+    _signed, _cookie = store.upgrade(session, ADMIN_ID, ADMIN_LOGIN)
+    assert store._signed_in_count == 1
+    # A fresh binding created at the same moment, probed at exactly its
+    # lifetime (600 seconds later).
+    session2, _value2 = store.start_login("state-def", "verifier-def")
+    clock.advance(600)
     with pytest.raises(SessionError, match="expired"):
-        store.upgrade(session, ADMIN_ID, ADMIN_LOGIN)
-    # The refusal mutated nothing: the row is still counted where it
-    # was, and no signed-in session exists.
+        store.upgrade(session2, ADMIN_ID, ADMIN_LOGIN)
+    # The refusal mutated nothing: the refused row is still counted
+    # where it was, and no second signed-in session exists.
     assert store._pre_login_count == 1
-    assert store._signed_in_count == 0
+    assert store._signed_in_count == 1
     # The expired row still expires normally on its own path.
-    assert store.get(store.cookie_value(session)) is None
+    assert store.get(store.cookie_value(session2)) is None
 
 
 def test_the_cookie_carries_the_decided_attributes() -> None:
