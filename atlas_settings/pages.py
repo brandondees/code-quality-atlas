@@ -2,8 +2,8 @@
 """The settings page's server-rendered HTML: one layout, one settings
 page, one error page. No client-side JavaScript, no third-party script,
 font, or CDN — the page's only active surface is plain HTML forms
-posted to itself, and every dynamic value is escaped on its way into
-the markup."""
+posted to the page's own `/settings/*` routes, and every dynamic value
+is escaped on its way into the markup."""
 
 from __future__ import annotations
 
@@ -23,9 +23,12 @@ from atlas_settings.phrases import (
 class StoredCredentials:
     """The stored-credentials fact as one value: a record exists, saved
     at this time, holding this endpoint and model. One optional value
-    instead of four loose parameters — there is no state where a
-    credential exists without its saved time, and no combination where
-    an endpoint shows without a key behind it."""
+    instead of four loose parameters — no combination exists where an
+    endpoint shows without a key behind it. `saved_at` is the audit's
+    own record of the last store-credentials write falling back to the
+    record's timestamp; `None` means neither could answer — the audit
+    line is lost and the record carries no time of its own — and the
+    section still shows, with "not on record" in place of the time."""
 
     saved_at: datetime | None
     base_url: str
@@ -37,7 +40,7 @@ def layout(title: str, body: str, flash: str | None = None) -> str:
     message rides the render, the body. The flash is escaped like every
     other interpolated text — it is written by this page from fixed
     phrases, but the escape is not a judgment call."""
-    flash_html = f'<p class="flash">{esc(flash)}</p>' if flash else ""
+    flash_html = f'<p class="flash" role="status">{esc(flash)}</p>' if flash else ""
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -183,7 +186,6 @@ def _credentials_form_section(
     # The endpoint and model are non-secret and refill across a refused
     # submit; the key is never prefilled — a refused save must never be
     # the thing that keeps a pasted key sitting in a form.
-    heading = "Rotate the key" if has_credentials else "Add credentials"
     if consent_acknowledged_at is None:
         # The form stays hidden until the consent above is
         # acknowledged: a key pasted into a form whose submit the
@@ -193,6 +195,7 @@ def _credentials_form_section(
 <p>The credentials form appears once the data-policy consent above is
 acknowledged.</p>
 </section>"""
+    heading = "Rotate the key" if has_credentials else "Add credentials"
     return f"""<section id="credentials-form">
 <h2>{heading}</h2>
 <p>The endpoint must be an <code>https://</code> URL whose host passes
@@ -211,8 +214,6 @@ model call is made.</p>
  value="{esc_attr(prefill_model)}"></label>
 <button type="submit">Save credentials</button>
 </form>
-<p>Saving credentials without the consent acknowledgement stores
-nothing.</p>
 </section>"""
 
 
