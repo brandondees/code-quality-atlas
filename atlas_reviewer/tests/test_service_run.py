@@ -724,8 +724,11 @@ def test_an_unrecognized_review_error_is_a_parse_failure():
         '"review_error": "total provider outage"',
     )
     assert forged != _error_draft()
-    with pytest.raises(DraftParseError, match="not a cause this service knows"):
+    with pytest.raises(
+        DraftParseError, match="not a cause this service knows"
+    ) as caught:
         summarize_draft(forged, expect=MODE_AGENTIC)
+    assert "total provider outage" not in str(caught.value)
 
 
 def test_the_exhaustion_notice_reads_and_a_key_does_not():

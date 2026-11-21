@@ -1242,17 +1242,21 @@ class Worker:
     def _cost_event(self, job: Job, report: ReviewReport | None) -> None:
         """The review's cost, logged when it settles (#702's measure-first
         rule): a finished review's cost comes from its draft's cost lines;
-        a cancelled or failed one's from the last progress record its
-        events file holds, read before the run directory goes. A review
-        whose cost is in neither is logged as unknown, so the gap between
-        the decision records and the cost records stays visible."""
+        a cancelled or failed one's from the progress figure of its own
+        last run, read before the run directory goes. A last run with no
+        figure of its own records nothing, so an earlier run's records
+        left in the directory are not billed again. A review whose cost
+        is in neither is logged as unknown, so the gap between the
+        decision records and the cost records stays visible."""
         fields: dict[str, str | int] = dict(_fields(job.event))
         cost = review_cost(report) if report is not None else None
         # The progress evidence's hash is the attempt's identity in the
-        # ledger. The first settlement and a later backfill of the same
-        # span both carry it, so a drop that fails after the settlement
-        # does not bill the span again. A review with no progress span
-        # has no such identity and is recorded once, as before.
+        # ledger, and its figure is that span's own bill. The first
+        # settlement and a later backfill of the same span both carry
+        # the hash, so a drop that fails after the settlement does not
+        # bill the span again. A failed attempt whose span has no figure
+        # of its own records nothing: an earlier span left in the
+        # directory is not this attempt's bill.
         evidence = last_run_progress(*_progress_paths(self._state_root, job.event))
         attempt_key = evidence[1] if evidence is not None else ""
         progress = None
@@ -1271,7 +1275,7 @@ class Worker:
                 }
             )
         else:
-            progress = read_progress(*_progress_paths(self._state_root, job.event))
+            progress = evidence[0] if evidence is not None else None
             if progress is not None:
                 fields.update(
                     {

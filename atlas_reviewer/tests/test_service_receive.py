@@ -5907,6 +5907,65 @@ def _two_sources(
     return sources, env
 
 
+def test_an_unrecognized_review_error_stays_out_of_the_log(tmp_path):
+    """A draft whose review_error is a key fails the review. The
+    review-failed record names the field's type and length, and the
+    key is absent. Kills logging the unrecognized text."""
+    from atlas_reviewer.service_run import MODE_AGENTIC, RunConfig, make_runner
+
+    key = "sk-or-v1-secretsecret"
+    draft = (
+        "<!-- atlas-review-status: "
+        + json.dumps(
+            {
+                "coverage_complete": False,
+                "mode": "agentic",
+                "review_error": key,
+            }
+        )
+        + " -->\n"
+    )
+
+    class _Proc:
+        def __init__(self, code: int) -> None:
+            self._code = code
+            self._polls = 0
+
+        def poll(self):
+            self._polls += 1
+            return self._code if self._polls > 1 else None
+
+        def send_signal(self, signum):
+            return None
+
+        def kill(self):
+            return None
+
+        def wait(self, timeout=None):
+            return self._code
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(draft, encoding="utf-8")
+        return _Proc(0)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), {}, popen=popen
+    )
+    worker = _worker(board, runner, root=tmp_path)
+    assert worker.run_one() is True
+    failed = [
+        event for event in worker._telemetry.events if event.step == "review failed"
+    ]
+    assert len(failed) == 1
+    assert key not in failed[0].error
+    assert "sk-or" not in failed[0].error
+    assert "not a cause this service knows" in failed[0].error
+    assert f"length {len(key)}" in failed[0].error
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+
+
 def test_a_probe_failure_fails_the_review_and_names_each_source(tmp_path):
     """Every probe fails, so the job fails, nothing is posted, and the
     error names each source and the probe failure. The sources stay
@@ -6426,6 +6485,52 @@ def test_a_failed_run_dir_drop_does_not_bill_the_attempt_twice(tmp_path, monkeyp
     assert total == Decimal("1.00")
     assert worker.run_one() is True
     assert posted == [KEY_OUT_OF_CREDIT]
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+
+
+def test_a_failed_later_attempt_does_not_rebill_the_kept_span(tmp_path, monkeypatch):
+    """The directory stays after a failed drop. The next attempt writes
+    only its own run-start line and fails before a progress record.
+    The ledger stays at the first attempt's bill. Kills billing that
+    failure from the merge of every progress record in the file."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.funding import active_choice
+
+    def boom(*_args, **_kwargs):
+        raise OSError("directory busy")
+
+    monkeypatch.setattr(service_mod.shutil, "rmtree", boom)
+    calls = {"n": 0}
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        calls["n"] += 1
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        if calls["n"] == 1:
+            _append_events(
+                run / "events.jsonl",
+                _run_start_record(1),
+                _progress_record("2.20", 3),
+            )
+            return ReviewRun(True, _refused_report("1.00"))
+        _append_events(run / "events.jsonl", _run_start_record(2))
+        return ReviewRun(False, error="review exited 1")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path)
+    worker = _worker(board, runner, root=tmp_path, spend=spend, funding=_funding_pair())
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+    assert worker.run_one() is True
+    assert calls["n"] == 2
+    assert board.states() == ((SHA_A, JobState.FAILED),)
     total, gap = spend.committed(REPO)
     assert gap == ""
     assert total == Decimal("1.00")

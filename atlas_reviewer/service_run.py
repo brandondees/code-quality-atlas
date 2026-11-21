@@ -742,11 +742,6 @@ def known_review_error(value: str) -> bool:
     return True
 
 
-"""The two fixed causes a refused key's review error carries (D92). The
-status line's `review_error` field is controller text with exactly these
-values; anything else on a draft is not a field this coordinator wrote."""
-
-
 def _review_error(status: Mapping[str, object]) -> str:
     """The draft's refused-key cause (D92), typed: the two fixed causes
     read, and so does the selector's exhaustion notice. An unrecognized
@@ -759,7 +754,8 @@ def _review_error(status: Mapping[str, object]) -> str:
         return ""
     if not known_review_error(value):
         raise DraftParseError(
-            f"the draft's review_error is not a cause this service knows: {value!r}"
+            "the draft's review_error is not a cause this service knows "
+            f"({type(value).__name__}, length {len(value)})"
         )
     return value
 
