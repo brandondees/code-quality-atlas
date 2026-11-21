@@ -182,7 +182,11 @@ def test_a_missing_key_variable_duplicate_or_extra_field_is_refused():
 def test_a_malformed_document_is_refused():
     """Not JSON, not an array, an empty array, and a document past the
     size cap all fail closed. Kills treating ``[]`` as unset, and
-    treating a JSON object as one source."""
+    treating a JSON object as one source. The token-valid key cases
+    kill the interpolation mutant: restoring ``!r`` on a repeated name,
+    field, or provider slug, or restoring ``sorted(extra)``, puts that
+    key in the refusal, and restoring a key variable or the model id
+    does the same for those refusals."""
     for raw in ("{", "null", "{}", "[]", '"subs-a"', "[1]"):
         with pytest.raises(ValueError):
             load_funding_sources({ENV_FUNDING_SOURCES: raw})
@@ -231,6 +235,70 @@ def test_a_malformed_document_is_refused():
         with pytest.raises(ValueError) as echoed:
             load_funding_sources(_env(_source(**{field: value})))
         assert secret not in str(echoed.value)
+    # ``secret`` matches the name and slug grammars, so it reaches the
+    # duplicate-name, duplicate-slug, duplicate-field, and extra-field
+    # refusals instead of failing the grammar first.
+    named = _source(name=secret)
+    with pytest.raises(ValueError, match="repeats the name") as echoed:
+        load_funding_sources(
+            _env(named, _source(name=secret, key_env="ATLAS_FUNDING_SUBS_B"))
+        )
+    assert secret not in str(echoed.value)
+    with pytest.raises(ValueError, match="repeats the provider") as echoed:
+        load_funding_sources(_env(_source(providers=[secret, secret])))
+    assert secret not in str(echoed.value)
+    repeated_field = (
+        '[{"' + secret + '": "a", "' + secret + '": "b", "name": "subs-a"}]'
+    )
+    with pytest.raises(ValueError, match="repeats the field") as echoed:
+        load_funding_sources({ENV_FUNDING_SOURCES: repeated_field})
+    assert secret not in str(echoed.value)
+    extra = _source()
+    extra[secret] = "x"
+    with pytest.raises(ValueError, match="extra") as echoed:
+        load_funding_sources(_env(extra))
+    assert secret not in str(echoed.value)
+    missing = _source()
+    del missing["byok"]
+    with pytest.raises(ValueError, match="missing") as echoed:
+        load_funding_sources(_env(missing))
+    assert "byok" not in str(echoed.value)
+    unset = _env(_source(name=secret))
+    del unset["ATLAS_FUNDING_SUBS_A"]
+    with pytest.raises(ValueError, match="unset") as echoed:
+        load_funding_sources(unset)
+    assert secret not in str(echoed.value)
+    assert "ATLAS_FUNDING_SUBS_A" not in str(echoed.value)
+    with pytest.raises(ValueError, match="repeats the key") as echoed:
+        load_funding_sources(
+            _env(_source(), _source(name="subs-b", key_env="ATLAS_FUNDING_SUBS_A"))
+        )
+    assert "ATLAS_FUNDING_SUBS_A" not in str(echoed.value)
+    with pytest.raises(ValueError, match="tenant credential") as echoed:
+        load_funding_sources(_env(_source(key_env="ATLAS_TENANT_MODEL_KEY")))
+    assert "ATLAS_TENANT_MODEL_KEY" not in str(echoed.value)
+    denied = _source(key_env="ATLAS_FUNDING_BYOK")
+    with pytest.raises(ValueError, match="is not a key") as echoed:
+        load_funding_sources(
+            {
+                ENV_FUNDING_SOURCES: json.dumps([denied]),
+                "ATLAS_FUNDING_BYOK": "sk-or-v1-x",
+            }
+        )
+    assert "ATLAS_FUNDING_BYOK" not in str(echoed.value)
+    with pytest.raises(ValueError, match="pilot key") as echoed:
+        load_funding_sources(_env(_source(key_env="ATLAS_OTHER_KEY")))
+    assert "ATLAS_OTHER_KEY" not in str(echoed.value)
+    with pytest.raises(ValueError, match="not an OpenRouter model id") as echoed:
+        configured_model({ENV_MODEL: secret}, MODEL_ID)
+    assert secret not in str(echoed.value)
+    with pytest.raises(ValueError, match="not an OpenRouter model id") as echoed:
+        sources_cover((), secret)
+    assert secret not in str(echoed.value)
+    slashed = "sk-or-v1-secret/secretsecret"
+    with pytest.raises(ValueError, match="model filter matches") as echoed:
+        sources_cover((), slashed)
+    assert slashed not in str(echoed.value)
 
 
 @pytest.mark.parametrize(
@@ -283,7 +351,7 @@ def test_no_source_matching_the_configured_model_is_a_boot_failure():
     deployment that can never select a source."""
     sources = load_funding_sources(_env(_source(model_filter="openai/*")))
     assert sources is not None
-    with pytest.raises(ValueError, match=MODEL_ID):
+    with pytest.raises(ValueError, match="model filter matches"):
         sources_cover(sources, MODEL_ID)
     with pytest.raises(ValueError, match="not an OpenRouter model id"):
         configured_model({"ATLAS_MODEL": "claude"}, MODEL_ID)
@@ -298,7 +366,7 @@ def test_no_source_matching_the_configured_model_is_a_boot_failure():
         config_from_env({**base, **_env(_source(key_env="ATLAS_TENANT_MODEL_KEY"))})
     built = config_from_env({**base, **_env(_source())})
     assert built.provider == "offline"
-    with pytest.raises(ServiceError, match=MODEL_ID):
+    with pytest.raises(ServiceError, match="model filter matches"):
         config_from_env(
             {
                 **base,

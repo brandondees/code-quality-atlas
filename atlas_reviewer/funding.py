@@ -125,19 +125,19 @@ def load_funding_sources(env: Mapping[str, str]) -> tuple[FundingSource, ...] | 
     key_envs: set[str] = set()
     for index, item in enumerate(data):
         source = _source(item, index)
+        # The refusal names the source's position and the defect. A name,
+        # field, value, or slug from the document can be a pasted key, and
+        # config_from_env prints this message on stderr.
         if source.name in names:
-            raise ValueError(
-                f"{ENV_FUNDING_SOURCES} source {index} repeats the name {source.name!r}"
-            )
+            raise ValueError(f"{ENV_FUNDING_SOURCES} source {index} repeats the name")
         if source.key_env in key_envs:
             raise ValueError(
-                f"{ENV_FUNDING_SOURCES} source {index} repeats the key variable "
-                f"{source.key_env}"
+                f"{ENV_FUNDING_SOURCES} source {index} repeats the key variable"
             )
         key = env.get(source.key_env)
         if key is None or key.strip() == "":
             raise ValueError(
-                f"{ENV_FUNDING_SOURCES} source {source.name!r} names {source.key_env}, "
+                f"{ENV_FUNDING_SOURCES} source {index} names a key variable "
                 "which is unset"
             )
         names.add(source.name)
@@ -149,11 +149,12 @@ def load_funding_sources(env: Mapping[str, str]) -> tuple[FundingSource, ...] | 
 def sources_cover(sources: tuple[FundingSource, ...], model_id: str) -> None:
     """Fail when no source's filter matches the model the service will ask for."""
     if _MODEL_ID.fullmatch(model_id) is None:
-        raise ValueError(f"{ENV_MODEL} {model_id!r} is not an OpenRouter model id")
+        raise ValueError(f"{ENV_MODEL} is not an OpenRouter model id")
     if any(source.allows(model_id) for source in sources):
         return
     raise ValueError(
-        f"{ENV_FUNDING_SOURCES} has no source whose model filter matches {model_id}"
+        f"{ENV_FUNDING_SOURCES} has no source whose model filter matches "
+        "the configured model"
     )
 
 
@@ -166,7 +167,7 @@ def configured_model(env: Mapping[str, str], default: str) -> str:
         return default
     model = raw.strip()
     if _MODEL_ID.fullmatch(model) is None:
-        raise ValueError(f"{ENV_MODEL} {model!r} is not an OpenRouter model id")
+        raise ValueError(f"{ENV_MODEL} is not an OpenRouter model id")
     return model
 
 
@@ -204,7 +205,7 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     data: dict[str, object] = {}
     for key, value in pairs:
         if key in data:
-            raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field {key!r}")
+            raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field")
         data[key] = value
     return data
 
@@ -215,11 +216,10 @@ def _source(item: object, index: int) -> FundingSource:
         raise ValueError(f"{where} is not an object")  # noqa: TRY004
     extra = set(item) - _FIELDS
     missing = _FIELDS - set(item)
-    if extra or missing:
-        raise ValueError(
-            f"{where} must carry exactly {sorted(_FIELDS)}; "
-            f"extra {sorted(extra)}, missing {sorted(missing)}"
-        )
+    if extra:
+        raise ValueError(f"{where} has an extra field")
+    if missing:
+        raise ValueError(f"{where} is missing a field")
     name = item["name"]
     if not isinstance(name, str) or _NAME.fullmatch(name) is None:
         raise ValueError(f"{where} has a name that is not a short token")
@@ -243,17 +243,14 @@ def _key_env(value: object, where: str) -> str:
     if not isinstance(value, str) or _KEY_ENV.fullmatch(value) is None:
         raise ValueError(f"{where} has a key variable that is not an ATLAS name")
     if value.startswith("ATLAS_TENANT"):
-        raise ValueError(f"{where} key variable {value} is a tenant credential")
+        raise ValueError(f"{where} key variable is a tenant credential")
     if value in _NOT_A_KEY:
-        raise ValueError(f"{where} key variable {value} is not a key")
+        raise ValueError(f"{where} key variable is not a key")
     if value == PILOT_KEY_ENV:
         return value
     if value.startswith(_FUNDING_KEY_PREFIX) and len(value) > len(_FUNDING_KEY_PREFIX):
         return value
-    raise ValueError(
-        f"{where} key variable {value} must be {PILOT_KEY_ENV} or a name "
-        f"under {_FUNDING_KEY_PREFIX}"
-    )
+    raise ValueError(f"{where} key variable must be the pilot key or a funding key")
 
 
 def _providers(value: object, where: str) -> tuple[str, ...]:
@@ -264,7 +261,7 @@ def _providers(value: object, where: str) -> tuple[str, ...]:
         if not isinstance(slug, str) or _PROVIDER.fullmatch(slug) is None:
             raise ValueError(f"{where} has a provider slug that is not a slug")
         if slug in slugs:
-            raise ValueError(f"{where} repeats the provider slug {slug!r}")
+            raise ValueError(f"{where} repeats the provider slug")
         slugs.append(slug)
     return tuple(slugs)
 
