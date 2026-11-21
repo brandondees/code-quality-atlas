@@ -5635,7 +5635,12 @@ def test_the_cost_line_names_the_funding_source_only_when_one_was_chosen():
     )
     assert "Funding source: subs-a." in named_line
     assert named_line.index("Funding source:") < named_line.index("Served by")
-    parsed = review_cost(type("R", (), {"cost_lines": (named_line,)})())
+
+    class _CostLines:
+        def __init__(self, line: str) -> None:
+            self.cost_lines = (line,)
+
+    parsed = review_cost(_CostLines(named_line))
     assert parsed == (0, "0", "0")
     invalid = render_draft(
         synthesize(
@@ -5695,6 +5700,40 @@ def test_a_progress_record_names_the_source_only_when_one_was_chosen():
         funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "Not A Name"}),
     )
     assert FIELD_SOURCE not in capture.fields
+
+
+def test_the_review_entries_pass_the_funding_source_through(tmp_path, monkeypatch):
+    """The source is resolved at each review entry and passed into the
+    draft and the progress records, including a continuation and a key
+    refusal that stops before any lens. Kills dropping that argument at
+    any of those sites."""
+    from atlas_reviewer.cli import _key_refusal_review
+    from atlas_reviewer.head_change import FIELD_SOURCE, PROGRESS_PHASE
+    from atlas_reviewer.telemetry import Telemetry
+
+    monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "subs-a")
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final()])
+    assert "Funding source: subs-a." in render_draft(result, Redactor())
+
+    continued = Telemetry(FakeClock())
+    many, _sprites = _lenses(
+        tmp_path,
+        [LENS],
+        ScriptedLensModel([final(), final()]),
+        telemetry=continued,
+    )
+    assert "Funding source: subs-a." in render_draft(many, Redactor())
+    progress = [event for event in continued.events if event.phase == PROGRESS_PHASE]
+    assert len(progress) >= 2
+    assert all(event.fields.get(FIELD_SOURCE) == "subs-a" for event in progress)
+
+    refused = _key_refusal_review(
+        "model key out of credit",
+        LIMITS,
+        (0, Decimal(0)),
+        ScriptedLensModel([]),
+    )
+    assert "Funding source: subs-a." in render_draft(refused, Redactor())
 
 
 def test_a_dry_run_drafts_cost_line_gains_no_endpoint_sentence():
