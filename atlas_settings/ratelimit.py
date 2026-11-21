@@ -20,11 +20,11 @@ may re-burst within its window — the accepted trade now, because the
 refusal it replaced locked out every new client for up to a whole
 window, the worse failure by far; the caller's own row is never the
 one evicted (it has none — the eviction only runs for a caller the
-table does not know). The walk runs only on that rare path — the
-common call filters its own key's hits and walks nothing else, so the
-work per call is bounded by that key's hit list, not by the table.
-In-process state only: the limits bound one page process's traffic,
-which is the surface an attacker reaches directly."""
+table does not know). The walk runs only while the table sits at its
+cap — below it, the common call filters its own key's hits and walks
+nothing else, so the work per call is bounded by that key's hit list,
+not by the table. In-process state only: the limits bound one page
+process's traffic, which is the surface an attacker reaches directly."""
 
 from __future__ import annotations
 
@@ -86,11 +86,11 @@ class RateLimiter:
         with self._lock:
             now = self._now()
             if len(self._hits) >= _MAX_RATE_KEYS:
-                # The rare path: the table is at its cap, so the walk
-                # runs — it first drops the rows whose newest hit is
-                # already outside that row's own window, which frees
-                # room without touching any live budget. The walk never
-                # runs below the cap, so the common call filters its
+                # The at-cap path: the table sits at its cap, so the
+                # walk runs — it first drops the rows whose newest hit
+                # is already outside that row's own window, which frees
+                # room without touching any live budget. Below the cap
+                # none of this runs, so the common call filters its
                 # own key's hits and walks nothing else.
                 for other, (window, stamps) in list(self._hits.items()):
                     if other != row and stamps and now - max(stamps) >= window:
@@ -101,7 +101,10 @@ class RateLimiter:
                 # and serve the caller. A flood of distinct addresses
                 # can cycle rows but can never wedge the table shut
                 # against new clients; the price is the evicted key's
-                # remaining allowance, which it may spend again.
+                # remaining allowance, which it may spend again. The
+                # `max()` is safe because every row has at least one
+                # hit: both store paths append the new hit before the
+                # row is stored, so no row is ever empty.
                 oldest = min(self._hits, key=lambda k: max(self._hits[k][1]))
                 del self._hits[oldest]
             hits = [

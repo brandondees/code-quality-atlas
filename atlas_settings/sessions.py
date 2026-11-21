@@ -19,8 +19,8 @@ sweeps the expired rows and then, if the cap still holds, evicts the
 oldest pre-login row and admits the new sign-in — one caller cannot
 hold every new sign-in shut by keeping 256 rows alive; `upgrade` at the
 signed-in cap evicts the least-recently-used signed-in row the same
-way. The walks run only on those rare paths, so the common insert is
-constant work.
+way. The walks run only while their table sits at its cap — below it
+the common insert is constant work.
 """
 
 from __future__ import annotations
@@ -187,6 +187,15 @@ class SessionStore:
             current = self._sessions.get(session.sid)
             if current is not session or session.signed_in:
                 raise SessionError("the sign-in session is already consumed")
+            if self._mono() - session.created_mono >= self._pre_login_ttl_s:
+                # The pre-login binding has its own lifetime, checked
+                # here too: a caller holding a `Session` object past the
+                # 10-minute mark — without the fresh `get()` that would
+                # have expired it — must not mint a signed-in session
+                # from it. The row is still in the table, so the
+                # refusal changes nothing, exactly like the consumed
+                # refusal above.
+                raise SessionError("the sign-in session has expired")
             del self._sessions[session.sid]
             # The consumed pre-login row's slot moves to the signed-in
             # table with it.

@@ -288,3 +288,17 @@ def test_a_non_address_key_is_not_mangled() -> None:
     limiter = RateLimiter(now=now)
     assert limiter.allow("write-session:abc123::not-an-address", 1, 60.0)
     assert set(limiter._hits) == {"write-session:abc123::not-an-address"}
+
+
+def test_a_malformed_address_tail_stays_per_key() -> None:
+    """A `-ip` key whose tail parses as no address stays exactly as
+    composed — the aggregation's parse guard mangles nothing (pins the
+    `except ValueError` branch, the layer's one uncovered branch)."""
+    ticks = [0.0]
+
+    def now() -> float:
+        return ticks[0]
+
+    limiter = RateLimiter(now=now)
+    assert limiter.allow("login-ip:not-an-address", 1, 60.0)
+    assert set(limiter._hits) == {"login-ip:not-an-address"}
