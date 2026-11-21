@@ -76,7 +76,13 @@ from atlas_reviewer.installation_store import (
 )
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.openrouter import MODEL_ID
-from atlas_reviewer.ports import BoundaryError, NotFoundError, TransportTimeoutError
+from atlas_reviewer.ports import (
+    KEY_AUTH_REFUSED,
+    KEY_OUT_OF_CREDIT,
+    BoundaryError,
+    NotFoundError,
+    TransportTimeoutError,
+)
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.repo_config import (
     DEFAULT_POST_CONFIG,
@@ -818,6 +824,21 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
     return lowered.get(name.lower())
 
 
+def _key_refusal_report(cause: str) -> ReviewReport:
+    """The posted review when a key refusal is the whole outcome (D92)."""
+    return ReviewReport(
+        (),
+        (),
+        "",
+        (),
+        (),
+        (),
+        "",
+        review_error=cause,
+        coverage_complete=False,
+    )
+
+
 class Worker:
     """Claims queued jobs and runs them. A publisher, when set, is called
     only after a review that was not superseded and did not fail."""
@@ -861,6 +882,10 @@ class Worker:
         # run never consults the list.
         self._funding = funding
         self._tenant_active = tenant_active or (lambda: False)
+        # The D92 cause recorded for a head that advanced off a refused
+        # source. Keyed by repository, pull request, and head, and
+        # cleared when that job settles. Another head does not read it.
+        self._head_causes: dict[tuple[str, int, str], str] = {}
 
     def healthy(self) -> bool:
         """False once a worker thread has died. ``/health`` then fails
@@ -1008,8 +1033,15 @@ class Worker:
             error=note,
         )
 
+    def _head_cause(self, job: Job) -> str:
+        """The D92 cause recorded for this head, or empty."""
+        return self._head_causes.get(job.key(), "")
+
+    def _forget_head_cause(self, job: Job) -> None:
+        self._head_causes.pop(job.key(), None)
+
     def _begin_funding(
-        self,
+        self, job: Job
     ) -> tuple[ReviewRun | None, contextvars.Token[FundingChoice | None] | None]:
         """Select the source for this claim, or a run that replaces the child.
 
@@ -1017,9 +1049,16 @@ class Worker:
         ``ATLAS_OPENROUTER_API_KEY`` the parent already holds. A tenant
         run does not select, and a store that cannot be read fails the
         review instead of falling through to an operator source. Every
-        source refused posts the D92 error without a child. A probe that
-        failed, or a key over its ceiling, fails the review without that
-        post."""
+        source refused posts the D92 error without a child. This head's
+        recorded cause, when it has one, is the post, including when
+        every source is now unavailable. When every source is already
+        unavailable and this head has no recorded cause, the post says
+        no funding source is available and names each source with its
+        cause, in spend order. That post is the selector's state. A
+        probe that failed, a blank key, or a key over its ceiling does
+        not mark the source unavailable, so that claim fails without a
+        post: the next claim can try the source, and a post would say
+        the sources are exhausted when they are not."""
         if self._funding is None:
             return None, None
         try:
@@ -1031,24 +1070,17 @@ class Worker:
         selection = self._funding.choose()
         if selection.choice is not None:
             return None, active_choice.set(selection.choice)
-        if selection.refusal:
-            return (
-                ReviewRun(
-                    True,
-                    ReviewReport(
-                        (),
-                        (),
-                        "",
-                        (),
-                        (),
-                        (),
-                        "",
-                        review_error=selection.refusal,
-                        coverage_complete=False,
-                    ),
-                ),
-                None,
-            )
+        # This head already advanced off a refused source. That cause
+        # wins over the selector-wide notice, including when every
+        # source is now unavailable. Another head's cause is not this.
+        remembered = self._head_cause(job)
+        if remembered:
+            return ReviewRun(True, _key_refusal_report(remembered)), None
+        notice = self._funding.unavailable_notice()
+        if notice:
+            return ReviewRun(True, _key_refusal_report(notice)), None
+        # A probe that failed, a blank key, or a key over its ceiling
+        # leaves the source eligible. Nothing is posted.
         return (
             ReviewRun(
                 False,
@@ -1057,41 +1089,111 @@ class Worker:
             None,
         )
 
+    def _advance_on_refusal(
+        self, job: Job, report: ReviewReport, choice: FundingChoice | None
+    ) -> bool:
+        """Re-queue this head on the next source after a key refusal.
+
+        True when this attempt was pinned to one source and another can
+        still serve the model. The settled bill is recorded, that
+        attempt's run directory is dropped so the next claim cannot
+        read the same progress back onto the ledger, and nothing is
+        posted. The D92 post is the attempt that finds no further
+        source. A tenant run has no choice, so its refusal never advances
+        onto an operator source. A review that failed for any other
+        reason, including a 429, is not this. A crash between the cost
+        record and the run-dir drop leaves the directory on disk with
+        the bill already recorded. Recovery re-queues a running job, and
+        the next claim's backfill can record that span again. Dropping
+        the directory first would lose the bill, so the record stays
+        first. The window is the same shape as a crash between the cost
+        record and a normal settle."""
+        if (
+            choice is None
+            or self._funding is None
+            or report.review_error not in {KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED}
+        ):
+            return False
+        if not self._funding.mark_refused(choice.name, report.review_error):
+            return False
+        # The first refusal this head advanced off. A later advance of
+        # the same head does not replace it.
+        self._head_causes.setdefault(job.key(), report.review_error)
+        self._cost_event(job, report)
+        self._telemetry.record(
+            "service",
+            "refusal advance",
+            {
+                **_fields(job.event),
+                "source": choice.name,
+                "cause": report.review_error,
+            },
+        )
+        self._drop_run_dir(job)
+        self._stored_supersede(job, self._board.release_claim(job))
+        return True
+
+    def _budget_stops(self, job: Job, fields: dict[str, str | int]) -> bool:
+        """True when the day's budget stops this claim before a review.
+
+        The crash backfill runs first, so a crashed attempt's spend
+        counts against the bounds the retry is admitted under. With no
+        funding refusal behind the stop, nothing is posted. A head that
+        already advanced off a refused source still posts the cause
+        recorded for this head. Another head's cause is not posted."""
+        if self._spend is None:
+            return False
+        _backfill_crashed_spend(
+            self._spend, self._state_root, job.event, self._telemetry
+        )
+        refusal, gap = self._spend.refusal(job.event.repo, self._installation)
+        if not refusal:
+            return False
+        self._telemetry.record(
+            "service",
+            "review skipped",
+            {**fields, "reason": skip_reason(refusal)},
+            status=ERROR,
+            error=f"{refusal} ({gap})" if gap else refusal,
+        )
+        remembered = self._head_cause(job)
+        if remembered:
+            self._publish(job, _key_refusal_report(remembered))
+            return True
+        committed = self._settle(job, JobState.FAILED)
+        if committed is JobState.SUPERSEDED:
+            self._note(job, committed, fields)
+        return True
+
+    def _note_skipped_sources(self, fields: dict[str, str | int]) -> None:
+        """One event naming the sources this claim will not probe."""
+        if self._funding is None:
+            return
+        names = self._funding.unavailable_names()
+        if not names:
+            return
+        self._telemetry.record(
+            "service",
+            "funding source skipped",
+            {**fields, "sources": ",".join(names)},
+        )
+
     def _execute(self, job: Job) -> None:
         fields = _fields(job.event)
-        if self._spend is not None:
-            # The crash backfill runs before the preflight check, so a
-            # crashed attempt's spend counts against the bounds the retry
-            # is admitted under, and before the runner starts, so the
-            # evidence it reads is still the crashed attempt's.
-            _backfill_crashed_spend(
-                self._spend, self._state_root, job.event, self._telemetry
-            )
-            refusal, gap = self._spend.refusal(job.event.repo, self._installation)
-            if refusal:
-                # The preflight re-check (config slice S9): the delivery
-                # was admitted under a total that has since been spent.
-                # The review never starts, nothing is posted, and the
-                # record says plainly what refused it.
-                self._telemetry.record(
-                    "service",
-                    "review skipped",
-                    {**fields, "reason": skip_reason(refusal)},
-                    status=ERROR,
-                    error=f"{refusal} ({gap})" if gap else refusal,
-                )
-                committed = self._settle(job, JobState.FAILED)
-                if committed is JobState.SUPERSEDED:
-                    self._note(job, committed, fields)
-                return
+        if self._budget_stops(job, fields):
+            return
         self._telemetry.record(
             "service",
             "runner named",
             {**fields, "runner": event_runner_name(job.event)},
         )
         token: contextvars.Token[FundingChoice | None] | None = None
+        choice: FundingChoice | None = None
         try:
-            skipped, token = self._begin_funding()
+            skipped, token = self._begin_funding(job)
+            self._note_skipped_sources(fields)
+            if token is not None:
+                choice = active_choice.get()
             run = (
                 skipped if skipped is not None else self._runner(job.event, job.cancel)
             )
@@ -1125,6 +1227,8 @@ class Worker:
                 status=ERROR,
                 error=run.error or "review failed",
             )
+            return
+        if self._advance_on_refusal(job, run.report, choice):
             return
         self._cost_event(job, run.report)
         if not self._board.still_current(job):
@@ -1412,6 +1516,7 @@ class Worker:
         review of #748)."""
         committed, follow_up = self._board.settle(job, state, covered=covered)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+            self._forget_head_cause(job)
             self._drop_run_dir(job)
         if follow_up is not None:
             self._telemetry.record("service", "follow-up queued", _fields(follow_up))
@@ -1426,6 +1531,7 @@ class Worker:
         """
         if stored is not JobState.SUPERSEDED:
             return
+        self._forget_head_cause(job)
         self._drop_run_dir(job)
         self._note(job, stored, _fields(job.event))
 
