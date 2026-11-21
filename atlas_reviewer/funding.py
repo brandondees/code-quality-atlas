@@ -223,12 +223,14 @@ class FundingSelection:
 
     ``choice`` is the source the review runs on. ``refusal`` is a D92
     cause, set only when every source that could serve the model has
-    refused or is out of credit: the service posts that error and does
-    not start a child.     ``error`` is any other reason no source was
-    chosen — a probe that failed, a key over its ceiling. That
-    selection is not itself a D92 post. The worker posts one only when
-    this head already advanced off a refused source, and the cause is
-    the one recorded for this head."""
+    refused or is out of credit. ``error`` is any other reason no
+    source was chosen — a probe that failed, a key over its ceiling.
+    That selection is not itself a D92 post. The worker posts one when
+    this head already advanced, and the cause is the one recorded for
+    this head. When every source is already unavailable and this head
+    has no recorded cause, the worker posts the selector's notice:
+    no funding source is available, then each source and its cause.
+    A probe failure while a source is still eligible posts nothing."""
 
     choice: FundingChoice | None = None
     refusal: str = ""
@@ -398,6 +400,31 @@ class FundingSelector:
             if cause in _REFUSAL_CAUSES:
                 self._causes[name] = cause
             return self._another_available()
+
+    def unavailable_notice(self) -> str:
+        """The D92 text when every source this model can use is already
+        unavailable, or empty when one can still be probed.
+
+        Each name is paired with its recorded cause, in spend order. A
+        cause is the fixed D92 text. The notice carries no key. Empty
+        when a source is still eligible, including one whose last probe
+        failed: that source is not marked unavailable, so the next claim
+        can try it."""
+        with self._lock:
+            parts: list[str] = []
+            for source in self._sources:
+                if not source.allows(self._model):
+                    continue
+                if source.name not in self._unavailable:
+                    return ""
+                cause = self._causes.get(source.name, "")
+                if cause:
+                    parts.append(f"{source.name}: {cause}")
+                else:
+                    parts.append(f"{source.name}: unavailable")
+            if not parts:
+                return ""
+            return "no funding source is available: " + "; ".join(parts)
 
     def unavailable_names(self) -> tuple[str, ...]:
         """Sources this model would skip because they already refused,

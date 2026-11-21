@@ -1049,10 +1049,16 @@ class Worker:
         ``ATLAS_OPENROUTER_API_KEY`` the parent already holds. A tenant
         run does not select, and a store that cannot be read fails the
         review instead of falling through to an operator source. Every
-        source refused posts the D92 error without a child. A probe that
-        failed, or a key over its ceiling, fails the review without that
-        post, unless this head already advanced off a refused source:
-        then the post is the cause recorded for this head."""
+        source refused posts the D92 error without a child. This head's
+        recorded cause, when it has one, is the post, including when
+        every source is now unavailable. When every source is already
+        unavailable and this head has no recorded cause, the post says
+        no funding source is available and names each source with its
+        cause, in spend order. That post is the selector's state. A
+        probe that failed, a blank key, or a key over its ceiling does
+        not mark the source unavailable, so that claim fails without a
+        post: the next claim can try the source, and a post would say
+        the sources are exhausted when they are not."""
         if self._funding is None:
             return None, None
         try:
@@ -1064,15 +1070,17 @@ class Worker:
         selection = self._funding.choose()
         if selection.choice is not None:
             return None, active_choice.set(selection.choice)
-        if selection.refusal:
-            return ReviewRun(True, _key_refusal_report(selection.refusal)), None
-        # This head already advanced off a refused source. A probe skip
-        # on the next claim (a 500, a blank key, a limit over the
-        # ceiling) would otherwise fail the job and post nothing.
-        # Another head's cause is not this one.
+        # This head already advanced off a refused source. That cause
+        # wins over the selector-wide notice, including when every
+        # source is now unavailable. Another head's cause is not this.
         remembered = self._head_cause(job)
         if remembered:
             return ReviewRun(True, _key_refusal_report(remembered)), None
+        notice = self._funding.unavailable_notice()
+        if notice:
+            return ReviewRun(True, _key_refusal_report(notice)), None
+        # A probe that failed, a blank key, or a key over its ceiling
+        # leaves the source eligible. Nothing is posted.
         return (
             ReviewRun(
                 False,
