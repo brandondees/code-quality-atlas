@@ -30,8 +30,10 @@ _FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 _SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
     (
         "Content-Security-Policy",
-        "default-src 'none'; style-src 'self'; form-action 'self'; "
-        "frame-ancestors 'none'",
+        (
+            "default-src 'none'; style-src 'self'; form-action 'self'; "
+            "frame-ancestors 'none'"
+        ),
     ),
     ("X-Frame-Options", "DENY"),
     ("Strict-Transport-Security", "max-age=31536000; includeSubDomains"),
