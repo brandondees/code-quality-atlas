@@ -6341,3 +6341,95 @@ def test_a_budget_stop_after_a_refusal_posts_the_remembered_cause(tmp_path):
     assert called["n"] == 0
     assert silent == []
     assert fresh.states() == ((SHA_A, JobState.FAILED),)
+
+
+def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
+    """Job X refuses and advances. Job Y, another repository already
+    over its budget, and job Z, whose probe fails, post nothing.
+    X's own later probe failure still posts X's cause, and the record
+    is gone once X settles. Kills posting a process-wide remembered
+    cause."""
+    from atlas_reviewer.funding import (
+        FundingSelector,
+        active_choice,
+        load_funding_sources,
+    )
+    from atlas_reviewer.ports import BoundaryError
+    from atlas_reviewer.pricing import KeyStatus
+
+    def probe(key):
+        if "subs-b" in key:
+            raise BoundaryError("OpenRouter HTTP 500")
+        return KeyStatus(Decimal(50), Decimal(40), Decimal(0), True)
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+            {
+                "name": "subs-b",
+                "key_env": "ATLAS_FUNDING_SUBS_B",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            },
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
+        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    funding = FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5")
+    started: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        started.append(event.repo)
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[tuple[str, str]] = []
+
+    def publisher(event, report):
+        posted.append((event.repo, report.review_error))
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path, budget=Decimal(100))
+    spend.record(OTHER, Decimal(100), 1)
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        spend=spend,
+        funding=funding,
+    )
+    assert worker.run_one() is True
+    assert started == [REPO]
+    assert posted == []
+    assert worker._head_causes == {(REPO, 7, SHA_A): KEY_OUT_OF_CREDIT}
+    assert worker.run_one() is True
+    assert posted == [(REPO, KEY_OUT_OF_CREDIT)]
+    assert worker._head_causes == {}
+    board.enqueue(PrEvent(OTHER, 9, SHA_B))
+    board.enqueue(PrEvent("third/repo", 9, SHA_B))
+    assert worker.run_one() is True
+    assert worker.run_one() is True
+    assert posted == [(REPO, KEY_OUT_OF_CREDIT)]
+    assert started == [REPO]
+    assert board.states().count((SHA_B, JobState.FAILED)) == 2
+    assert "sk-or" not in posted[0][1]

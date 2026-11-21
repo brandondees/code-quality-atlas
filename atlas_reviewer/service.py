@@ -882,6 +882,10 @@ class Worker:
         # run never consults the list.
         self._funding = funding
         self._tenant_active = tenant_active or (lambda: False)
+        # The D92 cause recorded for a head that advanced off a refused
+        # source. Keyed by repository, pull request, and head, and
+        # cleared when that job settles. Another head does not read it.
+        self._head_causes: dict[tuple[str, int, str], str] = {}
 
     def healthy(self) -> bool:
         """False once a worker thread has died. ``/health`` then fails
@@ -1029,8 +1033,15 @@ class Worker:
             error=note,
         )
 
+    def _head_cause(self, job: Job) -> str:
+        """The D92 cause recorded for this head, or empty."""
+        return self._head_causes.get(job.key(), "")
+
+    def _forget_head_cause(self, job: Job) -> None:
+        self._head_causes.pop(job.key(), None)
+
     def _begin_funding(
-        self,
+        self, job: Job
     ) -> tuple[ReviewRun | None, contextvars.Token[FundingChoice | None] | None]:
         """Select the source for this claim, or a run that replaces the child.
 
@@ -1040,7 +1051,8 @@ class Worker:
         review instead of falling through to an operator source. Every
         source refused posts the D92 error without a child. A probe that
         failed, or a key over its ceiling, fails the review without that
-        post."""
+        post, unless this head already advanced off a refused source:
+        then the post is the cause recorded for this head."""
         if self._funding is None:
             return None, None
         try:
@@ -1054,10 +1066,11 @@ class Worker:
             return None, active_choice.set(selection.choice)
         if selection.refusal:
             return ReviewRun(True, _key_refusal_report(selection.refusal)), None
-        # A source already refused this head. A probe skip on the next
-        # claim (a 500, a blank key, a limit over the ceiling) would
-        # otherwise fail the job and post nothing.
-        remembered = self._funding.remembered_cause()
+        # This head already advanced off a refused source. A probe skip
+        # on the next claim (a 500, a blank key, a limit over the
+        # ceiling) would otherwise fail the job and post nothing.
+        # Another head's cause is not this one.
+        remembered = self._head_cause(job)
         if remembered:
             return ReviewRun(True, _key_refusal_report(remembered)), None
         return (
@@ -1095,6 +1108,9 @@ class Worker:
             return False
         if not self._funding.mark_refused(choice.name, report.review_error):
             return False
+        # The first refusal this head advanced off. A later advance of
+        # the same head does not replace it.
+        self._head_causes.setdefault(job.key(), report.review_error)
         self._cost_event(job, report)
         self._telemetry.record(
             "service",
@@ -1115,8 +1131,8 @@ class Worker:
         The crash backfill runs first, so a crashed attempt's spend
         counts against the bounds the retry is admitted under. With no
         funding refusal behind the stop, nothing is posted. A head that
-        already advanced off a refused source still posts that source's
-        D92 cause."""
+        already advanced off a refused source still posts the cause
+        recorded for this head. Another head's cause is not posted."""
         if self._spend is None:
             return False
         _backfill_crashed_spend(
@@ -1132,9 +1148,7 @@ class Worker:
             status=ERROR,
             error=f"{refusal} ({gap})" if gap else refusal,
         )
-        remembered = (
-            self._funding.remembered_cause() if self._funding is not None else ""
-        )
+        remembered = self._head_cause(job)
         if remembered:
             self._publish(job, _key_refusal_report(remembered))
             return True
@@ -1168,7 +1182,7 @@ class Worker:
         token: contextvars.Token[FundingChoice | None] | None = None
         choice: FundingChoice | None = None
         try:
-            skipped, token = self._begin_funding()
+            skipped, token = self._begin_funding(job)
             self._note_skipped_sources(fields)
             if token is not None:
                 choice = active_choice.get()
@@ -1494,6 +1508,7 @@ class Worker:
         review of #748)."""
         committed, follow_up = self._board.settle(job, state, covered=covered)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+            self._forget_head_cause(job)
             self._drop_run_dir(job)
         if follow_up is not None:
             self._telemetry.record("service", "follow-up queued", _fields(follow_up))
@@ -1508,6 +1523,7 @@ class Worker:
         """
         if stored is not JobState.SUPERSEDED:
             return
+        self._forget_head_cause(job)
         self._drop_run_dir(job)
         self._note(job, stored, _fields(job.event))
 
