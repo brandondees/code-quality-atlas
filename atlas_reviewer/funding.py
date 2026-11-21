@@ -23,13 +23,14 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from atlas_reviewer.http import UrllibTransport, safe_url
 from atlas_reviewer.ports import (
     KEY_AUTH_REFUSED,
     KEY_OUT_OF_CREDIT,
     BoundaryError,
     KeyRefusedError,
 )
-from atlas_reviewer.pricing import KeyStatus, PricingUnknownError
+from atlas_reviewer.pricing import KeyStatus, PricingUnknownError, parse_key_status
 
 ENV_FUNDING_SOURCES = "ATLAS_FUNDING_SOURCES"
 # The chosen source's name and BYOK flag, handed to the one child that
@@ -194,6 +195,8 @@ def noted_funding_source(env: Mapping[str, str] | None = None) -> str:
     return raw
 
 
+KEY_URL = "https://openrouter.ai/api/v1/key"
+_PROBE_TIMEOUT_S = 15.0
 _REFUSAL_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
 
 
@@ -252,6 +255,38 @@ def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError(f"{ENV_FUNDING_SOURCES} repeats the field")
         data[key] = value
     return data
+
+
+def key_probe(key: str) -> KeyStatus:
+    """``GET /api/v1/key`` for one OpenRouter key.
+
+    A 401 or 402 is a key refusal. Anything else that is not a 200 is a
+    boundary error, so the caller can try another source without
+    treating a transient failure as a dry key. The error text is the
+    status and the URL, never the body and never the key. The transport
+    does not follow redirects, so the bearer token stays on this host.
+    """
+    # openrouter imports budget. Keeping this import in the function lets
+    # budget import this module without a cycle.
+    from atlas_reviewer.openrouter import _json_object, key_refusal_or_boundary
+
+    transport = UrllibTransport()
+    response = transport.request(
+        "GET",
+        KEY_URL,
+        {
+            "User-Agent": "code-quality-atlas-reviewer",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+        None,
+        _PROBE_TIMEOUT_S,
+    )
+    where = safe_url(KEY_URL)
+    message = f"OpenRouter HTTP {response.status} for {where}"
+    if response.status != 200:
+        raise key_refusal_or_boundary(response.status, message)
+    return parse_key_status(_json_object(response.body, where, PricingUnknownError))
 
 
 class FundingSelector:
