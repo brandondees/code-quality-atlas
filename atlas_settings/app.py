@@ -294,7 +294,12 @@ class SettingsApp:
 
     def _post_delete(self, session: Session, form: dict[str, str]) -> Response:
         confirm = form.get("confirm", "").strip()
-        if not hmac.compare_digest(confirm, DELETE_CONFIRM_WORD):
+        # Compared as encoded bytes: `compare_digest` refuses non-ASCII
+        # `str` outright, and a hostile confirm value is not allowed to
+        # become a 500 — it is just a mismatch.
+        if not hmac.compare_digest(
+            confirm.encode("utf-8"), DELETE_CONFIRM_WORD.encode("utf-8")
+        ):
             return self._settings_render(session, DELETE_MISMATCH, 400)
         self._write(
             session,
