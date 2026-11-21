@@ -6186,3 +6186,14 @@ sources are not exhausted. On a BYOK source, Anthropic's HTTP 400 that
 says the credit balance is too low is that same refusal; the pilot
 key's 400 stays a per-call error, and a 429 does not move the review.
 A tenant refusal stays on the tenant path. No model was called.
+
+## 2026-11-20 — funding sources, spend by source (D94)
+
+A settled bill can name the funding source it came from. A line with
+no source omits the field, and the day's total still adds every line.
+`funding-spend` prints the day's settled spend grouped by source. A
+missing file is zero. An unreadable file exits 2. The crash backfill
+keeps the source the progress record named. A name the ledger refuses
+is written without that name, and the bill is not dropped; a negative
+bill still raises. A backfill that drops a refused name stays measured
+as a backfill. No model was called.

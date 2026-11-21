@@ -14,6 +14,7 @@ review child is started without either.
 from __future__ import annotations
 
 import contextvars
+import json
 import math
 import os
 import random
@@ -31,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from atlas_reviewer.budget import (
     DEFAULT_REPO_DAILY_BUDGET_USD,
     DailySpend,
+    SourceNameError,
     repo_daily_budget_usd,
     skip_reason,
 )
@@ -122,6 +124,7 @@ from atlas_reviewer.service_run import (
     ReviewRun,
     RunConfig,
     RunSecrets,
+    known_review_error,
     make_runner,
     review_cost,
     run_dir,
@@ -130,6 +133,7 @@ from atlas_reviewer.service_run import (
 )
 from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, OK, Event, EventSink, JsonlSink, Telemetry
+from atlas_reviewer.verdict import STATUS_PREFIX
 
 if TYPE_CHECKING:
     from atlas_reviewer.github_api import GitHubClient
@@ -798,9 +802,32 @@ def _backfill_crashed_spend(
             "measured": "backfilled",
         }
     )
+    source_name = progress.source
+    note = ""
     try:
         appended, gap = spend.record_once(
-            event.repo, progress.billed_usd, progress.calls, key
+            event.repo,
+            progress.billed_usd,
+            progress.calls,
+            key,
+            source=source_name,
+        )
+    except SourceNameError:
+        try:
+            appended, gap = spend.record_once(
+                event.repo, progress.billed_usd, progress.calls, key, source=""
+            )
+        except OSError as exc:
+            _record(
+                telemetry,
+                "crashed spend",
+                fields,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            return
+        note = (
+            f"funding source {source_name!r} is not a source name; "
+            "the bill was recorded without it"
         )
     except OSError as exc:
         _record(
@@ -816,7 +843,7 @@ def _backfill_crashed_spend(
         return
     if not appended:
         fields["measured"] = "already recorded"
-    _record(telemetry, "crashed spend", fields)
+    _record(telemetry, "crashed spend", fields, error=note)
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -1119,7 +1146,7 @@ class Worker:
         # The first refusal this head advanced off. A later advance of
         # the same head does not replace it.
         self._head_causes.setdefault(job.key(), report.review_error)
-        self._cost_event(job, report)
+        self._cost_event(job, report, source=choice.name)
         self._telemetry.record(
             "service",
             "refusal advance",
@@ -1202,8 +1229,9 @@ class Worker:
         finally:
             if token is not None:
                 active_choice.reset(token)
+        source_name = choice.name if choice is not None else ""
         if job.superseded:
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.cancel.is_set():
@@ -1211,11 +1239,11 @@ class Worker:
             # again after the process starts. A newer head that landed
             # after the check above is SUPERSEDED, and that directory
             # still has to go.
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             self._stored_supersede(job, self._board.release_claim(job))
             return
         if not run.ok or run.report is None:
-            self._cost_event(job, None)
+            self._cost_event(job, None, source=source_name)
             committed = self._settle(job, JobState.FAILED)
             if committed is JobState.SUPERSEDED:
                 self._note(job, committed, fields)
@@ -1230,13 +1258,15 @@ class Worker:
             return
         if self._advance_on_refusal(job, run.report, choice):
             return
-        self._cost_event(job, run.report)
+        self._cost_event(job, run.report, source=source_name)
         if not self._board.still_current(job):
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         self._publish(job, run.report)
 
-    def _cost_event(self, job: Job, report: ReviewReport | None) -> None:
+    def _cost_event(
+        self, job: Job, report: ReviewReport | None, *, source: str = ""
+    ) -> None:
         """The review's cost, logged when it settles (#702's measure-first
         rule): a finished review's cost comes from its draft's cost lines;
         a cancelled or failed one's from the last progress record its
@@ -1245,6 +1275,13 @@ class Worker:
         the decision records and the cost records stays visible."""
         fields: dict[str, str | int] = dict(_fields(job.event))
         cost = review_cost(report) if report is not None else None
+        # The progress evidence's hash is the attempt's identity in the
+        # ledger. The first settlement and a later backfill of the same
+        # span both carry it, so a drop that fails after the settlement
+        # does not bill the span again. A review with no progress span
+        # has no such identity and is recorded once, as before.
+        evidence = last_run_progress(*_progress_paths(self._state_root, job.event))
+        attempt_key = evidence[1] if evidence is not None else ""
         progress = None
         if cost is not None:
             billed = Decimal(cost[1])
@@ -1275,7 +1312,7 @@ class Worker:
                 )
             else:
                 fields["measured"] = "unknown"
-        self._record_spend(job, cost, progress, fields)
+        self._record_spend(job, cost, progress, fields, source, attempt_key)
         self._telemetry.record("service", "review cost", fields)
 
     def _record_spend(
@@ -1284,6 +1321,8 @@ class Worker:
         cost: tuple[int, str, str] | None,
         progress: object,
         fields: dict[str, str | int],
+        source: str = "",
+        attempt_key: str = "",
     ) -> None:
         """Append the review's settled bill to the day's ledger (config
         slice S9, D81, D93). The figure is the review child's known bill
@@ -1305,12 +1344,68 @@ class Worker:
             return
         if cost is not None:
             amount, calls = Decimal(cost[1]), cost[0]
+            source_name = source
         elif isinstance(progress, Progress):
             amount, calls = progress.billed_usd, progress.calls
+            source_name = source or progress.source
         else:
             return
+        if attempt_key:
+            try:
+                _appended, gap = self._spend.record_once(
+                    job.event.repo, amount, calls, attempt_key, source=source_name
+                )
+            except SourceNameError:
+                self._telemetry.record(
+                    "service",
+                    "spend source dropped",
+                    fields,
+                    status=ERROR,
+                    error=(
+                        f"funding source {source_name!r} is not a source name; "
+                        "the bill was recorded without it"
+                    ),
+                )
+                try:
+                    _appended, gap = self._spend.record_once(
+                        job.event.repo, amount, calls, attempt_key, source=""
+                    )
+                except OSError as exc:
+                    gap = f"{type(exc).__name__}: {exc}"
+            except OSError as exc:
+                gap = f"{type(exc).__name__}: {exc}"
+            if gap:
+                self._telemetry.record(
+                    "service",
+                    "spend not recorded",
+                    fields,
+                    status=ERROR,
+                    error=gap,
+                )
+            return
         try:
-            self._spend.record(job.event.repo, amount, calls)
+            self._spend.record(job.event.repo, amount, calls, source=source_name)
+        except SourceNameError:
+            self._telemetry.record(
+                "service",
+                "spend source dropped",
+                fields,
+                status=ERROR,
+                error=(
+                    f"funding source {source_name!r} is not a source name; "
+                    "the bill was recorded without it"
+                ),
+            )
+            try:
+                self._spend.record(job.event.repo, amount, calls, source="")
+            except OSError as exc:
+                self._telemetry.record(
+                    "service",
+                    "spend not recorded",
+                    fields,
+                    status=ERROR,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         except OSError as exc:
             self._telemetry.record(
                 "service",
@@ -1371,6 +1466,21 @@ class Worker:
         if self._stop.is_set() or job.cancel.is_set():
             self._stopped_or_superseded(job, fields)
             return
+        # A synthetic refusal has no child draft. Persist one before the
+        # publisher runs, so a rate limit or a transient error retries
+        # the same cause from disk. An existing child draft is left as
+        # the child wrote it. A cause this service does not post is not
+        # written.
+        if report.review_error and known_review_error(report.review_error):
+            try:
+                self._save_refusal_draft(job, report.review_error)
+            except OSError as exc:
+                self._record_post_refusal(
+                    job,
+                    fields,
+                    f"could not save the refusal draft: {type(exc).__name__}: {exc}",
+                )
+                return
         try:
             already = self._publisher(job.event, report)
         except PostNotCurrent:
@@ -1418,6 +1528,26 @@ class Worker:
             fields,
             status=ERROR,
             error=error,
+        )
+
+    def _save_refusal_draft(self, job: Job, cause: str) -> None:
+        """Write the synthetic refusal as the draft a retry posts, when
+        the run directory has no draft yet. A child that already wrote
+        one keeps it. The status line is the agentic shape `summarize_draft`
+        reads back, and the cause is one `known_review_error` already
+        accepted, so the retry posts that same text."""
+        path = run_dir(self._state_root, job.event) / "draft.md"
+        if path.is_file():
+            return
+        make_private_dirs(path.parent)
+        status = {
+            "coverage_complete": False,
+            "mode": MODE_AGENTIC,
+            "review_error": cause,
+        }
+        path.write_text(
+            f"{STATUS_PREFIX}{json.dumps(status, sort_keys=True)} -->\n",
+            encoding="utf-8",
         )
 
     def _publish_saved(self, job: Job) -> None:

@@ -156,6 +156,32 @@ def test_a_record_cannot_be_negative(tmp_path):
         _spend(tmp_path).record("o/r", Decimal("-0.01"), 1)
 
 
+def test_a_negative_call_count_writes_nothing(tmp_path):
+    """A negative call count is refused before the append, on both
+    record paths. Kills checking only the amount."""
+    spend = _spend(tmp_path)
+    with pytest.raises(ValueError, match="call count"):
+        spend.record("o/r", Decimal(1), -3)
+    with pytest.raises(ValueError, match="call count"):
+        spend.record_once("o/r", Decimal(1), -3, "attempt")
+    assert spend.committed("o/r") == (Decimal(0), "")
+
+
+def test_a_non_utf8_ledger_is_unreadable(tmp_path):
+    """Bytes that are not UTF-8 are an unreadable ledger, for the day's
+    total and for the per-source grouping. Kills catching only OSError."""
+    path = spend_file(tmp_path, "o/r", DAY)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff\xfe")
+    spend = _spend(tmp_path)
+    total, gap = spend.committed("o/r")
+    assert total is None
+    assert "could not be read" in gap
+    groups, source_gap = spend.by_source("o/r")
+    assert groups is None
+    assert "could not be read" in source_gap
+
+
 # ------------------------------------------------------- the daily budget
 
 
@@ -372,6 +398,85 @@ def test_record_once_does_not_append_to_an_unreadable_ledger(tmp_path):
     appended, gap = _spend(tmp_path).record_once("o/r", Decimal("1.00"), 1, "k")
     assert appended is False
     assert "unreadable record" in gap
+
+
+def test_a_ledger_line_names_its_funding_source_only_when_it_has_one(tmp_path):
+    """A source is recorded and grouped. A line with no source omits the
+    field and groups as unattributed. The groups sum to the day's total.
+    A name that is not a source name is not written. Kills always writing
+    ``"source": ""``, and dropping the name."""
+    import json
+
+    from atlas_reviewer.budget import spend_file
+
+    spend = _spend(tmp_path)
+    spend.record("o/r", Decimal("0.40"), 1)
+    spend.record("o/r", Decimal("1.25"), 2, source="subs-a")
+    spend.record("o/r", Decimal("1.25"), 1, source="subs-a")
+    spend.record("o/r", Decimal("0.10"), 1, source="subs-b")
+    text = spend.file("o/r").read_text(encoding="utf-8")
+    lines = [json.loads(line) for line in text.splitlines()]
+    assert "source" not in lines[0]
+    assert lines[1]["source"] == "subs-a"
+    assert lines[2]["source"] == "subs-a"
+    assert lines[3]["source"] == "subs-b"
+    groups, gap = spend.by_source("o/r")
+    assert gap == ""
+    assert groups == (
+        ("", Decimal("0.40")),
+        ("subs-a", Decimal("2.50")),
+        ("subs-b", Decimal("0.10")),
+    )
+    total, total_gap = spend.committed("o/r")
+    assert total_gap == ""
+    assert total == sum(amount for _name, amount in groups)
+    with pytest.raises(ValueError, match="source"):
+        spend.record("o/r", Decimal(1), 1, source="Not A Name")
+    assert spend.committed("o/r") == (total, "")
+    path = spend_file(tmp_path, "o/r", DAY)
+    path.write_text(path.read_text(encoding="utf-8") + "garbage\n", encoding="utf-8")
+    unreadable, why = spend.by_source("o/r")
+    assert unreadable is None
+    assert "unreadable" in why
+    missing, missing_gap = spend.by_source("no/file")
+    assert missing == ()
+    assert missing_gap == ""
+
+
+def test_a_source_that_is_not_a_name_does_not_say_the_budget_holds(tmp_path):
+    """A line with a valid bill and a source that is not a source name
+    makes the report unreadable, and the message names the source. The
+    day's total still adds the bill. Kills telling the operator the
+    budget is blocked when the total is known."""
+    import json
+
+    spend = _spend(tmp_path)
+    spend.record("o/r", Decimal("1.00"), 1)
+    path = spend.file("o/r")
+    line = json.loads(path.read_text(encoding="utf-8"))
+    line["source"] = "Nope"
+    path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+    groups, gap = spend.by_source("o/r")
+    assert groups is None
+    assert "unreadable source" in gap
+    assert "budget holds" not in gap
+    total, total_gap = spend.committed("o/r")
+    assert total_gap == ""
+    assert total == Decimal("1.00")
+
+
+def test_record_once_keeps_the_source_on_the_one_line_it_writes(tmp_path):
+    spend = _spend(tmp_path)
+    assert spend.record_once(
+        "o/r", Decimal("1.10"), 2, "attempt-1", source="subs-a"
+    ) == (True, "")
+    assert spend.record_once("o/r", Decimal(9), 1, "attempt-1", source="subs-b") == (
+        False,
+        "",
+    )
+    groups, gap = spend.by_source("o/r")
+    assert gap == ""
+    assert groups == (("subs-a", Decimal("1.10")),)
 
 
 def test_record_once_needs_a_key(tmp_path):
