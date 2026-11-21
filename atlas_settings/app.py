@@ -52,6 +52,7 @@ from atlas_settings.phrases import (
 from atlas_settings.ratelimit import RateLimiter
 from atlas_settings.sessions import (
     Session,
+    SessionError,
     SessionStore,
     cookie_header,
 )
@@ -242,14 +243,22 @@ class SettingsApp:
             )
         try:
             checks.check_key_against_controller_text(key)
-            self.store.store_credentials(
-                self.config.installation_id, base_url, key, model
+            # Every write goes through `_write`: the store refusal, the
+            # unconfigured store, and the audit line are one path, so a
+            # stored key can never be answered with a bare 500 as if
+            # nothing happened, and an audit gap is answered with the
+            # phrase that says the write landed.
+            self._write(
+                session,
+                "store-credentials",
+                lambda: self.store.store_credentials(
+                    self.config.installation_id, base_url, key, model
+                ),
             )
+        except AuthorizationRefused as refused:
+            return refused.response
         except InstallationStoreError as exc:
             return self._store_refused(session, exc)
-        self.audit.record(
-            "store-credentials", self.config.installation_id, session.user_id or 0
-        )
         return self._redirect("/settings")
 
     def _write(
@@ -374,8 +383,28 @@ class SettingsApp:
             self._require_gate()
         except AuthorizationRefused as refused:
             return refused.response
-        _signed_in, value = self.sessions.upgrade(session, user.id, user.login)
-        self.audit.record("login", self.config.installation_id, user.id)
+        try:
+            signed_in, value = self.sessions.upgrade(session, user.id, user.login)
+        except SessionError:
+            # An overlapping callback consumed this pre-login session
+            # first; the loser answers the same fixed refusal a forged
+            # state gets, never a 500.
+            return self._page(pages.error_page("Refused", LOGIN_FAILED), 403)
+        try:
+            self.audit.record("login", self.config.installation_id, user.id)
+        except OSError:
+            # A sign-in without its audit line is an untracked identity
+            # holding an authenticated session; the session just created
+            # is destroyed so none survives unrecorded.
+            self.sessions.destroy(signed_in)
+            return self._page(
+                pages.error_page(
+                    "Audit gap",
+                    "the sign-in could not be recorded in the audit log; "
+                    "you were not signed in",
+                ),
+                500,
+            )
         return self._redirect("/settings", set_cookie=cookie_header(value))
 
     def _settings_page(self, cookie: str) -> Response:

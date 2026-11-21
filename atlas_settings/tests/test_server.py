@@ -1,14 +1,19 @@
 # SPDX-License-Identifier: MIT
-"""The HTTP handler: the security headers on every response, the bounded
-body, the content-type gate, the log lines that never carry a query
-string, and one full flow served over a real loopback socket."""
+"""The HTTP handler and the bounded server: the security headers on
+every response, the bounded body, the content-type gate, the log lines
+that never carry a query string and never trip over a malformed request
+line, the request timeout, the concurrency cap with its 503 overflow,
+and one full flow served over a real loopback socket."""
 
 import http.client
+import socket
 import threading
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, urlsplit
 
-from atlas_settings.server import serve
+from atlas_settings.app import Response
+from atlas_settings.server import SettingsServer, serve
 
 from .harness import build_world
 
@@ -95,6 +100,146 @@ def test_the_log_lines_never_carry_a_query_string(tmp_path: Path) -> None:
     for line in world.logs:
         assert "tracking=1" not in line
         assert "?" not in line
+
+
+def test_a_malformed_request_line_still_gets_an_answer(tmp_path: Path) -> None:
+    """A request line that fails to parse must still be answered 400 by
+    the server, not dropped: the error log fires before `path` and
+    `command` exist, and must not raise of its own."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        sock = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        sock.sendall(b"GARBAGE\r\n\r\n")
+        raw = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+        # Before the guard, the handler's own log_error raised on this
+        # path and the connection was dropped with no answer at all.
+        assert raw.startswith(b"<!DOCTYPE HTML>"), raw[:60]
+        # The error log lines went out with the placeholders — no path,
+        # no traceback to the worker thread's stderr.
+        assert world.logs == ["-  error", "-  400"], world.logs
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_connection_that_never_finishes_its_request_is_closed(
+    tmp_path: Path,
+) -> None:
+    """The bounded read: a client that opens a connection and sends
+    half a request line has its connection closed when the request
+    timeout lapses, instead of holding a handler thread forever."""
+    world = build_world(tmp_path)
+    server = serve(
+        world.app,
+        "127.0.0.1",
+        0,
+        lambda line: world.logs.append(line),
+        request_timeout_s=0.5,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        sock = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        sock.sendall(b"GET / HT")
+        sock.settimeout(10)
+        assert sock.recv(4096) == b""
+        sock.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_an_overflow_request_is_refused_not_queued(tmp_path: Path) -> None:
+    """With the handler slots full, a further connection is answered
+    503 at once rather than queued behind an unbounded pile of
+    threads — and the slot is handed back when the busy handler ends."""
+    world = build_world(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def block(*args: object, **kwargs: object) -> Response:
+        entered.set()
+        release.wait(10)
+        return Response(200, b"slow but fine")
+
+    world.app.get = block  # type: ignore[method-assign]
+    server = serve(
+        world.app,
+        "127.0.0.1",
+        0,
+        lambda line: world.logs.append(line),
+        max_concurrent=1,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    first_response: list[http.client.HTTPResponse] = []
+
+    def slow_request() -> None:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", server.server_address[1], timeout=10
+        )
+        connection.request("GET", "/")
+        response = connection.getresponse()
+        response.read()
+        first_response.append(response)
+        connection.close()
+
+    busy = threading.Thread(target=slow_request, daemon=True)
+    try:
+        busy.start()
+        assert entered.wait(10), "the first request never reached the handler"
+        overflow = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        overflow.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        raw = overflow.recv(4096)
+        overflow.close()
+        assert raw.startswith(b"HTTP/1.1 503 "), raw[:60]
+        release.set()
+        busy.join(timeout=10)
+        assert first_response[0].status == 200
+        # The slot was handed back: the next request is served normally.
+        assert _get(server, "/").status == 200
+    finally:
+        release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_the_busy_refusal_survives_a_client_that_already_left() -> None:
+    """A peer that hangs up before the 503 is sent must not crash the
+    accept loop: the refusal's send failure is swallowed and the request
+    socket is still shut down."""
+
+    class DeadPeer:
+        def sendall(self, data: bytes) -> None:
+            raise ConnectionResetError("the peer is gone")
+
+        def shutdown(self, how: int) -> None:
+            raise OSError
+
+        def close(self) -> None:
+            closed.append(True)
+
+    closed: list[bool] = []
+    server = object.__new__(SettingsServer)
+    SettingsServer._refuse_busy(server, cast("socket.socket", DeadPeer()))
+    assert closed == [True]
 
 
 def test_an_oversized_body_is_refused(tmp_path: Path) -> None:

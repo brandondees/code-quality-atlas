@@ -9,12 +9,14 @@ surface's own flows (rotate, revoke, cap, delete, CSRF, the audit of
 every write) are this suite's second file."""
 
 import json
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
 from atlas_reviewer.installation_store import InstallationStore
 from atlas_reviewer.tenant_provider import PricingUnknownError
 from atlas_settings.app import LOGIN_LIMIT
+from atlas_settings.audit import AUDIT_FILE_NAME, AuditLog
 from atlas_settings.phrases import (
     ADMIN_REFUSED,
     CONSENT_REFUSED,
@@ -23,6 +25,7 @@ from atlas_settings.phrases import (
     GATE_REFUSED,
     LOGIN_FAILED,
 )
+from atlas_settings.sessions import Session
 
 from .harness import (
     ADMIN_ID,
@@ -147,6 +150,90 @@ def test_a_github_read_failure_at_login_refuses_fail_closed(tmp_path: Path) -> N
     assert response.status == 502
     assert LOGIN_FAILED in response.body.decode()
     assert world.app.get("/settings", "", cookie, "1.2.3.4").location == "/login"
+
+
+def test_a_racing_callback_refuses_the_loser_without_a_500(tmp_path: Path) -> None:
+    """Two callbacks carrying the same pre-login session race: the one
+    whose view of the session is stale — it read the session before the
+    winner consumed it — answers the fixed login-failed refusal, never
+    a 500, and adds nothing."""
+    world = build_world(tmp_path)
+    started = world.app.get("/login", "", "", "1.2.3.4")
+    cookie = world.cookie_from(started)
+    state = world.state_from(started)
+    stale = world.app.sessions.get(cookie)
+    assert stale is not None
+    winner = world.app.get(
+        "/callback", f"code=fake-code&state={state}", cookie, "1.2.3.4"
+    )
+    assert winner.status == 303
+    world.cookie = world.cookie_from(winner)
+    real_get = world.app.sessions.get
+
+    def racing_get(value: str) -> Session | None:
+        # The racing thread's view: the pre-login session it looked up
+        # before the winner consumed it.
+        return stale if value == cookie else real_get(value)
+
+    world.app.sessions.get = racing_get  # type: ignore[method-assign]
+    loser = world.app.get(
+        "/callback", f"code=fake-code&state={state}", cookie, "1.2.3.4"
+    )
+    assert loser.status == 403
+    assert LOGIN_FAILED in loser.body.decode()
+    # Only the winner's sign-in was recorded; the loser added nothing.
+    entries = world.app.audit.entries("42", "login")
+    assert len(entries) == 1
+    # The winner's session still answers.
+    assert "octo-admin" in world.page_text()
+
+
+def test_a_login_whose_audit_line_cannot_be_written_signs_nobody_in(
+    tmp_path: Path,
+) -> None:
+    """The audit line is the sign-in's record: when it cannot be
+    written, the just-created signed-in session is destroyed — no
+    unrecorded identity is left holding an authenticated session, and
+    the answer says so rather than a bare 500."""
+    world = build_world(tmp_path)
+    started = world.app.get("/login", "", "", "1.2.3.4")
+    cookie = world.cookie_from(started)
+    state = world.state_from(started)
+
+    class UnwritableAudit(AuditLog):
+        def record(
+            self,
+            action: str,
+            installation_id: str,
+            github_user_id: int,
+            at: datetime | None = None,
+        ) -> None:
+            raise OSError("the audit file is unwritable")
+
+    world.app.audit = UnwritableAudit(
+        world.state_dir / AUDIT_FILE_NAME, world.clock.now
+    )
+    destroyed: list[Session] = []
+    real_destroy = world.app.sessions.destroy
+
+    def watched_destroy(session: Session) -> None:
+        destroyed.append(session)
+        real_destroy(session)
+
+    world.app.sessions.destroy = watched_destroy  # type: ignore[method-assign]
+    response = world.app.get(
+        "/callback", f"code=fake-code&state={state}", cookie, "1.2.3.4"
+    )
+    assert response.status == 500
+    assert "you were not signed in" in response.body.decode()
+    # Exactly the session the upgrade had just created was destroyed,
+    # and it is gone from the table.
+    assert len(destroyed) == 1
+    assert destroyed[0].signed_in
+    assert world.app.sessions.get(world.app.sessions.cookie_value(destroyed[0])) is None
+    # Nothing was recorded: the audit file carries no login line.
+    working = AuditLog(world.state_dir / AUDIT_FILE_NAME, world.clock.now)
+    assert working.entries("42", "login") == []
 
 
 # ---- the settings page ----------------------------------------------
@@ -320,6 +407,46 @@ def test_a_store_failure_names_itself_and_changes_nothing(tmp_path: Path) -> Non
     record = working.load("42")
     assert record is not None
     assert not record.has_credentials
+
+
+def test_an_audit_failure_after_the_save_answers_the_audit_gap_page(
+    tmp_path: Path,
+) -> None:
+    """The credentials save routes through `_write`: when the audit
+    line cannot be written after the store write landed, the answer is
+    the 500 that says the change was applied — never a bare 500 that
+    reads as if the save failed, and never an unhandled crash."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+
+    class UnwritableAudit(AuditLog):
+        def record(
+            self,
+            action: str,
+            installation_id: str,
+            github_user_id: int,
+            at: datetime | None = None,
+        ) -> None:
+            raise OSError("the audit file is unwritable")
+
+    world.app.audit = UnwritableAudit(
+        world.state_dir / AUDIT_FILE_NAME, world.clock.now
+    )
+    response = world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+    assert response.status == 500
+    assert "was applied but could not be recorded" in response.body.decode()
+    # The key is in fact stored: the write landed before the audit gap.
+    record = world.app.store.load("42")
+    assert record is not None
+    assert record.has_credentials
 
 
 # ---- the endpoint and model intake checks ---------------------------
