@@ -5,8 +5,9 @@ consent acknowledgement, the credentials' first save with its intake
 validations, and the refusals those surfaces decide — sign-in failures,
 the expired and lost-authorization paths' read side, the store naming
 its own failure, hostile endpoints, the unknown model. The write
-surface's own flows (rotate, revoke, cap, delete, CSRF, the audit of
-every write) are this suite's second file."""
+surface's own flows (rotate, revoke, cap, delete, and the audit of
+every write) are this suite's second file; this one carries the CSRF
+refusals too."""
 
 import json
 from datetime import datetime
@@ -436,6 +437,11 @@ def test_an_unconfigured_store_refuses_the_consent_write(tmp_path: Path) -> None
     )
     assert response.status == 503
     assert STORE_REFUSED_PREFIX in response.body.decode()
+    # The store refusal is a refusal render like the others: it shows
+    # the coverage count the request's own gate check just verified,
+    # not a hardcoded zero (kills the keep-the-zero mutant on the
+    # store-refusal path).
+    assert "1 repo(s) on the reviewer's allowlist" in response.body.decode()
 
 
 def test_a_store_write_error_refuses_the_consent_write(tmp_path: Path) -> None:

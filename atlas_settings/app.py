@@ -210,6 +210,7 @@ class SettingsApp:
             session,
             "record-consent",
             lambda: self.store.record_consent(self.config.installation_id),
+            covered,
         )
         return self._redirect("/settings")
 
@@ -219,7 +220,7 @@ class SettingsApp:
         try:
             record = self._load_record()
         except InstallationStoreError as exc:
-            return self._store_refused(session, exc)
+            return self._store_refused(session, exc, covered)
         if record is None or record.consent_acknowledged_at is None:
             # Saving credentials without consent stores nothing and says
             # why (D90): the refusal names the consent, never the form's
@@ -287,6 +288,7 @@ class SettingsApp:
                 lambda: self.store.store_credentials(
                     self.config.installation_id, base_url, key, model
                 ),
+                covered,
             )
         except AuthorizationRefused as refused:
             return refused.response
@@ -297,6 +299,7 @@ class SettingsApp:
         session: Session,
         action: str,
         write: Callable[[], object],
+        covered: int,
     ) -> None:
         """The store write first, then the audit line for it. An audit
         failure after a successful store write is answered with the
@@ -308,12 +311,16 @@ class SettingsApp:
         tell an admin a write landed when it cannot have."""
         if not self.store.configured:
             raise AuthorizationRefused(
-                self._store_refused(session, InstallationStoreError(STORE_BROKEN))
+                self._store_refused(
+                    session, InstallationStoreError(STORE_BROKEN), covered
+                )
             )
         try:
             write()
         except InstallationStoreError as exc:
-            raise AuthorizationRefused(self._store_refused(session, exc)) from exc
+            raise AuthorizationRefused(
+                self._store_refused(session, exc, covered)
+            ) from exc
         try:
             self.audit.record(action, self.config.installation_id, session.user_id or 0)
         except OSError as exc:
@@ -328,10 +335,16 @@ class SettingsApp:
                 )
             ) from exc
 
-    def _store_refused(self, session: Session, exc: InstallationStoreError) -> Response:
+    def _store_refused(
+        self, session: Session, exc: InstallationStoreError, covered: int
+    ) -> Response:
         """The store's refusal, its reason carried as data: the store's
-        messages are fixed text that never embed record contents."""
-        return self._settings_render(session, f"{STORE_REFUSED_PREFIX}{exc}", 503)
+        messages are fixed text that never embed record contents. The
+        render carries the coverage count `post` verified for this
+        request, like every other refusal render."""
+        return self._settings_render(
+            session, f"{STORE_REFUSED_PREFIX}{exc}", 503, covered
+        )
 
     # ---- authorization ----------------------------------------------
 
