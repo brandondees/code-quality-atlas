@@ -316,6 +316,7 @@ class SettingsApp:
             session,
             "revoke-credentials",
             lambda: self.store.revoke_credentials(self.config.installation_id),
+            covered,
         )
         return self._redirect("/settings")
 
@@ -330,6 +331,7 @@ class SettingsApp:
             session,
             "set-cap",
             lambda: self.store.set_cap(self.config.installation_id, cap),
+            covered,
         )
         return self._redirect("/settings")
 
@@ -349,6 +351,7 @@ class SettingsApp:
                 session,
                 "delete-installation",
                 lambda: self.store.delete(self.config.installation_id),
+                covered,
             )
         except AuthorizationRefused as refused:
             if refused.response.status == 500:
