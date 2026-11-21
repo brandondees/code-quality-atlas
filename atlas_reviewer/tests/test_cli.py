@@ -123,7 +123,16 @@ def test_the_live_provider_uses_the_model_flag_and_one_provider(tmp_path):
     )
     assert held["provider"].model_id == alt
     assert held["provider"]._providers == ("deepinfra/fp8",)
+    assert held["provider"].byok_source is False
     assert [url for _method, url, _headers, _body in fake.requests] == [f"{API}/key"]
+    cli._select_provider(
+        args,
+        {**env, "ATLAS_FUNDING_BYOK": "true"},
+        factory,
+        Telemetry(FakeClock()),
+        CallLimits(max_calls=3),
+    )
+    assert held["provider"].byok_source is True
 
     refused = cli.build_parser().parse_args(
         [

@@ -223,10 +223,14 @@ class FundingSelection:
 
     ``choice`` is the source the review runs on. ``refusal`` is a D92
     cause, set only when every source that could serve the model has
-    refused or is out of credit: the service posts that error and does
-    not start a child. ``error`` is any other reason no source was
-    chosen — a probe that failed, a key over its ceiling — and the
-    review fails without a D92 post."""
+    refused or is out of credit. ``error`` is any other reason no
+    source was chosen — a probe that failed, a key over its ceiling.
+    That selection is not itself a D92 post. The worker posts one when
+    this head already advanced, and the cause is the one recorded for
+    this head. When every source is already unavailable and this head
+    has no recorded cause, the worker posts the selector's notice:
+    no funding source is available, then each source and its cause.
+    A probe failure while a source is still eligible posts nothing."""
 
     choice: FundingChoice | None = None
     refusal: str = ""
@@ -386,15 +390,51 @@ class FundingSelector:
         """Remember that ``name`` refused. True when another source can
         still serve the model.
 
-        This slice's lock test calls it while a probe is in flight, and
-        the next-claim test calls it to skip a source. A later slice's
-        worker calls it when a review's key refuses. ``cause`` is the
-        D92 text a later claim posts when nothing else can serve."""
+        The selector's lock test calls it while a probe is in flight, and
+        the next-claim test calls it to skip a source.
+        ``Worker._advance_on_refusal`` calls it when a review's key
+        refuses. ``cause`` is the D92 text a later claim posts when
+        nothing else can serve."""
         with self._lock:
             self._unavailable.add(name)
             if cause in _REFUSAL_CAUSES:
                 self._causes[name] = cause
             return self._another_available()
+
+    def unavailable_notice(self) -> str:
+        """The D92 text when every source this model can use is already
+        unavailable, or empty when one can still be probed.
+
+        Each name is paired with its recorded cause, in spend order. A
+        cause is the fixed D92 text. The notice carries no key. Empty
+        when a source is still eligible, including one whose last probe
+        failed: that source is not marked unavailable, so the next claim
+        can try it."""
+        with self._lock:
+            parts: list[str] = []
+            for source in self._sources:
+                if not source.allows(self._model):
+                    continue
+                if source.name not in self._unavailable:
+                    return ""
+                cause = self._causes.get(source.name, "")
+                if cause:
+                    parts.append(f"{source.name}: {cause}")
+                else:
+                    parts.append(f"{source.name}: unavailable")
+            if not parts:
+                return ""
+            return "no funding source is available: " + "; ".join(parts)
+
+    def unavailable_names(self) -> tuple[str, ...]:
+        """Sources this model would skip because they already refused,
+        in spend order. Names only."""
+        with self._lock:
+            return tuple(
+                source.name
+                for source in self._sources
+                if source.allows(self._model) and source.name in self._unavailable
+            )
 
     def _probe_source(self, source: FundingSource) -> FundingChoice | str:
         """A choice, a D92 cause, or a reason the source was skipped
