@@ -104,6 +104,11 @@ credit-low HTTP 400 rule in §4 is classified in the child, where the
 400 arrives, so the child has to be told the flag. `require_zdr` is
 not a proxy for it.
 
+Selection and the unavailable mark share one lock, and marking a
+source that is already unavailable changes nothing. The key probe
+runs outside that lock, so one claim's request does not stall another
+claim or a refusal mark. The selector's probe-lock test pins both.
+
 The priced D92 minimum — remaining credit against the smaller of one
 call's largest reservation and the per-lens budget — still runs in the
 child, because it needs the catalog the child already loads. A source
@@ -137,15 +142,34 @@ answer is keyed on `(repo, pr_number, head_sha)`. The re-queue is
 not enqueue the head a second time, which the queue would refuse.
 Each source is tried at most once while the worker process remembers
 the refusal, so a list of three sources can advance twice. The next
-claim takes the next source that still has credit. The D92 post is
-sent only when no source remains, with the last refusal's cause.
+claim takes the next source that still has credit. Exhaustion is
+decided in two places. A refusal whose source is the last eligible
+one ends the advance: the worker posts and does not release the claim
+again. A claim that finds no eligible source is exhausted at claim
+time and does not release the claim either. The selector keeps each
+refused source's cause, and the post carries the first refused
+source's cause in spend order. When a later claim ends without a
+review after a source has already refused — the next probe fails, the
+key is blank, the key is over its ceiling, or the daily budget skips
+the claim — that same cause is posted, so the earlier refusal is not
+left unposted. F3's test that every source refused posts the error,
+and its test that a later probe failure still posts the remembered
+cause, pin those two endings. Each advance records one `refusal
+advance` telemetry event naming the source and the cause and carrying
+no key. Unsetting `ATLAS_FUNDING_SOURCES` and restarting is the
+rollback to today's single key.
 
 The memory is the worker process. It survives the re-queue, because
 the next claim is the same process, and a restart forgets it. The
 probe then decides again. A source whose OpenRouter key still shows
 credit, but which Anthropic refused for a low balance, stays
-unavailable for the life of the process so the next claim does not
-pick it again. Topping up a key takes effect on the next start.
+unavailable until the process restarts, so the next claim does not
+pick it again. Restart is the recovery, not a timer: a topped-up key
+is probed again on the next start, and a mark does not expire while
+the process runs. Revisit that when an operator needs a marked source
+to return without a restart, for example after a monthly credit
+renewal that should not wait for a deploy. The outcome of that
+revisit is an update note on D94.
 
 The re-queued attempt is a new child with its own per-review ceiling.
 It does not inherit the earlier attempt's bill. That bill is already
@@ -168,6 +192,8 @@ line written before this change still counts, and a line without
 `source` is spend that was not attributed. `funding-spend` is a
 read-only command that prints the day's settled spend grouped by
 source. It does not call a model and it does not write the ledger.
+The post sent when the list is exhausted names the first refused
+source's D92 cause and does not name a key.
 
 ## 6. What this stack does not do
 
