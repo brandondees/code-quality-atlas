@@ -1625,8 +1625,11 @@ def test_the_child_env_gains_the_tenant_variables_and_loses_the_operator_key():
 def test_a_funding_choice_overlays_the_one_key_and_hides_the_other(tmp_path):
     """The child receives the chosen key in the variable it already
     reads, plus the route and the source name. The other source's
-    variable and its value stay in the parent. Kills copying every
-    funding key into the child, and forgetting the source name."""
+    variable and its value stay in the parent. A pilot choice sets ZDR
+    and clears BYOK, and two providers are joined. Kills copying every
+    funding key into the child, forgetting the source name, hard-coding
+    ``ATLAS_REQUIRE_ZDR`` to ``false``, hard-coding ``ATLAS_FUNDING_BYOK``
+    to ``true``, and joining only the first provider."""
     from decimal import Decimal
 
     from atlas_reviewer.funding import FundingChoice, active_choice
@@ -1654,6 +1657,19 @@ def test_a_funding_choice_overlays_the_one_key_and_hides_the_other(tmp_path):
     assert env["ATLAS_FUNDING_BYOK"] == "true"
     assert "ATLAS_FUNDING_SUBS_B" not in env
     assert "sk-or-v1-subs-b-secret" not in env.values()
+    pilot = FundingChoice(
+        "pilot",
+        "sk-or-v1-pilot-secret",
+        ("google-vertex/global", "amazon-bedrock"),
+        True,
+        Decimal(5),
+        False,
+    )
+    pilot_env = child_env(parent, funding=pilot)
+    assert pilot_env["ATLAS_REQUIRE_ZDR"] == "true"
+    assert pilot_env["ATLAS_FUNDING_BYOK"] == "false"
+    assert pilot_env["ATLAS_PROVIDERS"] == "google-vertex/global,amazon-bedrock"
+    assert pilot_env["ATLAS_OPENROUTER_API_KEY"] == "sk-or-v1-pilot-secret"
     bare = child_env({"ATLAS_OPENROUTER_API_KEY": "sk-or", "PATH": "/usr/bin"})
     assert "ATLAS_FUNDING_SOURCE" not in bare
     assert "ATLAS_FUNDING_BYOK" not in bare
