@@ -62,6 +62,11 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.funding import (
     ENV_FUNDING_BYOK,
     ENV_FUNDING_SOURCE,
+    NOTICE_CAUSE_MARK,
+    NOTICE_PREFIX,
+    NOTICE_SEPARATOR,
+    SOURCE_NAME,
+    UNAVAILABLE_CAUSE,
     FundingChoice,
     active_choice,
 )
@@ -709,23 +714,49 @@ def _status_flag(status: Mapping[str, object], key: str) -> Any:
 
 
 REVIEW_ERROR_CAUSES = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED})
-"""The two fixed causes a refused key's review error carries (D92). The
-status line's `review_error` field is controller text with exactly these
-values; anything else on a draft is not a field this coordinator wrote."""
+# The notice grammar lives in funding.py. A cause is one of the two
+# fixed key causes or `UNAVAILABLE_CAUSE`. Anything else, including a
+# key, stays out of a post.
+_NOTICE_TAILS = frozenset({KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED, UNAVAILABLE_CAUSE})
+
+
+def known_review_error(value: str) -> bool:
+    """True when `value` is a cause this service may post: one of the two
+    fixed key causes, or the selector's exhaustion notice and nothing
+    else. A raw key, a notice whose tail is a key, and any other string
+    are unknown."""
+    if value in REVIEW_ERROR_CAUSES:
+        return True
+    if not value.startswith(NOTICE_PREFIX):
+        return False
+    parts = value[len(NOTICE_PREFIX) :].split(NOTICE_SEPARATOR)
+    if not parts or any(part == "" for part in parts):
+        return False
+    for part in parts:
+        name, sep, cause = part.partition(NOTICE_CAUSE_MARK)
+        if (
+            sep != NOTICE_CAUSE_MARK
+            or SOURCE_NAME.fullmatch(name) is None
+            or cause not in _NOTICE_TAILS
+        ):
+            return False
+    return True
 
 
 def _review_error(status: Mapping[str, object]) -> str:
-    """The draft's refused-key cause (D92), typed: only the two fixed
-    causes read. An unrecognized value is not a field this coordinator
-    wrote -- version skew, or a draft this service cannot map -- and
-    raises, the way a mismatched mode does; posting it would put
-    unvalidated text where the fixed cause belongs."""
+    """The draft's refused-key cause (D92), typed: the two fixed causes
+    read, and so does the selector's exhaustion notice. An unrecognized
+    value is not a field this coordinator wrote -- version skew, or a
+    draft this service cannot map -- and raises, the way a mismatched
+    mode does; posting it would put unvalidated text where the fixed
+    cause belongs."""
     value = _status_flag(status, "review_error")
     if not value:
         return ""
-    if value not in REVIEW_ERROR_CAUSES:
+    if not known_review_error(value):
         raise DraftParseError(
-            f"the draft's review_error is not a cause this service knows: {value!r}"
+            "the draft's review_error is not a cause this service knows "
+            f"({type(value).__name__}, length {len(value)})"
         )
     return value
 

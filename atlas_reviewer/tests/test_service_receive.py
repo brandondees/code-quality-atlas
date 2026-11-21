@@ -5876,7 +5876,11 @@ def test_an_unreadable_installation_store_does_not_select_an_operator_source(
     assert board.states() == ((SHA_A, JobState.FAILED),)
 
 
-def _two_sources() -> tuple[object, dict[str, str]]:
+def _two_sources(
+    *,
+    subs_a: str = "sk-or-v1-subs-a",
+    subs_b: str = "sk-or-v1-subs-b",
+) -> tuple[object, dict[str, str]]:
     from atlas_reviewer.funding import load_funding_sources
 
     document = json.dumps(
@@ -5895,12 +5899,71 @@ def _two_sources() -> tuple[object, dict[str, str]]:
     )
     env = {
         "ATLAS_FUNDING_SOURCES": document,
-        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a",
-        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b",
+        "ATLAS_FUNDING_SUBS_A": subs_a,
+        "ATLAS_FUNDING_SUBS_B": subs_b,
     }
     sources = load_funding_sources(env)
     assert sources is not None
     return sources, env
+
+
+def test_an_unrecognized_review_error_stays_out_of_the_log(tmp_path):
+    """A draft whose review_error is a key fails the review. The
+    review-failed record names the field's type and length, and the
+    key is absent. Kills logging the unrecognized text."""
+    from atlas_reviewer.service_run import MODE_AGENTIC, RunConfig, make_runner
+
+    key = "sk-or-v1-secretsecret"
+    draft = (
+        "<!-- atlas-review-status: "
+        + json.dumps(
+            {
+                "coverage_complete": False,
+                "mode": "agentic",
+                "review_error": key,
+            }
+        )
+        + " -->\n"
+    )
+
+    class _Proc:
+        def __init__(self, code: int) -> None:
+            self._code = code
+            self._polls = 0
+
+        def poll(self):
+            self._polls += 1
+            return self._code if self._polls > 1 else None
+
+        def send_signal(self, signum):
+            return None
+
+        def kill(self):
+            return None
+
+        def wait(self, timeout=None):
+            return self._code
+
+    def popen(argv, env, stdout, stderr):
+        Path(argv[argv.index("--out") + 1]).write_text(draft, encoding="utf-8")
+        return _Proc(0)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path, MODE_AGENTIC), {}, popen=popen
+    )
+    worker = _worker(board, runner, root=tmp_path)
+    assert worker.run_one() is True
+    failed = [
+        event for event in worker._telemetry.events if event.step == "review failed"
+    ]
+    assert len(failed) == 1
+    assert key not in failed[0].error
+    assert "sk-or" not in failed[0].error
+    assert "not a cause this service knows" in failed[0].error
+    assert f"length {len(key)}" in failed[0].error
+    assert board.states() == ((SHA_A, JobState.FAILED),)
 
 
 def test_a_probe_failure_fails_the_review_and_names_each_source(tmp_path):
@@ -5985,45 +6048,22 @@ def test_a_raised_runner_clears_the_funding_choice(tmp_path):
             active_choice.set(None)
 
 
-def _funding_pair():
-    from atlas_reviewer.funding import FundingSelector, load_funding_sources
+def _funding_pair(probe=None):
+    """The two-source selector the later tests share. The secrets stay
+    the longer pair; `_two_sources` on its own keeps the short ones."""
+    from atlas_reviewer.funding import FundingSelector
     from atlas_reviewer.pricing import KeyStatus
 
-    document = json.dumps(
-        [
-            {
-                "name": "subs-a",
-                "key_env": "ATLAS_FUNDING_SUBS_A",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-            {
-                "name": "subs-b",
-                "key_env": "ATLAS_FUNDING_SUBS_B",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-        ]
+    sources, env = _two_sources(
+        subs_a="sk-or-v1-subs-a-secret",
+        subs_b="sk-or-v1-subs-b-secret",
     )
-    env = {
-        "ATLAS_FUNDING_SOURCES": document,
-        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
-        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
-    }
-    sources = load_funding_sources(env)
-    assert sources is not None
-    return FundingSelector(
-        sources,
-        env,
-        lambda key: KeyStatus(Decimal(50), Decimal(40), Decimal(0), True),
-        "anthropic/claude-sonnet-5.5",
-    )
+    if probe is None:
+
+        def probe(key):
+            return KeyStatus(Decimal(50), Decimal(40), Decimal(0), True)
+
+    return FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5")
 
 
 def _refused_report(settled: str, cause: str = KEY_OUT_OF_CREDIT) -> ReviewReport:
@@ -6219,11 +6259,7 @@ def test_a_later_probe_failure_posts_the_remembered_refusal(tmp_path):
     """subs-a refuses and the re-queued claim's probe of subs-b fails.
     The job posts the remembered D92 cause. Kills failing that claim
     with no post."""
-    from atlas_reviewer.funding import (
-        FundingSelector,
-        active_choice,
-        load_funding_sources,
-    )
+    from atlas_reviewer.funding import active_choice
     from atlas_reviewer.ports import BoundaryError
     from atlas_reviewer.pricing import KeyStatus
 
@@ -6232,36 +6268,7 @@ def test_a_later_probe_failure_posts_the_remembered_refusal(tmp_path):
             raise BoundaryError("OpenRouter HTTP 500")
         return KeyStatus(Decimal(50), Decimal(40), Decimal(0), True)
 
-    document = json.dumps(
-        [
-            {
-                "name": "subs-a",
-                "key_env": "ATLAS_FUNDING_SUBS_A",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-            {
-                "name": "subs-b",
-                "key_env": "ATLAS_FUNDING_SUBS_B",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-        ]
-    )
-    env = {
-        "ATLAS_FUNDING_SOURCES": document,
-        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
-        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
-    }
-    sources = load_funding_sources(env)
-    assert sources is not None
-    funding = FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5")
+    funding = _funding_pair(probe)
     started: list[str] = []
 
     def runner(event, cancel):
@@ -6349,54 +6356,25 @@ def test_a_budget_stop_after_a_refusal_posts_the_remembered_cause(tmp_path):
 
 
 def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
-    """Job X refuses and advances. Job Y, another repository already
-    over its budget, and job Z, whose probe fails, post nothing.
-    X's own later probe failure still posts X's cause, and the record
-    is gone once X settles. Kills posting a process-wide remembered
-    cause."""
-    from atlas_reviewer.funding import (
-        FundingSelector,
-        active_choice,
-        load_funding_sources,
-    )
+    """Job X refuses and advances, and its cause stays recorded. While
+    that record is live, an unrelated repository over its budget, a
+    repository whose probe fails, the same repository on another pull
+    request, and the same pull request on another SHA each reach their
+    own budget or probe check and post nothing. X's own later probe
+    failure then posts X's cause, and the record is gone once X
+    settles. Kills posting a process-wide remembered cause, and kills
+    clearing the cause before the unrelated jobs run."""
+    from atlas_reviewer.funding import active_choice
     from atlas_reviewer.ports import BoundaryError
     from atlas_reviewer.pricing import KeyStatus
+    from atlas_reviewer.service_queue import Job
 
     def probe(key):
         if "subs-b" in key:
             raise BoundaryError("OpenRouter HTTP 500")
         return KeyStatus(Decimal(50), Decimal(40), Decimal(0), True)
 
-    document = json.dumps(
-        [
-            {
-                "name": "subs-a",
-                "key_env": "ATLAS_FUNDING_SUBS_A",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-            {
-                "name": "subs-b",
-                "key_env": "ATLAS_FUNDING_SUBS_B",
-                "providers": ["anthropic"],
-                "require_zdr": False,
-                "model_filter": "*",
-                "key_ceiling_usd": "195",
-                "byok": True,
-            },
-        ]
-    )
-    env = {
-        "ATLAS_FUNDING_SOURCES": document,
-        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
-        "ATLAS_FUNDING_SUBS_B": "sk-or-v1-subs-b-secret",
-    }
-    sources = load_funding_sources(env)
-    assert sources is not None
-    funding = FundingSelector(sources, env, probe, "anthropic/claude-sonnet-5.5")
+    funding = _funding_pair(probe)
     started: list[str] = []
 
     def runner(event, cancel):
@@ -6405,10 +6383,12 @@ def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
         started.append(event.repo)
         return ReviewRun(True, _refused_report("1.00"))
 
-    posted: list[tuple[str, str]] = []
+    posted: list[tuple[str, int, str, str]] = []
 
     def publisher(event, report):
-        posted.append((event.repo, report.review_error))
+        posted.append(
+            (event.repo, event.pr_number, event.head_sha, report.review_error)
+        )
         return True
 
     board = Board(tmp_path / "queue.json")
@@ -6426,18 +6406,359 @@ def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
     assert worker.run_one() is True
     assert started == [REPO]
     assert posted == []
-    assert worker._head_causes == {(REPO, 7, SHA_A): KEY_OUT_OF_CREDIT}
-    assert worker.run_one() is True
-    assert posted == [(REPO, KEY_OUT_OF_CREDIT)]
-    assert worker._head_causes == {}
-    board.enqueue(PrEvent(OTHER, 9, SHA_B))
-    board.enqueue(PrEvent("third/repo", 9, SHA_B))
-    assert worker.run_one() is True
-    assert worker.run_one() is True
-    assert posted == [(REPO, KEY_OUT_OF_CREDIT)]
+    cause = {(REPO, 7, SHA_A): KEY_OUT_OF_CREDIT}
+    assert worker._head_causes == cause
+    # claim() takes the first QUEUED job, and the advance left X there.
+    # Hold it off the queue so the unrelated jobs run while its cause
+    # is still recorded.
+    held = board._jobs[0]
+    assert held.key() == (REPO, 7, SHA_A)
+    held.state = JobState.POST_PENDING
+    assert board.enqueue(PrEvent(OTHER, 9, SHA_B)) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent("third/repo", 9, SHA_B)) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent(REPO, 8, SHA_A)) is Enqueue.QUEUED
+    # A newer SHA of X's pull request would supersede X. Append it as
+    # its own queued job so this claim reaches the budget and probe
+    # checks while X's cause is still the recorded one.
+    board._jobs.append(Job(PrEvent(REPO, 7, SHA_B), JobState.QUEUED))
+    for _ in range(4):
+        assert worker.run_one() is True
+    assert posted == []
     assert started == [REPO]
-    assert board.states().count((SHA_B, JobState.FAILED)) == 2
-    assert "sk-or" not in posted[0][1]
+    assert worker._head_causes == cause
+    assert [job.state for job in board._jobs[1:]] == [JobState.FAILED] * 4
+    held.state = JobState.QUEUED
+    assert worker.run_one() is True
+    assert posted == [(REPO, 7, SHA_A, KEY_OUT_OF_CREDIT)]
+    assert worker._head_causes == {}
+    assert "sk-or" not in posted[0][3]
+
+
+def test_a_failed_run_dir_drop_does_not_bill_the_attempt_twice(tmp_path, monkeypatch):
+    """The refusal records its bill, then the run directory cannot be
+    removed. The next claim backfills that same progress span. The
+    ledger still holds the one bill, not the bill plus the span's
+    settled figure. Kills recording the settlement with `record`,
+    which the backfill's `record_once` cannot see."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.funding import active_choice
+
+    def boom(*_args, **_kwargs):
+        raise OSError("directory busy")
+
+    monkeypatch.setattr(service_mod.shutil, "rmtree", boom)
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        _append_events(
+            run / "events.jsonl",
+            _run_start_record(),
+            _progress_record("2.20", 3),
+        )
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path, budget=Decimal("0.50"))
+    worker = _worker(
+        board,
+        runner,
+        publisher=publisher,
+        root=tmp_path,
+        spend=spend,
+        funding=_funding_pair(),
+    )
+    assert worker.run_one() is True
+    assert posted == []
+    assert run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)).is_dir()
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+    assert worker.run_one() is True
+    assert posted == [KEY_OUT_OF_CREDIT]
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+
+
+def test_an_unreadable_ledger_is_not_appended_when_the_attempt_has_progress(
+    tmp_path,
+):
+    """Settlement of an attempt that left progress evidence goes through
+    `record_once`. An unreadable day's file is left as it is, and the
+    gap is named. The claim itself never reaches this: an unreadable
+    file already holds the budget. Kills appending that bill with
+    `record`."""
+    from atlas_reviewer.service_queue import Job
+
+    event = PrEvent(REPO, 7, SHA_A)
+    run = run_dir(tmp_path, event)
+    run.mkdir(parents=True)
+    _append_events(
+        run / "events.jsonl",
+        _run_start_record(),
+        _progress_record("2.20", 3),
+    )
+    spend = _spend(tmp_path)
+    ledger = spend.file(REPO)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text("{not a record\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    worker = _worker(
+        Board(tmp_path / "queue.json"),
+        lambda event, cancel: ReviewRun(True, _refused_report("1.00")),
+        root=tmp_path,
+        spend=spend,
+        funding=_funding_pair(),
+    )
+    worker._cost_event(Job(event, JobState.RUNNING), _refused_report("1.00"))
+    assert ledger.read_bytes() == before
+    named = [
+        event
+        for event in worker._telemetry.events
+        if event.step == "spend not recorded"
+    ]
+    assert named
+    assert "unreadable record" in named[0].error
+
+
+def test_a_failed_later_attempt_does_not_rebill_the_kept_span(tmp_path, monkeypatch):
+    """The directory stays after a failed drop. The next attempt writes
+    only its own run-start line and fails before a progress record.
+    The ledger stays at the first attempt's bill. Kills billing that
+    failure from the merge of every progress record in the file."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.funding import active_choice
+
+    def boom(*_args, **_kwargs):
+        raise OSError("directory busy")
+
+    monkeypatch.setattr(service_mod.shutil, "rmtree", boom)
+    calls = {"n": 0}
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        calls["n"] += 1
+        run = run_dir(tmp_path, event)
+        run.mkdir(parents=True, exist_ok=True)
+        if calls["n"] == 1:
+            _append_events(
+                run / "events.jsonl",
+                _run_start_record(1),
+                _progress_record("2.20", 3),
+            )
+            return ReviewRun(True, _refused_report("1.00"))
+        _append_events(run / "events.jsonl", _run_start_record(2))
+        return ReviewRun(False, error="review exited 1")
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    spend = _spend(tmp_path)
+    worker = _worker(board, runner, root=tmp_path, spend=spend, funding=_funding_pair())
+    assert worker.run_one() is True
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+    assert worker.run_one() is True
+    assert calls["n"] == 2
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    total, gap = spend.committed(REPO)
+    assert gap == ""
+    assert total == Decimal("1.00")
+
+
+def test_the_selector_notice_is_a_cause_the_draft_reader_accepts():
+    """The notice the selector builds is a cause the draft reader
+    accepts, including a source with no recorded cause. Kills a second
+    copy of that grammar that the selector's own notice no longer
+    matches."""
+    from atlas_reviewer.funding import NOTICE_PREFIX
+    from atlas_reviewer.service_run import known_review_error
+
+    funding = _funding_pair()
+    assert funding.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
+    assert funding.mark_refused("subs-b", KEY_AUTH_REFUSED) is False
+    notice = funding.unavailable_notice()
+    assert notice.startswith(NOTICE_PREFIX)
+    assert known_review_error(notice) is True
+    assert "sk-or" not in notice
+    quiet = _funding_pair()
+    assert quiet.mark_refused("subs-a", KEY_OUT_OF_CREDIT) is True
+    assert quiet.mark_refused("subs-b", "probe failed") is False
+    unmarked = quiet.unavailable_notice()
+    assert known_review_error(unmarked) is True
+    assert unmarked.endswith("subs-b: unavailable")
+
+
+def test_a_rate_limited_refusal_retries_the_saved_cause(tmp_path):
+    """The remembered cause's post is rate-limited. The retry posts
+    that same cause from the draft the first attempt saved. Kills
+    publishing the synthetic report without a draft, which leaves the
+    retry with nothing to post."""
+    from atlas_reviewer.funding import active_choice
+
+    clock = {"t": 1_000_000.0}
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        return ReviewRun(True, _refused_report("1.00"))
+
+    posted: list[str] = []
+    calls = {"n": 0}
+
+    def publisher(event, report):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RateLimited("slow down", 1.0)
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    worker._now = lambda: clock["t"]
+    assert worker.run_one() is True
+    assert posted == []
+    assert worker.run_one() is True
+    assert posted == []
+    assert (run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)) / "draft.md").is_file()
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    clock["t"] += 10_000
+    worker._retry_post()
+    assert posted == [KEY_OUT_OF_CREDIT]
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert "sk-or" not in posted[0]
+
+
+def test_a_kept_draft_retries_the_new_cause(tmp_path, monkeypatch):
+    """A failed drop keeps attempt 1's draft. Attempt 2 posts a
+    different cause and is rate-limited. The retry posts attempt 2's
+    cause. Kills keeping whatever draft is already in the directory."""
+    import atlas_reviewer.service as service_mod
+    from atlas_reviewer.funding import active_choice
+    from atlas_reviewer.verdict import STATUS_PREFIX
+
+    def boom(*_args, **_kwargs):
+        raise OSError("directory busy")
+
+    monkeypatch.setattr(service_mod.shutil, "rmtree", boom)
+
+    def status(cause: str) -> str:
+        body = json.dumps(
+            {"coverage_complete": False, "mode": "agentic", "review_error": cause},
+            sort_keys=True,
+        )
+        return f"{STATUS_PREFIX}{body} -->\n"
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        if choice.name == "subs-a":
+            run = run_dir(tmp_path, event)
+            run.mkdir(parents=True, exist_ok=True)
+            (run / "draft.md").write_text(status(KEY_OUT_OF_CREDIT), encoding="utf-8")
+            return ReviewRun(True, _refused_report("1.00", KEY_OUT_OF_CREDIT))
+        return ReviewRun(True, _refused_report("0.25", KEY_AUTH_REFUSED))
+
+    clock = {"t": 1_000_000.0}
+    posted: list[str] = []
+    calls = {"n": 0}
+
+    def publisher(event, report):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RateLimited("slow down", 1.0)
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    worker._now = lambda: clock["t"]
+    assert worker.run_one() is True
+    assert posted == []
+    assert worker.run_one() is True
+    assert posted == []
+    draft = (run_dir(tmp_path, PrEvent(REPO, 7, SHA_A)) / "draft.md").read_text(
+        encoding="utf-8"
+    )
+    assert KEY_AUTH_REFUSED in draft
+    assert KEY_OUT_OF_CREDIT not in draft
+    clock["t"] += 10_000
+    worker._retry_post()
+    assert posted == [KEY_AUTH_REFUSED]
+    assert "sk-or" not in posted[0]
+
+
+def test_a_rate_limited_exhaustion_notice_retries_the_same_notice(tmp_path):
+    """Every source has refused, and the next head's notice post is
+    rate-limited. The retry reads the saved draft and posts the same
+    notice. Kills leaving that draft unwritten, and kills a parser
+    that accepts only the two fixed causes."""
+    from atlas_reviewer.funding import active_choice
+
+    clock = {"t": 1_000_000.0}
+    started: list[str] = []
+
+    def runner(event, cancel):
+        choice = active_choice.get()
+        assert choice is not None
+        started.append(choice.name)
+        cause = KEY_OUT_OF_CREDIT if choice.name == "subs-a" else KEY_AUTH_REFUSED
+        return ReviewRun(True, _refused_report("1.00", cause))
+
+    notice = (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key refused"
+    )
+    posted: list[str] = []
+    held = {"raise": False}
+
+    def publisher(event, report):
+        if held["raise"]:
+            held["raise"] = False
+            raise RateLimited("slow down", 1.0)
+        posted.append(report.review_error)
+        return True
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(
+        board, runner, publisher=publisher, root=tmp_path, funding=_funding_pair()
+    )
+    worker._now = lambda: clock["t"]
+    assert worker.run_one() is True
+    assert worker.run_one() is True
+    assert posted == [KEY_AUTH_REFUSED]
+    board.enqueue(PrEvent(OTHER, 9, SHA_B))
+    held["raise"] = True
+    assert worker.run_one() is True
+    assert posted == [KEY_AUTH_REFUSED]
+    assert started == ["subs-a", "subs-b"]
+    draft = run_dir(tmp_path, PrEvent(OTHER, 9, SHA_B)) / "draft.md"
+    assert draft.is_file()
+    assert notice in draft.read_text(encoding="utf-8")
+    assert board.states()[-1] == (SHA_B, JobState.POST_PENDING)
+    clock["t"] += 10_000
+    worker._retry_post()
+    assert posted == [KEY_AUTH_REFUSED, notice]
+    assert board.states()[-1] == (SHA_B, JobState.DONE)
+    assert "sk-or" not in posted[1]
 
 
 def test_a_later_head_posts_the_exhausted_funding_state(tmp_path):

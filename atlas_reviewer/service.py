@@ -14,6 +14,7 @@ review child is started without either.
 from __future__ import annotations
 
 import contextvars
+import json
 import math
 import os
 import random
@@ -118,18 +119,22 @@ from atlas_reviewer.service_run import (
     MODE_AGENTIC,
     MODE_ONESHOT,
     WEBHOOK_SECRET_ENV,
+    DraftParseError,
     ReviewReport,
     ReviewRun,
     RunConfig,
     RunSecrets,
+    known_review_error,
     make_runner,
     review_cost,
     run_dir,
     service_deadline,
     service_mode,
+    summarize_draft,
 )
 from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, OK, Event, EventSink, JsonlSink, Telemetry
+from atlas_reviewer.verdict import STATUS_PREFIX
 
 if TYPE_CHECKING:
     from atlas_reviewer.github_api import GitHubClient
@@ -1239,12 +1244,23 @@ class Worker:
     def _cost_event(self, job: Job, report: ReviewReport | None) -> None:
         """The review's cost, logged when it settles (#702's measure-first
         rule): a finished review's cost comes from its draft's cost lines;
-        a cancelled or failed one's from the last progress record its
-        events file holds, read before the run directory goes. A review
-        whose cost is in neither is logged as unknown, so the gap between
-        the decision records and the cost records stays visible."""
+        a cancelled or failed one's from the progress figure of its own
+        last run, read before the run directory goes. A last run with no
+        figure of its own records nothing, so an earlier run's records
+        left in the directory are not billed again. A review whose cost
+        is in neither is logged as unknown, so the gap between the
+        decision records and the cost records stays visible."""
         fields: dict[str, str | int] = dict(_fields(job.event))
         cost = review_cost(report) if report is not None else None
+        # The progress evidence's hash is the attempt's identity in the
+        # ledger, and its figure is that span's own bill. The first
+        # settlement and a later backfill of the same span both carry
+        # the hash, so a drop that fails after the settlement does not
+        # bill the span again. A failed attempt whose span has no figure
+        # of its own records nothing: an earlier span left in the
+        # directory is not this attempt's bill.
+        evidence = last_run_progress(*_progress_paths(self._state_root, job.event))
+        attempt_key = evidence[1] if evidence is not None else ""
         progress = None
         if cost is not None:
             billed = Decimal(cost[1])
@@ -1261,7 +1277,7 @@ class Worker:
                 }
             )
         else:
-            progress = read_progress(*_progress_paths(self._state_root, job.event))
+            progress = evidence[0] if evidence is not None else None
             if progress is not None:
                 fields.update(
                     {
@@ -1275,7 +1291,7 @@ class Worker:
                 )
             else:
                 fields["measured"] = "unknown"
-        self._record_spend(job, cost, progress, fields)
+        self._record_spend(job, cost, progress, fields, attempt_key)
         self._telemetry.record("service", "review cost", fields)
 
     def _record_spend(
@@ -1284,6 +1300,7 @@ class Worker:
         cost: tuple[int, str, str] | None,
         progress: object,
         fields: dict[str, str | int],
+        attempt_key: str = "",
     ) -> None:
         """Append the review's settled bill to the day's ledger (config
         slice S9, D81, D93). The figure is the review child's known bill
@@ -1300,7 +1317,11 @@ class Worker:
         either records
         nothing: the amount is never guessed, and the gap the cost event
         carries is where the miss stays visible. A write failure is a
-        named gap and leaves the total short rather than wrong."""
+        named gap and leaves the total short rather than wrong. When the
+        attempt has progress evidence, the bill is recorded once under
+        that evidence's key. An unreadable ledger is not appended to:
+        its total is unknown, the gap is logged as spend not recorded,
+        and the day's budget already holds."""
         if self._spend is None:
             return
         if cost is not None:
@@ -1308,6 +1329,22 @@ class Worker:
         elif isinstance(progress, Progress):
             amount, calls = progress.billed_usd, progress.calls
         else:
+            return
+        if attempt_key:
+            try:
+                _appended, gap = self._spend.record_once(
+                    job.event.repo, amount, calls, attempt_key
+                )
+            except OSError as exc:
+                gap = f"{type(exc).__name__}: {exc}"
+            if gap:
+                self._telemetry.record(
+                    "service",
+                    "spend not recorded",
+                    fields,
+                    status=ERROR,
+                    error=gap,
+                )
             return
         try:
             self._spend.record(job.event.repo, amount, calls)
@@ -1371,6 +1408,21 @@ class Worker:
         if self._stop.is_set() or job.cancel.is_set():
             self._stopped_or_superseded(job, fields)
             return
+        # A synthetic refusal has no child draft. Persist one before the
+        # publisher runs, so a rate limit or a transient error retries
+        # the same cause from disk. An existing child draft is left as
+        # the child wrote it. A cause this service does not post is not
+        # written.
+        if report.review_error and known_review_error(report.review_error):
+            try:
+                self._save_refusal_draft(job, report.review_error)
+            except OSError as exc:
+                self._record_post_refusal(
+                    job,
+                    fields,
+                    f"could not save the refusal draft: {type(exc).__name__}: {exc}",
+                )
+                return
         try:
             already = self._publisher(job.event, report)
         except PostNotCurrent:
@@ -1419,6 +1471,36 @@ class Worker:
             status=ERROR,
             error=error,
         )
+
+    def _save_refusal_draft(self, job: Job, cause: str) -> None:
+        """Write the synthetic refusal as the draft a retry posts. A
+        draft already there is kept when it carries this same cause, and
+        replaced when it carries another, so a directory a failed drop
+        kept cannot make the retry post the earlier attempt. The status
+        line is the agentic shape `summarize_draft` reads back, and the
+        cause is one `known_review_error` already accepted."""
+        path = run_dir(self._state_root, job.event) / "draft.md"
+        if path.is_file() and self._draft_cause(path) == cause:
+            return
+        make_private_dirs(path.parent)
+        status = {
+            "coverage_complete": False,
+            "mode": MODE_AGENTIC,
+            "review_error": cause,
+        }
+        path.write_text(
+            f"{STATUS_PREFIX}{json.dumps(status, sort_keys=True)} -->\n",
+            encoding="utf-8",
+        )
+
+    def _draft_cause(self, path: Path) -> str:
+        """The cause a saved draft would post, or empty when it is not
+        one this service can read."""
+        try:
+            report = summarize_draft(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, DraftParseError, ValueError):
+            return ""
+        return report.review_error
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is

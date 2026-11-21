@@ -52,7 +52,15 @@ _MAX_SOURCES = 8
 # skip any key. The single-key parser has no such cap; this one does so
 # an extra digit fails at boot instead of disabling that check.
 _MAX_CEILING = Decimal(10000)
-_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# The source-name grammar and the exhaustion notice are one text.
+# `known_review_error` parses what `unavailable_notice` builds. A second
+# copy would let a wording change here make a retry post nothing.
+SOURCE_NAME = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_NAME = SOURCE_NAME
+NOTICE_PREFIX = "no funding source is available: "
+NOTICE_SEPARATOR = "; "
+NOTICE_CAUSE_MARK = ": "
+UNAVAILABLE_CAUSE = "unavailable"
 _KEY_ENV = re.compile(r"^ATLAS_[A-Z0-9_]+$")
 # The same slug grammar ``openrouter._PROVIDER_SLUG`` uses. A test pins
 # the two patterns together so a route the child would refuse cannot
@@ -418,13 +426,11 @@ class FundingSelector:
                 if source.name not in self._unavailable:
                     return ""
                 cause = self._causes.get(source.name, "")
-                if cause:
-                    parts.append(f"{source.name}: {cause}")
-                else:
-                    parts.append(f"{source.name}: unavailable")
+                shown = cause if cause else UNAVAILABLE_CAUSE
+                parts.append(f"{source.name}{NOTICE_CAUSE_MARK}{shown}")
             if not parts:
                 return ""
-            return "no funding source is available: " + "; ".join(parts)
+            return NOTICE_PREFIX + NOTICE_SEPARATOR.join(parts)
 
     def unavailable_names(self) -> tuple[str, ...]:
         """Sources this model would skip because they already refused,

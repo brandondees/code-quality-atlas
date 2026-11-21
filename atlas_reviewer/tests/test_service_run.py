@@ -724,8 +724,44 @@ def test_an_unrecognized_review_error_is_a_parse_failure():
         '"review_error": "total provider outage"',
     )
     assert forged != _error_draft()
-    with pytest.raises(DraftParseError, match="not a cause this service knows"):
+    with pytest.raises(
+        DraftParseError, match="not a cause this service knows"
+    ) as caught:
         summarize_draft(forged, expect=MODE_AGENTIC)
+    assert "total provider outage" not in str(caught.value)
+
+
+def test_the_exhaustion_notice_reads_and_a_key_does_not():
+    """The selector's exhaustion notice is a cause this service posts.
+    A raw key, and a notice whose tail is a key, are not. Kills widening
+    the check to any string, and kills leaving the notice out of it."""
+    from atlas_reviewer.service_run import known_review_error
+
+    notice = (
+        "no funding source is available: "
+        "subs-a: model key out of credit; subs-b: model key refused"
+    )
+    draft = _error_draft().replace(
+        '"review_error": "model key out of credit"',
+        '"review_error": ' + json.dumps(notice),
+    )
+    report = summarize_draft(draft, expect=MODE_AGENTIC)
+    assert report.review_error == notice
+    assert known_review_error("no funding source is available: subs-a: unavailable")
+    key = "sk-or-v1-secretsecret"
+    for forged in (
+        key,
+        f"no funding source is available: subs-a: {key}",
+        "no funding source is available: ",
+        "no funding source is available: subs-a: model key out of credit; ",
+    ):
+        assert known_review_error(forged) is False
+        bad = _error_draft().replace(
+            '"review_error": "model key out of credit"',
+            '"review_error": ' + json.dumps(forged),
+        )
+        with pytest.raises(DraftParseError, match="not a cause this service knows"):
+            summarize_draft(bad, expect=MODE_AGENTIC)
 
 
 @pytest.mark.parametrize("cause", [KEY_OUT_OF_CREDIT, KEY_AUTH_REFUSED])
