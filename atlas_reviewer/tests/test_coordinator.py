@@ -5608,36 +5608,54 @@ def test_the_cost_line_names_the_installations_endpoint_for_a_tenant_review():
     assert line.endswith("Served by the installation's own model endpoint.")
 
 
-def test_the_cost_line_names_the_funding_source_only_when_one_was_chosen(monkeypatch):
+def test_the_cost_line_names_the_funding_source_only_when_one_was_chosen():
     """The source name rides the cost line, ahead of the endpoint
-    sentence, and only when a source was handed to the child. Kills
-    always appending it, and never appending it."""
-    monkeypatch.delenv("ATLAS_FUNDING_SOURCE", raising=False)
+    sentence, and only when a source was handed to the child. An invalid
+    name is not a source, so the line does not carry it. Kills always
+    appending it, never appending it, and appending a name that is not
+    a source name."""
+    from atlas_reviewer.funding import noted_funding_source
+    from atlas_reviewer.service_run import review_cost
+
     plain = render_draft(synthesize([lens_result(clean())]), Redactor())
     plain_line = next(
         line for line in plain.splitlines() if line.startswith("Model calls:")
     )
     assert "Funding source:" not in plain_line
-    monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "subs-a")
     named = render_draft(
-        synthesize([lens_result(clean())], endpoint_class="operator"), Redactor()
+        synthesize(
+            [lens_result(clean())],
+            endpoint_class="operator",
+            funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "subs-a"}),
+        ),
+        Redactor(),
     )
     named_line = next(
         line for line in named.splitlines() if line.startswith("Model calls:")
     )
     assert "Funding source: subs-a." in named_line
     assert named_line.index("Funding source:") < named_line.index("Served by")
-    from atlas_reviewer.service_run import review_cost
-
     parsed = review_cost(type("R", (), {"cost_lines": (named_line,)})())
-    assert parsed is not None
-    assert parsed[0] >= 0
+    assert parsed == (0, "0", "0")
+    invalid = render_draft(
+        synthesize(
+            [lens_result(clean())],
+            funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "Not A Name"}),
+        ),
+        Redactor(),
+    )
+    invalid_line = next(
+        line for line in invalid.splitlines() if line.startswith("Model calls:")
+    )
+    assert "Funding source:" not in invalid_line
 
 
-def test_a_progress_record_names_the_source_only_when_one_was_chosen(monkeypatch):
+def test_a_progress_record_names_the_source_only_when_one_was_chosen():
     """The progress record carries the source name when the child was
-    handed one, and omits the field otherwise. Kills always writing it."""
+    handed one, and omits the field otherwise. Kills always writing it,
+    and writing a name that is not a source name."""
     from atlas_reviewer.coordinator import _record_progress
+    from atlas_reviewer.funding import noted_funding_source
     from atlas_reviewer.head_change import FIELD_SOURCE
 
     class _Spend:
@@ -5655,16 +5673,27 @@ def test_a_progress_record_names_the_source_only_when_one_was_chosen(monkeypatch
         def record(self, phase, step, fields=None, **kwargs):
             self.fields = fields
 
-    monkeypatch.delenv("ATLAS_FUNDING_SOURCE", raising=False)
     capture = _Capture()
     _record_progress(capture, (), (), _Spend(), frozenset())
     assert capture.fields is not None
     assert FIELD_SOURCE not in capture.fields
-    monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "subs-a")
-    _record_progress(capture, (), (), _Spend(), frozenset())
+    _record_progress(
+        capture,
+        (),
+        (),
+        _Spend(),
+        frozenset(),
+        funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "subs-a"}),
+    )
     assert capture.fields[FIELD_SOURCE] == "subs-a"
-    monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "Not A Name")
-    _record_progress(capture, (), (), _Spend(), frozenset())
+    _record_progress(
+        capture,
+        (),
+        (),
+        _Spend(),
+        frozenset(),
+        funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "Not A Name"}),
+    )
     assert FIELD_SOURCE not in capture.fields
 
 

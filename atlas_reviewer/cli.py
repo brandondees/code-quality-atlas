@@ -101,6 +101,7 @@ from atlas_reviewer.egress import TenantEndpointTransport
 from atlas_reviewer.eval_harness import EvalFormatError, load_directory
 from atlas_reviewer.evidence import PullInfo, Remark, parse_pull
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
+from atlas_reviewer.funding import noted_funding_source
 from atlas_reviewer.gather import Collected, pr_commits
 from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import (
@@ -953,6 +954,7 @@ def _key_refusal_review(
         (),
         spend=spend,
         endpoint_class=endpoint_class(model),
+        funding_source=noted_funding_source(),
     )
 
 
