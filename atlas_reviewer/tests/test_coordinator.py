@@ -5608,6 +5608,143 @@ def test_the_cost_line_names_the_installations_endpoint_for_a_tenant_review():
     assert line.endswith("Served by the installation's own model endpoint.")
 
 
+def test_the_cost_line_names_the_funding_source_only_when_one_was_chosen():
+    """The source name rides the cost line, ahead of the endpoint
+    sentence, and only when a source was handed to the child. An invalid
+    name is not a source, so the line does not carry it. Kills always
+    appending it, never appending it, and appending a name that is not
+    a source name."""
+    from atlas_reviewer.funding import noted_funding_source
+    from atlas_reviewer.service_run import review_cost
+
+    plain = render_draft(synthesize([lens_result(clean())]), Redactor())
+    plain_line = next(
+        line for line in plain.splitlines() if line.startswith("Model calls:")
+    )
+    assert "Funding source:" not in plain_line
+    named = render_draft(
+        synthesize(
+            [lens_result(clean())],
+            endpoint_class="operator",
+            funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "subs-a"}),
+        ),
+        Redactor(),
+    )
+    named_line = next(
+        line for line in named.splitlines() if line.startswith("Model calls:")
+    )
+    assert "Funding source: subs-a." in named_line
+    assert named_line.index("Funding source:") < named_line.index("Served by")
+
+    class _CostLines:
+        def __init__(self, line: str) -> None:
+            self.cost_lines = (line,)
+
+    parsed = review_cost(_CostLines(named_line))
+    assert parsed == (0, "0", "0")
+    invalid = render_draft(
+        synthesize(
+            [lens_result(clean())],
+            funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "Not A Name"}),
+        ),
+        Redactor(),
+    )
+    invalid_line = next(
+        line for line in invalid.splitlines() if line.startswith("Model calls:")
+    )
+    assert "Funding source:" not in invalid_line
+
+
+def test_a_progress_record_names_the_source_only_when_one_was_chosen():
+    """The progress record carries the source name when the child was
+    handed one, and omits the field otherwise. Kills always writing it,
+    and writing a name that is not a source name."""
+    from atlas_reviewer.coordinator import _record_progress
+    from atlas_reviewer.funding import noted_funding_source
+    from atlas_reviewer.head_change import FIELD_SOURCE
+
+    class _Spend:
+        calls = 1
+
+        class limits:
+            reservation_usd = Decimal(10)
+
+        def snapshot(self):
+            return (Decimal(1), Decimal(1), Decimal(0))
+
+    class _Capture:
+        fields: dict | None = None
+
+        def record(self, phase, step, fields=None, **kwargs):
+            self.fields = fields
+
+    capture = _Capture()
+    _record_progress(capture, (), (), _Spend(), frozenset())
+    assert capture.fields is not None
+    assert FIELD_SOURCE not in capture.fields
+    _record_progress(
+        capture,
+        (),
+        (),
+        _Spend(),
+        frozenset(),
+        funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "subs-a"}),
+    )
+    assert capture.fields[FIELD_SOURCE] == "subs-a"
+    _record_progress(
+        capture,
+        (),
+        (),
+        _Spend(),
+        frozenset(),
+        funding_source=noted_funding_source({"ATLAS_FUNDING_SOURCE": "Not A Name"}),
+    )
+    assert FIELD_SOURCE not in capture.fields
+
+
+def test_the_review_entries_pass_the_funding_source_through(tmp_path, monkeypatch):
+    """The source is resolved at each review entry and passed into the
+    draft and the progress records, including a continuation and a key
+    refusal that stops before any lens. The continuation uses its own
+    state directory, so the first review's attested reads do not make
+    that round a no-op. Kills dropping that argument at any of those
+    sites, including the continuation round."""
+    from atlas_reviewer.cli import _key_refusal_review
+    from atlas_reviewer.head_change import (
+        FIELD_SOURCE,
+        LENS_SETTLED_STEP,
+        PROGRESS_PHASE,
+    )
+    from atlas_reviewer.telemetry import Telemetry
+
+    monkeypatch.setenv("ATLAS_FUNDING_SOURCE", "subs-a")
+    result, _model, _sprites = review(tmp_path, [READ_ALL, final()])
+    assert "Funding source: subs-a." in render_draft(result, Redactor())
+
+    continued = Telemetry(FakeClock())
+    continuation = tmp_path / "continuation"
+    continuation.mkdir()
+    many, _sprites = _lenses(
+        continuation,
+        [LENS],
+        ScriptedLensModel([final(), final()]),
+        telemetry=continued,
+    )
+    assert "Funding source: subs-a." in render_draft(many, Redactor())
+    progress = [event for event in continued.events if event.phase == PROGRESS_PHASE]
+    settled = [event for event in progress if event.step == LENS_SETTLED_STEP]
+    assert len(settled) >= 2
+    assert settled[1].fields.get(FIELD_SOURCE) == "subs-a"
+
+    refused = _key_refusal_review(
+        "model key out of credit",
+        LIMITS,
+        (0, Decimal(0)),
+        ScriptedLensModel([]),
+    )
+    assert "Funding source: subs-a." in render_draft(refused, Redactor())
+
+
 def test_a_dry_run_drafts_cost_line_gains_no_endpoint_sentence():
     draft = render_draft(synthesize([lens_result(clean())]), Redactor())
     line = next(line for line in draft.splitlines() if line.startswith("Model calls:"))
