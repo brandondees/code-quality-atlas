@@ -5759,8 +5759,9 @@ def test_a_tenant_claim_does_not_probe_the_operator_list(tmp_path):
 
 def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_path):
     """No source has credit, so the D92 error is posted and the runner
-    never starts. Kills starting a child on a dry list, and failing the
-    job with no post."""
+    never starts. The post names the source and its cause. Kills starting
+    a child on a dry list, failing the job with no post, and posting only
+    the bare cause."""
     from atlas_reviewer.funding import FundingSelector, load_funding_sources
     from atlas_reviewer.pricing import KeyStatus
 
@@ -5809,7 +5810,8 @@ def test_every_source_refused_posts_the_error_and_does_not_start_a_child(tmp_pat
         ),
     )
     assert worker.run_one() is True
-    assert posted == [KEY_OUT_OF_CREDIT]
+    assert posted == ["no funding source is available: subs-a: model key out of credit"]
+    assert "sk-or" not in posted[0]
     assert started == []
     assert board.states() == ((SHA_A, JobState.DONE),)
 
