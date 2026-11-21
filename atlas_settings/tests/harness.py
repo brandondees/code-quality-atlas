@@ -10,7 +10,7 @@ call is made, no deployed service setting is touched."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from cryptography.fernet import Fernet
 
@@ -45,3 +45,23 @@ BASE_ENV: dict[str, str] = {
     "ATLAS_INSTALLATION_STORE_KEY": STORE_KEY,
     "ATLAS_REVIEW_REPOS": ALLOWLISTED_REPO,
 }
+
+
+class FakeClock:
+    """The wall clock — and its monotonic companion — that the sessions
+    and the audit run on, advanced by tests so expiries are
+    deterministic."""
+
+    def __init__(self) -> None:
+        self.moment = START
+        self._mono = 0.0
+
+    def now(self) -> datetime:
+        return self.moment
+
+    def monotonic(self) -> float:
+        return self._mono
+
+    def advance(self, seconds: float) -> None:
+        self.moment = self.moment + timedelta(seconds=seconds)
+        self._mono += seconds
