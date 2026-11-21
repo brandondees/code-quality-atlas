@@ -354,9 +354,16 @@ class SettingsApp:
             if refused.response.status == 500:
                 # The audit gap — the one 500 `_write` raises: the store
                 # delete landed and only its record failed. The session
-                # ends with the delete it caused; an authenticated
+                # ends with the delete it caused — the row is destroyed
+                # and the cookie is cleared with it; an authenticated
                 # session must not outlive the record it deleted.
                 self.sessions.destroy(session)
+                return Response(
+                    refused.response.status,
+                    refused.response.body,
+                    content_type=refused.response.content_type,
+                    set_cookie=cleared_cookie_header(),
+                )
             return refused.response
         # The record is gone; the session ends with the delete too.
         self.sessions.destroy(session)

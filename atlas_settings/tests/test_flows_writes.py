@@ -428,6 +428,10 @@ def test_the_delete_audit_gap_still_ends_the_session(tmp_path: Path) -> None:
     assert "was applied but could not be recorded" in response.body.decode()
     assert world.app.store.load("42") is None
     assert world.app.sessions.get(world.cookie) is None
+    # The cookie is cleared with the session, on the audit-gap path too.
+    assert response.set_cookie is not None
+    assert response.set_cookie.startswith("atlas_settings_session=;")
+    assert "Max-Age=0" in response.set_cookie
 
 
 # ---- rate limits -----------------------------------------------------
