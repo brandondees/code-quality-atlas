@@ -68,6 +68,19 @@ def test_the_cookie_carries_the_decided_attributes() -> None:
     assert "Path=/" in header
 
 
+def test_the_pre_login_cookie_is_lax_and_the_session_cookie_strict() -> None:
+    """The pre-login binding's cookie is `SameSite=Lax`: its whole life
+    is the round trip through GitHub's authorize page, and the redirect
+    back is a cross-site top-level GET navigation, which a `Strict`
+    cookie is not sent on — in a browser the binding would never reach
+    the callback (kills the strict-everywhere mutant). The signed-in
+    session's cookie stays `Strict`: its life is same-site."""
+    assert "SameSite=Lax" in cookie_header("v", samesite="Lax")
+    assert "SameSite=Strict" in cookie_header("v")
+    assert "SameSite=Lax" not in cookie_header("v")
+    assert "SameSite=Strict" not in cookie_header("v", samesite="Lax")
+
+
 def test_a_forged_or_truncated_cookie_is_an_expired_session() -> None:
     clock = FakeClock()
     store = _store(clock)

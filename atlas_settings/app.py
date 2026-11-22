@@ -394,7 +394,14 @@ class SettingsApp:
         challenge = new_login_challenge()
         _session, value = self.sessions.start_login(challenge.state, challenge.verifier)
         url = self.github.authorize_url(challenge, self._redirect_uri())
-        return Response(302, b"", location=url, set_cookie=cookie_header(value))
+        # Lax, not Strict: the binding's only job is to survive the
+        # round trip through GitHub's authorize page, and the redirect
+        # back is a cross-site top-level GET navigation — a Strict
+        # cookie is not sent on one, so the callback would never see
+        # the binding it issued.
+        return Response(
+            302, b"", location=url, set_cookie=cookie_header(value, samesite="Lax")
+        )
 
     def _callback(self, query: str, cookie: str, remote_addr: str) -> Response:
         if not self.limiter.allow(

@@ -67,6 +67,31 @@ def test_the_full_login_flow_ends_signed_in(tmp_path: Path) -> None:
     assert "Installation" in page
 
 
+def test_the_binding_cookie_is_lax_and_the_session_cookie_strict(
+    tmp_path: Path,
+) -> None:
+    """The sign-in flow's two cookies carry their own SameSite: the
+    binding issued on the redirect to GitHub is `Lax` — the redirect
+    back from GitHub's authorize page is a cross-site top-level GET
+    navigation, the one case `Lax` allows and `Strict` forbids, so a
+    browser delivers the binding to the callback — and the signed-in
+    session issued by the callback is `Strict` (kills the
+    strict-everywhere mutant, under which a browser drops the binding
+    and the callback refuses a valid sign-in)."""
+    world = build_world(tmp_path)
+    started = world.app.get("/login", "", "", "1.2.3.4")
+    assert started.status == 302
+    assert "SameSite=Lax" in (started.set_cookie or "")
+    cookie = world.cookie_from(started)
+    state = world.state_from(started)
+    callback = world.app.get(
+        "/callback", f"code=fake-code&state={state}", cookie, "1.2.3.4"
+    )
+    assert callback.status == 303
+    assert "SameSite=Strict" in (callback.set_cookie or "")
+    assert "SameSite=Lax" not in (callback.set_cookie or "")
+
+
 def test_the_login_page_asks_for_github_sign_in(tmp_path: Path) -> None:
     world = build_world(tmp_path)
     response = world.app.get("/", "", "", "1.2.3.4")

@@ -287,13 +287,19 @@ class SessionStore:
         return secrets.token_urlsafe(_ID_BYTES)
 
 
-def cookie_header(value: str) -> str:
+def cookie_header(value: str, samesite: str = "Strict") -> str:
     """The `Set-Cookie` header's value: the signed id with the decided
     attributes. `Secure` is set unconditionally — the deployed page is
-    https; a loopback test reads the cookie by hand."""
+    https; a loopback test reads the cookie by hand. `samesite` is
+    `Strict` for the signed-in session and `Lax` for the pre-login
+    binding, whose whole life is the round trip through GitHub's
+    authorize page: the redirect back is a cross-site top-level GET
+    navigation, and a `Strict` cookie is not sent on one — the callback
+    would never see the binding, and in a browser every sign-in would
+    refuse."""
     return (
         f"{COOKIE_NAME}={value}; Path=/; HttpOnly; Secure; "
-        f"SameSite=Strict; Max-Age={ABSOLUTE_TTL_S}"
+        f"SameSite={samesite}; Max-Age={ABSOLUTE_TTL_S}"
     )
 
 
