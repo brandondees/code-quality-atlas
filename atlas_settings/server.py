@@ -92,27 +92,22 @@ class _DeadlineBoundSocket:
 
     def makefile(self, /, mode: str, buffering: int | None = None) -> Any:
         # The same stack `socket.makefile` would build, over this object
-        # instead of the real socket. With the handler's `rbufsize` of
-        # -1 the read side is a `BufferedReader` over the raw stream,
-        # exactly as it is without the wrapper; only the raw layer is
-        # replaced. The casts: `SocketIO` is typed against the real
-        # socket, and this object satisfies its read protocol
-        # dynamically (the runtime proof is the socket-level suite).
+        # instead of the real socket: the read side is a `BufferedReader`
+        # over the raw stream (the handler's `rbufsize` is -1), exactly
+        # as it is over the bare socket — only the raw layer is
+        # replaced, and every read drains the budget. The write side
+        # never comes through here: with `wbufsize` 0 the stdlib builds
+        # a `_SocketWriter` over the socket directly. The casts:
+        # `SocketIO` is typed against the real socket, and this object
+        # satisfies its read protocol dynamically (the runtime proof is
+        # the socket-level suite).
         raw = SocketIO(
             cast("socket.socket", self),
             cast("Literal['rb', 'wb', 'rwb']", mode),
         )
-        if buffering is None:
-            buffering = -1
-        if buffering < 0:
-            buffering = io.DEFAULT_BUFFER_SIZE
-        if buffering == 0:
+        if "r" not in mode:  # pragma: no cover - the write side is a _SocketWriter
             return raw
-        if "r" in mode and "w" not in mode:
-            return io.BufferedReader(raw, buffering)
-        if "w" in mode and "r" not in mode:
-            return io.BufferedWriter(raw, buffering)
-        return io.BufferedRandom(raw, buffering)
+        return io.BufferedReader(raw, io.DEFAULT_BUFFER_SIZE)
 
     def recv_into(self, buffer: Any, nbytes: int = 0, flags: int = 0) -> int:
         remaining = self._deadline_s - (self._clock() - self._started)
