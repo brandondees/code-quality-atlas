@@ -146,11 +146,14 @@ claim takes the next source that still has credit. Exhaustion is
 decided in two places. A refusal whose source is the last eligible
 one ends the advance: the worker posts and does not release the claim
 again. A claim that finds no eligible source is exhausted at claim
-time and does not release the claim either. When every source is
-already marked unavailable and nothing is remembered for that head,
-the worker posts a D92 error: no funding source is available, then
-each unavailable source with its recorded cause, in spend order, and
-no key. The post is the selector's current state, not a refusal of
+time and does not release the claim either. When at least one source matches the model and every one of them is
+marked unavailable, and nothing is remembered for that head, the worker posts
+the selector's notice. It starts with `no funding source is available:`
+and a space, then each matching source as `name: cause`, joined by a
+semicolon and a space, in spend order. The
+cause is the recorded refusal, or `unavailable` when the mark stored
+none. A source the filter excludes is left out. The notice carries no
+key. The post is the selector's current state, not a refusal of
 this head. The selector keeps each refused source's cause. The worker
 also records the first refused source's cause for the head that
 advanced, keyed by repository, pull request, and head, and clears the
@@ -168,10 +171,12 @@ are not. Its telemetry names the skipped sources. A daily-budget stop
 with nothing remembered posts nothing for the same reason. F3's test
 that every source refused posts the error, its test that a later
 probe failure still posts that head's cause, its test that a later
-head's first claim after exhaustion posts the selector's state, its
-test that a transient probe posts nothing, and its test that another
-repository's budget stop or probe skip posts nothing, pin those
-endings. Each advance records one `refusal
+head's first claim after exhaustion posts the selector's state, and
+its test that another repository's budget stop or probe skip posts
+nothing, pin those endings. The test that a transient probe posts
+nothing is #810's
+`test_a_probe_failure_fails_the_review_and_names_each_source`, not
+F3's. Each advance records one `refusal
 advance` telemetry event naming the source and the cause and carrying
 no key. Unsetting `ATLAS_FUNDING_SOURCES` and restarting is the
 rollback to today's single key.

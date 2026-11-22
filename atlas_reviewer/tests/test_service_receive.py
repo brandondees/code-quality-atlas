@@ -6693,7 +6693,11 @@ def test_another_repository_does_not_post_this_heads_refusal(tmp_path):
     # checks while X's cause is still the recorded one.
     board._jobs.append(Job(PrEvent(REPO, 7, SHA_B), JobState.QUEUED))
     for _ in range(4):
+        job_y = next(job for job in board._jobs if job.state is JobState.QUEUED)
         assert worker.run_one() is True
+        # While X's cause is still recorded. A cause written for this
+        # unrelated head and cleared before the final dict check fails here.
+        assert worker._head_cause(job_y) == ""
     assert posted == []
     assert started == [REPO]
     assert worker._head_causes == cause
@@ -7030,6 +7034,61 @@ def test_a_rate_limited_exhaustion_notice_retries_the_same_notice(tmp_path):
     assert posted == [KEY_AUTH_REFUSED, notice]
     assert board.states()[-1] == (SHA_B, JobState.DONE)
     assert "sk-or" not in posted[1]
+
+
+def test_a_model_no_source_matches_posts_nothing(tmp_path):
+    """No source's filter matches the model. The notice is empty and
+    the claim fails without a post. Kills treating that empty match as
+    exhaustion and posting the notice."""
+    from atlas_reviewer.funding import FundingSelector, load_funding_sources
+
+    document = json.dumps(
+        [
+            {
+                "name": "subs-a",
+                "key_env": "ATLAS_FUNDING_SUBS_A",
+                "providers": ["anthropic"],
+                "require_zdr": False,
+                "model_filter": "anthropic/*",
+                "key_ceiling_usd": "195",
+                "byok": True,
+            }
+        ]
+    )
+    env = {
+        "ATLAS_FUNDING_SOURCES": document,
+        "ATLAS_FUNDING_SUBS_A": "sk-or-v1-subs-a-secret",
+    }
+    sources = load_funding_sources(env)
+    assert sources is not None
+    probed: list[str] = []
+
+    def probe(key):
+        probed.append(key)
+        raise AssertionError(key)
+
+    funding = FundingSelector(sources, env, probe, "google/gemini-pro")
+    assert funding.unavailable_notice() == ""
+    posted: list[str] = []
+    started: list[str] = []
+
+    def publisher(event, report):
+        posted.append(report.review_error)
+        return True
+
+    def runner(event, cancel):
+        started.append(event.repo)
+        return ReviewRun(True, REPORT)
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker = _worker(board, runner, publisher=publisher, root=tmp_path, funding=funding)
+    assert worker.run_one() is True
+    assert posted == []
+    assert started == []
+    assert probed == []
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    assert "sk-or" not in worker._telemetry.events[-1].error
 
 
 def test_a_later_head_posts_the_exhausted_funding_state(tmp_path):
