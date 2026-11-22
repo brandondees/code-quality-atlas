@@ -99,6 +99,16 @@ CONSENT_REQUIRED = (
     "installation's own endpoint, and no tenant review may run until it is"
 )
 
+# The credentials commit's own consent rule: the acknowledgement must be
+# on the record when the write commits, under the same per-installation
+# lock the write holds -- the page's earlier check is advisory; this one
+# closes the window a concurrent `installation.deleted` delivery would
+# otherwise leave open.
+CONSENT_MISSING_AT_COMMIT = (
+    "the installation's credentials cannot be stored: the data-policy "
+    "consent is not on record at write time"
+)
+
 
 def installation_id(raw: str) -> str:
     """The installation id validated for use as a file name: non-empty
@@ -226,12 +236,23 @@ class InstallationStore:
         deleted. `flock` excludes across processes and across threads of
         one process (separate open file descriptions), so it is the one
         serialization this store needs."""
-        make_private_dirs(self.root / "locks")
-        fd = os.open(
-            self.root / "locks" / f"{ident}.lock",
-            os.O_WRONLY | os.O_CREAT,
-            0o600,
-        )
+        try:
+            make_private_dirs(self.root / "locks")
+            fd = os.open(
+                self.root / "locks" / f"{ident}.lock",
+                os.O_WRONLY | os.O_CREAT,
+                0o600,
+            )
+        except OSError as exc:
+            # A lock file that cannot be opened for writing -- a
+            # read-only volume, a vanished directory -- is a store that
+            # cannot be used, not a crash: the named store error is what
+            # both processes answer, and the settings page's own
+            # store-unavailable refusal is built on it.
+            raise InstallationStoreError(
+                "the installation state directory cannot be locked: "
+                f"{type(exc).__name__}"
+            ) from exc
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
             try:
@@ -315,7 +336,11 @@ class InstallationStore:
         a hostname and no userinfo, query, or fragment -- the full
         egress check runs per connection, not here; the key and model
         must be non-empty and bounded. A failed validation raises
-        before anything is written."""
+        before anything is written. The data-policy consent
+        acknowledgement must be on the record at commit time -- the
+        check and the write run under the same per-installation lock,
+        so a concurrent `installation.deleted` delivery cannot land a
+        credential record with no consent on it."""
         ident = installation_id(installation)
         checked = _check_base_url(base_url)
         if not key or len(key) > _MAX_SECRET_CHARS or "\x00" in key:
@@ -324,18 +349,21 @@ class InstallationStore:
                 f"{_MAX_SECRET_CHARS} characters"
             )
         checked_model = _check_model(model)
-        return self._write_record(
-            ident,
-            lambda current: InstallationRecord(
+
+        def compose(current: InstallationRecord | None) -> InstallationRecord:
+            if current is None or current.consent_acknowledged_at is None:
+                raise InstallationStoreError(CONSENT_MISSING_AT_COMMIT)
+            return InstallationRecord(
                 ident,
                 checked,
                 key,
                 checked_model,
-                current.daily_cap_usd if current is not None else None,
-                (current.consent_acknowledged_at if current is not None else None),
+                current.daily_cap_usd,
+                current.consent_acknowledged_at,
                 self.clock(),
-            ),
-        )
+            )
+
+        return self._write_record(ident, compose)
 
     def revoke_credentials(self, installation: str) -> InstallationRecord:
         """Remove the installation's credentials, keeping its cap and

@@ -12,6 +12,7 @@ from atlas_reviewer.budget import (
     STORE_UNAVAILABLE,
 )
 from atlas_reviewer.installation_store import (
+    CONSENT_MISSING_AT_COMMIT,
     CONSENT_REQUIRED,
     STORE_BROKEN,
 )
@@ -125,6 +126,7 @@ REDACTION_GUARD_TEXTS: tuple[str, ...] = (
     KEY_REFUSED,
     CONSENT_REQUIRED,
     STORE_BROKEN,
+    CONSENT_MISSING_AT_COMMIT,
     BUDGET_REACHED,
     CAP_REACHED,
     STORE_UNAVAILABLE,

@@ -41,6 +41,7 @@ from atlas_settings.phrases import (
     ADMIN_REFUSED,
     CONSENT_REFUSED,
     CONSENT_UNCHECKED,
+    CSRF_REFUSED,
     ENDPOINT_REFUSED_PREFIX,
     GATE_REFUSED,
     GITHUB_CHECK_FAILED,
@@ -71,10 +72,6 @@ MAX_BODY_BYTES = 8192
 type Validator = Callable[[str], tuple[Decimal, Decimal]]
 
 STYLES_ROOT = Path(__file__).resolve().parent / "static"
-
-CSRF_REFUSED_PHRASE = (
-    "the form's cross-site request token was missing or stale; nothing was changed"
-)
 
 
 @dataclass(frozen=True)
@@ -167,7 +164,7 @@ class SettingsApp:
         if not submitted or not hmac.compare_digest(
             submitted.encode("utf-8"), session.csrf.encode("utf-8")
         ):
-            return self._page(pages.error_page("Refused", CSRF_REFUSED_PHRASE), 403)
+            return self._page(pages.error_page("Refused", CSRF_REFUSED), 403)
         handler = self._action_handler(action)
         if handler is None:
             return self._not_found()
@@ -229,13 +226,18 @@ class SettingsApp:
         base_url = form.get("base_url", "").strip()
         key = form.get("key", "")
         model = form.get("model", "").strip()
+        # The prefill shows the endpoint the admin typed, minus anything
+        # credential-bearing: userinfo in the URL is a credential, and a
+        # refusal page must not return one. The raw `base_url` stays
+        # what the egress check judges.
+        prefill_url = _prefill_endpoint(base_url)
         if not base_url or not key or not model:
             return self._settings_render(
                 session,
                 "the endpoint, the key and the model are all required",
                 400,
                 covered,
-                prefill_base_url=base_url,
+                prefill_base_url=prefill_url,
                 prefill_model=model,
             )
         try:
@@ -246,7 +248,7 @@ class SettingsApp:
                 f"{ENDPOINT_REFUSED_PREFIX}{exc}",
                 400,
                 covered,
-                prefill_base_url=base_url,
+                prefill_base_url=prefill_url,
                 prefill_model=model,
             )
         try:
@@ -258,7 +260,7 @@ class SettingsApp:
                 f"{MODEL_REFUSED_PREFIX}{exc}",
                 400,
                 covered,
-                prefill_base_url=base_url,
+                prefill_base_url=prefill_url,
                 prefill_model=model,
             )
         try:
@@ -273,7 +275,7 @@ class SettingsApp:
                 KEY_REFUSED,
                 400,
                 covered,
-                prefill_base_url=base_url,
+                prefill_base_url=prefill_url,
                 prefill_model=model,
             )
         try:
@@ -289,6 +291,8 @@ class SettingsApp:
                     self.config.installation_id, base_url, key, model
                 ),
                 covered,
+                prefill_base_url=prefill_url,
+                prefill_model=model,
             )
         except AuthorizationRefused as refused:
             return refused.response
@@ -300,6 +304,8 @@ class SettingsApp:
         action: str,
         write: Callable[[], object],
         covered: int,
+        prefill_base_url: str = "",
+        prefill_model: str = "",
     ) -> None:
         """The store write first, then the audit line for it. An audit
         failure after a successful store write is answered with the
@@ -312,14 +318,20 @@ class SettingsApp:
         if not self.store.configured:
             raise AuthorizationRefused(
                 self._store_refused(
-                    session, InstallationStoreError(STORE_BROKEN), covered
+                    session,
+                    InstallationStoreError(STORE_BROKEN),
+                    covered,
+                    prefill_base_url,
+                    prefill_model,
                 )
             )
         try:
             write()
         except InstallationStoreError as exc:
             raise AuthorizationRefused(
-                self._store_refused(session, exc, covered)
+                self._store_refused(
+                    session, exc, covered, prefill_base_url, prefill_model
+                )
             ) from exc
         try:
             self.audit.record(action, self.config.installation_id, session.user_id or 0)
@@ -336,14 +348,26 @@ class SettingsApp:
             ) from exc
 
     def _store_refused(
-        self, session: Session, exc: InstallationStoreError, covered: int
+        self,
+        session: Session,
+        exc: InstallationStoreError,
+        covered: int,
+        prefill_base_url: str = "",
+        prefill_model: str = "",
     ) -> Response:
         """The store's refusal, its reason carried as data: the store's
         messages are fixed text that never embed record contents. The
         render carries the coverage count `post` verified for this
-        request, like every other refusal render."""
+        request, like every other refusal render, and — for a refused
+        credentials save — the typed endpoint and model, so the admin
+        re-types only the key."""
         return self._settings_render(
-            session, f"{STORE_REFUSED_PREFIX}{exc}", 503, covered
+            session,
+            f"{STORE_REFUSED_PREFIX}{exc}",
+            503,
+            covered,
+            prefill_base_url=prefill_base_url,
+            prefill_model=prefill_model,
         )
 
     # ---- authorization ----------------------------------------------
@@ -623,3 +647,26 @@ def parse_form(body: bytes) -> dict[str, str]:
 
 def remote_address(client_address: tuple[str, int] | str) -> str:
     return client_address[0] if isinstance(client_address, tuple) else client_address
+
+
+def _prefill_endpoint(url: str) -> str:
+    """The endpoint as the refusal prefill may show it. Userinfo in the
+    URL — `user:password@host` — is a credential, and the page never
+    returns a credential: the host side of the authority is kept, the
+    userinfo is dropped. A URL the parser cannot read at all is not
+    echoed either; the refusal's phrase names the problem anyway."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    if "@" not in parts.netloc:
+        return url
+    return urllib.parse.urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc.rpartition("@")[2],
+            parts.path,
+            parts.query,
+            parts.fragment,
+        )
+    )

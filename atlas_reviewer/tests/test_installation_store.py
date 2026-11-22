@@ -76,7 +76,12 @@ def _seed_raw(tmp_path: Path, ident: str, payload: dict[str, object], key=KEY_A)
     (root / f"{ident}.json").write_text(json.dumps(envelope), encoding="utf-8")
 
 
-def _credentials_record(store, ident="12345"):
+def _credentials_record(store, ident="12345", consent=True):
+    # The consent acknowledgement is part of the fixture now: the
+    # credentials commit requires it on the record at write time. The
+    # consent-less calls are the ones whose subject is the refusal.
+    if consent:
+        store.record_consent(ident, at=NOW)
     return store.store_credentials(
         ident,
         "https://models.example.invalid/api/v1",
@@ -396,6 +401,7 @@ def test_a_write_waits_for_a_held_file_lock_and_then_lands(tmp_path):
         done = threading.Event()
 
         def write():
+            store.record_consent("12345", at=NOW)
             store.store_credentials(
                 "12345",
                 "https://models.example.invalid/api/v1",
@@ -500,9 +506,22 @@ def test_credentials_without_consent_refuse_the_tenant_path(tmp_path):
     """The gate the settings page's acknowledgement feeds (D81 §7
     decision 3): credentials present, consent absent -- the tenant path
     is refused with the consent named, and the error is the store
-    error the runner turns into the review's named failure."""
+    error the runner turns into the review's named failure. The
+    consent-less record is seeded raw: the store's own commit refuses
+    consent-less credentials, so the API cannot build this state."""
     store = _store(tmp_path)
-    _credentials_record(store)
+    _seed_raw(
+        tmp_path,
+        "12345",
+        {
+            "base_url": "https://models.example.invalid/api/v1",
+            "key": TENANT_KEY,
+            "model": "openai/gpt-4o",
+            "daily_cap_usd": None,
+            "consent_acknowledged_at": None,
+            "updated_at": NOW.isoformat(),
+        },
+    )
     record = store.load("12345")
     assert record is not None
     assert record.consent_acknowledged_at is None
@@ -522,9 +541,11 @@ def test_the_sweep_deletes_records_past_the_window_and_keeps_fresh_ones(
     tmp_path,
 ):
     store = _store(tmp_path)
+    store.record_consent("11111", at=NOW)
     stale = store.store_credentials(
         "11111", "https://stale.example.invalid", TENANT_KEY, "openai/gpt-4o"
     )
+    store.record_consent("22222", at=NOW)
     fresh = store.store_credentials(
         "22222", "https://fresh.example.invalid", TENANT_KEY, "openai/gpt-4o"
     )
@@ -556,6 +577,7 @@ def test_the_sweep_skips_a_stray_or_temporary_file_and_still_sweeps(tmp_path):
     neither is deleted: this store removes only what it wrote. Both are
     named in the returned count."""
     store = _store(tmp_path)
+    store.record_consent("11111", at=NOW)
     stale = store.store_credentials(
         "11111", "https://stale.example.invalid", TENANT_KEY, "openai/gpt-4o"
     )
@@ -590,6 +612,7 @@ def test_the_sweep_skips_a_record_shaped_name_that_fails_the_ids_checks(
     are named and skipped like any other stray, never halting the sweep
     and never deleted."""
     store = _store(tmp_path)
+    store.record_consent("11111", at=NOW)
     stale = store.store_credentials(
         "11111", "https://stale.example.invalid", TENANT_KEY, "openai/gpt-4o"
     )
@@ -637,3 +660,41 @@ def test_the_retention_window_defaults_to_the_decided_setting():
     with pytest.raises(ValueError) as exc:
         retention_days({ENV_RETENTION_DAYS: "fortnight"})
     assert ENV_RETENTION_DAYS in str(exc.value)
+
+
+def test_a_lock_that_cannot_open_is_a_named_store_error(tmp_path, monkeypatch):
+    """A lock file that cannot be created or opened (a read-only state
+    volume) is a store that cannot be used: the named store error, not
+    a bare OSError (kills the let-it-propagate mutant, which crashed
+    the caller past its own handling)."""
+    import atlas_reviewer.installation_store as store_module
+
+    store = _store(tmp_path)
+
+    def no_dirs(*args, **kwargs):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(store_module, "make_private_dirs", no_dirs)
+    with pytest.raises(InstallationStoreError, match="cannot be locked"):
+        store.load("12345")
+    with pytest.raises(InstallationStoreError, match="cannot be locked"):
+        store.set_cap("12345", None)
+
+
+def test_credentials_without_consent_are_refused_at_commit(tmp_path):
+    """The consent acknowledgement must be on the record when the
+    credentials commit: a recordless installation is refused with the
+    named error and writes nothing (kills the trust-the-caller mutant,
+    which built the credential record with no consent on it -- the
+    window a concurrent `installation.deleted` delivery would have
+    left open)."""
+    store = _store(tmp_path)
+    with pytest.raises(InstallationStoreError, match="consent"):
+        store.store_credentials(
+            "12345",
+            "https://models.example.invalid/api/v1",
+            TENANT_KEY,
+            "openai/gpt-4o",
+        )
+    assert store.load("12345") is None
+    assert not (store_root(tmp_path) / "12345.json").exists()

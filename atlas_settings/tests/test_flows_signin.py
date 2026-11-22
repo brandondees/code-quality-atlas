@@ -9,18 +9,15 @@ surface's own flows (rotate, revoke, cap, delete, and the audit of
 every write) are this suite's second file; this one carries the CSRF
 refusals too."""
 
-import json
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from atlas_reviewer.installation_store import InstallationStore, InstallationStoreError
 from atlas_reviewer.tenant_provider import PricingUnknownError
-from atlas_settings.app import (
-    CSRF_REFUSED_PHRASE,
-    LOGIN_LIMIT,
-    WRITE_SESSION_LIMIT,
-)
+from atlas_settings.app import LOGIN_LIMIT, WRITE_SESSION_LIMIT
 from atlas_settings.audit import AUDIT_FILE_NAME, AuditLog
 from atlas_settings.checks import REDACTION_GUARD_TEXTS
 from atlas_settings.phrases import (
@@ -28,6 +25,7 @@ from atlas_settings.phrases import (
     CONSENT_REFUSED,
     CONSENT_STATEMENT,
     CONSENT_UNCHECKED,
+    CSRF_REFUSED,
     GATE_REFUSED,
     GITHUB_CHECK_FAILED,
     KEY_REFUSED,
@@ -378,7 +376,7 @@ def test_a_wrong_csrf_token_is_refused_and_changes_nothing(tmp_path: Path) -> No
         "1.2.3.4",
     )
     assert response.status == 403
-    assert CSRF_REFUSED_PHRASE in response.body.decode()
+    assert CSRF_REFUSED in response.body.decode()
     assert world.app.store.load("42") is None
 
 
@@ -395,7 +393,7 @@ def test_a_non_ascii_csrf_token_is_a_refusal_not_a_500(tmp_path: Path) -> None:
         "1.2.3.4",
     )
     assert response.status == 403
-    assert CSRF_REFUSED_PHRASE in response.body.decode()
+    assert CSRF_REFUSED in response.body.decode()
 
 
 def test_a_non_ascii_state_is_a_refusal_not_a_500(tmp_path: Path) -> None:
@@ -662,11 +660,20 @@ def test_credentials_save_end_to_end(tmp_path: Path) -> None:
     assert record.base_url == GOOD_ENDPOINT
     assert record.model == GOOD_MODEL
     assert record.has_credentials
-    # The audit line carries the write without any value.
+    # The audit line is metadata only, compared whole: the entry carries
+    # the action, the installation, the acting user and the time the
+    # fixture clock held — and nothing else, so a value that leaked into
+    # any field fails the equality (kills the key-shaped-substring
+    # mutant, which a substring check could not catch).
     entries = world.app.audit.entries("42", "store-credentials")
-    assert len(entries) == 1
-    assert json.dumps(FAKE_KEY) not in json.dumps(entries)
-    assert entries[0]["github_user_id"] == ADMIN_ID
+    assert entries == [
+        {
+            "at": world.clock.now().isoformat(),
+            "action": "store-credentials",
+            "installation_id": "42",
+            "github_user_id": ADMIN_ID,
+        }
+    ]
 
 
 def test_a_store_failure_names_itself_and_changes_nothing(tmp_path: Path) -> None:
@@ -912,3 +919,104 @@ def test_a_refused_credentials_submit_refills_the_typed_fields(
     assert 'value="https://api.example.com/v1"' in body
     assert 'value="vendor/not-in-the-table"' in body
     assert FAKE_KEY not in body
+
+
+def test_the_refusal_prefill_never_carries_url_userinfo(tmp_path: Path) -> None:
+    """Userinfo in the endpoint URL is a credential, and the refusal
+    prefill must not return one: the host side of the authority is
+    kept, the userinfo dropped — on the required-fields path and on the
+    egress refusal alike (kills the echo-the-userinfo mutant, which
+    returned the typed credential in the endpoint field)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+    csrf = world.csrf()
+    missing_model = world.app.post(
+        "/settings/credentials",
+        {
+            "csrf": csrf,
+            "base_url": "https://user:secret-pw@host.example/v1",
+            "key": FAKE_KEY,
+            "model": "",
+        },
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert missing_model.status == 400
+    assert "user:secret-pw" not in missing_model.body.decode()
+    assert 'value="https://host.example/v1"' in missing_model.body.decode()
+    refused_endpoint = world.app.post(
+        "/settings/credentials",
+        {
+            "csrf": csrf,
+            "base_url": "https://user:secret-pw@127.0.0.1:9/v1",
+            "key": FAKE_KEY,
+            "model": GOOD_MODEL,
+        },
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert refused_endpoint.status == 400
+    assert "the endpoint was refused" in refused_endpoint.body.decode()
+    assert "user:secret-pw" not in refused_endpoint.body.decode()
+    assert 'value="https://127.0.0.1:9/v1"' in refused_endpoint.body.decode()
+
+
+def test_a_read_only_state_volume_is_the_store_unavailable_refusal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A state volume the lock file cannot be created or opened on (a
+    read-only mount) is a store that cannot be used: the named store
+    error is what the store raises and the settings read answers with
+    the store-unavailable refusal — not a crash past it (kills the
+    let-the-OSError-propagate mutant, which 500'd the read)."""
+    import atlas_reviewer.installation_store as store_module
+
+    world = build_world(tmp_path)
+    sign_in(world)
+
+    def no_dirs(*args: object, **kwargs: object) -> None:
+        raise OSError("read-only file system")
+
+    # The module global, not an instance attribute: the lock path
+    # resolves `make_private_dirs` through the store module's namespace.
+    monkeypatch.setattr(store_module, "make_private_dirs", no_dirs)
+    refused = world.app.get("/settings", "", world.cookie, "1.2.3.4")
+    assert refused.status == 503
+    assert STORE_REFUSED_PREFIX in refused.body.decode()
+    assert "cannot be locked" in refused.body.decode()
+
+
+def test_a_store_write_error_keeps_the_typed_endpoint_and_model(
+    tmp_path: Path,
+) -> None:
+    """A store that can be read but refuses the credentials write keeps
+    the typed endpoint and model in the refusal's form — only the key
+    is re-typed (kills the drop-the-store-prefill mutant, which blanked
+    the form on the store-refusal path)."""
+    world = build_world(tmp_path)
+    sign_in(world)
+    world.app.post(
+        "/settings/consent",
+        {"csrf": world.csrf(), "acknowledge": "1"},
+        world.cookie,
+        "1.2.3.4",
+    )
+
+    def explode(*args: object, **kwargs: object) -> object:
+        raise InstallationStoreError("the write did not land")
+
+    world.app.store.store_credentials = explode  # type: ignore[method-assign]
+    response = world.app.post(
+        "/settings/credentials", _credentials_form(world), world.cookie, "1.2.3.4"
+    )
+    assert response.status == 503
+    assert STORE_REFUSED_PREFIX in response.body.decode()
+    assert 'value="https://api.example.com/v1"' in response.body.decode()
+    assert FAKE_KEY not in response.body.decode()
