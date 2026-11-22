@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import socket
 import threading
+import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, cast
+from socket import SocketIO
+from typing import Any, Literal, cast
 
 from atlas_settings.app import (
     MAX_BODY_BYTES,
@@ -41,10 +44,68 @@ _SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
     ("Cache-Control", "no-store"),
     ("X-Content-Type-Options", "nosniff"),
 )
-# The bounded server: how many requests are handled at once, and how
-# long one request may take to arrive before its connection is closed.
+# The bounded server: how many requests are handled at once, how long
+# one read may block, and how long a whole request may take.
 _MAX_CONCURRENT_REQUESTS = 20
 _REQUEST_TIMEOUT_S = 30.0
+# The whole-request budget: the request line, the headers and the
+# bounded 8 KiB body must all have arrived within this much time,
+# measured on the monotonic clock from the moment the handler picked
+# the connection up. A real request completes in well under a second
+# on any honest link; sixty seconds is twice the per-recv timeout and
+# bounds a slow-drip client's slot hold to about a minute — the
+# per-recv timeout alone cannot do that, because a client sending one
+# byte every 29 seconds resets it on every byte and holds a handler
+# slot forever.
+_REQUEST_DEADLINE_S = 60.0
+
+
+class _DeadlineBoundSocket:
+    """The request socket under the whole-request deadline: every
+    read's timeout is the smaller of the per-recv timeout and what
+    remains of the request's budget on the monotonic clock, and a read
+    attempted past the budget raises at once. This is what turns the
+    per-recv timeout — which a one-byte-every-29-seconds drip resets
+    forever — into a bound on the whole request. Everything else
+    delegates to the real socket; the reads are intercepted here
+    because `makefile` must build its streams over this object, so the
+    buffered request-line, header and body reads all drain the same
+    budget."""
+
+    def __init__(
+        self,
+        sock: socket.socket,
+        clock: Callable[[], float],
+        deadline_s: float,
+        per_recv_s: float,
+    ) -> None:
+        self._sock = sock
+        self._clock = clock
+        self._deadline_s = deadline_s
+        self._per_recv_s = per_recv_s
+        self._started = clock()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sock, name)
+
+    def makefile(self, /, mode: str, buffering: int | None = None) -> Any:
+        # The stream is built over this object, not the real socket, so
+        # the buffered reads drain the same budget; `SocketIO` takes the
+        # mode only — the buffering is the caller's `BufferedReader`
+        # wrapper's business. The casts: `SocketIO` is typed against the
+        # real socket, and this object satisfies its read protocol
+        # dynamically (the runtime proof is the socket-level suite).
+        return SocketIO(
+            cast("socket.socket", self),
+            cast("Literal['rb', 'wb', 'rwb']", mode),
+        )
+
+    def recv_into(self, buffer: Any, nbytes: int = 0, flags: int = 0) -> int:
+        remaining = self._deadline_s - (self._clock() - self._started)
+        if remaining <= 0:
+            raise TimeoutError("the request outlived its whole-request deadline")
+        self._sock.settimeout(min(remaining, self._per_recv_s))
+        return self._sock.recv_into(buffer, nbytes, flags)
 
 
 class SettingsServer(ThreadingHTTPServer):
@@ -117,11 +178,27 @@ class SettingsServer(ThreadingHTTPServer):
 
 
 class SettingsHandler(BaseHTTPRequestHandler):
-    """One request. The `app` and `log_sink` are class attributes set by
-    `serve`; the handler holds no per-request state of its own."""
+    """One request. The `app`, `log_sink`, and the deadline settings are
+    class attributes set by `serve`; the handler holds no per-request
+    state of its own."""
 
     app: SettingsApp
     log_sink: Any  # Callable[[str], None]
+    _request_deadline_s: float = _REQUEST_DEADLINE_S
+    _deadline_clock = staticmethod(time.monotonic)
+
+    def setup(self) -> None:
+        # The request socket is wrapped so every read's timeout is the
+        # smaller of the per-recv timeout and what remains of the
+        # whole-request budget: the per-recv timeout bounds one read,
+        # not the request, and a slow drip resets it on every byte.
+        self.request = _DeadlineBoundSocket(
+            self.request,
+            self._deadline_clock,
+            self._request_deadline_s,
+            self.timeout if self.timeout is not None else _REQUEST_TIMEOUT_S,
+        )
+        super().setup()
 
     def do_GET(self) -> None:
         self._handle("GET")
@@ -132,6 +209,15 @@ class SettingsHandler(BaseHTTPRequestHandler):
     def _handle(self, method: str) -> None:
         try:
             response = self._dispatch(method)
+        except TimeoutError:
+            # The whole-request budget lapsed mid-request (the body
+            # read is where a drip that got past the request line dies):
+            # the connection is closed and the slot released, and
+            # nothing is answered, because a client this slow is not a
+            # request but a connection test.
+            self.close_connection = True
+            self.log_error("the request deadline lapsed")
+            return
         except Exception as exc:  # noqa: BLE001 -- a bug must not echo values
             self.log_sink(f"internal error handling {method}: {type(exc).__name__}")
             # The one bare inline body in the layer, deliberately: the
@@ -181,8 +267,32 @@ class SettingsHandler(BaseHTTPRequestHandler):
             return Response(
                 413, b"<html><body><p>request body too large</p></body></html>"
             )
-        self._body = self.rfile.read(length)
+        body = self._read_exactly(length)
+        if body is None:
+            # The body ended before its promised length: a malformed
+            # request, and never a form to parse — a truncated body must
+            # not be processed as if it were whole.
+            return Response(400, b"<html><body><p>bad request</p></body></html>")
+        self._body = body
         return None
+
+    def _read_exactly(self, length: int) -> bytes | None:
+        """Exactly `length` bytes, or `None` when the body ended short.
+        `BufferedReader.read` on a timeout-mode socket returns what one
+        raw read produced, so a single `read(length)` can return a
+        truncated body — and a truncated form must never be parsed as
+        if it were whole. The loop is also what makes the body drip
+        hold the slot: every raw read drains the same whole-request
+        budget, and the read that outlives it raises."""
+        chunks: list[bytes] = []
+        got = 0
+        while got < length:
+            chunk = self.rfile.read(length - got)
+            if not chunk:
+                return None
+            chunks.append(chunk)
+            got += len(chunk)
+        return b"".join(chunks)
 
     def _send(self, response: Response) -> None:
         self.send_response(response.status)
@@ -253,16 +363,21 @@ def serve(
     *,
     max_concurrent: int | None = None,
     request_timeout_s: float | None = None,
+    request_deadline_s: float | None = None,
+    deadline_clock: Callable[[], float] | None = None,
 ) -> ThreadingHTTPServer:
     """The page's server: threads per request, bounded — at most
     `_MAX_CONCURRENT_REQUESTS` requests are handled at once, and a
     connection arriving while every handler is busy is answered 503 and
     closed rather than queued without bound (excess capacity is the
     socket backlog's). Each request's socket read is bounded by
-    `_REQUEST_TIMEOUT_S`, so a client that opens a connection and never
-    finishes its request line cannot hold a handler forever. The page's
-    own state is lock-guarded; the store's per-installation `flock`
-    serializes against the review service's writes."""
+    `_REQUEST_TIMEOUT_S`, and the whole request — line, headers, body —
+    by `_REQUEST_DEADLINE_S` on the monotonic clock: the per-recv
+    timeout alone is reset by every byte a slow drip sends, so only the
+    total budget bounds how long one connection can hold a handler
+    slot. The page's own state is lock-guarded; the store's
+    per-installation `flock` serializes against the review service's
+    writes."""
 
     class Bound(SettingsHandler):
         pass
@@ -270,6 +385,14 @@ def serve(
     Bound.timeout = (
         _REQUEST_TIMEOUT_S if request_timeout_s is None else request_timeout_s
     )
+    Bound._request_deadline_s = (
+        _REQUEST_DEADLINE_S if request_deadline_s is None else request_deadline_s
+    )
+    if deadline_clock is not None:
+        # staticmethod, as with log_sink: a plain function as a class
+        # attribute would become a method, and its first argument would
+        # be the handler.
+        Bound._deadline_clock = staticmethod(deadline_clock)
     Bound.app = app
     # staticmethod: a plain function assigned to a class attribute
     # becomes a method, and the sink's first argument would be the

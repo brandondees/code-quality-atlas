@@ -8,6 +8,7 @@ and one full flow served over a real loopback socket."""
 import http.client
 import socket
 import threading
+import time
 from pathlib import Path
 from typing import cast
 from urllib.parse import parse_qs, urlsplit
@@ -315,6 +316,228 @@ def test_the_busy_refusal_survives_a_client_that_already_left() -> None:
     server = object.__new__(SettingsServer)
     SettingsServer._refuse_busy(server, cast("socket.socket", DeadPeer()))
     assert closed == [True]
+
+
+class _FastClock:
+    """A monotonic clock that runs faster than real time, advanced from
+    its own thread: the drip tests' fake clock — the budget lapses in
+    about a second of real time without any real sleep at the timeout's
+    scale."""
+
+    def __init__(self, fake_seconds_per_real_second: float = 10.0) -> None:
+        self.now = 0.0
+        self._rate = fake_seconds_per_real_second
+        self._stop = threading.Event()
+
+    def __call__(self) -> float:
+        return self.now
+
+    def start(self) -> None:
+        def run() -> None:
+            while not self._stop.wait(0.05):
+                self.now += self._rate * 0.05
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+def test_a_body_shorter_than_its_length_is_a_400(tmp_path: Path) -> None:
+    """A body that ends before its Content-Length is a malformed
+    request, answered 400 — never parsed as a whole form (kills the
+    process-the-truncation mutant, under which the single-read body
+    returned early and the app acted on a cut-mid-field form)."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        sock = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        sock.sendall(
+            b"POST /settings/cap HTTP/1.0\r\nHost: x\r\n"
+            b"Content-Type: application/x-www-form-urlencoded\r\n"
+            b"Content-Length: 8\r\n\r\n"
+            b"ab"
+        )
+        sock.shutdown(socket.SHUT_WR)
+        raw = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+        assert raw.startswith(b"HTTP/1.0 400 "), raw[:60]
+        assert b"bad request" in raw
+        assert world.app.store.load("42") is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_slow_drip_cannot_hold_a_slot_past_the_deadline(tmp_path: Path) -> None:
+    """The whole-request budget: a client dripping one byte at a time,
+    every gap far inside the per-recv timeout, loses its connection when
+    the monotonic budget lapses — the per-recv timeout alone would never
+    fire — and its slot is released, so a fresh client is served (kills
+    the drop-the-deadline mutant, under which the dripping client holds
+    the slot and the fresh client sees nothing but 503s)."""
+    world = build_world(tmp_path)
+    clock = _FastClock()
+    server = serve(
+        world.app,
+        "127.0.0.1",
+        0,
+        lambda line: world.logs.append(line),
+        request_timeout_s=100.0,
+        request_deadline_s=5.0,
+        deadline_clock=clock,
+        max_concurrent=1,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    clock.start()
+    try:
+        drip = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        drip.sendall(b"P")  # one request-line byte; the line never completes
+        drip.settimeout(10)
+        closed = False
+        answered: list[bytes] = []
+        for _ in range(240):  # up to ~12 real seconds of dripping
+            time.sleep(0.05)
+            drip.settimeout(0.2)
+            try:
+                data = drip.recv(64)
+            except TimeoutError:
+                data = None  # no answer yet; keep dripping
+            if data == b"":
+                closed = True  # the server closed its side, nothing sent
+                break
+            if data:
+                answered.append(data)
+                break  # the server answered a client that never finished
+            drip.settimeout(10)
+            try:
+                drip.sendall(b"x")  # well inside the 100s per-recv timeout
+            except OSError:
+                # A reset without a FIN we observed: probe once more for
+                # the EOF — a clean cut-off ends with one.
+                drip.settimeout(0.5)
+                try:
+                    closed = drip.recv(64) == b""
+                except (TimeoutError, OSError):
+                    closed = False
+                break
+        assert closed and not answered, (
+            f"the drip ended wrong: closed={closed}, answered={answered!r}"
+        )
+        drip.close()
+        # The slot is free again: with a single slot, a fresh client is
+        # served only once the drip's handler has ended. The 503s before
+        # that are the shedding rule working while the drip still held.
+        served = None
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                response = _get(server, "/")
+                served = response.status
+                if served == 200:
+                    break
+            except OSError:
+                served = None
+            time.sleep(0.1)
+        assert served == 200, f"the fresh client was never served (last: {served})"
+    finally:
+        clock.stop()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_a_body_that_drips_past_the_deadline_is_cut_off(tmp_path: Path) -> None:
+    """A drip that got past the request line and headers dies in the
+    body read: the budget covers the body too, the connection is closed
+    with nothing answered — not even the generic 500, which would treat
+    a pacing attack as an app bug — and the slot is freed (kills the
+    answer-the-lapse mutant, which sent the 500)."""
+    world = build_world(tmp_path)
+    clock = _FastClock()
+    server = serve(
+        world.app,
+        "127.0.0.1",
+        0,
+        lambda line: world.logs.append(line),
+        request_timeout_s=100.0,
+        request_deadline_s=5.0,
+        deadline_clock=clock,
+        max_concurrent=1,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    clock.start()
+    try:
+        drip = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        # The headers arrive whole and inside the budget; the body is
+        # the part that drips.
+        drip.sendall(
+            b"POST /settings/cap HTTP/1.0\r\nHost: x\r\n"
+            b"Content-Type: application/x-www-form-urlencoded\r\n"
+            b"Content-Length: 64\r\n\r\n"
+        )
+        drip.settimeout(10)
+        closed = False
+        answered: list[bytes] = []
+        for _ in range(240):
+            time.sleep(0.05)
+            drip.settimeout(0.2)
+            try:
+                data = drip.recv(64)
+            except TimeoutError:
+                data = None  # no answer yet; keep dripping
+            if data == b"":
+                closed = True  # closed with nothing answered
+                break
+            if data:
+                answered.append(data)
+                break  # the budget lapse was answered — the mutant's shape
+            drip.settimeout(10)
+            try:
+                drip.sendall(b"x")
+            except OSError:
+                drip.settimeout(0.5)
+                try:
+                    closed = drip.recv(64) == b""
+                except (TimeoutError, OSError):
+                    closed = False
+                break
+        assert closed and not answered, (
+            f"the body drip ended wrong: closed={closed}, answered={answered!r}"
+        )
+        drip.close()
+        served = None
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            try:
+                response = _get(server, "/")
+                served = response.status
+                if served == 200:
+                    break
+            except OSError:
+                served = None
+            time.sleep(0.1)
+        assert served == 200, f"the fresh client was never served (last: {served})"
+    finally:
+        clock.stop()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_an_oversized_body_is_refused(tmp_path: Path) -> None:
