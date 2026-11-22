@@ -98,8 +98,9 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m pytest tests/ -q --cov=tooling   # test suite + coverage gate (94% floor)
 python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer   # reviewer service suite, own coverage run
+python -m pytest atlas_settings/tests -q --cov=atlas_settings   # settings page suite, own coverage run
 ruff check . && ruff format --check .   # lint + format
-mypy                             # type-check tooling/ + atlas_reviewer/ ([tool.mypy] in pyproject.toml)
+mypy                             # type-check tooling/ + atlas_reviewer/ + atlas_settings/ ([tool.mypy] in pyproject.toml)
 python -m tooling.cli drift     # skills in sync with their research sources?
 ```
 
