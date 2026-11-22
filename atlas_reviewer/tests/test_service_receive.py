@@ -5397,6 +5397,7 @@ def test_an_installation_deleted_delivery_deletes_the_stored_state(tmp_path):
     installation's stored state -- credentials, cap and consent."""
 
     store = _installation_store(tmp_path)
+    store.record_consent(str(_INSTALLATION))
     store.store_credentials(
         str(_INSTALLATION),
         "https://models.example.invalid/api/v1",
@@ -5507,6 +5508,7 @@ def test_the_tenant_resolver_answers_the_stored_credentials_with_consent(tmp_pat
     from atlas_reviewer.service import _tenant_credentials_source
 
     store = _installation_store(tmp_path)
+    store.record_consent(str(_INSTALLATION))
     store.store_credentials(
         str(_INSTALLATION),
         "https://models.example.invalid/api/v1",
@@ -5528,11 +5530,23 @@ def test_the_tenant_resolver_refuses_credentials_without_consent(tmp_path):
     from atlas_reviewer.service import _tenant_credentials_source
 
     store = _installation_store(tmp_path)
-    store.store_credentials(
+    # A credentials-without-consent record cannot be built through the
+    # store's own API any more -- the commit refuses it -- so the
+    # record is written through the store's document shape directly,
+    # the way an old record from before the rule would look.
+    from atlas_reviewer.installation_store import InstallationRecord
+
+    store._write_record(
         str(_INSTALLATION),
-        "https://models.example.invalid/api/v1",
-        _TENANT_KEY,
-        "openai/gpt-4o",
+        lambda _current: InstallationRecord(
+            str(_INSTALLATION),
+            "https://models.example.invalid/api/v1",
+            _TENANT_KEY,
+            "openai/gpt-4o",
+            None,
+            None,
+            datetime.now(UTC),
+        ),
     )
     source = _tenant_credentials_source(
         store, {"ATLAS_GITHUB_INSTALLATION_ID": str(_INSTALLATION)}
@@ -5618,13 +5632,13 @@ def test_the_parent_record_loses_a_child_stderr_tenant_key(tmp_path, monkeypatch
         "PATH": "/usr/bin",
     }
     store = InstallationStore.open(tmp_path, env)
+    store.record_consent(str(_INSTALLATION))
     store.store_credentials(
         str(_INSTALLATION),
         "https://models.example.invalid/api/v1",
         tenant_key,
         "openai/gpt-4o",
     )
-    store.record_consent(str(_INSTALLATION))
 
     class _Proc:
         def __init__(self) -> None:
@@ -5699,6 +5713,7 @@ def test_the_sweep_boot_log_names_the_skipped_strays(tmp_path):
     from atlas_reviewer.service import _retention_sweep
 
     store = _installation_store(tmp_path)
+    store.record_consent(str(_INSTALLATION))
     record = store.store_credentials(
         str(_INSTALLATION),
         "https://models.example.invalid/api/v1",
