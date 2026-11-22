@@ -965,6 +965,22 @@ def test_the_refusal_prefill_never_carries_url_userinfo(tmp_path: Path) -> None:
     assert "the endpoint was refused" in refused_endpoint.body.decode()
     assert "user:secret-pw" not in refused_endpoint.body.decode()
     assert 'value="https://127.0.0.1:9/v1"' in refused_endpoint.body.decode()
+    # A URL the parser cannot read at all is not echoed either: the
+    # prefill is empty and the refusal's phrase carries the problem.
+    unparseable = world.app.post(
+        "/settings/credentials",
+        {
+            "csrf": csrf,
+            "base_url": "https://[::1/v1",
+            "key": FAKE_KEY,
+            "model": "",
+        },
+        world.cookie,
+        "1.2.3.4",
+    )
+    assert unparseable.status == 400
+    assert "[::1" not in unparseable.body.decode()
+    assert 'value=""' in unparseable.body.decode()
 
 
 def test_a_read_only_state_volume_is_the_store_unavailable_refusal(
