@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from cryptography.fernet import Fernet
 
+from atlas_reviewer.egress import Pinned
 from atlas_settings.config import ENV_APP_ID
 
 FAKE_KEY = "sk-fake-key-0123456789abcdef-not-real"
@@ -67,3 +68,12 @@ class FakeClock:
     def advance(self, seconds: float) -> None:
         self.moment = self.moment + timedelta(seconds=seconds)
         self._mono += seconds
+
+
+def default_resolve(host: str, port: int) -> Pinned:
+    """The tests' default resolver: any host passes, shaped exactly like
+    the real guard's answer — so the hostile-endpoint tests that pass
+    the *real* resolver are the ones proving refusals."""
+    import socket
+
+    return Pinned(socket.AF_INET, (f"93.0.{port % 250}.{port % 250}", port))
