@@ -7,16 +7,20 @@ Four variables are new to this page — `ATLAS_SETTINGS_GITHUB_CLIENT_ID`,
 them is missing, naming every missing variable at once. The App
 credentials the page's GitHub reads need (`ATLAS_GITHUB_APP_ID`,
 `ATLAS_GITHUB_APP_PRIVATE_KEY`, `ATLAS_GITHUB_INSTALLATION_ID`) and the
-store's key (`ATLAS_INSTALLATION_STORE_KEY`) are part A's variables the
-deployment already carries; the page reads them from the same
-environment and refuses to start without them too — a page that cannot
-verify the visitor or write the store must not start at all. The
-allowlist (`ATLAS_REVIEW_REPOS`) is the fifth part A variable the page
-reads: it is parsed exactly the way the service parses it, default
-included, and is not a startup gate — the invite-only gate judges the
-installation's coverage, not the variable's presence. None of these is
-set in any deployment yet; the README's operator section documents each
-one.
+store's key (`ATLAS_INSTALLATION_STORE_KEY`) are the service's
+variables: they exist in the service's environment shape, and none of
+them is set in any deployment yet — the page shares that environment
+and refuses to start without them, because a page that cannot verify
+the visitor or write the store must not start at all. The store key
+must also be a valid Fernet key: a malformed one would start a page
+that then refuses every write, the late failure this gate exists to
+prevent. The allowlist (`ATLAS_REVIEW_REPOS`) is the service variable
+the page parses exactly the way the service parses it, default
+included; it is not a startup gate — the invite-only gate judges the
+installation's coverage, not the variable's presence. The README's
+operator section, added with this stack's final layer, documents each
+variable's purpose, required-or-optional status, and default; nothing
+here is set in any deployment yet.
 """
 
 from __future__ import annotations
@@ -29,17 +33,23 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from cryptography.fernet import Fernet
+
+from atlas_reviewer.installation_store import ENV_STORE_KEY
 from atlas_settings.phrases import CAP_REFUSED
 
 ENV_CLIENT_ID = "ATLAS_SETTINGS_GITHUB_CLIENT_ID"
 ENV_CLIENT_SECRET = "ATLAS_SETTINGS_GITHUB_CLIENT_SECRET"
 ENV_SESSION_KEY = "ATLAS_SETTINGS_SESSION_KEY"
 ENV_BASE_URL = "ATLAS_SETTINGS_BASE_URL"
-ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
-ENV_APP_KEY = "ATLAS_GITHUB_APP_PRIVATE_KEY"
-ENV_INSTALLATION = "ATLAS_GITHUB_INSTALLATION_ID"
-ENV_STORE_KEY = "ATLAS_INSTALLATION_STORE_KEY"
-ENV_STATE_DIR = "ATLAS_REVIEWER_STATE_DIR"
+ENV_APP_ID = "ATLAS_GITHUB_APP_ID"  # == atlas_reviewer.cli.ENV_APP_ID; pinned by test
+ENV_APP_KEY = (
+    "ATLAS_GITHUB_APP_PRIVATE_KEY"  # == atlas_reviewer.cli.ENV_APP_KEY; pinned by test
+)
+ENV_INSTALLATION = "ATLAS_GITHUB_INSTALLATION_ID"  # == atlas_reviewer.cli.ENV_INSTALLATION_ID; pinned by test
+ENV_STATE_DIR = (
+    "ATLAS_REVIEWER_STATE_DIR"  # == atlas_reviewer.cli.ENV_STATE_DIR; pinned by test
+)
 ENV_REPOS = "ATLAS_REVIEW_REPOS"
 DEFAULT_REPO = "brandondees/code-quality-atlas"
 DEFAULT_STATE_DIR = ".atlas-reviewer-state"
@@ -54,6 +64,14 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _ASCII_DIGITS = re.compile(r"[0-9]+")
 _MAX_ID_DIGITS = 64
 _MIN_SESSION_KEY_CHARS = 32
+# The cap literal's shape: at most 7 integer digits (a length prefilter
+# only — `MAX_CAP_USD` is the actual limit) and at most 2 cent places.
+_CAP_RE = re.compile(r"\A[0-9]{1,7}(\.[0-9]{1,2})?\Z")
+
+
+class CapRejectedError(ValueError):
+    """The submitted daily cap is not a positive dollar amount within
+    the bounds; the fixed phrase is the whole message."""
 
 
 class SettingsConfigError(RuntimeError):
@@ -117,6 +135,16 @@ def settings_config(env: Mapping[str, str] | None = None) -> SettingsConfig:
             "the settings page refuses to start; these environment "
             "variables must be set: " + ", ".join(missing)
         )
+    store_key = environ[ENV_STORE_KEY].strip()
+    try:
+        Fernet(store_key.encode("ascii"))
+    except ValueError:
+        # Building a Fernet from bytes raises ValueError (binascii.Error
+        # among them; UnicodeEncodeError is its subclass), the same shape
+        # the store's own open() check catches.
+        raise SettingsConfigError(
+            f"{ENV_STORE_KEY} must be a valid Fernet key"
+        ) from None
     base_url = environ[ENV_BASE_URL].strip()
     _check_base_url(base_url)
     installation = environ[ENV_INSTALLATION].strip()
@@ -134,9 +162,14 @@ def settings_config(env: Mapping[str, str] | None = None) -> SettingsConfig:
             "deployment reviews for"
         )
     app_id = environ[ENV_APP_ID].strip()
-    if _ASCII_DIGITS.fullmatch(app_id) is None or int(app_id) < 1:
+    if (
+        _ASCII_DIGITS.fullmatch(app_id) is None
+        or len(app_id) > _MAX_ID_DIGITS
+        or int(app_id) < 1
+    ):
         raise SettingsConfigError(
-            f"{ENV_APP_ID} must be the App's numeric id, a positive integer"
+            f"{ENV_APP_ID} must be the App's numeric id, a positive "
+            f"integer of at most {_MAX_ID_DIGITS} ASCII digits"
         )
     session_key = environ[ENV_SESSION_KEY].strip()
     if len(session_key) < _MIN_SESSION_KEY_CHARS:
@@ -148,7 +181,7 @@ def settings_config(env: Mapping[str, str] | None = None) -> SettingsConfig:
         client_secret=environ[ENV_CLIENT_SECRET].strip(),
         session_key=session_key,
         base_url=base_url,
-        state_dir=Path(environ.get(ENV_STATE_DIR, "") or DEFAULT_STATE_DIR),
+        state_dir=Path(environ.get(ENV_STATE_DIR, DEFAULT_STATE_DIR)),
         installation_id=installation,
         app_id=app_id,
         app_private_key=environ[ENV_APP_KEY],
@@ -171,7 +204,11 @@ def _check_base_url(base_url: str) -> None:
     refused, loopback or not: the deployed page is behind https."""
     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in base_url):
         raise SettingsConfigError(f"{ENV_BASE_URL} must not carry control characters")
-    parts = urlsplit(base_url)
+    try:
+        parts = urlsplit(base_url)
+        _ = parts.port  # a non-numeric or out-of-range port raises here too
+    except ValueError:
+        raise SettingsConfigError(f"{ENV_BASE_URL} is not a valid URL") from None
     if not (
         parts.scheme == "https"
         or (parts.scheme == "http" and (parts.hostname or "") in _LOOPBACK_HOSTS)
@@ -203,11 +240,3 @@ def parse_daily_cap(raw: str) -> Decimal | None:
     if cap <= 0 or cap > MAX_CAP_USD:
         raise CapRejectedError(CAP_REFUSED)
     return cap
-
-
-class CapRejectedError(ValueError):
-    """The submitted daily cap is not a positive dollar amount within
-    the bounds; the fixed phrase is the whole message."""
-
-
-_CAP_RE = re.compile(r"\A[0-9]{1,7}(\.[0-9]{1,2})?\Z")

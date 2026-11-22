@@ -243,6 +243,102 @@ def test_control_characters_in_the_base_url_are_refused() -> None:
         settings_config(env)
 
 
+def test_the_duplicated_constants_match_their_part_a_sources() -> None:
+    """The page is a separate process and keeps local copies of the
+    service's env-var names and defaults — pinned here to their part A
+    sources, so a rename on either side fails this test. The one
+    deliberate exception is ENV_STORE_KEY, which is imported from part
+    A's store module itself (the module this page already depends on;
+    no new coupling), recorded in D90's bot-findings update."""
+    from atlas_reviewer import cli, service
+    from atlas_settings import config
+
+    assert config.ENV_APP_ID == cli.ENV_APP_ID
+    assert config.ENV_APP_KEY == cli.ENV_APP_KEY
+    assert config.ENV_INSTALLATION == cli.ENV_INSTALLATION_ID
+    assert config.ENV_STATE_DIR == cli.ENV_STATE_DIR
+    assert config.DEFAULT_STATE_DIR == str(cli.DEFAULT_STATE_DIR)
+    assert config.DEFAULT_REPO == service.DEFAULT_REPO
+
+
+def test_the_state_dir_resolves_the_way_the_service_resolves_it() -> None:
+    from atlas_reviewer.service import config_from_env
+
+    ours_env = dict(BASE_ENV)
+    # An explicitly blank variable resolves to the current directory on
+    # both sides — the service's own semantics, copied exactly.
+    ours_env["ATLAS_REVIEWER_STATE_DIR"] = ""
+    ours = settings_config(ours_env)
+    theirs = config_from_env(
+        {
+            "ATLAS_SERVICE_PORT": "8080",
+            "ATLAS_GITHUB_WEBHOOK_SECRET": "0123456789abcdef",
+            "ATLAS_ALLOW_LIVE_INFERENCE": "1",
+            "ATLAS_REVIEWER_STATE_DIR": "",
+        }
+    )
+    assert ours.state_dir == Path("")
+    assert ours.state_dir == theirs.state_dir
+    # Unset: the shared default, the same value on both sides.
+    del ours_env["ATLAS_REVIEWER_STATE_DIR"]
+    ours = settings_config(ours_env)
+    theirs = config_from_env(
+        {
+            "ATLAS_SERVICE_PORT": "8080",
+            "ATLAS_GITHUB_WEBHOOK_SECRET": "0123456789abcdef",
+            "ATLAS_ALLOW_LIVE_INFERENCE": "1",
+        }
+    )
+    assert ours.state_dir == Path(".atlas-reviewer-state")
+    assert ours.state_dir == theirs.state_dir
+
+
+def test_a_malformed_store_key_refuses_at_startup() -> None:
+    env = dict(BASE_ENV)
+    env[ENV_STORE_KEY] = "not-a-fernet-key"
+    with pytest.raises(SettingsConfigError, match="valid Fernet key") as excinfo:
+        settings_config(env)
+    assert "not-a-fernet-key" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://[abc", "https://[::1", "https://host:abc"],
+)
+def test_a_malformed_base_url_refuses_with_the_named_error(url: str) -> None:
+    env = dict(BASE_ENV)
+    env["ATLAS_SETTINGS_BASE_URL"] = url
+    with pytest.raises(SettingsConfigError, match="is not a valid URL") as excinfo:
+        settings_config(env)
+    assert url not in str(excinfo.value)
+
+
+def test_an_over_long_app_id_is_refused() -> None:
+    env = dict(BASE_ENV)
+    env["ATLAS_GITHUB_APP_ID"] = "1" * 65
+    with pytest.raises(SettingsConfigError, match="64 ASCII digits"):
+        settings_config(env)
+    env["ATLAS_GITHUB_APP_ID"] = "1" * 64
+    assert settings_config(env).app_id == "1" * 64
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1:8090", "http://localhost:8090", "http://[::1]:8090"],
+)
+def test_each_loopback_host_takes_the_local_http_escape(url: str) -> None:
+    env = dict(BASE_ENV)
+    env["ATLAS_SETTINGS_BASE_URL"] = url
+    assert settings_config(env).base_url == url
+
+
+def test_a_lookalike_host_is_not_the_loopback_escape() -> None:
+    env = dict(BASE_ENV)
+    env["ATLAS_SETTINGS_BASE_URL"] = "http://localhost.evil.example"
+    with pytest.raises(SettingsConfigError, match="https://"):
+        settings_config(env)
+
+
 def test_the_allowlist_parses_the_way_the_service_parses_it() -> None:
     from atlas_reviewer.service import config_from_env
 
@@ -281,24 +377,30 @@ def test_the_allowlist_parses_the_way_the_service_parses_it() -> None:
 def test_every_long_public_phrase_is_in_the_redaction_guard() -> None:
     from atlas_settings.config import MAX_CAP_USD
 
-    public_strings = [
-        value
-        for name, value in vars(phrases).items()
-        if not name.startswith("_")
-        and isinstance(value, str)
-        and name not in ("DELETE_CONFIRM_WORD",)
-    ]
+    # One enumeration for the guard and the loop: a broken helper fails
+    # the non-empty assert instead of silently checking nothing (kills
+    # the broken-filter mutant, which left the test green over an empty
+    # loop).
+    public_strings = _public_phrases(phrases)
     assert public_strings, "the phrases module exposes its constants"
-    for phrase in public_strings:
-        if len(phrase) > 7:
-            assert phrase in phrases.REDACTION_GUARD_TEXTS, name_of(phrase)
+    for name, phrase in public_strings:
+        if len(phrase) >= _REDACTION_MIN_CHARS:
+            assert phrase in phrases.REDACTION_GUARD_TEXTS, name
     # The cap phrase names the config bound; the two cannot drift.
     assert "$10000" in CAP_REFUSED
     assert MAX_CAP_USD == Decimal(10000)
 
 
-def name_of(phrase: str) -> str:
-    for name, value in vars(phrases).items():
-        if value is phrase:
-            return name
-    return "?"
+_REDACTION_MIN_CHARS = 8
+"""The redaction register's floor: a phrase shorter than this can never
+be registered for scrubbing, so it needs no guard entry."""
+
+
+def _public_phrases(module: object) -> list[tuple[str, str]]:
+    return [
+        (name, value)
+        for name, value in vars(module).items()
+        if not name.startswith("_")
+        and isinstance(value, str)
+        and name != "DELETE_CONFIRM_WORD"
+    ]
