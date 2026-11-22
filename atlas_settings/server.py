@@ -11,6 +11,7 @@ response or a log."""
 
 from __future__ import annotations
 
+import io
 import socket
 import threading
 import time
@@ -69,8 +70,9 @@ class _DeadlineBoundSocket:
     forever — into a bound on the whole request. Everything else
     delegates to the real socket; the reads are intercepted here
     because `makefile` must build its streams over this object, so the
-    buffered request-line, header and body reads all drain the same
-    budget."""
+    handler's reads — its `rfile` is a `BufferedReader` over this
+    object's raw stream, exactly as it is over the bare socket — all
+    drain the same budget."""
 
     def __init__(
         self,
@@ -89,16 +91,28 @@ class _DeadlineBoundSocket:
         return getattr(self._sock, name)
 
     def makefile(self, /, mode: str, buffering: int | None = None) -> Any:
-        # The stream is built over this object, not the real socket, so
-        # the buffered reads drain the same budget; `SocketIO` takes the
-        # mode only — the buffering is the caller's `BufferedReader`
-        # wrapper's business. The casts: `SocketIO` is typed against the
-        # real socket, and this object satisfies its read protocol
+        # The same stack `socket.makefile` would build, over this object
+        # instead of the real socket. With the handler's `rbufsize` of
+        # -1 the read side is a `BufferedReader` over the raw stream,
+        # exactly as it is without the wrapper; only the raw layer is
+        # replaced. The casts: `SocketIO` is typed against the real
+        # socket, and this object satisfies its read protocol
         # dynamically (the runtime proof is the socket-level suite).
-        return SocketIO(
+        raw = SocketIO(
             cast("socket.socket", self),
             cast("Literal['rb', 'wb', 'rwb']", mode),
         )
+        if buffering is None:
+            buffering = -1
+        if buffering < 0:
+            buffering = io.DEFAULT_BUFFER_SIZE
+        if buffering == 0:
+            return raw
+        if "r" in mode and "w" not in mode:
+            return io.BufferedReader(raw, buffering)
+        if "w" in mode and "r" not in mode:
+            return io.BufferedWriter(raw, buffering)
+        return io.BufferedRandom(raw, buffering)
 
     def recv_into(self, buffer: Any, nbytes: int = 0, flags: int = 0) -> int:
         remaining = self._deadline_s - (self._clock() - self._started)
@@ -207,6 +221,14 @@ class SettingsHandler(BaseHTTPRequestHandler):
         self._handle("POST")
 
     def _handle(self, method: str) -> None:
+        if self.request_version == "HTTP/0.9":
+            # An explicitly HTTP/0.9 request line (or a two-word line
+            # with no version, which lands on the same default) parses,
+            # but its responses carry no status line and no headers at
+            # all — the decided security headers cannot ride one. It is
+            # refused through the real error path instead of served.
+            self.send_error(400)
+            return
         try:
             response = self._dispatch(method)
         except TimeoutError:
@@ -328,10 +350,13 @@ class SettingsHandler(BaseHTTPRequestHandler):
         the HTTP/0.9 default, under which the stdlib sends a bare body
         with no status line and no headers at all — an error answer is
         still a response this page sends, so it goes out with a status
-        line and the decided security headers. The body stays the
-        stdlib's fixed error page; nothing from the request is echoed."""
+        line and the decided security headers. The `message` and
+        `explain` the parser supplies are dropped: for a malformed
+        request line they are the line itself, query and all — the OAuth
+        code and state live there — and the page's answer is the stdlib's
+        fixed text for the status, never request-derived."""
         self.request_version = "HTTP/1.1"
-        super().send_error(code, message, explain)
+        super().send_error(code)
 
     def log_message(self, format: str, *args: object) -> None:
         """Never runs: the stdlib's default access-log line would carry
@@ -375,9 +400,11 @@ def serve(
     by `_REQUEST_DEADLINE_S` on the monotonic clock: the per-recv
     timeout alone is reset by every byte a slow drip sends, so only the
     total budget bounds how long one connection can hold a handler
-    slot. The page's own state is lock-guarded; the store's
-    per-installation `flock` serializes against the review service's
-    writes."""
+    slot. A response write to a stalled reader is bounded by the
+    per-recv timeout in effect — writes do not drain the whole-request
+    budget, which bounds how long a client may take to send. The page's
+    own state is lock-guarded; the store's per-installation `flock`
+    serializes against the review service's writes."""
 
     class Bound(SettingsHandler):
         pass

@@ -78,7 +78,11 @@ def test_every_response_carries_the_decided_headers(tmp_path: Path) -> None:
         set_cookie = login.getheader("Set-Cookie") or ""
         assert "HttpOnly" in set_cookie
         assert "Secure" in set_cookie
-        assert "SameSite=Strict" in set_cookie
+        # The sign-in redirect's binding cookie is `SameSite=Lax` (the
+        # round-G rule: its life is the cross-site round trip through
+        # GitHub's authorize page); the signed-in session's cookie is
+        # the `Strict` one.
+        assert "SameSite=Lax" in set_cookie
         assert login.getheader("Location", "").startswith(
             "https://github.com/login/oauth/authorize"
         )
@@ -288,7 +292,14 @@ def test_an_overflow_request_is_refused_not_queued(tmp_path: Path) -> None:
         release.set()
         busy.join(timeout=10)
         assert first_response[0].status == 200
-        # The slot was handed back: the next request is served normally.
+        # The slot is handed back by the handler thread's `finally`,
+        # which can run after the client thread has read its response —
+        # wait, bounded, for the release itself, and probe exactly once:
+        # a retry on 503 would hide the handback failure this asserts.
+        released_by = time.monotonic() + 5
+        while time.monotonic() < released_by and server._slots._value != 1:
+            time.sleep(0.05)
+        assert server._slots._value == 1, "the slot was not handed back"
         assert _get(server, "/").status == 200
     finally:
         release.set()
@@ -372,6 +383,69 @@ def test_a_body_shorter_than_its_length_is_a_400(tmp_path: Path) -> None:
         assert raw.startswith(b"HTTP/1.0 400 "), raw[:60]
         assert b"bad request" in raw
         assert world.app.store.load("42") is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_an_http_0_9_request_is_refused_with_real_headers(tmp_path: Path) -> None:
+    """An explicitly HTTP/0.9 request line — and a two-word line with no
+    version, which lands on the same default — parses, but its responses
+    would carry no status line and no headers at all. It is refused
+    through the real error path instead of served (kills the
+    serve-the-0-9 mutant, which answered a bare, headerless page)."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        for request_line in (b"GET / HTTP/0.9\r\n\r\n", b"GET /\r\n\r\n"):
+            sock = socket.create_connection(
+                ("127.0.0.1", server.server_address[1]), timeout=10
+            )
+            sock.sendall(request_line)
+            raw = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                raw += chunk
+            sock.close()
+            assert raw.startswith(b"HTTP/1.0 400 "), (request_line, raw[:60])
+            assert b"X-Frame-Options: DENY" in raw
+            assert b"Cache-Control: no-store" in raw
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_the_parser_error_pages_carry_no_request_derived_text(
+    tmp_path: Path,
+) -> None:
+    """A malformed request line's error answer is the stdlib's fixed text
+    for the status: the parser's own message is the request line itself,
+    query and all — the OAuth code and state live there — and none of it
+    is reflected (kills the reflect-the-request-line mutant, which
+    echoed the line into the reason phrase and the body)."""
+    world = build_world(tmp_path)
+    server, thread = _serve(world, tmp_path)
+    try:
+        sock = socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=10
+        )
+        sock.sendall(b"GET /callback?code=secret&state=value EXTRA HTTP/1.1\r\n\r\n")
+        raw = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            raw += chunk
+        sock.close()
+        assert raw.startswith(b"HTTP/1.0 400 "), raw[:60]
+        assert b"X-Frame-Options: DENY" in raw
+        assert b"secret" not in raw
+        assert b"EXTRA" not in raw
+        assert b"state=value" not in raw
     finally:
         server.shutdown()
         server.server_close()
