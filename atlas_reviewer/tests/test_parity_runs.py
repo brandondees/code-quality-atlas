@@ -294,6 +294,10 @@ def test_the_checked_in_runs_pass_and_are_not_a_model_measurement():
         "661-m2",
         "661-m3",
         "661-m4",
+        "801-m1",
+        "801-m2",
+        "801-m3",
+        "801-m4",
     ]
     assert all(
         item["passed"] is True and item["found"] == 3 for item in report["findings"]

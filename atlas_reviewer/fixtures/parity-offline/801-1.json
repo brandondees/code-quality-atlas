@@ -1,0 +1,62 @@
+{
+  "pr": 801,
+  "model": "recorded-fixture",
+  "repetition": 1,
+  "head_sha": "186e09f2944e561815462eb5d9795dba4229c488",
+  "coverage_complete": true,
+  "lenses_run": [
+    "sweeping-for-security"
+  ],
+  "lenses_not_run": [],
+  "lenses_failed": [],
+  "limit_stops": [],
+  "findings": [
+    {
+      "severity": "major",
+      "path": "atlas_reviewer/funding.py",
+      "quote": "repeats the name",
+      "verified": true,
+      "lens": "sweeping-for-security",
+      "line": 130
+    },
+    {
+      "severity": "major",
+      "path": "atlas_reviewer/funding.py",
+      "quote": "repeats the field",
+      "verified": true,
+      "lens": "sweeping-for-security",
+      "line": 207
+    },
+    {
+      "severity": "major",
+      "path": "atlas_reviewer/funding.py",
+      "quote": "extra {sorted(extra)}, missing {sorted(missing)}",
+      "verified": true,
+      "lens": "sweeping-for-security",
+      "line": 221
+    },
+    {
+      "severity": "major",
+      "path": "atlas_reviewer/funding.py",
+      "quote": "repeats the provider slug",
+      "verified": true,
+      "lens": "sweeping-for-security",
+      "line": 267
+    },
+    {
+      "severity": "nit",
+      "path": "atlas_reviewer/funding.py",
+      "quote": "an extra note the key does not record",
+      "verified": true,
+      "line": 1
+    }
+  ],
+  "false_positive_majors": null,
+  "lenses_clean": null,
+  "lenses_planned": null,
+  "cost_usd": null,
+  "wall_seconds": null,
+  "cache_read_tokens": null,
+  "cache_write_tokens": null,
+  "previous_turn_misses": null
+}

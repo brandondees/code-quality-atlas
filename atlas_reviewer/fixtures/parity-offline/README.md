@@ -1,7 +1,7 @@
 # Recorded parity runs
 
-Six run files the offline command scores against the parity key. Three
-repetitions of pull request #640 and three of #661. Each one finds every
+Nine run files the offline command scores against the parity key. Three
+repetitions each of pull requests #640, #661 and #801. Each one finds every
 key finding for its pull request and carries one extra nit, so a clean
 `eval-parity --runs` of this directory exits 0 and the report shows the
 extra.

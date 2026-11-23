@@ -6361,3 +6361,31 @@ rounds. Generated trees (standalone `skills/`, `collapsed/`, and the
 self-vendored `.claude/skills/` mirror) regenerated from the source;
 drift is clean. Offline only: no model call, network call or secret
 read.
+
+## 2026-11-23 — the parity key gains #801's four secret-echo Majors (issue #814)
+
+The class: refusal messages that interpolate document-controlled text. At
+`186e09f2` (the #801 head the round-5 review ran at, one commit before the
+round-6 fix `9ba4759d` that removed every echo) four funding-refusal sites
+format the document's own values into the `ValueError` that
+`config_from_env` wraps into `ServiceError` and `main` prints to stderr:
+the duplicate source name (`funding.py` 129–131), the duplicate field
+(207), the extra-and-missing field names (219–222), and the duplicate
+provider slug (267) — the line the review's Major cited. A token-valid key
+pasted into any of those spots is echoed verbatim into logs. The same
+round's fix had already removed the `_bool` value echo in the same file,
+so these four are the siblings that fix left behind, and the round-1 atlas
+procedure at `f81dda58` — which ran `sweeping-for-security` and others —
+caught the `_bool` echo but none of the four.
+
+The key record (`parity-key/801.json`) anchors on `186e09f2` and carries
+each echo as its own finding with the raise statement's span inside its
+enclosing function, `sweeping-for-security` as the owner lens, and `read`
+as the need; every span, message and stderr hop in the sources was read at
+that commit. The offline scorer directory gains three `recorded-fixture`
+runs for #801 that find all four, so the checked-in clean pass keeps
+covering the whole key. `test_the_checked_in_key_grades_every_recorded_finding`
+pins the eleven ids, spans, encloses and echo evidence, and
+`test_the_secret_echo_refusals_are_graded_on_their_spans` pins found,
+partial and lost boundaries per site. Offline only: recorded JSON and the
+span grader; no model call, network call or secret read.
