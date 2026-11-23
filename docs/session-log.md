@@ -6376,13 +6376,13 @@ and provider-slug echoes carry a pasted key verbatim (a JSON field name
 faces no grammar and the slug grammar has no length cap); the name echo
 reaches only a short credential that passes the name grammar, because the
 grammar refusal in `_source` (`funding.py` 224) runs first and no longer
-echoes. The same
-round's fix had already removed the `_bool` value echo in the same file,
-so these four are the siblings that fix left behind, and the round-1 atlas
-procedure at `f81dda58` — which ran `sweeping-for-security` and others —
-caught the `_bool` echo but none of the four; the record for that round is
-dees-bot's correction comment on issue #814 (2026-11-21), posted from the
-round-1 review agent's transcript — no posted review body carries it.
+echoes. The same round's fix had already removed the `_bool` value echo
+in the same file, so these four are the siblings that fix left behind,
+and the round-1 atlas procedure at `f81dda58` — which ran
+`sweeping-for-security` and others — caught the `_bool` echo but none of
+the four; the record for that round is dees-bot's correction comment on
+issue #814 (2026-11-21), posted from the round-1 review agent's
+transcript — no posted review body carries it.
 
 The key record (`parity-key/801.json`) anchors on `186e09f2` and carries
 each echo as its own finding with the raise statement's span inside its
