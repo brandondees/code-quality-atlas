@@ -72,6 +72,14 @@ def main(argv: list[str] | None = None) -> int:
     except SettingsConfigError as exc:
         print(f"atlas_settings: {exc}", file=sys.stderr)
         return 2
+    try:
+        server = serve(app, args.host, args.port, lambda line: print(line, flush=True))
+    except OSError as exc:
+        # The port already in use is the operator's most common startup
+        # error: it folds into the same clean exit-2 shape as a
+        # misconfigured environment instead of a raw traceback.
+        print(f"atlas_settings: {exc}", file=sys.stderr)
+        return 2
     server = serve(app, args.host, args.port, lambda line: print(line, flush=True))
     print(
         f"atlas_settings: serving on http://{args.host}:{args.port} "
@@ -87,5 +95,5 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - the imported module is what the tests run
     sys.exit(main())
