@@ -12,7 +12,7 @@ provenance:
   built_from:
   - category: 14
     source: docs/research/cluster-4-runtime.md#14
-    hash: 32bbeac23db2c3de68eafbf812b9f9b097f72becc3e59e35e10e20e8e9387b0b
+    hash: dae9335062c9d73a03c08e1f8b150bc028cbcc45f1d3d7b935e7b8a8078629f4
 ---
 
 # sweeping-for-security
@@ -39,6 +39,8 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Trace document-controlled or environment-derived values (a config document, env-derived JSON, request or PR content) to the sinks a validation failure reports through: do refusal, error, and logging paths interpolate those values into exception messages, log lines, or stderr (`{value!r}` / `{name!r}`)? A value that passed a format or grammar check is still attacker- or operator-controlled text — echoing it in a refusal publishes whatever was pasted into that field (a pasted API key, a token) into logs. A refusal should name the position and the defect, not the value.
+- When a taint-into-sink finding (or the fix for one) is confirmed at one site, sweep the enclosing module for sibling paths that interpolate document-controlled values into messages the same way, and report each one with its own line — a fix that touches only the cited site leaves the siblings in place.
 - Does any query/command/HTML/path get built by string concatenation or interpolation of request-derived data? If so, demand parameterized queries / contextual output encoding / allow-listed path resolution.
 - Every state-changing or data-returning endpoint: is there an explicit authorization check tied to the *resource owner*, not just authentication? (IDOR = authenticated but not authorized.) Object references taken from the request (IDs, filenames) must be authorized, never trusted.
 - Can the *same actor* both initiate and approve a high-consequence action (a payment/refund, a role or permission grant, a deploy, a bulk delete)? Sensitive workflows need *segregation of duties / maker-checker* — two distinct actors, so no single actor completes the workflow alone. A role/permission gate authorizes *who* may act and is **not** itself dual-control: if the action records an initiator (e.g. `requested_by`) and an approver but never compares their identities, the maker-checker control is missing even when a role check is present. This is orthogonal to least-privilege (*how much* one actor may do) and IDOR (*whose* resource): flag the missing dual-control and surface it to security/compliance — *which* operations require it is a business-policy call, not a code default. (SOX §404; maps A01 Broken Access Control / A04 Insecure Design.)
