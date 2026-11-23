@@ -95,5 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":  # pragma: no cover - the imported module is what the tests run
+if (
+    __name__ == "__main__"
+):  # pragma: no cover - the imported module is what the tests run
     sys.exit(main())

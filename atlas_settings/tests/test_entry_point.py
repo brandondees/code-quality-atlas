@@ -33,7 +33,9 @@ def test_a_missing_config_exits_two_naming_the_missing_variables(
     missing-variable message on stderr — variable names only: a value
     that is present is never echoed (kills the echo-the-value mutant)."""
     monkeypatch.setattr(
-        os, "environ", {"ATLAS_SETTINGS_SESSION_KEY": "fake-session-secret-value-0123456789"}
+        os,
+        "environ",
+        {"ATLAS_SETTINGS_SESSION_KEY": "fake-session-secret-value-0123456789"},
     )
     exit_code = main([])
     assert exit_code == 2

@@ -6005,8 +6005,10 @@ with one fixed phrase that never echoes the value, with the page stating
 S9's stricter-wins and the operator max as the outer bounds. Each
 accepted write appends one audit line (action, installation, GitHub user
 id, UTC time — no value is ever a parameter) to
-`<state dir>/settings-audit.jsonl`, outside the store's directory so the
-retention sweep is never fed a permanent stray; an audit failure after a
+`<state dir>/settings-audit.jsonl`, beside the store's records under
+the same state root — the retention sweep's own record-name validation
+skips and names non-record entries, so the audit file is never swept
+and never halts the sweep; an audit failure after a
 successful write answers "the change was applied but could not be
 recorded", never a message that could read as if nothing happened. The
 B2 seam is the page's write-action dispatch table, which part B2's
@@ -6022,7 +6024,11 @@ guard over network-free hosts, `test_audit.py`, `test_ratelimit.py`,
 `test_server.py` and `test_wiring.py` for the socket-level handler,
 `test_write_failures.py` for the store that reads but cannot write;
 159 tests, 100% line and branch coverage of the package; every behavior
-a test that fails when reverted).
+a test that fails when reverted). *(At the 2026-11-19 build. The
+shipped suite after the layer split and the fix rounds is 304 tests
+across `test_flows_signin.py`, `test_flows_writes.py`,
+`test_entry_point.py`, `test_pages.py` and the files above — the split
+the stack's own records describe.)*
 
 **The mutants applied by hand this round, all killed** (the killer tests
 named):

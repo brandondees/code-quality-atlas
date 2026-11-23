@@ -884,19 +884,24 @@ treats an exhausted bound as unproven, so the bound can only refuse,
 never satisfy, the gate.
 
 **Sessions and request safety.** Server-side sessions behind a signed
-cookie (`HttpOnly`, `Secure`, `SameSite=Strict`) keyed by
+cookie (`HttpOnly`, `Secure`) keyed by
 `ATLAS_SETTINGS_SESSION_KEY`: the cookie carries a random session id
 and an HMAC-SHA256 signature; every other session fact — identity,
-CSRF token, the OAuth bindings — stays in the page process. A
-signed-in session's TTL is 30 minutes of idle time with a 12-hour
-absolute cap; a pre-login session lives 10 minutes. Every
+CSRF token, the OAuth bindings — stays in the page process. The
+signed-in session's cookie is `SameSite=Strict`; the short-lived
+pre-login binding is `SameSite=Lax`, because the redirect back from
+GitHub's authorize page is a cross-site top-level GET navigation a
+`Strict` cookie is not sent on. A signed-in session's TTL is 30
+minutes of idle time with a 12-hour absolute cap; a pre-login session
+lives 10 minutes. Every
 state-changing POST carries the session's CSRF token, only POST
 changes state, request bodies are bounded at 8 KiB, and sign-in and
 writes are rate limited (per IP on sign-in, per session and per IP on
 writes). Every response carries `Content-Security-Policy: default-src
 'none'` (plus `style-src 'self'`, `form-action 'self'`,
 `frame-ancestors 'none'`), `X-Frame-Options: DENY`, HSTS,
-`Referrer-Policy: no-referrer`, and `Cache-Control: no-store`; the
+`Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and
+`X-Content-Type-Options: nosniff`; the
 handler never logs a query string, so the OAuth code and state are in
 no log.
 
@@ -950,7 +955,11 @@ is set, naming the missing ones:
 
 All of the above are documented here and set in no deployment yet.
 `--host` (default `127.0.0.1`) and `--port` (default 8090) are CLI
-arguments, not environment variables.
+arguments, not environment variables. A bind failure — the port
+already in use, the usual accident of a fixed default port — exits 2
+with `atlas_settings: <reason>` on stderr, the same shape a
+misconfigured environment gets. Ctrl-C stops the page cleanly; SIGTERM
+terminates the process without draining in-flight requests.
 
 **The split.** The per-repo pre-approved command list Brandon decided
 for S7 (D88's 12:05 PM CT update) is part B2, a later PR, because it
