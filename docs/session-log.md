@@ -6335,3 +6335,29 @@ keeps the source the progress record named. A name the ledger refuses
 is written without that name, and the bill is not dropped; a negative
 bill still raises. A backfill that drops a refused name stays measured
 as a backfill. No model was called.
+
+## 2026-11-23 — sweeping-for-security traces document-controlled values into error and log sinks, and sweeps echo siblings (issue #814)
+
+The #801 seeded case (the parity key's four secret-echo Majors) exists
+because the lens checklist had no check for the sink half of secret
+handling: "are secrets absent from log output" reads the code's own
+secrets, but a refusal message that interpolates the document's own
+text — a pasted key sitting in a duplicate field name, a provider slug,
+a source name — carried the value out through `ServiceError` to stderr
+with every grammar check passing. Two checks join category #14's
+reviewable heuristics, both priority-marked so they inline in the
+lens's Top checks rather than living only in the full reference list.
+The taint-to-sink check traces document-controlled or
+environment-derived values to the sinks a validation failure reports
+through — exception messages, log lines, stderr — flags `{value!r}` /
+`{name!r}` interpolation of those values in refusal paths, and states
+the fix shape: name the position and the defect, not the value. The
+sibling-sweep check says that once one echo site is confirmed (or
+fixed), the lens sweeps the enclosing module for sibling paths that
+interpolate document-controlled values the same way and reports each
+with its own line — the miss mechanism on #801, where the `_bool`
+value-echo fix landed and the four siblings survived four review
+rounds. Generated trees (standalone `skills/`, `collapsed/`, and the
+self-vendored `.claude/skills/` mirror) regenerated from the source;
+drift is clean. Offline only: no model call, network call or secret
+read.
