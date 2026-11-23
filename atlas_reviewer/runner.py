@@ -444,6 +444,17 @@ class _SetupFailure:
     failed: bool = False
 
 
+@dataclass
+class _SetupPython:
+    """The interpreter the setup phase resolved and ran its `{python}`
+    commands with (issue #819, D95), shared out of the frozen run the way
+    `_Create` shares the create outcome: the baked interpreter the
+    checkpoint's consumer hands to the staging probe as its first,
+    preferred candidate."""
+
+    python: TrustedPython | None = None
+
+
 @dataclass(frozen=True)
 class _Run:
     api: SpritesApi
@@ -458,6 +469,7 @@ class _Run:
     setup: SetupSpec | None = None
     restore: str | None = None
     setup_failure: _SetupFailure = field(default_factory=_SetupFailure)
+    setup_python: _SetupPython = field(default_factory=_SetupPython)
 
 
 @dataclass(frozen=True)
@@ -1506,6 +1518,7 @@ def _setup_phase(run: _Run) -> None:
             "the setup phase found no trusted interpreter to run the "
             "repo's setup commands with"
         )
+    run.setup_python.python = python
     for n, command in enumerate(spec.commands, start=1):
         purpose = f"setup command {n}"
         run.deadline.check(purpose)
@@ -1588,17 +1601,20 @@ BAKE_COMMENT = "code-quality-atlas post-setup state (issue #819)"
 @dataclass(frozen=True)
 class Baked:
     """The setup pass's outcome: the checkpoint id the post-setup state
-    got, or None with the failed attempt's report when it could not be
-    made. A failure is classified for the caller (issue #819, D95):
-    `setup_failed` marks a **deterministic setup-phase failure** -- a
-    command that failed, or no trusted interpreter -- where re-running
-    the same commands per lens with egress open would fail identically,
-    so the caller runs no setup at all, named; any other failure (the
-    checkpoint call, the deadline, a refused create) leaves the caller
-    its per-lens-setup fallback."""
+    got and the interpreter the setup phase verified (issue #819, D95) --
+    the baked interpreter every lens's staging probe asks about first --
+    or None with the failed attempt's report when the checkpoint could
+    not be made. A failure is classified for the caller: `setup_failed`
+    marks a **deterministic setup-phase failure** -- a command that
+    failed, or no trusted interpreter -- where re-running the same
+    commands per lens with egress open would fail identically, so the
+    caller runs no setup at all, named; any other failure (the checkpoint
+    call, the deadline, a refused create) leaves the caller its
+    per-lens-setup fallback."""
 
     checkpoint_id: str | None
     report: RunnerReport | None
+    python: TrustedPython | None = None
     setup_failed: bool = False
 
 
@@ -1628,11 +1644,16 @@ def bake_setup(
     the attempt's report, classified: a deterministic setup-phase failure
     (`setup_failed`) tells the caller to run no per-lens setup at all --
     the same commands would fail identically with egress open again --
-    while any other failure leaves the caller its per-lens fallback."""
+    while any other failure leaves the caller its per-lens fallback. The
+    interpreter the setup phase resolved is carried out with the
+    checkpoint: it is the baked interpreter the lens runners' staging
+    probes ask about first."""
     telemetry = telemetry or Telemetry(clock)
     found: list[str] = []
+    pythons: list[TrustedPython | None] = []
 
-    def body(session: Session) -> str:
+    def body(run: _Run) -> str:
+        pythons.append(run.setup_python.python)
         checkpoint_id = api.checkpoint(name, BAKE_COMMENT)
         found.append(checkpoint_id)
         telemetry.record(
@@ -1640,17 +1661,21 @@ def bake_setup(
         )
         return f"checkpoint {checkpoint_id}"
 
-    report = run_session(
+    report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
         create_retries=create_retries, create_gate=create_gate, setup=spec,
     )  # fmt: skip
     if report.status is not RunnerStatus.COMPLETED or not found:
         return Baked(
-            None, replace(report, provisioning=True),
+            None,
+            replace(report, provisioning=True),
+            next(iter(pythons), None),
             setup_failed=report.setup_failed,
-        )  # fmt: skip
-    return Baked(found[0], replace(report, provisioning=True))
+        )
+    return Baked(
+        found[0], replace(report, provisioning=True), next(iter(pythons), None)
+    ) (The review fixes from #831's round 1 rebased onto the baked-interpreter slice: the restore-refusal retry, the bake skipped for a fully-reused plan, the bake's own wall cap, the deterministic-setup-failure classification, and the redundant _path call removed)
 
 
 def _raw_exec(run: _Run, step: _Exec) -> bytes:

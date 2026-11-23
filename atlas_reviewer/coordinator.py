@@ -152,6 +152,7 @@ from atlas_reviewer.head_change import (
     PROGRESS_REVIEW_STEP,
     cap_reading,
 )
+from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -1187,8 +1188,8 @@ def _review_lenses(
     # setup. A bake that could not make a checkpoint -- a refusal, a
     # failure, a deadline -- is named on the telemetry and every lens
     # falls back to running the setup phase on its own runner, the
-    # slice-1 shape; a restore that is refused later fails that lens's
-    # run closed, never re-opens the network mid-runner.
+    # slice-1 shape; a restore that is refused later retries once on a
+    # fresh runner running the setup phase itself (issue #819, D95).
     baked = _bake_setup_pass(
         sprites, runner_ledger, setup, event, deadline, clock, telemetry,
         gate, resolved.create_retries, names=names,
@@ -1196,20 +1197,24 @@ def _review_lenses(
     if setup is None or not setup.commands:
         runner_setup = None
         runner_restore = None
+        runner_baked = None
     elif baked is not None and baked.checkpoint_id is not None:
         # The restore path, with the spec carried alongside: a restore
         # that is refused at lens time retries once on a fresh runner
         # running the setup phase itself (issue #819, D95).
         runner_setup = setup
         runner_restore = baked.checkpoint_id
+        runner_baked = baked.python
     elif baked is not None and baked.setup_failed:
         # The bake's own setup failed deterministically; the same
         # commands would fail identically per lens, so no setup runs.
         runner_setup = None
         runner_restore = None
+        runner_baked = None
     else:
         runner_setup = setup
         runner_restore = None
+        runner_baked = None
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         if spend.halted:
@@ -1263,6 +1268,7 @@ def _review_lenses(
             approval_channel=approval_channel,
             setup=runner_setup,
             restore=runner_restore,
+            baked_python=runner_baked,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1679,6 +1685,7 @@ def _review_one(
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
     restore: str | None = None,
+    baked_python: TrustedPython | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1839,7 +1846,9 @@ def _review_one(
         )  # fmt: skip
 
     try:
-        report = run_bridge_call(setup=setup, restore=restore)
+        report = run_bridge_call(
+            setup=setup, restore=restore, baked_python=baked_python
+        )
     except RestoreRefusedError as exc:
         # The shared checkpoint could not be restored into this lens's
         # runner (issue #819, D95): an unknown id -- the shape a restore
@@ -1861,7 +1870,7 @@ def _review_one(
                 status=ERROR,
                 error=str(exc),
             )
-        report = run_bridge_call(setup=setup, restore=None)
+        report = run_bridge_call(setup=setup, restore=None, baked_python=None)
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),
         lens=lens,

@@ -11,14 +11,17 @@ from dataclasses import replace
 
 import pytest
 
-from atlas_reviewer.coordinator import render_draft
+from atlas_reviewer.attestation import Cause
+from atlas_reviewer.coordinator import render_draft (The review fixes from #831's round 1 rebased onto the baked-interpreter slice: the restore-refusal retry, the bake skipped for a fully-reused plan, the bake's own wall cap, the deterministic-setup-failure classification, and the redundant _path call removed)
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import (
+    PYENV_PYTHON,
     ExecRule,
     FakeSprites,
     MemoryLedger,
     ScriptedLensModel,
 )
+from atlas_reviewer.interpreter import PYENV_VERSIONS, SYSTEM_PYTHON
 from atlas_reviewer.local_runner import LocalSprites
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.redact import Redactor
@@ -56,6 +59,10 @@ DENY_EGRESS = (
 
 def ops(api):
     return [c[0] for c in api.calls]
+
+
+def _scripts(api):
+    return [argv[-1] for argv in api.argv_seen]
 
 
 def test_the_setup_pass_bakes_a_checkpoint_and_destroys_the_setup_runner():
@@ -483,3 +490,201 @@ def bake_runner_name():
     from .test_coordinator import EVENT
 
     return lens_runner_name(EVENT, SETUP_LENS)
+# --------------------------------------- the baked interpreter (#819, D95)
+
+# A third pyenv version the bake resolves and installs into: a trusted
+# shape, distinct from the fake's default answer, so the handoff is
+# visible.
+BAKED = f"{PYENV_VERSIONS}/3.12.9/bin/python3"
+PIP_SPEC = SetupSpec((("{python}", "-m", "pip", "install", "pytest"),))
+
+
+def test_the_bake_carries_the_interpreter_its_setup_phase_verified():
+    api = FakeSprites(rules=DENY_EGRESS, pythons=((BAKED, "3.12.9"),))
+    api.rules = DENY_EGRESS + (ExecRule("pip install pytest", "", 0),)
+    baked = bake_setup(
+        api, MemoryLedger(), PIP_SPEC, name=NAME, deadline_s=120.0, clock=FakeClock()
+    )
+    assert baked.checkpoint_id == "v1"
+    assert baked.python is not None and baked.python.path == BAKED
+
+
+def test_the_bake_names_no_interpreter_without_a_setup_phase():
+    api = FakeSprites(rules=DENY_EGRESS)
+    baked = bake_setup(
+        api, MemoryLedger(), SetupSpec(()), name=NAME, deadline_s=120.0,
+        clock=FakeClock(),
+    )  # fmt: skip
+    assert baked.checkpoint_id == "v1"
+    assert baked.python is None
+
+
+def test_choose_pytest_prefers_the_literal_candidate_the_caller_added():
+    from atlas_reviewer.bridge_staging import PYTEST_CANDIDATES, choose_pytest
+
+    text = f"atlas-pytest:{PYENV_PYTHON}:3.13.7\natlas-pytest:{BAKED}:3.12.9\n"
+    chosen = choose_pytest(text, (BAKED, *PYTEST_CANDIDATES))
+    assert chosen is not None and chosen.path == BAKED
+
+
+def test_choose_pytest_keeps_the_default_order_when_nothing_was_added():
+    from atlas_reviewer.bridge_staging import choose_pytest
+
+    text = f"atlas-pytest:{SYSTEM_PYTHON}:3.12.1\natlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+    chosen = choose_pytest(text)
+    assert chosen is not None and chosen.path == PYENV_PYTHON
+
+
+class _RecordingFake(FakeSprites):
+    """Keeps the restore records past each runner's destroy, the way the
+    local-runner recording fake does."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.restores: list[tuple[str, str]] = []
+
+    def restore(self, name, checkpoint_id):
+        super().restore(name, checkpoint_id)
+        self.restores.append((name, checkpoint_id))
+
+
+def _bridge_sprites(answer, probe=None):
+    """A FakeSprites staging like `test_bridge_runs.fake_bridge`'s, with
+    the pytest probe reporting the baked interpreter (`probe` overrides
+    the reported line, for a restore that lost the baked pytest)."""
+    from .test_bridge_runs import ReplyRule
+
+    return _RecordingFake(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{probe or BAKED}:3.12.9\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("__ATLAS_RUN__", answer),
+            ExecRule("pip install pytest", "", 0),
+            DENY_EGRESS[0],
+        ),
+        pythons=((BAKED, "3.12.9"),),
+    )
+
+
+def test_run_bridge_confirms_the_baked_interpreter_and_runs_the_tests(tmp_path):
+    """The staging probe asks about the baked interpreter first, the
+    staged bridge carries it, and a `run_tests` call gets a real run back
+    instead of the unavailability the fresh image produced."""
+    from atlas_reviewer.bridge import Status, run_bridge
+    from atlas_reviewer.interpreter import TrustedPython
+    from atlas_reviewer.redact import Redactor
+
+    from .test_bridge_runs import SUITE, framed, staged, trees
+
+    api = _bridge_sprites(lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"))
+    api.create(BAKE_NAME)
+    api.checkpoint(BAKE_NAME, "bake")
+    results: list[object] = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {"path": "test_calc.py"}))
+        return "done"
+
+    report = run_bridge(
+        api, MemoryLedger(), trees(SUITE), body,
+        redactor=Redactor(), changed=frozenset(), name=NAME,
+        deadline_s=120.0, clock=FakeClock(),
+        root=str(tmp_path / "bridge"), setup=PIP_SPEC, restore="v1",
+        baked_python=TrustedPython(BAKED, "3.12.9"),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (result,) = results
+    assert result.status is Status.OK
+    runs = result.runs
+    assert len(runs) == 1 and runs[0].exit == 0
+    # The setup phase ran on this runner? No -- the restore replaced it:
+    # every exec ran denied, and the pip command never ran here.
+    assert api.policy_deny_at_exec and all(api.policy_deny_at_exec)
+    assert not any("pip install pytest" in s for s in _scripts(api))
+
+
+def test_run_bridge_names_a_baked_interpreter_the_probe_cannot_confirm(tmp_path):
+    """A restore that lost the baked pytest is a named error on the
+    staging telemetry -- the probe answered with a different interpreter
+    -- while the review itself continues on what the probe did find."""
+    from atlas_reviewer.bridge import Status, run_bridge
+    from atlas_reviewer.interpreter import TrustedPython
+    from atlas_reviewer.redact import Redactor
+    from atlas_reviewer.telemetry import Telemetry
+
+    from .test_bridge_runs import SUITE, framed, staged, trees
+
+    api = _bridge_sprites(
+        lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"), probe=PYENV_PYTHON
+    )
+    api.create(BAKE_NAME)
+    api.checkpoint(BAKE_NAME, "bake")
+    telemetry = Telemetry(FakeClock())
+    results: list[object] = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {"path": "test_calc.py"}))
+        return "done"
+
+    report = run_bridge(
+        api, MemoryLedger(), trees(SUITE), body,
+        redactor=Redactor(), changed=frozenset(), name=NAME,
+        deadline_s=120.0, clock=FakeClock(), telemetry=telemetry,
+        root=str(tmp_path / "bridge"), restore="v1",
+        baked_python=TrustedPython(BAKED, "3.12.9"),
+    )  # fmt: skip
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (result,) = results
+    assert result.status is Status.OK
+    staged_events = [
+        event for event in telemetry.events
+        if event.phase == "bridge staging" and event.step == "staged"
+    ]  # fmt: skip
+    assert len(staged_events) == 1
+    assert staged_events[0].fields["baked_python"] == BAKED
+    assert staged_events[0].fields["pytest"] == PYENV_PYTHON
+    assert staged_events[0].status == "error"
+    assert "not confirmed" in staged_events[0].error
+
+
+def test_the_whole_chain_scores_a_run_tests_call(tmp_path):
+    """The acceptance, offline end to end: a repo whose default-branch
+    REVIEW.md declares setup commands; the bake runs them with egress
+    allowed, flips to deny-all, checkpoints; the lens runner restores the
+    checkpoint, its staging probe confirms the baked interpreter, and the
+    lens's `run_tests` call returns a real run -- the tool gap the issue
+    opened with is closed without a per-lens setup."""
+    from .agentic import tools
+    from .test_bridge_runs import framed, staged
+
+    api = _bridge_sprites(lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"))
+    model = ScriptedLensModel([tools(("run_tests", {"path": "test_calc.py"})), final()])
+    result = _run_lenses(tmp_path, api, [LENS], model, setup=PIP_SPEC)
+    lens = next(entry for entry in result.lenses if entry.index == 1)
+    assert lens.outcome is not None
+    assert Cause.TOOL_GAP not in lens.outcome.causes
+    assert lens.outcome.test_runs == 1
+    assert api.live_names() == ()
+    denies = _denies_by_runner(api)
+    bake_flags = [
+        flags
+        for name, flags in denies.items()
+        if name not in {runner for runner, _ in api.restores}
+    ]
+    assert len(bake_flags) == 1
+    assert bake_flags[0][:2] == [False, False]  # resolve, pip install
+    assert all(bake_flags[0][2:])  # egress proof and later: denied
+    for name, flags in denies.items():
+        if name in {runner for runner, _ in api.restores}:
+            assert flags and all(flags), name

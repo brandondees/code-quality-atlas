@@ -244,19 +244,29 @@ def git_resolve_script(
 def choose_pytest(
     text: str, candidates: Sequence[str] = PYTEST_CANDIDATES
 ) -> TrustedPython | None:
-    """The newest pyenv interpreter, else the system one, among those the
-    guest reported with an importable pytest. Only paths of the trusted
-    shapes, or exactly a literal candidate the controller itself named,
-    are accepted from the guest's answer; unreported candidates count as
-    unavailable."""
+    """The interpreter the guest reported with an importable pytest,
+    preferring a **literal candidate the controller itself named** -- the
+    baked interpreter a setup pass verified (issue #819, D95), which the
+    restore is expected to have kept pytest-capable -- over the default
+    order's newest pyenv interpreter, else the system one. Only paths of
+    the trusted shapes, or exactly a literal candidate the controller
+    itself named, are accepted from the guest's answer; unreported
+    candidates count as unavailable. Callers that name no literal path
+    (the default) keep the default order exactly."""
     found = [
         (path, (int(a), int(b), int(c)))
         for path, a, b, c in _PYTEST_RE.findall(text)
         if trusted_path(path) or path in candidates
     ]
+    # The preference is for the candidates the caller added beyond the
+    # default probe list -- the baked interpreter -- not for the system
+    # python, which is a member of the default list and must not jump
+    # the default order.
+    extra = tuple(c for c in candidates if c not in PYTEST_CANDIDATES)
+    named = [c for c in found if c[0] in extra]
     pyenv = sorted((c for c in found if c[0] != SYSTEM_PYTHON), key=_newest)
     system = [c for c in found if c[0] == SYSTEM_PYTHON]
-    chosen = [*pyenv, *system][:1]
+    chosen = [*named, *pyenv, *system][:1]
     return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
 
 
