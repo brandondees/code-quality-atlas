@@ -94,13 +94,13 @@ warn_unused_configs = true
 branch = true
 # atlas_reviewer's suite runs as its own `--cov=atlas_reviewer` step; its
 # test modules would otherwise count toward their own coverage, and
-# __main__.py is only exercised through a subprocess, which coverage does
-# not follow.
+# atlas_reviewer's __main__.py is only exercised through a subprocess, which
+# coverage does not follow. atlas_settings' __main__.py is imported by its
+# own tests (test_entry_point.py), so it stays measured.
 omit = [
     "atlas_reviewer/tests/*",
     "atlas_reviewer/__main__.py",
     "atlas_settings/tests/*",
-    "atlas_settings/__main__.py",
 ]
 
 [tool.coverage.report]
