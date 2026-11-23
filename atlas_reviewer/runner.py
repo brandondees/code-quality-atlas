@@ -14,7 +14,11 @@ cleanup ends at most that plus one call window after it starts:
 2. create a fresh Sprite -- never reuse one: guests can restore checkpoints
    and create Tasks, so a used Sprite is contaminated
 3. set deny-all egress from the outside API, then read it back; nothing
-   executes unless the read-back is exactly deny-all
+   executes unless the read-back is exactly deny-all. A runner given a
+   setup spec (issue #819, D95) runs the repo's declared setup commands
+   first, while egress is still allowed -- still before any PR content
+   is uploaded or unpacked -- and proves the flip held with the
+   behavioral egress check after the read-back
 4. cap memory; probe which tool binaries exist (tool check); upload the
    head-SHA tarball over exec stdin to a file, confirming the byte count
    the runner received; unpack it in a second exec; run each available tool
@@ -66,10 +70,11 @@ import hashlib
 import random
 import re
 import secrets
+import shlex
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -77,6 +82,7 @@ from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
 from atlas_reviewer.interpreter import (
+    NEUTRAL_DIR,
     PYTHON_PLACEHOLDER,
     SYSTEM_PYTHON,
     DiagnosticSpec,
@@ -103,7 +109,7 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits, measure
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES
 from atlas_reviewer.stops import held
-from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
+from atlas_reviewer.telemetry import ERROR, OK, Fields, Telemetry
 
 DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
 MEMORY_LIMIT_MB = 1024
@@ -146,6 +152,13 @@ PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
 UNPACK_BUDGET_S = 120.0
 FIRST_FRAME_BUDGET_S = 30.0
+# One setup command's own bound and the exec budget that carries it
+# (issue #819, D95): a `pip install` against a real index can take
+# minutes, and the review's wall deadline bounds the phase as a whole
+# besides. The bound is what the command runs under (`timeout -k`), the
+# budget is the exec's window around it.
+SETUP_BOUND_S = 300
+SETUP_BUDGET_S = SETUP_BOUND_S + 30.0
 # From the first destroy of a runner, shared by the watchdog's and the
 # final one: no control-plane call starts after it, so cleanup ends
 # within this plus one call window (`SpritesClient` timeout_s, 30s).
@@ -230,6 +243,23 @@ class ToolSpec:
 TRIVIAL_TOOL = ToolSpec(
     "source-file-count", "sh", "echo posix-sh", "find . -type f | wc -l", timeout_s=30
 )
+
+
+@dataclass(frozen=True)
+class SetupSpec:
+    """The reviewed repo's declared setup commands (issue #819, D95): the
+    dev-dependency installs a runner runs **before** the review phase,
+    with egress still allowed, so `pip install` and friends can reach
+    their indexes. The commands are the repo's own default-branch
+    `REVIEW.md` text (`repo_config.parse_setup_commands`), controller
+    tokens -- the model never names one -- and a command may carry the
+    `{python}` placeholder, which the controller substitutes with the
+    interpreter it resolved by absolute path before the phase ran. Empty
+    (or absent) is the ordinary runner: deny-all from the start, nothing
+    installed."""
+
+    commands: tuple[tuple[str, ...], ...] = ()
+
 
 DEFAULT_TOOLS = (
     ToolSpec(
@@ -391,6 +421,7 @@ class _Run:
     exec_lock: threading.Lock = field(default_factory=threading.Lock)
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_gate: threading.Semaphore | None = None
+    setup: SetupSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -830,12 +861,13 @@ def _disposable(
     first_frame_s: float,
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
+    setup: SetupSpec | None = None,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(
         api, name, deadline, telemetry, first_frame_s,
-        create_retries=create_retries, create_gate=create_gate,
+        create_retries=create_retries, create_gate=create_gate, setup=setup,
     )  # fmt: skip
     destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
@@ -936,18 +968,23 @@ def run_session(
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
+    setup: SetupSpec | None = None,
 ) -> RunnerReport:
     """`body` on a fresh disposable runner with the same lifecycle as a
     review: recorded in the ledger, provisioned deny-all and verified,
     bounded by the deadline and its watchdog, always destroyed. The body's
     return value is the report's note. `create_gate`, when given, is how
     many creates may be in flight at once across the callers sharing it;
-    `create_retries` is how many times a 429'd create waits and retries."""
+    `create_retries` is how many times a 429'd create waits and retries.
+    A `setup` spec (issue #819, D95) runs the repo's declared setup
+    commands with egress still allowed, before the deny-all flip and
+    before anything of the review -- the body included -- executes; every
+    exec after the flip runs under verified deny-all."""
     return _disposable(
         api, ledger, lambda run: body(Session(run)), name=name,
         deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate,
+        create_retries=create_retries, create_gate=create_gate, setup=setup,
     )  # fmt: skip
 
 
@@ -1309,6 +1346,13 @@ def _provision(run: _Run) -> None:
             "another review of this commit may be using it."
         ) from exc
     run.create.outcome = "settled"
+    if run.setup is not None and run.setup.commands:
+        # The setup phase (issue #819, D95) runs while egress is still
+        # whatever the fresh image's default is, so `pip install` can
+        # reach its indexes; every setup exec is still before any PR
+        # content is uploaded or unpacked. The deny-all flip below is
+        # what ends the phase, and nothing of the review runs before it.
+        _setup_phase(run)
     run.deadline.check("network policy")
     t.span(
         "egress", "set deny-all",
@@ -1325,6 +1369,8 @@ def _provision(run: _Run) -> None:
         lambda: api.set_memory_limit(name, MEMORY_LIMIT_MB),
         {"memory_mb": MEMORY_LIMIT_MB},
     )  # fmt: skip
+    if run.setup is not None and run.setup.commands:
+        _egress_proof(run)
 
 
 def _require_deny_all(policy: Json) -> None:
@@ -1333,6 +1379,98 @@ def _require_deny_all(policy: Json) -> None:
         raise PolicyNotEnforcedError(
             f"network policy read-back is not deny-all: {rules!r}"
         )
+
+
+def setup_command_script(command: Sequence[str], python: TrustedPython) -> str:
+    """One setup command as the runner runs it (issue #819, D95): from the
+    neutral directory -- empty, and empty of the PR, which is not uploaded
+    yet -- each token quoted, the `{python}` placeholder already
+    substituted with the resolved interpreter's quoted absolute path, the
+    whole argv under its own `timeout -k` bound. The tokens are the
+    repo's default-branch `REVIEW.md` grammar's output, so quoting is
+    belt-and-braces, not the containment guarantee."""
+    argv = [
+        python.quoted if token == PYTHON_PLACEHOLDER else shlex.quote(token)
+        for token in command
+    ]
+    return (
+        f"mkdir -p {shlex.quote(NEUTRAL_DIR)} && cd {shlex.quote(NEUTRAL_DIR)} && "
+        + bounded(" ".join(argv), SETUP_BOUND_S)
+    )
+
+
+def _setup_phase(run: _Run) -> None:
+    """The repo's declared setup commands, one exec each, while egress is
+    still allowed (issue #819, D95). The interpreter is resolved first --
+    before any PR content exists, the same pre-unpack resolution every
+    tool path uses -- and a command that fails, times out, or outlives
+    its budget fails the run closed: a setup the repo declared and did
+    not get is not a review to continue, it is the broken state named in
+    the issue. The phase ends at the deny-all flip `_provision` performs
+    right after; nothing of the review runs before it."""
+    spec = run.setup
+    assert spec is not None and spec.commands
+    python = run.telemetry.span(
+        "interpreter",
+        "resolve trusted python",
+        lambda: _resolve_python(run),
+        after=_python_fields,
+    )
+    if not isinstance(python, TrustedPython):
+        raise BoundaryError(
+            "the setup phase found no trusted interpreter to run the "
+            "repo's setup commands with"
+        )
+    for n, command in enumerate(spec.commands, start=1):
+        purpose = f"setup command {n}"
+        run.deadline.check(purpose)
+        code, text = _exec(
+            run,
+            _Exec("setup", purpose, setup_command_script(command, python),
+                  budget_s=SETUP_BUDGET_S),
+        )  # fmt: skip
+        run.telemetry.record(
+            "setup", purpose,
+            {"command_index": n, "exit_status": code},
+            status=ERROR if code != 0 else OK,
+            error=(
+                "" if code == 0
+                else f"exit {code}: {guest_text(text, GUEST_TAIL_CHARS)}"
+            ),
+        )  # fmt: skip
+        if code != 0:
+            raise BoundaryError(
+                f"setup command {n} failed (exit {code}): "
+                f"{guest_text(text, GUEST_TAIL_CHARS)}"
+            )
+
+
+def _egress_proof(run: _Run) -> None:
+    """Behavioural evidence that the deny-all flip held, on the only
+    runners that ever had egress allowed (issue #819, D95): the read-back
+    proves what the control plane stored, this shows the guest cannot
+    connect out to an IP literal and a hostname. `OPEN` fails the run
+    closed -- a policy that read back deny-all but connects is the
+    enforcement the whole review phase rests on. An `UNVERIFIED` verdict
+    (the check itself could not run or a target went unreported) is
+    recorded as an error and does not fail the run: the read-back remains
+    the enforced gate, exactly as the probe's own egress check is
+    evidence beside it, not the gate."""
+    verdict = _egress_check(run)
+    clean = verdict.startswith("no outbound connection")
+    run.telemetry.record(
+        "egress",
+        "behavioral check",
+        {"verdict": verdict},
+        status=OK if clean else ERROR,
+        error=(
+            ""
+            if clean
+            else f"the deny-all flip's behavioral check did not pass: {verdict}"
+        ),
+    )
+    if verdict.startswith("OPEN"):
+        raise PolicyNotEnforcedError(f"the deny-all flip did not hold: {verdict}")
 
 
 def _raw_exec(run: _Run, step: _Exec) -> bytes:

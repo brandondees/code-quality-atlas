@@ -1,0 +1,410 @@
+# SPDX-License-Identifier: MIT
+"""Issue #819 (D95): the reviewed repo's setup phase. The parse
+(`repo_config`'s `review_setup_commands:` line, read from the default
+branch), the runner lifecycle's order -- the setup commands run with
+egress still allowed, the deny-all flip and its read-back sit between
+them and every exec of the review, and the behavioral egress check
+proves the flip held -- the bridge's pass-through, and the CLI and
+coordinator plumbing. Nothing here contacts GitHub, a live Sprite or a
+model: the fakes record the policy each exec ran under, and the local
+runner answers the egress check with the outcome the deny-all policy
+produces."""
+
+from dataclasses import dataclass, field
+
+from atlas_reviewer.cli import (
+    _SETUP_FETCH_NOTE,
+    _SETUP_LOOKUP_NOTE,
+    _SETUP_OVERBOUND_NOTE,
+    _setup_commands,
+)
+from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
+from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
+from atlas_reviewer.ports import BoundaryError, NotFoundError, ResponseTooLargeError
+from atlas_reviewer.repo_config import parse_setup_commands, read_repo_config
+from atlas_reviewer.runner import SetupSpec, run_session
+
+from .helpers import HEAD, OLD, FakeClock, source_tarball
+
+LINE = "review_setup_commands: {value}"
+EVENT = PrEvent("example-org/example-app", 42, HEAD)
+NAME = "cqa-rev-20261123-120000-abc123"
+SETUP_ECHO = ("echo", "atlas-setup-ran")
+# The clean-egress answer: each connect attempts and reports timeout,
+# which is what the deny-all policy produces on a live runner; the echo
+# rule is the setup command's own success answer. The egress rule
+# answers with the verdict lines the real script would print.
+DENY_EGRESS = (
+    ExecRule(
+        "create_connection",
+        "atlas-egress:1.1.1.1:443:tried:timeout:0\n"
+        "atlas-egress:example.com:443:tried:timeout:0",
+        0,
+    ),
+    ExecRule("atlas-setup-ran", "", 0),
+)
+
+
+def parse(value: str | None):
+    return parse_setup_commands(LINE.format(value=value) if value is not None else None)
+
+
+# ------------------------------------------------------------------ parse
+
+
+def test_a_setup_line_parses_into_argv_with_the_python_placeholder():
+    read = parse("{python} -m pip install pytest, {python} -m pip install cryptography")
+    assert read.commands == (
+        ("{python}", "-m", "pip", "install", "pytest"),
+        ("{python}", "-m", "pip", "install", "cryptography"),
+    )
+    assert read.notes == ()
+
+
+def test_a_setup_command_without_the_placeholder_parses_like_a_proposal():
+    read = parse("make deps")
+    assert read.commands == (("make", "deps"),)
+    assert read.notes == ()
+
+
+def test_no_text_or_no_line_reads_as_no_setup():
+    assert parse_setup_commands(None).commands == ()
+    assert parse_setup_commands("# policy only\n").commands == ()
+    assert parse_setup_commands("# policy only\n").notes == ()
+
+
+def test_the_placeholder_is_the_program_token_only():
+    # An argument cannot carry the placeholder: the argument grammar has
+    # no braces, so the line is unusable, like any other out-of-grammar
+    # token.
+    read = parse("{python} -m pip install {python}")
+    assert read.commands == ()
+    assert "review_setup_commands:" in read.notes[0]
+
+
+# The fail-open note, verbatim: the key, the condition, and the default
+# that stands -- never a rejected value.
+UNUSABLE_NOTE = (
+    "the reviewed repo's default-branch REVIEW.md carries a "
+    "review_setup_commands: line it cannot use as the run's setup "
+    "commands (a comma-separated list of declared setup commands, one "
+    "line per key, the program token may be the {python} placeholder); "
+    "it is ignored and the runner runs no setup phase -- the execution "
+    "tools stay as unavailable as they were without one"
+)
+
+
+def test_an_unusable_setup_line_fails_open_to_no_setup_with_the_named_note():
+    read = parse("make check && curl http://evil.example")
+    assert read.commands == ()
+    assert read.notes == (UNUSABLE_NOTE,)
+
+
+def test_a_second_setup_line_fails_open_to_no_setup():
+    read = parse_setup_commands(
+        f"{LINE.format(value='make deps')}\n{LINE.format(value='make all')}\n"
+    )
+    assert read.commands == ()
+    assert "2 review_setup_commands: lines" in read.notes[0]
+
+
+def test_duplicate_commands_are_unusable():
+    read = parse("make deps, make deps")
+    assert read.commands == ()
+    assert read.notes
+
+
+def test_setup_commands_are_bounded():
+    assert parse(", ".join(f"step{i}" for i in range(5))).commands == ()
+    over_tokens = parse("{python} a b c d e f g h i")
+    assert over_tokens.commands == ()
+    assert over_tokens.notes
+
+
+def test_the_setup_key_draws_no_unsupported_note_in_the_merge_base_read():
+    tarball = source_tarball(
+        {b"REVIEW.md": b"# policy\n\nreview_setup_commands: make deps\n"},
+        top="example-app",
+    )
+    assert read_repo_config(tarball).unsupported_notes == ()
+
+
+# ------------------------------------------------------- the cli glue
+
+
+@dataclass
+class FakeFetchGitHub:
+    """The shape `_setup_commands` needs: one repository answer, one file
+    answer or error."""
+
+    repository: object = None
+    repository_error: Exception | None = None
+    file: bytes | None = None
+    file_error: Exception | None = None
+    calls: list = field(default_factory=list)
+
+    def get_repository(self, repo):
+        self.calls.append(("get_repository", repo))
+        if self.repository_error is not None:
+            raise self.repository_error
+        return self.repository
+
+    def get_file(self, repo, ref, path, max_bytes):
+        self.calls.append(("get_file", repo, ref, path))
+        if self.file_error is not None:
+            raise self.file_error
+        if self.file is None:
+            raise NotFoundError("404")
+        return self.file
+
+
+def test_the_cli_glue_reads_the_default_branch_file():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"},
+        file=b"# policy\n\nreview_setup_commands: {python} -m pip install pytest\n",
+    )
+    spec, notes = _setup_commands(github, EVENT)
+    assert spec is not None
+    assert spec.commands == (("{python}", "-m", "pip", "install", "pytest"),)
+    assert notes == ()
+    assert github.calls == [
+        ("get_repository", EVENT.repo),
+        ("get_file", EVENT.repo, "main", "REVIEW.md"),
+    ]
+
+
+def test_no_default_branch_file_is_the_silent_unconfigured_repo():
+    github = FakeFetchGitHub(repository={"default_branch": "main"})
+    assert _setup_commands(github, EVENT) == (None, ())
+
+
+def test_a_repo_level_lookup_failure_is_a_named_gap_with_no_setup():
+    github = FakeFetchGitHub(repository_error=NotFoundError("404"))
+    assert _setup_commands(github, EVENT) == (None, (_SETUP_LOOKUP_NOTE,))
+    github2 = FakeFetchGitHub(repository={"default_branch": ""})
+    assert _setup_commands(github2, EVENT) == (None, (_SETUP_LOOKUP_NOTE,))
+
+
+def test_a_failed_fetch_or_an_over_bound_file_names_its_own_gap():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"}, file_error=BoundaryError("boom")
+    )
+    assert _setup_commands(github, EVENT) == (None, (_SETUP_FETCH_NOTE,))
+    overbound = FakeFetchGitHub(
+        repository={"default_branch": "main"}, file_error=ResponseTooLargeError("over")
+    )
+    assert _setup_commands(overbound, EVENT) == (None, (_SETUP_OVERBOUND_NOTE,))
+
+
+def test_the_cli_glue_never_carries_a_failed_reads_error_text():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"},
+        file_error=BoundaryError("secret-value leaked into the error"),
+    )
+    _got, notes = _setup_commands(github, EVENT)
+    assert "secret-value" not in notes[0]
+
+
+# ------------------------------------------------- the lifecycle order
+
+
+def ops(api):
+    return [c[0] for c in api.calls]
+
+
+def _scripts(api):
+    return [argv[-1] for argv in api.argv_seen]
+
+
+def run_setup(api, spec, deadline_s=120.0):
+    def body(session):
+        session.exec("body", "true")
+        return "done"
+
+    return run_session(
+        api,
+        MemoryLedger(),
+        body,
+        name=NAME,
+        deadline_s=deadline_s,
+        clock=FakeClock(),
+        setup=spec,
+    )
+
+
+def test_setup_commands_run_while_egress_is_allowed_then_everything_runs_denied():
+    """The order the issue's acceptance rests on: the setup execs run
+    before the policy flip (egress still allowed), the flip and its
+    read-back sit between the last setup exec and the first exec of the
+    review, and every exec after the flip runs under exactly deny-all."""
+    api = FakeSprites(rules=DENY_EGRESS)
+    report = run_setup(api, SetupSpec((SETUP_ECHO,)))
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    # Execs in order: the interpreter resolution, the setup command --
+    # both while egress is still allowed -- then the egress proof and
+    # the body's exec, both under the verified deny-all.
+    assert api.policy_deny_at_exec == [False, False, True, True]
+    sequence = ops(api)
+    flip = sequence.index("set_network_policy")
+    assert sequence[flip : flip + 3] == [
+        "set_network_policy",
+        "get_network_policy",
+        "set_memory_limit",
+    ]
+    assert [i for i, c in enumerate(sequence) if c == "exec" and i < flip] == [1, 2]
+
+
+def test_a_failing_setup_command_fails_the_run_and_still_destroys():
+    api = FakeSprites(rules=(ExecRule("atlas-setup-ran", "boom", 1),) + DENY_EGRESS)
+    report = run_setup(api, SetupSpec((SETUP_ECHO,)))
+    assert report.status is RunnerStatus.FAILED
+    assert "setup command 1 failed" in report.note
+    assert report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert api.live_names() == ()
+
+
+def test_a_missing_interpreter_for_the_setup_phase_fails_the_run():
+    api = FakeSprites(rules=DENY_EGRESS, pythons=())
+    report = run_setup(api, SetupSpec((("{python}", "--version"),)))
+    assert report.status is RunnerStatus.FAILED
+    assert "no trusted interpreter" in report.note
+    assert report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+def test_an_open_egress_check_after_the_flip_fails_the_run():
+    api = FakeSprites(
+        rules=(
+            ExecRule(
+                "create_connection",
+                "atlas-egress:1.1.1.1:443:tried:connected:0\n"
+                "atlas-egress:example.com:443:tried:connected:0",
+                0,
+            ),
+            ExecRule("atlas-setup-ran", "", 0),
+        )
+    )
+    report = run_setup(api, SetupSpec((SETUP_ECHO,)))
+    assert report.status is RunnerStatus.FAILED
+    assert "did not hold" in report.note
+    assert report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+def test_the_egress_proof_runs_only_when_a_setup_phase_ran():
+    api = FakeSprites(rules=DENY_EGRESS)
+    run_setup(api, SetupSpec((SETUP_ECHO,)))
+    assert sum(1 for s in _scripts(api) if "atlas-egress" in s) >= 1
+    plain = FakeSprites(rules=DENY_EGRESS)
+    run_setup(plain, None)
+    assert sum(1 for s in _scripts(plain) if "atlas-egress" in s) == 0
+    # And the plain run keeps today's lifecycle exactly: deny-all before
+    # any exec at all.
+    assert ops(plain)[:3] == ["create", "set_network_policy", "get_network_policy"]
+    assert all(plain.policy_deny_at_exec)
+
+
+def test_an_empty_spec_is_the_ordinary_runner():
+    api = FakeSprites(rules=DENY_EGRESS)
+    report = run_setup(api, SetupSpec(()))
+    assert report.status is RunnerStatus.COMPLETED
+    assert ops(api)[:3] == ["create", "set_network_policy", "get_network_policy"]
+    assert all(api.policy_deny_at_exec)
+
+
+# ------------------------------------------------------ the bridge pass
+
+
+def _trees():
+    from atlas_reviewer.bridge_staging import SourceTrees
+
+    source = source_tarball({"calc.py": b"def total(xs):\n    return sum(xs)\n"})
+    return SourceTrees(source, source, OLD, HEAD)
+
+
+def _bridge_report(api, trees, tmp_path):
+    import sys
+
+    from atlas_reviewer.bridge import run_bridge
+    from atlas_reviewer.redact import Redactor
+
+    return run_bridge(
+        api,
+        MemoryLedger(),
+        trees,
+        lambda bridge: "staged",
+        redactor=Redactor(),
+        changed=frozenset(),
+        name=NAME,
+        deadline_s=300.0,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(sys.executable,),
+        setup=SetupSpec((SETUP_ECHO,)),
+    )
+
+
+def test_run_bridge_runs_the_setup_phase_before_the_flip_and_the_staging(tmp_path):
+    """Through the bridge's own entry point: the setup execs precede the
+    flip, and every exec after it -- the egress proof, the git
+    resolution, the uploads and the repository build -- runs under
+    verified deny-all."""
+    from atlas_reviewer.local_runner import LocalSprites
+
+    api = LocalSprites()
+    report = _bridge_report(api, _trees(), tmp_path)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    denies = api.policy_deny_at_exec
+    # The interpreter resolution and the setup command ran with egress
+    # still allowed; every exec from the egress proof on ran denied.
+    assert denies[:2] == [False, False]
+    assert denies[2:] and all(denies[2:])
+    sequence = ops(api)
+    flip = sequence.index("set_network_policy")
+    assert sequence[flip : flip + 2] == ["set_network_policy", "get_network_policy"]
+    assert flip == 3  # the create, then the two setup execs, then the flip
+
+
+def test_run_bridge_uploads_nothing_before_the_flip(tmp_path):
+    from atlas_reviewer.local_runner import LocalSprites
+
+    api = LocalSprites()
+    report = _bridge_report(api, _trees(), tmp_path)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    flip = ops(api).index("get_network_policy")
+    upload_positions = [
+        i
+        for i, c in enumerate(api.calls)
+        if c[0] == "exec" and ("base.tar.gz" in c[2] or "head.tar.gz" in c[2])
+    ]
+    assert upload_positions, "the trees are uploaded"
+    assert all(i > flip for i in upload_positions)
+
+
+# ------------------------------------------------- the coordinator plumb
+
+
+def test_the_coordinator_carries_the_setup_spec_into_the_lens_runner(tmp_path):
+    """The setup spec rides `review_lens` into the lens run's runner: the
+    lens's own runner ran the setup phase before its flip, recorded by
+    the fake's per-exec policy record -- the plumb a dropped kwarg would
+    lose."""
+    from atlas_reviewer.local_runner import LocalSprites
+
+    from .agentic import final
+    from .test_coordinator import review
+
+    api = LocalSprites()
+    result, _model, sprites = review(
+        tmp_path,
+        [final()],
+        sprites=api,
+        setup=SetupSpec((SETUP_ECHO,)),
+    )
+    assert sprites is api
+    denies = api.policy_deny_at_exec
+    # The setup phase's two execs ran before the flip; every exec from
+    # the egress proof on -- staging, the lens hold, the model session's
+    # bridge calls -- ran under verified deny-all.
+    assert denies[:2] == [False, False]
+    assert denies[2:] and all(denies[2:])
+    (lens,) = result.lenses
+    assert lens.index == 1

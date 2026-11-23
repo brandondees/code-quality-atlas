@@ -97,6 +97,21 @@ Today's keys:
   widen network, secret, or Sprite access and the runner stays deny-all
   and credential-free.
 
+- `review_setup_commands:` (issue #819, D95) -- the repo's **setup
+  spec**: the dev-dependency installs a runner runs in its setup phase,
+  with egress still allowed, before the deny-all flip and before any PR
+  content is uploaded. Same token grammar as the S7 proposals, one
+  addition: the program token may be the `{python}` placeholder,
+  substituted with the interpreter the controller resolved by absolute
+  path. Parsed by `parse_setup_commands` from the **default branch**
+  (the same read source the S7 proposals take -- a PR that could carry
+  its own setup commands would name installs into its own review's
+  runner while the network is open), never from the merge-base, whose
+  copy of the key the merge-base read ignores silently (it is a known
+  key, so no false unsupported note draws). An unusable value fails
+  open to no setup phase, with a named note that counts and never
+  echoes the rejected text.
+
 The admission-class keys (`review_base_include:` /
 `review_base_exclude:` / `review_skip_events:`, #756 and #761) are
 `service_admit.py`'s -- read from the repo's default branch, a different
@@ -403,6 +418,142 @@ def parse_run_proposals(text: str | None) -> RunProposalsRead:
     if proposals is None:
         return DEFAULT_RUN_PROPOSALS
     return RunProposalsRead(proposals, ())
+
+
+# The default-branch line that declares the repo's setup commands (issue
+# #819, D95): the value is a comma-separated list of commands, each one
+# program token plus optional fixed argument tokens separated by single
+# spaces -- the same token grammar the S7 proposals use, with one
+# addition: the program token may be the `{python}` placeholder, which
+# the controller substitutes with the interpreter it resolved by
+# absolute path before the phase ran. The commands run in the runner's
+# setup phase, with egress still allowed so installs reach their
+# indexes -- which is exactly why they are read from the **default
+# branch**, never the merge-base and never the PR head: a PR that could
+# carry its own setup commands would name installs into its own review's
+# runner while the network is open.
+SETUP_COMMANDS_LINE = re.compile(
+    r"^review_setup_commands:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
+)
+_SETUP_PLACEHOLDER = "{python}"
+_MAX_SETUP_COMMANDS = 4
+
+
+def _setup_commands(raw: str | None) -> tuple[tuple[str, ...], ...] | None:
+    """The comma-separated declared commands of one line's value, or None
+    when the value is unusable, by the S7 proposal grammar's own rules --
+    empty, a token outside its grammar, a traversal-shaped argument
+    token, more tokens or commands than the bounds, a program whose path
+    the bridge's own path rule refuses, or the same command twice -- with
+    the one addition the setup grammar carries: the program token may be
+    the `{python}` placeholder, substituted with the resolved
+    interpreter's absolute path at run time. A placeholder anywhere but
+    the program position is not a token the grammar accepts, so it is
+    unusable, like any other out-of-grammar token."""
+    if raw is None or not raw.strip():
+        return None
+    commands: list[tuple[str, ...]] = []
+    for piece in raw.split(","):
+        tokens = piece.split()
+        if not tokens or len(tokens) > _MAX_COMMAND_TOKENS:
+            return None
+        program, *args = tokens
+        if program != _SETUP_PLACEHOLDER and (
+            not _COMMAND_PROGRAM_TOKEN.fullmatch(program)
+            or path_problem(program) is not None
+        ):
+            return None
+        if not all(
+            _COMMAND_ARG_TOKEN.fullmatch(token) and token not in _TRAVERSAL_ARGS
+            for token in args
+        ):
+            return None
+        if tuple(tokens) in commands:
+            return None
+        commands.append(tuple(tokens))
+    if len(commands) > _MAX_SETUP_COMMANDS:
+        return None
+    return tuple(commands)
+
+
+def _unusable_setup_note(lines: int) -> str:
+    """The note for the offending `review_setup_commands:` lines: the key,
+    the condition, the count, and the default that stands -- no setup
+    phase -- and never any rejected value."""
+    if lines == 1:
+        return (
+            f"the reviewed repo's default-branch {REVIEW_MD} carries a "
+            "review_setup_commands: line it cannot use as the run's setup "
+            "commands (a comma-separated list of declared setup commands, "
+            "one line per key, the program token may be the {python} "
+            "placeholder); it is ignored and the runner runs no setup "
+            "phase -- the execution tools stay as unavailable as they "
+            "were without one"
+        )
+    return (
+        f"the reviewed repo's default-branch {REVIEW_MD} carries "
+        f"{lines} review_setup_commands: lines it cannot use as the run's "
+        "setup commands (a comma-separated list of declared setup "
+        "commands, one line per key, the program token may be the "
+        "{python} placeholder); they are ignored and the runner runs no "
+        "setup phase -- the execution tools stay as unavailable as they "
+        "were without one"
+    )
+
+
+@dataclass(frozen=True)
+class SetupRead:
+    """What the reviewed repo's **default-branch** `REVIEW.md` declared
+    for the runner's setup phase (issue #819, D95): `commands` are the
+    parsed, validated argv tuples, each run with egress still allowed
+    before the deny-all flip and before any PR content is uploaded; the
+    `{python}` placeholder is substituted with the interpreter the
+    controller resolved by absolute path. `notes` is controller text,
+    non-empty only when a line was seen and ignored, so "line present but
+    unusable" can be told apart from "no line"; the note names the key,
+    the condition and the default that stands, and never echoes the
+    rejected text."""
+
+    commands: tuple[tuple[str, ...], ...]
+    notes: tuple[str, ...]
+
+
+DEFAULT_SETUP = SetupRead((), ())
+
+
+def parse_setup_commands(text: str | None) -> SetupRead:
+    """The `review_setup_commands:` line, parsed from one `REVIEW.md`
+    **text** -- the default-branch file the service fetches, never the
+    merge-base tarball and never the PR head (the same read source the
+    S7 proposals take: a PR that could carry its own setup commands
+    would name installs into its own review's runner while egress is
+    allowed). No file, or no line for the key, reads as no setup phase,
+    silently, exactly as no request at all. A line that is present but
+    unusable -- an empty or out-of-grammar value, or the key more than
+    once -- fails open to no setup: the whole line is dropped and the
+    note names the key, the condition and the default, never the
+    rejected text. Fence-blind by design, exactly as the other known
+    keys' parsers are."""
+    if text is None:
+        return DEFAULT_SETUP
+    commands: tuple[tuple[str, ...], ...] | None = None
+    unusable = False
+    matched = 0
+    for line in text.splitlines():
+        match = SETUP_COMMANDS_LINE.match(line)
+        if match is None:
+            continue
+        matched += 1
+        parsed = _setup_commands(match.group(1))
+        if parsed is None or commands is not None:
+            unusable = True
+            continue
+        commands = parsed
+    if unusable:
+        return SetupRead((), (_unusable_setup_note(matched),))
+    if commands is None:
+        return DEFAULT_SETUP
+    return SetupRead(commands, ())
 
 
 def parse_post_config(text: str | None) -> PostConfigRead:
@@ -748,6 +899,7 @@ _KNOWN_KEYS = frozenset(
         "review_base_exclude",
         "review_skip_events",
         "review_test_commands",
+        "review_setup_commands",
     }
 )
 # How many distinct unsupported keys one note names; the remainder is

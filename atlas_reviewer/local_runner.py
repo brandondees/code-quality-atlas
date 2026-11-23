@@ -33,7 +33,12 @@ from typing import Self
 
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
-from atlas_reviewer.runner import EXIT_MARKER, SWEEP_TAG
+from atlas_reviewer.runner import (
+    DENY_ALL,
+    EGRESS_TAG,
+    EXIT_MARKER,
+    SWEEP_TAG,
+)
 
 REAP_TIMEOUT_S = 5.0
 
@@ -72,10 +77,22 @@ class LocalSprites(FakeSprites):
             # runner's, so the local runner answers the sweep with its own
             # scoped implementation instead of executing it.
             self._record("exec", name, script)
+            self._note_policy(name)
             self.sweep(name)
             return b"\x01" + f"{SWEEP_TAG}:clean\n{EXIT_MARKER}0\n".encode()
+        if EGRESS_TAG in script:
+            # The egress check runs real outbound connects on a live
+            # runner; this machine's real network would answer for
+            # itself, and no local enforcement exists, so the local
+            # runner reports the outcome the deny-all policy produces --
+            # every connect attempts and times out -- instead of
+            # executing the script. The same modeling choice the sweep's
+            # scoped stand-in makes.
+            self._record("exec", name, script)
+            self._note_policy(name)
+            return b"\x01" + self._egress_answer(script)
         self._record("exec", name, script)
-        self._get(name)
+        self._note_policy(name)
         self.argv_seen.append(tuple(argv))
         self.timeouts_seen.append(timeout_s)
         try:
@@ -99,6 +116,20 @@ class LocalSprites(FakeSprites):
                 first_byte=False,
             ) from exc
         return b"\x01" + stdout
+
+    def _note_policy(self, name: str) -> None:
+        """Records whether this exec ran under deny-all (issue #819, D95):
+        the order proof's raw material, shared with the fake's own exec."""
+        self.policy_deny_at_exec.append(self._get(name).network_rules == list(DENY_ALL))
+
+    def _egress_answer(self, script: str) -> bytes:
+        """The egress verdict lines the deny-all policy produces: one
+        timed-out connect per target, in script order."""
+        found = re.search(r"for t in (.+?); do", script)
+        targets = found.group(1).split() if found else ()
+        lines = [f"{EGRESS_TAG}:{t}:tried:timeout:0" for t in targets]
+        body = "\n".join(lines)
+        return f"{body}\n{EXIT_MARKER}0\n".encode()
 
     def sweep(
         self,
