@@ -29,7 +29,11 @@ from atlas_reviewer.installation_store import (
 from atlas_reviewer.tenant_provider import PricingUnknownError
 from atlas_settings import checks, pages
 from atlas_settings.audit import AuditLog
-from atlas_settings.config import SettingsConfig
+from atlas_settings.config import (
+    CapRejectedError,
+    SettingsConfig,
+    parse_daily_cap,
+)
 from atlas_settings.github import (
     GitHubClient,
     GitHubRefused,
@@ -42,6 +46,8 @@ from atlas_settings.phrases import (
     CONSENT_REFUSED,
     CONSENT_UNCHECKED,
     CSRF_REFUSED,
+    DELETE_CONFIRM_WORD,
+    DELETE_MISMATCH,
     ENDPOINT_REFUSED_PREFIX,
     GATE_REFUSED,
     GITHUB_CHECK_FAILED,
@@ -57,6 +63,7 @@ from atlas_settings.sessions import (
     Session,
     SessionError,
     SessionStore,
+    cleared_cookie_header,
     cookie_header,
 )
 
@@ -193,6 +200,9 @@ class SettingsApp:
         builtins: dict[str, Callable[[Session, dict[str, str], int], Response]] = {
             "consent": self._post_consent,
             "credentials": self._post_credentials,
+            "revoke": self._post_revoke,
+            "cap": self._post_cap,
+            "delete": self._post_delete,
         }
         return builtins.get(action, self.write_actions.get(action))
 
@@ -297,6 +307,72 @@ class SettingsApp:
         except AuthorizationRefused as refused:
             return refused.response
         return self._redirect("/settings")
+
+    def _post_revoke(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
+        del form
+        self._write(
+            session,
+            "revoke-credentials",
+            lambda: self.store.revoke_credentials(self.config.installation_id),
+            covered,
+        )
+        return self._redirect("/settings")
+
+    def _post_cap(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
+        try:
+            cap = parse_daily_cap(form.get("cap_usd", ""))
+        except CapRejectedError as exc:
+            return self._settings_render(session, str(exc), 400, covered)
+        self._write(
+            session,
+            "set-cap",
+            lambda: self.store.set_cap(self.config.installation_id, cap),
+            covered,
+        )
+        return self._redirect("/settings")
+
+    def _post_delete(
+        self, session: Session, form: dict[str, str], covered: int
+    ) -> Response:
+        confirm = form.get("confirm", "").strip()
+        # Compared as encoded bytes: `compare_digest` refuses non-ASCII
+        # `str` outright, and a hostile confirm value is not allowed to
+        # become a 500 — it is just a mismatch.
+        if not hmac.compare_digest(
+            confirm.encode("utf-8"), DELETE_CONFIRM_WORD.encode("utf-8")
+        ):
+            return self._settings_render(session, DELETE_MISMATCH, 400, covered)
+        try:
+            self._write(
+                session,
+                "delete-installation",
+                lambda: self.store.delete(self.config.installation_id),
+                covered,
+            )
+        except AuthorizationRefused as refused:
+            if refused.response.status == 500:
+                # The audit gap — the one 500 `_write` raises: the store
+                # delete landed and only its record failed. The session
+                # ends with the delete it caused — the row is destroyed
+                # and the cookie is cleared with it; an authenticated
+                # session must not outlive the record it deleted.
+                self.sessions.destroy(session)
+                return Response(
+                    refused.response.status,
+                    refused.response.body,
+                    content_type=refused.response.content_type,
+                    set_cookie=cleared_cookie_header(),
+                )
+            return refused.response
+        # The record is gone; the session ends with the delete too.
+        self.sessions.destroy(session)
+        return self._redirect("/", set_cookie=cleared_cookie_header())
+
+    # ---- shared write plumbing -------------------------------------
 
     def _write(
         self,
