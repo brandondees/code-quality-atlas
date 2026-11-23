@@ -432,6 +432,18 @@ class _Create:
     outcome: CreateOutcome = "not started"
 
 
+@dataclass
+class _SetupFailure:
+    """Whether this runner's setup phase failed **deterministically**
+    (issue #819, D95) -- a declared command that failed, or no trusted
+    interpreter to run the spec's `{python}` commands with -- shared out
+    of the frozen run the way `_Create` shares the create outcome: the
+    bake's classifier reads it instead of matching the failure note's
+    wording, so a transient failure cannot read as a deterministic one."""
+
+    failed: bool = False
+
+
 @dataclass(frozen=True)
 class _Run:
     api: SpritesApi
@@ -445,6 +457,7 @@ class _Run:
     create_gate: threading.Semaphore | None = None
     setup: SetupSpec | None = None
     restore: str | None = None
+    setup_failure: _SetupFailure = field(default_factory=_SetupFailure)
 
 
 @dataclass(frozen=True)
@@ -906,34 +919,45 @@ def _disposable(
     watchdog.daemon = True
     watchdog.start()
     try:
-        status, note = _guarded(run, body)
+        status, note, setup_failed = _guarded(run, body)
     finally:
         watchdog.cancel()
         with held():
             cleanup = destroyer.destroy("final")
-    return RunnerReport(status, cleanup, name, note)
+    return RunnerReport(status, cleanup, name, note, setup_failed=setup_failed)
 
 
-def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
+def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str, bool]:
     """Steps that are never fatal (diagnostics, the stdin check) swallow
     their own errors, so a body can return normally after the deadline
-    passed; that run is not complete either."""
+    passed; that run is not complete either. The third element is the
+    run's own setup-failure classification (issue #819, D95): whether the
+    setup phase failed deterministically -- a declared command that
+    failed, or no trusted interpreter -- which the bake reads off the
+    report instead of matching the note's wording."""
     try:
         _provision(run)
         note = body(run)
     except DeadlineExceededError as exc:
-        return _deadline_reached(run, str(exc))
+        return (*_deadline_reached(run, str(exc)), False)
     except CreateRefusedError:
         raise
     except RestoreRefusedError:
         raise
     except BoundaryError as exc:
         if run.deadline.remaining() <= 0:
-            return _deadline_reached(run, f"deadline reached: {exc}")
-        return RunnerStatus.FAILED, run.telemetry.scrub(str(exc))
+            return (*_deadline_reached(run, f"deadline reached: {exc}"), False)
+        return (
+            RunnerStatus.FAILED,
+            run.telemetry.scrub(str(exc)),
+            (run.setup_failure.failed),
+        )
     if run.deadline.remaining() <= 0:
-        return _deadline_reached(run, f"deadline reached by the last step ({note})")
-    return RunnerStatus.COMPLETED, run.telemetry.scrub(note)
+        return (
+            *_deadline_reached(run, f"deadline reached by the last step ({note})"),
+            False,
+        )
+    return RunnerStatus.COMPLETED, run.telemetry.scrub(note), False
 
 
 def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
@@ -1007,7 +1031,7 @@ def run_session(
     A `setup` spec (issue #819, D95) runs the repo's declared setup
     commands with egress still allowed, before the deny-all flip and
     before anything of the review -- the body included -- executes; every
-    exec after the flip runs under verified deny-all.     A `restore` names
+    exec after the flip runs under verified deny-all. A `restore` names
     the shared post-setup checkpoint this runner starts from instead of
     running the setup itself: deny-all is set and verified first, then
     the checkpoint is restored, and the egress proof follows it, since
@@ -1464,6 +1488,7 @@ def _setup_phase(run: _Run) -> None:
         after=_python_fields,
     )
     if not isinstance(python, TrustedPython):
+        run.setup_failure.failed = True
         raise BoundaryError(
             "the setup phase found no trusted interpreter to run the "
             "repo's setup commands with"
@@ -1486,6 +1511,7 @@ def _setup_phase(run: _Run) -> None:
             ),
         )  # fmt: skip
         if code != 0:
+            run.setup_failure.failed = True
             raise BoundaryError(
                 f"setup command {n} failed (exit {code}): "
                 f"{guest_text(text, GUEST_TAIL_CHARS)}"
@@ -1563,15 +1589,6 @@ class Baked:
     setup_failed: bool = False
 
 
-# The controller note prefixes that classify a bake failure as a
-# deterministic setup-phase failure; both are `_setup_phase`'s own fixed
-# texts, and the guest's tail only ever rides behind them.
-_SETUP_FAILURE_PREFIXES = (
-    "setup command ",
-    "the setup phase found no trusted interpreter",
-)
-
-
 def bake_setup(
     api: SpritesApi,
     ledger: RunnerLedger,
@@ -1616,8 +1633,7 @@ def bake_setup(
         create_retries=create_retries, create_gate=create_gate, setup=spec,
     )  # fmt: skip
     if report.status is not RunnerStatus.COMPLETED or not found:
-        setup_failed = report.note.startswith(_SETUP_FAILURE_PREFIXES)
-        return Baked(None, report, setup_failed=setup_failed)
+        return Baked(None, report, setup_failed=report.setup_failed)
     return Baked(found[0], report)
 
 

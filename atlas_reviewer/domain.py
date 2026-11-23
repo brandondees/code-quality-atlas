@@ -213,3 +213,11 @@ class RunnerReport:
     cleanup: CleanupStatus
     runner_name: str | None
     note: str
+    # Whether the run's setup phase failed deterministically (issue #819,
+    # D95) -- a declared command that failed, or no trusted interpreter
+    # for the spec's `{python}` commands. False for every run without a
+    # setup phase, and for a run that failed before its setup phase could
+    # classify; the bake's classifier reads it instead of matching the
+    # note's wording, so a transient failure cannot read as a
+    # deterministic one.
+    setup_failed: bool = False
