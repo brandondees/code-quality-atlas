@@ -656,6 +656,7 @@ def test_run_bridge_names_a_baked_interpreter_the_probe_cannot_confirm(tmp_path)
     assert staged_events[0].fields["pytest"] == PYENV_PYTHON
     assert staged_events[0].status == "error"
     assert "not confirmed" in staged_events[0].error
+    assert "run on what the probe found" in staged_events[0].error
 
 
 def test_the_whole_chain_scores_a_run_tests_call(tmp_path):

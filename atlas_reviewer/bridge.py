@@ -2374,8 +2374,10 @@ def run_bridge(
                 ""
                 if confirmed
                 else "the baked interpreter was not confirmed by the staging "
-                "probe; run_tests and mutate stay as unavailable as without "
-                "a setup phase until the restore is checked"
+                f"probe, which answered {staged.pytest.path if staged.pytest else 'no interpreter'}; "
+                "run_tests and mutate run on what the probe found, or stay "
+                "unavailable if it found none -- the repo's setup-installed "
+                "dependencies are not on that interpreter"
             ),
         )  # fmt: skip
         return body(

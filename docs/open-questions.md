@@ -327,10 +327,12 @@ restore is expected to have kept exactly that interpreter pytest-capable,
 and the staging telemetry names both -- `baked_python` and `pytest`. A
 probe that answers with a different interpreter (a restore that lost the
 baked state, or a repo whose spec installed into a second interpreter the
-default order prefers) is a named error on the staging telemetry, and
-`run_tests` and `mutate` stay unavailable on that runner -- the gap
-named, never a silent return to the unconfigured image's behavior; the
-review itself continues on what the probe did find. The offline chain is
+default order prefers) is a named error on the staging telemetry, which
+says what it answered and what that means: `run_tests` and `mutate` run
+on the interpreter the probe found -- which does not carry the repo's
+setup-installed dependencies -- or stay unavailable when the probe found
+none; the mismatch is on the telemetry either way, never a silent return
+to the unconfigured image's behavior. The offline chain is
 pinned end to end: a repo with a setup spec bakes once with egress
 allowed, the lens runner restores the checkpoint, the probe confirms the
 baked interpreter, and the lens's `run_tests` call returns a real run --
