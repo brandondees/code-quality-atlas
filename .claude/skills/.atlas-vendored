@@ -18,8 +18,8 @@ finding-maintainability-hotspots
 grounding-review-in-tool-output
 hunting-silent-failures
 reviewing-accessibility-and-i18n
-reviewing-agentic-safety
 reviewing-agent-legibility
+reviewing-agentic-safety
 reviewing-ai-authored-code
 reviewing-api-contract-safety
 reviewing-artifact-conventions
