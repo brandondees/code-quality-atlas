@@ -9,14 +9,30 @@ contacts GitHub, a live Sprite or a model."""
 
 from dataclasses import replace
 
-from atlas_reviewer.domain import CleanupStatus, RunnerStatus
-from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
-from atlas_reviewer.local_runner import LocalSprites
-from atlas_reviewer.ports import BoundaryError
-from atlas_reviewer.runner import SetupSpec, bake_setup, run_session
+import pytest
 
-from .agentic import final
-from .helpers import FakeClock
+from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
+from atlas_reviewer.fakes import (
+    ExecRule,
+    FakeSprites,
+    MemoryLedger,
+    ScriptedLensModel,
+)
+from atlas_reviewer.local_runner import LocalSprites
+from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.runner import (
+    DEFAULT_CREATE_RETRIES,
+    RestoreRefusedError,
+    SetupSpec,
+    bake_setup,
+    run_session,
+)
+
+from .agentic import LENS, final
+from .helpers import HEAD, FakeClock
+from .test_coordinator import OTHER
+
+EVENT_BAKE = PrEvent("example-org/example-app", 7, HEAD)
 
 NAME = "cqa-rev-20261123-130000-abc123"
 SETUP_ECHO = ("echo", "atlas-setup-ran")
@@ -110,23 +126,27 @@ def test_a_restoring_runner_flips_first_restores_then_proves_egress():
     assert seen == ["v1"]
 
 
-def test_a_restore_the_api_refuses_fails_the_run_named():
+def test_a_restore_the_api_refuses_propagates_for_the_callers_retry():
+    """A restore that did not happen raises `RestoreRefusedError` past
+    the run's report -- the denied network is never re-opened on this
+    runner; the caller's retry is a fresh runner running the setup phase
+    itself -- and the runner is still destroyed and its ledger entry
+    cleared."""
     api = FakeSprites(rules=DENY_EGRESS)
-    before = len(api.calls)
 
     def body(session):
         session.exec("body", "true")
         return "done"
 
-    report = run_session(
-        api, MemoryLedger(), body, name=NAME, deadline_s=120.0,
-        clock=FakeClock(), restore="v9",
-    )  # fmt: skip
-    assert report.status is RunnerStatus.FAILED
-    assert "checkpoint restore" in report.note
-    assert "v9" in report.note
-    assert report.cleanup is CleanupStatus.DESTROYED_VERIFIED
-    assert ops(api)[before:][:4] == [
+    with pytest.raises(RestoreRefusedError) as exc_info:
+        run_session(
+            api, MemoryLedger(), body, name=NAME, deadline_s=120.0,
+            clock=FakeClock(), restore="v9",
+        )  # fmt: skip
+    assert "checkpoint restore" in str(exc_info.value)
+    assert "v9" in str(exc_info.value)
+    assert api.live_names() == ()
+    assert ops(api)[:4] == [
         "create",
         "set_network_policy",
         "get_network_policy",
@@ -180,9 +200,8 @@ def _denies_by_runner(api):
     return grouped
 
 
-def _run_two_lenses(tmp_path, sprites, script, **kw):
+def _run_lenses(tmp_path, sprites, names, model, **kw):
     from atlas_reviewer.coordinator import review_lenses
-    from atlas_reviewer.fakes import ScriptedLensModel
     from atlas_reviewer.redact import Redactor
 
     from .agentic import BODY, DIFF, LENS, LIMITS, trees
@@ -193,9 +212,9 @@ def _run_two_lenses(tmp_path, sprites, script, **kw):
     tasks.start()
     try:
         result = review_lenses(
-            EVENT, [LENS, OTHER], DIFF, trees(),
+            EVENT, names, DIFF, trees(),
             library=StubLibrary({LENS: BODY, OTHER: OTHER_BODY}),
-            model=ScriptedLensModel(script),
+            model=model,
             limits=replace(LIMITS, pool_size=2), ledger=ledger(tmp_path),
             sprites=sprites, runner_ledger=MemoryLedger(), redactor=Redactor(),
             clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
@@ -213,7 +232,10 @@ def test_every_lens_restores_the_one_checkpoint_and_none_reruns_setup(tmp_path):
     runner restores that checkpoint, and no lens runner runs a setup exec
     of its own -- every lens exec from the first on runs denied."""
     api = _Recording()
-    result = _run_two_lenses(tmp_path, api, [final(), final()], setup=SPEC)
+    result = _run_lenses(
+        tmp_path, api, [LENS, OTHER],
+        ScriptedLensModel([final(), final()]), setup=SPEC,
+    )  # fmt: skip
     assert api.live_names() == ()
     # The two planned lenses restore the bake's checkpoint; the
     # continuation rounds the unread-file rule starts restore it too.
@@ -247,7 +269,10 @@ def test_a_failed_bake_falls_back_to_per_lens_setup(tmp_path):
             raise BoundaryError("the control plane refused the checkpoint")
 
     api = NoCheckpoint()
-    result = _run_two_lenses(tmp_path, api, [final(), final()], setup=SPEC)
+    result = _run_lenses(
+        tmp_path, api, [LENS, OTHER],
+        ScriptedLensModel([final(), final()]), setup=SPEC,
+    )  # fmt: skip
     assert api.live_names() == ()
     assert api.restores == []
     # Every runner (the two planned lenses, plus any continuation rounds)
@@ -257,3 +282,89 @@ def test_a_failed_bake_falls_back_to_per_lens_setup(tmp_path):
         assert flags[:2] == [False, False], name
         assert flags[2:] and all(flags[2:]), name
     assert [lens.index for lens in result.lenses][:2] == [1, 2]
+
+
+# ------------------------------------- the degrade path and the bake bounds
+
+
+def test_a_restore_refusal_retries_the_lens_on_a_fresh_runner(tmp_path):
+    """The documented degrade path, in the code: the lens whose restore
+    was refused retries ONCE on a fresh runner running the setup phase
+    itself -- its own provisioning allows egress again before its own
+    flip, the denied network never re-opened -- and the lens completes."""
+
+    class RefusingRestore(_Recording):
+        def restore(self, name, checkpoint_id):
+            raise NotFoundError(f"checkpoint {checkpoint_id} not found")
+
+    api = RefusingRestore()
+    result = _run_lenses(
+        tmp_path, api, [LENS, OTHER],
+        ScriptedLensModel([final(), final()]), setup=SPEC,
+    )  # fmt: skip
+    assert api.restores == []
+    assert api.live_names() == ()
+    # Every runner that ran the setup phase (the bake, plus each lens's
+    # fresh retry runner) shows its two deny-False execs before its own
+    # flip; nothing runs denied-before-flip anywhere else.
+    for name, flags in _denies_by_runner(api).items():
+        if flags[:1] == [False]:
+            assert flags[:2] == [False, False], name
+            assert flags[2:] and all(flags[2:]), name
+    lens = next(entry for entry in result.lenses if entry.index == 1)
+    assert lens.state.value == "complete" or lens.outcome is not None
+
+
+def test_a_deterministic_setup_failure_runs_no_per_lens_setup(tmp_path):
+    """A bake whose setup command failed would fail identically on every
+    lens runner with egress open again, so the lenses run NO setup: the
+    review continues on the unconfigured image's behavior, named."""
+    api = _Recording()
+    failing = SetupSpec((("false",),))
+    result = _run_lenses(
+        tmp_path, api, [LENS, OTHER],
+        ScriptedLensModel([final(), final()]), setup=failing,
+    )  # fmt: skip
+    assert api.live_names() == ()
+    # The bake's one deny-False exec pair is the only network window:
+    # every lens runner ran with deny-all from its first exec.
+    false_windows = [
+        name
+        for name, flags in _denies_by_runner(api).items()
+        if any(not flag for flag in flags)
+    ]
+    assert len(false_windows) == 1
+    assert api.restores == []
+    lens = next(entry for entry in result.lenses if entry.index == 1)
+    assert lens.state.value == "complete" or lens.outcome is not None
+
+
+def test_the_bake_is_skipped_when_no_lens_is_left_to_run():
+    """Every lens reused by the delta prelude means no runner will
+    restore anything: the bake -- a runner with egress allowed and real
+    installs -- must not run for nothing."""
+    from atlas_reviewer.coordinator import _bake_setup_pass
+
+    api = FakeSprites(rules=DENY_EGRESS)
+    baked = _bake_setup_pass(
+        api, MemoryLedger(), SPEC, EVENT_BAKE, 1_000_000.0, FakeClock(),
+        None, None, DEFAULT_CREATE_RETRIES, names=(),
+    )  # fmt: skip
+    assert baked is None
+    assert api.calls == []
+
+
+def test_the_bake_gets_its_own_wall_cap_not_the_whole_review_deadline():
+    from atlas_reviewer.coordinator import _bake_setup_pass
+    from atlas_reviewer.domain import RunnerStatus as _RS
+
+    api = FakeSprites(rules=DENY_EGRESS)
+    baked = _bake_setup_pass(
+        api, MemoryLedger(), SPEC, EVENT_BAKE, 1_000_000.0, FakeClock(),
+        None, None, DEFAULT_CREATE_RETRIES, names=[LENS], bake_wall_s=0.0,
+    )  # fmt: skip
+    assert baked is not None and baked.checkpoint_id is None
+    assert baked.report is not None
+    assert baked.report.status is _RS.DEADLINE_EXCEEDED
+    assert not baked.setup_failed
+    assert api.live_names() == ()

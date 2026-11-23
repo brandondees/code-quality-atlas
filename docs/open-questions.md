@@ -260,12 +260,27 @@ does -- the spec's commands with egress allowed, then the verified
 deny-all flip and the behavioral egress proof -- and checkpoints the
 result, and is **destroyed once the checkpoint is made**: no second
 long-lived runner needs holding awake, and the survival question's two
-live answers both have a recorded shape. The fallback to per-lens setup
-is the coordinator's, decided **before a lens runner starts** when no
-checkpoint exists at all (a create the API refused, a failed command, a
-deadline, a failed checkpoint call), named on the telemetry; a restore
-the API refuses at lens time fails that lens's run closed with the
-checkpoint named, never a mid-runner switch with the network re-opened.
+live answers both have a recorded shape. The bake runs only when at
+least one lens is left to run (every lens reused by the delta prelude
+means nothing will restore, so no runner with egress open runs for
+nothing), on the smaller of the review wall that is left and its own
+`BAKE_WALL_S` (900s) cap, since it runs serially before any lens starts.
+What happens when no checkpoint exists is decided **before a lens runner
+starts**, and it is classified: a **deterministic setup-phase failure**
+in the bake (a command that failed, no trusted interpreter) means the
+lenses run **no setup at all** -- the same commands would fail
+identically per lens with egress open again -- while any other failure
+(a create the API refused, a deadline, a failed checkpoint call) leaves
+every lens the per-lens-setup fallback, each named on the telemetry. A
+restore that does not happen at lens time -- an unknown id, which is
+also the shape a restore the API will not perform cross-sprite takes, a
+refusal, an incomplete stream -- raises `RestoreRefusedError` past that
+run's report and the lens **retries once on a fresh runner running the
+setup phase itself**, the reviewed slice-1 provisioning whose own flip
+allows egress again before it verifies deny: the denied network is never
+re-opened on the runner that lost the restore, the retry happens only
+while the wall has room, and a lens with no spec to fall back to is NOT
+RUN with the refusal named.
 The fake models the hopeful half -- a checkpoint outliving its sprite's
 deletion -- and the refused half is the unknown-id `NotFoundError`, so
 the tests cover both answers and the live check decides which one is

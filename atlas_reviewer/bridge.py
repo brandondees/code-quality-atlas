@@ -2332,8 +2332,9 @@ def run_bridge(
     uploads anything, so its installs can reach their indexes. A
     `restore` names the shared post-setup checkpoint this runner starts
     from instead -- deny-all is verified first, the checkpoint is
-    restored, and the egress proof follows it; a restore the API refuses
-    fails the run named."""
+    restored, and the egress proof follows it; a restore that does not
+    happen raises `RestoreRefusedError` past this report, for the
+    caller's fresh-runner retry (issue #819, D95)."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)

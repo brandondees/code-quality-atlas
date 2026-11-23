@@ -285,7 +285,6 @@ class SpritesClient:
         the document's list example shows the newest entry first, which is
         the ordering the first entry relies on (unconfirmed -- the live
         check names it)."""
-        self._path(name)
         resp = self._call(
             "POST", f"{self._path(name)}/checkpoint", {"comment": comment}
         )
