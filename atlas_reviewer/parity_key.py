@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""The parity key: eleven graded protocol findings.
+"""The parity key: eleven graded protocol findings — the seven protocol
+Minors, and the four secret-echo Majors pull request 801 seeds (issue
+#814).
 
-The seven protocol Minors, and the four secret-echo Majors pull request
-801 seeds (issue #814). A key file is one pull request's verified protocol
-findings. Adding a
-protocol-reviewed pull request is another JSON file in the same directory;
-the loader reads every file. A record is a path and a line span, or the
-pull request body and the lines a citation has to quote.
+A key file is one pull request's verified protocol findings. Adding a
+protocol-reviewed pull request is another JSON file in the same
+directory; the loader reads every file. A record is a path and a line
+span, or the pull request body and the lines a citation has to quote.
 ``grade_findings`` compares one verified candidate list with those spans.
 ``score_parity`` counts found, partial, and lost across recorded runs.
 ``load_runs`` reads a directory of those runs, and

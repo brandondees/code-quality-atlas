@@ -15,8 +15,8 @@ a directory of run files and writes that report.
 The spans were read at the `reviewed_commit` in each file. The Nov 14 trial
 scorer and `docs/plans/2026-11-13-agentic-execution-and-ci-evidence.md` name
 the Minors; issue #814's review record names the 801 echoes. Each finding's
-`source` says why its span is that range. Nothing
-here is a fresh measurement of a model.
+`source` says why its span is that range. Nothing here is a fresh
+measurement of a model.
 
 ## What a record stores
 
