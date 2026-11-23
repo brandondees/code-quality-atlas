@@ -3,11 +3,16 @@
 root — `main`'s exit-2 contract for a misconfigured environment (the
 message names the missing variables and never a value), `build`'s
 refusal when the installation store cannot be used, the wired app a
-configured environment gets, and the bind failure folded into the same
-clean exit. The serving loop itself runs behind a stub server here;
-its request handling is the socket-level suite's subject."""
+configured environment gets, the bind failure folded into the same
+clean exit, and the real serving path on a real port. The stubbed
+tests cover the loop's contract; the real-serve test is what catches a
+mistake in `main`'s own calls into it."""
 
+import http.client
 import os
+import socket
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -136,3 +141,61 @@ def test_a_bind_failure_folds_into_the_clean_exit(
     err = capsys.readouterr().err
     assert err.startswith("atlas_settings: ")
     assert "Address already in use" in err
+
+
+def test_main_serves_through_the_real_serve_on_a_free_port(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real `serve`, a real port, a real request: `main` binds,
+    answers the login page over the socket, and shuts down cleanly when
+    the server is told to stop. The `serve` seam is *spied*, not stubbed
+    — the call goes through to the real bind, which is what a stubbed
+    test could not see when a fix round left a second `serve()` call
+    below its own guard: on a fixed port the re-bind crashed every real
+    start (kills the duplicate-serve mutant, which either crashes the
+    run or leaves the probe port unanswered)."""
+    import atlas_settings.__main__ as entry
+    from atlas_settings.server import SettingsServer
+
+    probe = socket.create_server(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+
+    env = _env(tmp_path)
+    monkeypatch.setattr(os, "environ", env)
+
+    captured: dict[str, SettingsServer] = {}
+    real_serve = entry.serve
+
+    def spying_serve(*args: object, **kwargs: object) -> SettingsServer:
+        server = real_serve(*args, **kwargs)
+        captured["server"] = server
+        return server
+
+    monkeypatch.setattr(entry, "serve", spying_serve)
+
+    result: dict[str, int] = {}
+    thread = threading.Thread(
+        target=lambda: result.update(code=main(["--port", str(port)])), daemon=True
+    )
+    thread.start()
+
+    # The bound port answers the login page through the real server.
+    status = None
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            response.read()
+            status = response.status
+            connection.close()
+            break
+        except OSError:
+            time.sleep(0.1)
+    assert status == 200, f"the real server never answered (last: {status})"
+
+    captured["server"].shutdown()
+    thread.join(timeout=10)
+    assert result.get("code") == 0

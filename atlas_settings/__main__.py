@@ -80,7 +80,6 @@ def main(argv: list[str] | None = None) -> int:
         # misconfigured environment instead of a raw traceback.
         print(f"atlas_settings: {exc}", file=sys.stderr)
         return 2
-    server = serve(app, args.host, args.port, lambda line: print(line, flush=True))
     print(
         f"atlas_settings: serving on http://{args.host}:{args.port} "
         f"(state dir {config.state_dir}, audit {AUDIT_FILE_NAME})",

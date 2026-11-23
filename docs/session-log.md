@@ -6025,7 +6025,7 @@ guard over network-free hosts, `test_audit.py`, `test_ratelimit.py`,
 `test_write_failures.py` for the store that reads but cannot write;
 159 tests, 100% line and branch coverage of the package; every behavior
 a test that fails when reverted). *(At the 2026-11-19 build. The
-shipped suite after the layer split and the fix rounds is 304 tests
+shipped suite after the layer split and the fix rounds is 311 tests
 across `test_flows_signin.py`, `test_flows_writes.py`,
 `test_entry_point.py`, `test_pages.py` and the files above — the split
 the stack's own records describe.)*
