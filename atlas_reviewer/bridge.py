@@ -2313,6 +2313,7 @@ def run_bridge(
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
     approvals: RunApprovals | None = None,
     setup: SetupSpec | None = None,
+    restore: str | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2328,7 +2329,11 @@ def run_bridge(
     nothing, and every `command` a call then names is refused. `setup`
     (issue #819, D95) is the repo's declared setup phase: it runs with
     egress still allowed, before the deny-all flip and before staging
-    uploads anything, so its installs can reach their indexes."""
+    uploads anything, so its installs can reach their indexes. A
+    `restore` names the shared post-setup checkpoint this runner starts
+    from instead -- deny-all is verified first, the checkpoint is
+    restored, and the egress proof follows it; a restore the API refuses
+    fails the run named."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)
@@ -2367,5 +2372,6 @@ def run_bridge(
     return run_session(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate, setup=setup,
+        create_retries=create_retries, create_gate=create_gate,
+        setup=setup, restore=restore,
     )  # fmt: skip

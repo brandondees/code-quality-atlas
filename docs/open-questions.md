@@ -254,6 +254,26 @@ existed; their history predates it.)*
 
 **Update (2026-11-24, fix round 1 on #828 — the read source and the placeholder, as implemented):** the entry above was written before the implementation chose these two shapes, and it describes a weaker design on the exact axis the change exists to enforce; the original text stands as recorded, and this note is the correction slices 2 and 3 read. **The setup spec is read from the repo's default branch**, the same read source the S7 proposals take (`cli.py`'s `_setup_commands`, the default branch's `REVIEW.md`, never the merge base and never the PR head) -- not from the merge-base `REVIEW.md` the entry describes. The merge-base framing is superseded because it is the weaker channel: the merge base of a stacked PR contains the earlier stacked PRs' content, so a same-repo **or stacked** PR that could carry its own setup commands would name installs into its own review's runner while egress is allowed -- exactly what the default-branch read refuses. The entry's narrower invariant ("the upload comes after the flip") remains true, but it is not the one that justifies the shipped design. **The `{python}` placeholder is the program token only**: an argument carrying it is not a token the grammar accepts, so the line is unusable, like any other out-of-grammar token (pinned by `test_the_placeholder_is_the_program_token_only`).
 
+**Update (2026-11-23, slice 2, the checkpoint seam as built):** the setup
+pass is one runner per review that provisions exactly as a setup runner
+does -- the spec's commands with egress allowed, then the verified
+deny-all flip and the behavioral egress proof -- and checkpoints the
+result, and is **destroyed once the checkpoint is made**: no second
+long-lived runner needs holding awake, and the survival question's two
+live answers both have a recorded shape. The fallback to per-lens setup
+is the coordinator's, decided **before a lens runner starts** when no
+checkpoint exists at all (a create the API refused, a failed command, a
+deadline, a failed checkpoint call), named on the telemetry; a restore
+the API refuses at lens time fails that lens's run closed with the
+checkpoint named, never a mid-runner switch with the network re-opened.
+The fake models the hopeful half -- a checkpoint outliving its sprite's
+deletion -- and the refused half is the unknown-id `NotFoundError`, so
+the tests cover both answers and the live check decides which one is
+real. The id the controller accepts is read from the checkpoint list it
+fetches after the create (the stream's completion text carries it only
+in prose), held to a conservative charset, and the create and restore
+streams are read as the document's NDJSON progress events: an `error`
+event is the named failure, a stream with no `complete` event is one.
 ## Open questions
 
 **Live state (2026-06-12).** Most of the questions below were answered by what

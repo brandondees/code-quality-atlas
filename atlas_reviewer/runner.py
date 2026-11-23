@@ -18,7 +18,11 @@ cleanup ends at most that plus one call window after it starts:
    setup spec (issue #819, D95) runs the repo's declared setup commands
    first, while egress is still allowed -- still before any PR content
    is uploaded or unpacked -- and proves the flip held with the
-   behavioral egress check after the read-back
+   behavioral egress check after the read-back. A runner given a
+   checkpoint to restore (issue #819, D95) sets and verifies deny-all
+   first, restores the shared post-setup checkpoint, and runs the same
+   egress proof after it -- the restored state is the one thing the flip
+   cannot have seen.
 4. cap memory; probe which tool binaries exist (tool check); upload the
    head-SHA tarball over exec stdin to a file, confirming the byte count
    the runner received; unpack it in a second exec; run each available tool
@@ -422,6 +426,7 @@ class _Run:
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_gate: threading.Semaphore | None = None
     setup: SetupSpec | None = None
+    restore: str | None = None
 
 
 @dataclass(frozen=True)
@@ -862,12 +867,14 @@ def _disposable(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
+    restore: str | None = None,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(
         api, name, deadline, telemetry, first_frame_s,
-        create_retries=create_retries, create_gate=create_gate, setup=setup,
+        create_retries=create_retries, create_gate=create_gate,
+        setup=setup, restore=restore,
     )  # fmt: skip
     destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
@@ -969,6 +976,7 @@ def run_session(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
+    restore: str | None = None,
 ) -> RunnerReport:
     """`body` on a fresh disposable runner with the same lifecycle as a
     review: recorded in the ledger, provisioned deny-all and verified,
@@ -979,12 +987,17 @@ def run_session(
     A `setup` spec (issue #819, D95) runs the repo's declared setup
     commands with egress still allowed, before the deny-all flip and
     before anything of the review -- the body included -- executes; every
-    exec after the flip runs under verified deny-all."""
+    exec after the flip runs under verified deny-all. A `restore` names
+    the shared post-setup checkpoint this runner starts from instead of
+    running the setup itself: deny-all is set and verified first, then
+    the checkpoint is restored, and the egress proof follows it, since
+    the restored state is the one thing the flip cannot have seen."""
     return _disposable(
         api, ledger, lambda run: body(Session(run)), name=name,
         deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate, setup=setup,
+        create_retries=create_retries, create_gate=create_gate,
+        setup=setup, restore=restore,
     )  # fmt: skip
 
 
@@ -1346,7 +1359,8 @@ def _provision(run: _Run) -> None:
             "another review of this commit may be using it."
         ) from exc
     run.create.outcome = "settled"
-    if run.setup is not None and run.setup.commands:
+    spec = run.setup if run.setup is not None and run.setup.commands else None
+    if spec is not None and run.restore is None:
         # The setup phase (issue #819, D95) runs while egress is still
         # whatever the fresh image's default is, so `pip install` can
         # reach its indexes; every setup exec is still before any PR
@@ -1363,13 +1377,23 @@ def _provision(run: _Run) -> None:
         lambda: _require_deny_all(api.get_network_policy(name)),
         after=lambda _: {"deny_all": True},
     )  # fmt: skip
+    if run.restore is not None:
+        # The shared post-setup checkpoint (issue #819, D95), restored
+        # under deny-all: the restore is a control-plane call, and the
+        # runner's first exec still happens after the verified flip. A
+        # restore the API refuses -- an unknown id, which is also the
+        # shape a restore the API will not perform cross-sprite takes --
+        # fails the run closed, named; the fallback to per-lens setup is
+        # the caller's decision when no checkpoint exists at all, never a
+        # mid-runner switch with the network re-opened.
+        _restore_checkpoint(run)
     run.deadline.check("resource policy")
     t.span(
         "resources", "memory limit",
         lambda: api.set_memory_limit(name, MEMORY_LIMIT_MB),
         {"memory_mb": MEMORY_LIMIT_MB},
     )  # fmt: skip
-    if run.setup is not None and run.setup.commands:
+    if spec is not None or run.restore is not None:
         _egress_proof(run)
 
 
@@ -1471,6 +1495,87 @@ def _egress_proof(run: _Run) -> None:
     )
     if verdict.startswith("OPEN"):
         raise PolicyNotEnforcedError(f"the deny-all flip did not hold: {verdict}")
+
+
+def _restore_checkpoint(run: _Run) -> None:
+    """The shared post-setup checkpoint restored into this runner (issue
+    #819, D95). The API's own completion is the verification; a refusal
+    is named with the checkpoint it named, and stays the run's failure --
+    the network is already denied here, so the per-lens-setup fallback is
+    not a shape this runner can take."""
+    restore = run.restore
+    assert restore is not None
+    try:
+        run.telemetry.span(
+            "checkpoint",
+            "restore",
+            lambda: run.api.restore(run.name, restore),
+            {"checkpoint": restore},
+        )
+    except BoundaryError as exc:
+        raise BoundaryError(
+            f"the checkpoint restore of {restore} failed: {exc}"
+        ) from exc
+
+
+BAKE_COMMENT = "code-quality-atlas post-setup state (issue #819)"
+
+
+@dataclass(frozen=True)
+class Baked:
+    """The setup pass's outcome: the checkpoint id the post-setup state
+    got, or None with the failed attempt's report when it could not be
+    made -- the caller's fallback for None is per-lens setup, named."""
+
+    checkpoint_id: str | None
+    report: RunnerReport | None
+
+
+def bake_setup(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    spec: SetupSpec,
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
+    create_retries: int = DEFAULT_CREATE_RETRIES,
+    create_gate: threading.Semaphore | None = None,
+) -> Baked:
+    """One setup pass (issue #819, D95): a runner that provisions exactly
+    as a setup runner does -- the spec's commands with egress allowed,
+    then the verified deny-all flip and the behavioral egress proof --
+    and then checkpoints the result, the shared post-setup state every
+    lens restores from instead of re-running the setup. The runner is
+    destroyed once the checkpoint is made: whether a checkpoint survives
+    its sprite's deletion is an API capability the document does not
+    settle (D95's live check names it), and if a later restore refuses,
+    that lens's own run fails closed named -- the fallback to per-lens
+    setup is the caller's decision when no checkpoint exists at all, not
+    a mid-runner switch with the network re-opened. A create the API
+    refused (`CreateRefusedError`) propagates: nothing was made, and the
+    caller's fallback decides."""
+    telemetry = telemetry or Telemetry(clock)
+    found: list[str] = []
+
+    def body(session: Session) -> str:
+        checkpoint_id = api.checkpoint(name, BAKE_COMMENT)
+        found.append(checkpoint_id)
+        telemetry.record(
+            "checkpoint", "created", {"checkpoint": checkpoint_id, "runner": name}
+        )
+        return f"checkpoint {checkpoint_id}"
+
+    report = run_session(
+        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
+        telemetry=telemetry, first_frame_s=first_frame_s,
+        create_retries=create_retries, create_gate=create_gate, setup=spec,
+    )  # fmt: skip
+    if report.status is not RunnerStatus.COMPLETED or not found:
+        return Baked(None, report)
+    return Baked(found[0], report)
 
 
 def _raw_exec(run: _Run, step: _Exec) -> bytes:
