@@ -153,13 +153,11 @@ def test_main_serves_through_the_real_serve_on_a_free_port(
     test could not see when a fix round left a second `serve()` call
     below its own guard: on a fixed port the re-bind crashed every real
     start (kills the duplicate-serve mutant, which either crashes the
-    run or leaves the probe port unanswered)."""
+    run or leaves the probe port unanswered). One retry on a bind
+    collision — another process taking the probed port between the
+    probe and the bind — uses a fresh port; a second collision fails."""
     import atlas_settings.__main__ as entry
     from atlas_settings.server import SettingsServer
-
-    probe = socket.create_server(("127.0.0.1", 0))
-    port = probe.getsockname()[1]
-    probe.close()
 
     env = _env(tmp_path)
     monkeypatch.setattr(os, "environ", env)
@@ -174,28 +172,44 @@ def test_main_serves_through_the_real_serve_on_a_free_port(
 
     monkeypatch.setattr(entry, "serve", spying_serve)
 
-    result: dict[str, int] = {}
-    thread = threading.Thread(
-        target=lambda: result.update(code=main(["--port", str(port)])), daemon=True
-    )
-    thread.start()
+    def attempt_once(port: int) -> tuple[int | None, bool]:
+        """One full serve-and-probe attempt: (status, shut-down-cleanly)."""
+        result: dict[str, int] = {}
+        thread = threading.Thread(
+            target=lambda: result.update(code=main(["--port", str(port)])),
+            daemon=True,
+        )
+        thread.start()
+        status = None
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+                connection.request("GET", "/")
+                response = connection.getresponse()
+                response.read()
+                status = response.status
+                connection.close()
+                break
+            except OSError:
+                time.sleep(0.1)
+        # Either the page answered (the bind and dispatch work) or the
+        # attempt failed; the thread is daemon and bounded either way.
+        served = status == 200
+        if "server" in captured and served:
+            captured["server"].shutdown()
+            thread.join(timeout=10)
+            return status, result.get("code") == 0
+        return status, False
 
-    # The bound port answers the login page through the real server.
-    status = None
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        try:
-            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-            connection.request("GET", "/")
-            response = connection.getresponse()
-            response.read()
-            status = response.status
-            connection.close()
+    bound = False
+    for _ in range(2):  # one retry on a bind collision
+        probe = socket.create_server(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        status, clean = attempt_once(port)
+        if status == 200:
+            assert clean, "the server did not shut down cleanly"
+            bound = True
             break
-        except OSError:
-            time.sleep(0.1)
-    assert status == 200, f"the real server never answered (last: {status})"
-
-    captured["server"].shutdown()
-    thread.join(timeout=10)
-    assert result.get("code") == 0
+    assert bound, "the real serve never bound and answered on either attempt"

@@ -945,13 +945,14 @@ is set, naming the missing ones:
 | --- | --- | --- |
 | `ATLAS_SETTINGS_GITHUB_CLIENT_ID` | yes | The App's OAuth client id (the "Client ID" on the App settings page, not the App id) |
 | `ATLAS_SETTINGS_GITHUB_CLIENT_SECRET` | yes | The App's client secret, for the server-side code exchange |
-| `ATLAS_SETTINGS_SESSION_KEY` | yes | The HMAC key the session cookie is signed under (generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`) |
+| `ATLAS_SETTINGS_SESSION_KEY` | yes | The HMAC key the session cookie is signed under (generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"`). Must be at least 32 characters — shorter is refused at startup |
 | `ATLAS_SETTINGS_BASE_URL` | yes | The page's own base URL; `redirect_uri` is `<base>/callback`. Must be https (a loopback http URL is accepted for local testing) |
 | `ATLAS_GITHUB_APP_ID` | no (part A) | The App's numeric id, for the App JWT the admin check reads with |
 | `ATLAS_GITHUB_APP_PRIVATE_KEY` | no (part A) | The App's PEM private key, for the App JWT and the installation-token mints |
 | `ATLAS_GITHUB_INSTALLATION_ID` | no (part A) | The installation this deployment reviews for — the page manages exactly it |
 | `ATLAS_INSTALLATION_STORE_KEY` | no (part A) | The store's Fernet key; the page refuses to start without it |
 | `ATLAS_REVIEW_REPOS` | no (part A) | The allowlist behind the invite-only gate (default `brandondees/code-quality-atlas`) |
+| `ATLAS_REVIEWER_STATE_DIR` | no (part A) | The state directory the page shares with the review service. Set it to the **same absolute path** the service runs with: the default is cwd-relative (`.atlas-reviewer-state`), so two processes started from different working directories would silently open different stores and the per-installation `flock` would no longer serialize their writes |
 
 All of the above are documented here and set in no deployment yet.
 `--host` (default `127.0.0.1`) and `--port` (default 8090) are CLI
