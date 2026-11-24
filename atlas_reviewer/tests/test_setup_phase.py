@@ -310,6 +310,20 @@ def test_an_empty_spec_is_the_ordinary_runner():
     assert all(api.policy_deny_at_exec)
 
 
+def test_a_hung_setup_command_ends_at_the_deadline_and_destroys():
+    """The fail-closed claim's timed-out leg, pinned: a setup command that
+    hangs past its budget is ended by the run's watchdog (the fake's hung
+    exec ends only when the Sprite is destroyed), the run is not
+    completed, and the runner is destroyed verified -- while egress is
+    still allowed, exactly the state the flip must end."""
+    api = FakeSprites(rules=DENY_EGRESS, hang_on="atlas-setup-ran")
+    report = run_setup(api, SetupSpec((SETUP_ECHO,)), deadline_s=0.05)
+    assert report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert "exec connection closed" in report.note
+    assert report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert api.live_names() == ()
+
+
 # ------------------------------------------------------ the bridge pass
 
 
