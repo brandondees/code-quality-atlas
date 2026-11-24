@@ -180,6 +180,7 @@ from atlas_reviewer.repo_config import (
     REVIEW_MD,
     RepoConfig,
     parse_run_proposals,
+    parse_setup_commands,
     read_repo_config,
 )
 from atlas_reviewer.review_wide import (
@@ -193,6 +194,7 @@ from atlas_reviewer.runner import (
     TRIVIAL_TOOL,
     Diagnostic,
     RunnerJob,
+    SetupSpec,
     Swept,
     ToolAbsent,
     ToolRan,
@@ -1062,6 +1064,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # requests, never grants, so a failed read leaves nothing
         # proposed and names the gap.
         proposals, proposal_notes = _run_proposals(github, event)
+        # Issue #819 (D95): the repo's setup spec, read from the same
+        # default-branch window the S7 proposals take -- a PR cannot name
+        # installs into its own review's runner while egress is allowed.
+        setup, setup_notes = _setup_commands(github, event)
         # S5 (D81 Q6): the repo's ordering-only path ranking, applied to
         # the changed-file listing the lenses are read in the order of,
         # and recorded in the draft. The patterns never reach a model;
@@ -1156,7 +1162,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     preferences=lens_preferences.preferences,
                     shapes=shapes,
                 )
-                selection = _with_preference_note(selection, config, proposal_notes)
+                selection = _with_preference_note(
+                    selection, config, (*proposal_notes, *setup_notes)
+                )
                 names = tuple(loaded.name for loaded in plan.loaded)
                 picker_spend = _picker_spend(picker_provider)
                 ledger = AttemptLedger(
@@ -1267,6 +1275,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     path_ranks=path_ranks,
                     operator_ceiling_max=ceiling_max,
                     run_proposals=proposals,
+                    setup=setup,
                 )
                 review = replace(
                     review,
@@ -1409,6 +1418,65 @@ def _run_proposals(
         return (), (_PROPOSAL_FETCH_NOTE,)
     read = parse_run_proposals(data.decode("utf-8", errors="replace"))
     return read.proposals, read.notes
+
+
+# The fixed notes the default-branch setup read can leave (issue #819,
+# D95). Each names the condition and the default that stands -- no setup
+# phase, the runner stays deny-all from the start -- and never a rejected
+# value or an error's text, for the same reason the proposal notes do not.
+_SETUP_LOOKUP_NOTE = (
+    "the reviewed repo's default branch could not be resolved, so its "
+    "review_setup_commands: line, if any, was not read; no setup phase "
+    "runs and the runner stays deny-all from the start"
+)
+_SETUP_FETCH_NOTE = (
+    "the reviewed repo's default-branch REVIEW.md could not be fetched, "
+    "so its review_setup_commands: line, if any, was not read; no setup "
+    "phase runs and the runner stays deny-all from the start"
+)
+_SETUP_OVERBOUND_NOTE = (
+    "the reviewed repo's default-branch REVIEW.md is over the "
+    f"{MAX_CHECKED_BYTES}-byte read bound, so its review_setup_commands: "
+    "line, if any, was not read; no setup phase runs and the runner stays "
+    "deny-all from the start"
+)
+
+
+def _setup_commands(
+    github: GitHubReader, event: PrEvent
+) -> tuple[SetupSpec | None, tuple[str, ...]]:
+    """The reviewed repo's setup spec (issue #819, D95): the
+    `review_setup_commands:` line of the `REVIEW.md` on the repo's
+    **default branch** -- the same read source, for the same reason, the
+    S7 proposals take (`_run_proposals`): a same-repo or stacked PR that
+    could carry its own setup commands would name installs into its own
+    review's runner while egress is allowed. The read fails open to no
+    setup in every direction that matters: no file reads as the ordinary
+    unconfigured repo, silently; a default branch that cannot be
+    resolved, a fetch that failed, or a file over the read bound leaves
+    no setup phase with the fixed note that says so -- a lost read can
+    only leave the runner as it was, never widen what runs with the
+    network open."""
+    try:
+        repository = github.get_repository(event.repo)
+    except BoundaryError:
+        return None, (_SETUP_LOOKUP_NOTE,)
+    branch = repository.get("default_branch") if isinstance(repository, dict) else None
+    if not isinstance(branch, str) or not branch:
+        return None, (_SETUP_LOOKUP_NOTE,)
+    try:
+        data = github.get_file(event.repo, branch, REVIEW_MD, MAX_CHECKED_BYTES)
+    except NotFoundError:
+        # No REVIEW.md on the default branch: the ordinary unconfigured
+        # repo, silent, exactly as no setup spec at all.
+        return None, ()
+    except ResponseTooLargeError:
+        return None, (_SETUP_OVERBOUND_NOTE,)
+    except BoundaryError:
+        return None, (_SETUP_FETCH_NOTE,)
+    read = parse_setup_commands(data.decode("utf-8", errors="replace"))
+    spec = SetupSpec(read.commands) if read.commands else None
+    return spec, read.notes
 
 
 def _with_preference_note(

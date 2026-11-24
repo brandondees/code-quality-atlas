@@ -24,6 +24,7 @@ from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.lens_loop import FinalReply, ModelTurn, TurnRequest, UserText
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
 from atlas_reviewer.runner import (
+    DENY_ALL,
     EXIT_MARKER,
     EXIT_NOT_FOUND,
     PROBE_TAG,
@@ -77,6 +78,11 @@ class FakeSprites:
     first_bytes_seen: list[float | None] = field(default_factory=list)
     argv_seen: list[tuple[str, ...]] = field(default_factory=list)
     policies_sent: list[tuple[str, list[Json]]] = field(default_factory=list)
+    # Per exec, whether the sprite's network policy was exactly deny-all
+    # when the exec ran (issue #819, D95): the order proof's raw
+    # material -- setup execs answer False, every exec after the flip
+    # answers True.
+    policy_deny_at_exec: list[bool] = field(default_factory=list)
     _sprites: dict[str, _Sprite] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -145,6 +151,7 @@ class FakeSprites:
         script = argv[-1]
         self._record("exec", name, script)
         sprite = self._get(name)
+        self.policy_deny_at_exec.append(sprite.network_rules == list(DENY_ALL))
         self.stdin_seen.append(stdin)
         self.timeouts_seen.append(timeout_s)
         self.first_bytes_seen.append(first_byte_s)

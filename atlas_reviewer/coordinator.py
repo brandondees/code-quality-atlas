@@ -216,6 +216,7 @@ from atlas_reviewer.rounds import (
 from atlas_reviewer.runner import (
     DEFAULT_CREATE_RETRIES,
     CreateRefusedError,
+    SetupSpec,
     event_runner_name,
     lens_runner_name,
 )
@@ -720,6 +721,7 @@ def review_lens(
     evidence_digest: str | None = None,
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
+    setup: SetupSpec | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -774,6 +776,7 @@ def review_lens(
             evidence_digest=evidence_digest,
             run_proposals=run_proposals,
             approval_channel=approval_channel,
+            setup=setup,
         )
         single = synthesize(
             [ran.result],
@@ -826,6 +829,7 @@ def review_lenses(
     operator_ceiling_max: Decimal | None = None,
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
+    setup: SetupSpec | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -1012,6 +1016,7 @@ def review_lenses(
             path_ranks=path_ranks,
             run_proposals=run_proposals,
             approval_channel=approval_channel,
+            setup=setup,
         ),
     )
 
@@ -1049,6 +1054,7 @@ def _review_lenses(
     path_ranks: PathRanks | None = None,
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
+    setup: SetupSpec | None = None,
 ) -> AgenticReview:
     funding = noted_funding_source()
     files = split_files(diff)
@@ -1143,6 +1149,7 @@ def _review_lenses(
             ranks=path_ranks,
             run_proposals=run_proposals,
             approval_channel=approval_channel,
+            setup=setup,
         )
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
@@ -1525,6 +1532,7 @@ def _review_one(
     ranks: PathRanks | None = None,
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
+    setup: SetupSpec | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1680,6 +1688,7 @@ def _review_one(
         create_gate=create_gate,
         create_retries=create_retries,
         approvals=approvals,
+        setup=setup,
     )  # fmt: skip
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),

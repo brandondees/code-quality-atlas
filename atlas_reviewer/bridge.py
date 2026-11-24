@@ -88,6 +88,7 @@ from atlas_reviewer.runner import (
     GUEST_TAIL_CHARS,
     UNPACK_BUDGET_S,
     Session,
+    SetupSpec,
     guest_text,
     run_session,
 )
@@ -2311,6 +2312,7 @@ def run_bridge(
     create_gate: threading.Semaphore | None = None,
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
     approvals: RunApprovals | None = None,
+    setup: SetupSpec | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2323,7 +2325,10 @@ def run_bridge(
     the run-scoped operator-approval gate (S7, D88) -- the proposals the
     repo's default-branch config named, the channel that answers them,
     and the approved set that dies with this runner; None proposes
-    nothing, and every `command` a call then names is refused."""
+    nothing, and every `command` a call then names is refused. `setup`
+    (issue #819, D95) is the repo's declared setup phase: it runs with
+    egress still allowed, before the deny-all flip and before staging
+    uploads anything, so its installs can reach their indexes."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)
@@ -2362,5 +2367,5 @@ def run_bridge(
     return run_session(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate,
+        create_retries=create_retries, create_gate=create_gate, setup=setup,
     )  # fmt: skip

@@ -829,6 +829,46 @@ telemetry (`run approvals` / `configured`), so a run that proposed nothing
 and a run whose proposals never reached the coordinator can be told
 apart.
 
+## The runner's setup phase (issue #819, D95)
+
+`run_tests` and `mutate` (D80) need a pytest-capable interpreter, and a
+fresh Sprite ships none: the deny-all policy is set before anything
+executes, so nothing could be installed, and every execution-tool call
+returned "no pytest-capable interpreter was staged for the runner". The
+fix is a **setup phase the repo declares**: the `review_setup_commands:`
+line in the `REVIEW.md` on the repo's **default branch** — the same read
+source the S7 proposals take, never the PR head and never the merge-base,
+because a PR that could carry its own setup commands would name installs
+into its own review's runner while the network is open.
+
+**The order is the guarantee.** A runner given a setup spec provisions in
+a different order: create, resolve the trusted interpreter, run each
+declared command bounded (from the neutral directory, still before any PR
+content is uploaded or unpacked), **then** set deny-all, read it back
+exactly, cap memory, and run the behavioral egress check — whose
+`CONNECTED` answer fails the run closed. Every exec of the review — the
+staging probe, the tool runs, `run_tests` and `mutate` — happens after
+that read-back. Without a setup spec the lifecycle is unchanged: deny-all
+from the start, and the existing order tests still pin it. The value's
+grammar is the S7 proposals' token grammar with one addition: the program
+token may be the `{python}` placeholder, substituted with the interpreter
+the controller resolved by absolute path — `review_setup_commands: {python} -m pip install pytest`. The same fail-open rules apply: an
+unusable value or a repeated key runs no setup phase and is named with a
+note that never echoes the rejected text; a command that fails, times out,
+or outlives its budget fails the run.
+
+**The state is checkpointed once and shared.** The setup phase's result
+is the "pre-baked image with dev dependencies per repo" the direction
+asked for, as far as the Sprites API allows: the API document the adapter
+is written against (OpenAPI 0.1.12) has no create-from-image parameter,
+so the shared state is a checkpoint — created once after the deny-all
+flip, restored by each lens's runner instead of re-running the setup
+there (that is the checkpoint slice's work, issue #819's second PR).
+Three capabilities the document does not settle stay behind seams with
+the parent's live check as the judge: whether a restore crosses sprites,
+whether a checkpoint survives deleting the sprite that created it, and
+what a fresh Sprite's default network state is.
+
 ## The BYOK settings page (config slice S10, part B1)
 
 Part B1 is the intake surface: a GitHub App installation's admin signs

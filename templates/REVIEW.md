@@ -256,6 +256,27 @@ a recommended default for copies.
 # review_ceiling_usd: 25   # example — uncomment and set your repo's own value, or delete to take the deployment's default
 ```
 
+## Setup phase (the execution tools' interpreter)
+
+The execution tools (`run_tests`, `mutate`) need a pytest-capable
+interpreter, and a fresh runner image ships none. This file may declare a
+**setup spec** — a `review_setup_commands:` line, a comma-separated list
+of commands, each one program token plus optional fixed argument tokens,
+where the program token may be the `{python}` placeholder — that the
+runner executes **before** the review phase, with egress still allowed so
+installs reach their indexes. The network is then turned off: deny-all is
+set and read back exactly, and a behavioral egress check proves it held,
+before anything of the review runs. The line is read from the repo's
+**default branch** (never the merge base, never the PR head — a PR that
+could carry its own setup commands would name installs into its own
+review's runner while the network is open), and it is the same
+fail-open-with-a-named-note read the other keys use. Without a line the
+runner stays deny-all from the start, exactly as before.
+
+```text
+# review_setup_commands: {python} -m pip install pytest   # example — uncomment and set your repo's own value, or delete to run no setup phase
+```
+
 ## Scope discipline
 
 - Review only the files in the PR's diff, never the whole repo (that's what the
