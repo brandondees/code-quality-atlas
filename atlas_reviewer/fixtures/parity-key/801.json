@@ -1,0 +1,51 @@
+{
+  "pr": 801,
+  "reviewed_commit": "186e09f2944e561815462eb5d9795dba4229c488",
+  "source": "186e09f2944e561815462eb5d9795dba4229c488 is the pull request head the round-5 review ran at, one commit before the round-6 sibling fix (9ba4759db2a329feb71d9484acdfdc201628dcaa) that removed every document-controlled echo from the funding refusals. All four echo sites are live at that commit: the name echo is lines 129-131, the field echo is line 207, the extra-field echo is lines 219-222, and the provider-slug echo is line 267 of atlas_reviewer/funding.py. The 2026-11-21 review of this head raised the class as one Major naming all four; the same round's fix had already removed the _bool value echo, so these four are the siblings that fix left behind.",
+  "findings": [
+    {
+      "id": "801-m1",
+      "severity": "major",
+      "summary": "The duplicate-name refusal echoes the document's source name.",
+      "source": "The raise is funding.py lines 129-131; line 130 formats {source.name!r}, the document-controlled name, into the message. load_funding_sources is lines 93-146. The value reaches stderr: config_from_env (service.py 1608-1612 at this head) wraps the ValueError's message into ServiceError, and main prints it (service.py 2243). The reach is narrower than the other three: the name passes _source's grammar first (the check at funding.py 224, pattern ^[a-z][a-z0-9-]{0,31}$ at line 44), and that refusal no longer echoes, so a full key such as a sk-or-v1 token is refused there and never reaches this echo - only a short credential that passes the name grammar does. The echo itself is real at this head and is one of the four sites the round-6 fix 9ba4759d removed.",
+      "lenses": ["sweeping-for-security"],
+      "needs": ["read"],
+      "spans": [{"path": "atlas_reviewer/funding.py", "line": 129, "end_line": 131}],
+      "encloses": [{"path": "atlas_reviewer/funding.py", "line": 93, "end_line": 146}],
+      "citations": []
+    },
+    {
+      "id": "801-m2",
+      "severity": "major",
+      "summary": "The duplicate-field refusal echoes the document's field name.",
+      "source": "The raise is funding.py line 207 inside _object (lines 197-209); it formats {key!r}, the duplicated field name from the JSON document's pair list, into the message. The same ServiceError-then-stderr path carries it out. The field name is document-controlled text, so a pasted key listed as two JSON fields under one object is echoed.",
+      "lenses": ["sweeping-for-security"],
+      "needs": ["read"],
+      "spans": [{"path": "atlas_reviewer/funding.py", "line": 207, "end_line": 207}],
+      "encloses": [{"path": "atlas_reviewer/funding.py", "line": 197, "end_line": 209}],
+      "citations": []
+    },
+    {
+      "id": "801-m3",
+      "severity": "major",
+      "summary": "The field-shape refusal echoes the document's extra field names.",
+      "source": "The raise is funding.py lines 219-222 inside _source (lines 212-239); lines 220-221 format sorted(extra) and sorted(missing) into the message. Only the extra half is document-controlled: an extra field's name is whatever the document carried, while the missing half and the sorted(_FIELDS) on line 220 name the schema's own field list. A key pasted as an unknown field's name is echoed through the same ServiceError-then-stderr path.",
+      "lenses": ["sweeping-for-security"],
+      "needs": ["read"],
+      "spans": [{"path": "atlas_reviewer/funding.py", "line": 219, "end_line": 222}],
+      "encloses": [{"path": "atlas_reviewer/funding.py", "line": 212, "end_line": 239}],
+      "citations": []
+    },
+    {
+      "id": "801-m4",
+      "severity": "major",
+      "summary": "The duplicate-provider-slug refusal echoes the document's slug value.",
+      "source": "The raise is funding.py line 267 inside _providers (lines 259-269); it formats {slug!r}, the repeated provider slug taken from the document, into the message. This is the line the round-5 review's Major cited. The slug list is document-controlled, so a token-valid key pasted twice under providers is echoed through the same ServiceError-then-stderr path.",
+      "lenses": ["sweeping-for-security"],
+      "needs": ["read"],
+      "spans": [{"path": "atlas_reviewer/funding.py", "line": 267, "end_line": 267}],
+      "encloses": [{"path": "atlas_reviewer/funding.py", "line": 259, "end_line": 269}],
+      "citations": []
+    }
+  ]
+}

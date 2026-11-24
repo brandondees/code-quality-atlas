@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""The parity key: the seven graded protocol Minors and the loader that refuses a bad record."""
+"""The parity key: the seven graded protocol Minors, #801's four secret-echo
+Majors, and the loader that refuses a bad record."""
 
 import json
 from pathlib import Path
@@ -22,7 +23,9 @@ from atlas_reviewer.parity_key import (
 
 _COMMIT = "674071a91513b4774c82350fb757d9c085f10baf"
 _QUEUE = "0fe45e5ea79f3abd8e07488a01b623186df96692"
-_SEVEN = (
+_ECHO = "186e09f2944e561815462eb5d9795dba4229c488"
+_FUNDING = "atlas_reviewer/funding.py"
+_KEY_IDS = (
     "640-m1",
     "640-m2",
     "640-m3",
@@ -30,6 +33,10 @@ _SEVEN = (
     "661-m2",
     "661-m3",
     "661-m4",
+    "801-m1",
+    "801-m2",
+    "801-m3",
+    "801-m4",
 )
 _CI = "`gate` on `674071a9` (run 43510666665)"
 _STACK = "pre-rebase head `61273b4f`"
@@ -76,11 +83,11 @@ def _write(directory: Path, name: str, payload: object) -> None:
     (directory / name).write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_the_checked_in_key_grades_all_seven_protocol_minors():
+def test_the_checked_in_key_grades_every_recorded_finding():
     findings = load_key(KEY_DIR)
     by_id = {item.id: item for item in findings}
-    assert list(by_id) == list(_SEVEN)
-    missing = [item for item in _SEVEN if item not in by_id]
+    assert list(by_id) == list(_KEY_IDS)
+    missing = [item for item in _KEY_IDS if item not in by_id]
     assert missing == []
     note = (KEY_DIR / "640.json").read_text(encoding="utf-8")
     assert "not a record" not in note
@@ -114,8 +121,28 @@ def test_the_checked_in_key_grades_all_seven_protocol_minors():
     assert by_id["661-m3"].spans[0] == Span("atlas_reviewer/rounds.py", 184, 186)
     assert by_id["661-m3"].needs == ("run_tests", "mutate")
     assert by_id["661-m4"].spans[0].line_start == 210
-    assert all(item.severity == "minor" for item in findings)
+    assert all(item.severity == "minor" for item in findings if item.pr != 801)
     assert all(item.citations == () for item in findings if item.id != "661-m1")
+    for echo_id, start, end in (
+        ("801-m1", 129, 131),
+        ("801-m2", 207, 207),
+        ("801-m3", 219, 222),
+        ("801-m4", 267, 267),
+    ):
+        echo = by_id[echo_id]
+        assert echo.reviewed_commit == _ECHO
+        assert echo.spans[0] == Span(_FUNDING, start, end)
+        assert echo.severity == "major"
+        assert echo.lenses == ("sweeping-for-security",)
+        assert echo.needs == ("read",)
+    assert "{source.name!r}" in by_id["801-m1"].source
+    assert by_id["801-m1"].encloses[0] == Span(_FUNDING, 93, 146)
+    assert "{key!r}" in by_id["801-m2"].source
+    assert by_id["801-m2"].encloses[0] == Span(_FUNDING, 197, 209)
+    assert "sorted(extra)" in by_id["801-m3"].source
+    assert by_id["801-m3"].encloses[0] == Span(_FUNDING, 212, 239)
+    assert "{slug!r}" in by_id["801-m4"].source
+    assert by_id["801-m4"].encloses[0] == Span(_FUNDING, 259, 269)
 
 
 def test_an_end_line_equal_to_the_line_is_kept(tmp_path: Path):
@@ -396,6 +423,35 @@ def test_the_queue_cancel_check_is_graded_on_its_line():
     assert grade_findings([cancel], [_cite(queue, 329)]).grades == (FOUND,)
     assert grade_findings([cancel], [_cite(queue, 330)]).grades == (PARTIAL,)
     assert grade_findings([cancel], [_cite(queue, 317)]).grades == (LOST,)
+
+
+def test_the_secret_echo_refusals_are_graded_on_their_spans():
+    name_echo = _key("801-m1")
+    assert grade_findings([name_echo], [_cite(_FUNDING, 130)]).grades == (FOUND,)
+    assert grade_findings([name_echo], [_cite(_FUNDING, 129, end_line=131)]).grades == (
+        FOUND,
+    )
+    assert grade_findings([name_echo], [_cite(_FUNDING, 132)]).grades == (PARTIAL,)
+    assert grade_findings([name_echo], [_cite(_FUNDING, 93, end_line=146)]).grades == (
+        PARTIAL,
+    )
+    assert grade_findings([name_echo], [_cite(_FUNDING, 207)]).grades == (LOST,)
+    field_echo = _key("801-m2")
+    assert grade_findings([field_echo], [_cite(_FUNDING, 207)]).grades == (FOUND,)
+    assert grade_findings([field_echo], [_cite(_FUNDING, 206)]).grades == (PARTIAL,)
+    extra_echo = _key("801-m3")
+    assert grade_findings([extra_echo], [_cite(_FUNDING, 221)]).grades == (FOUND,)
+    assert grade_findings(
+        [extra_echo], [_cite(_FUNDING, 219, end_line=222)]
+    ).grades == (FOUND,)
+    assert grade_findings([extra_echo], [_cite(_FUNDING, 223)]).grades == (PARTIAL,)
+    slug_echo = _key("801-m4")
+    assert grade_findings([slug_echo], [_cite(_FUNDING, 267)]).grades == (FOUND,)
+    assert grade_findings([slug_echo], [_cite(_FUNDING, 266)]).grades == (PARTIAL,)
+    assert grade_findings([slug_echo], [_cite(_FUNDING, 259, end_line=269)]).grades == (
+        PARTIAL,
+    )
+    assert grade_findings([slug_echo], [_cite(_FUNDING, 244)]).grades == (LOST,)
 
 
 def test_the_missing_hook_is_found_on_the_check_that_skips_it():
