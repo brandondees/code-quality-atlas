@@ -1487,7 +1487,20 @@ def _setup_phase(run: _Run) -> None:
         lambda: _resolve_python(run),
         after=_python_fields,
     )
-    if not isinstance(python, TrustedPython):
+    if isinstance(python, ExecFailed):
+        # The resolution exec itself failed -- a machinery failure this
+        # run cannot distinguish from a transient one, not a property of
+        # the image: a fresh runner may resolve fine. The run still fails
+        # closed, but the classification stays non-deterministic, so the
+        # bake's caller keeps its per-lens-setup fallback.
+        raise BoundaryError(
+            f"the setup phase's interpreter resolution failed: {python.detail}"
+        )
+    if python is None:
+        # The resolution ran and established that no trusted interpreter
+        # exists on this image -- deterministic across the fresh runners
+        # every lens gets, so re-running the same resolution per lens
+        # would fail identically.
         run.setup_failure.failed = True
         raise BoundaryError(
             "the setup phase found no trusted interpreter to run the "

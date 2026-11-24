@@ -267,11 +267,24 @@ nothing), on the smaller of the review wall that is left and its own
 `BAKE_WALL_S` (900s) cap, since it runs serially before any lens starts.
 What happens when no checkpoint exists is decided **before a lens runner
 starts**, and it is classified: a **deterministic setup-phase failure**
-in the bake (a command that failed, no trusted interpreter) means the
-lenses run **no setup at all** -- the same commands would fail
-identically per lens with egress open again -- while any other failure
-(a create the API refused, a deadline, a failed checkpoint call) leaves
-every lens the per-lens-setup fallback, each named on the telemetry. A
+in the bake means the lenses run **no setup at all**, while any other
+failure (a create the API refused, a deadline, a failed checkpoint call)
+leaves every lens the per-lens-setup fallback, each named on the
+telemetry. What counts as deterministic is stated per failure, not guessed
+from one sample: the interpreter phase is deterministic only when the
+resolution **ran and established that no trusted interpreter exists** --
+the fresh runners every lens gets run the same image -- while a
+resolution that failed to *run* is never deterministic (a machinery
+failure a fresh runner may not repeat, so the fallback stands); a
+declared command that exited nonzero is classified deterministic, and
+that classification is a chosen default rather than a proof, recorded
+here because an external reviewer challenged it and the challenge is
+half right: a single nonzero exit cannot prove the command would fail
+again, so the skip is chosen on the worst cases -- skipped, a transient
+failure costs the pre-#819 status quo (the tools unavailable, the review
+completing partial); retried, a deterministic failure costs every lens's
+runner failing and the review posting with no lens run at all, which is
+strictly worse. A
 restore that does not happen at lens time -- an unknown id, which is
 also the shape a restore the API will not perform cross-sprite takes, a
 refusal, an incomplete stream -- raises `RestoreRefusedError` past that
@@ -284,7 +297,14 @@ RUN with the refusal named.
 The fake models the hopeful half -- a checkpoint outliving its sprite's
 deletion -- and the refused half is the unknown-id `NotFoundError`, so
 the tests cover both answers and the live check decides which one is
-real. The id the controller accepts is read from the checkpoint list it
+real. The evidence base for that question is split, and the split is
+recorded: the official API reference (the delete-a-sprite and
+restore-checkpoint pages) is silent on whether deleting a sprite deletes
+its checkpoints, while a Fly community thread claims deletion deletes
+them -- so the live check, not either text, decides; should deletion
+delete them, the retry above is the shipped degrade path and the
+follow-up is the bake's destroy deferred until after the last restore
+(with the Tasks hold). The id the controller accepts is read from the checkpoint list it
 fetches after the create (the stream's completion text carries it only
 in prose), held to a conservative charset, and the create and restore
 streams are read as the document's NDJSON progress events: an `error`

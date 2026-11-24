@@ -28,7 +28,7 @@ from atlas_reviewer.runner import (
     run_session,
 )
 
-from .agentic import LENS, final
+from .agentic import LENS, READ_ALL, final
 from .helpers import HEAD, FakeClock
 from .test_coordinator import OTHER
 
@@ -284,6 +284,26 @@ def test_a_failed_bake_falls_back_to_per_lens_setup(tmp_path):
     assert [lens.index for lens in result.lenses][:2] == [1, 2]
 
 
+def test_a_recovered_bake_failure_does_not_hold_coverage_open(tmp_path):
+    """The bake's failed report stays off the Runner line when the
+    fallback recovered: a review whose lens runners all completed --
+    here, a single lens that read everything and finished clean -- keeps
+    `coverage_complete` true and can approve, instead of posting COMMENT
+    on a provisioning pass that already redid its work."""
+
+    class NoCheckpoint(_Recording):
+        def checkpoint(self, name, comment):
+            raise BoundaryError("the control plane refused the checkpoint")
+
+    api = NoCheckpoint()
+    result = _run_lenses(
+        tmp_path, api, [LENS], ScriptedLensModel([READ_ALL, final()]),
+        setup=SPEC,
+    )  # fmt: skip
+    assert api.restores == []
+    assert result.coverage_complete is True
+
+
 # ------------------------------------- the degrade path and the bake bounds
 
 
@@ -368,3 +388,78 @@ def test_the_bake_gets_its_own_wall_cap_not_the_whole_review_deadline():
     assert baked.report.status is _RS.DEADLINE_EXCEEDED
     assert not baked.setup_failed
     assert api.live_names() == ()
+
+
+# -------------------------------- the deterministic/non-deterministic split
+
+
+class _FailedBakeResolution(_Recording):
+    """The bake runner's interpreter-resolution exec exits nonzero, while
+    every other runner's resolution runs for real -- the machinery
+    failure the classification must not read as deterministic."""
+
+    def __init__(self, bake_name):
+        super().__init__()
+        self.bake_name = bake_name
+
+    def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+        if name == self.bake_name and "atlas-python" in argv[-1]:
+            self._record("exec", name, argv[-1])
+            self._note_policy(name)
+            return b"\x01__ATLAS_EXIT__=1\n"
+        return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+
+def test_a_resolution_exec_failure_is_not_a_deterministic_failure():
+    """The resolution exec failing to run is a machinery failure this run
+    cannot distinguish from a transient one: the bake fails closed, but
+    the classification stays non-deterministic -- the caller keeps its
+    per-lens fallback. The resolution *running* and finding no trusted
+    interpreter is the deterministic shape."""
+    api = _FailedBakeResolution(NAME)
+    baked = bake_setup(
+        api, MemoryLedger(), SPEC, name=NAME, deadline_s=120.0, clock=FakeClock()
+    )
+    assert baked.checkpoint_id is None
+    assert baked.report is not None
+    assert baked.report.status is RunnerStatus.FAILED
+    assert baked.setup_failed is False
+    assert "interpreter resolution failed" in baked.report.note
+
+    absent = FakeSprites(rules=DENY_EGRESS, pythons=())
+    baked2 = bake_setup(
+        absent, MemoryLedger(), SPEC, name=NAME, deadline_s=120.0, clock=FakeClock()
+    )
+    assert baked2.checkpoint_id is None
+    assert baked2.setup_failed is True
+    assert "no trusted interpreter" in baked2.report.note
+
+
+def test_a_resolution_exec_failure_keeps_the_per_lens_fallback(tmp_path):
+    """End to end: the bake's interpreter resolution fails to run, so the
+    classification is non-deterministic and every lens falls back to
+    running the setup phase on its own runner -- whose resolution
+    succeeds -- and the review completes with its coverage gate open."""
+    api = _FailedBakeResolution(bake_runner_name())
+    result = _run_lenses(
+        tmp_path, api, [LENS],
+        ScriptedLensModel([READ_ALL, final()]), setup=SPEC,
+    )  # fmt: skip
+    assert api.restores == []
+    # The fallback ran on the lens runners (their own resolution and
+    # setup command, deny-False before their own flips); the bake's own
+    # resolution failure is the only exec it ran.
+    for name, flags in _denies_by_runner(api).items():
+        if name != api.bake_name:
+            assert flags[:2] == [False, False], name
+            assert flags[2:] and all(flags[2:]), name
+    assert result.coverage_complete is True
+
+
+def bake_runner_name():
+    from atlas_reviewer.coordinator import SETUP_LENS
+    from atlas_reviewer.runner import lens_runner_name
+
+    from .test_coordinator import EVENT
+
+    return lens_runner_name(EVENT, SETUP_LENS)

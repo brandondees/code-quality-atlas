@@ -1301,11 +1301,20 @@ def _review_lenses(
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
     reports = tuple(ran.report for ran in runs if ran.report is not None)
-    if baked is not None and baked.report is not None:
-        # The setup pass's own report rides the draft's runner records
-        # like any lens's: the bake is a real runner with a real
-        # lifecycle, and its status and cleanup belong in the draft the
-        # operator reads.
+    if (
+        baked is not None
+        and baked.report is not None
+        and (baked.report.status is RunnerStatus.COMPLETED)
+    ):
+        # The setup pass's completed report rides the draft's runner
+        # records like any lens's, cleanup included -- a bake whose
+        # destroy went unverified still holds the Runner line, the way
+        # any runner's unverified cleanup does. A FAILED bake does not:
+        # its work was re-run on the lens runners (the fallback) or the
+        # lenses ran without a setup and their own outcomes carry the
+        # gap, so a failed row here would hold `coverage_complete` open
+        # on a review whose runners all completed. The failure lives on
+        # the telemetry, which `_bake_setup_pass` records at ERROR.
         reports = (baked.report, *reports)
     review = synthesize(
         [ran.result for ran in runs],
