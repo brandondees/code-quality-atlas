@@ -289,6 +289,7 @@ fetches after the create (the stream's completion text carries it only
 in prose), held to a conservative charset, and the create and restore
 streams are read as the document's NDJSON progress events: an `error`
 event is the named failure, a stream with no `complete` event is one.
+
 ## Open questions
 
 **Live state (2026-06-12).** Most of the questions below were answered by what
