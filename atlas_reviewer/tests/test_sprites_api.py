@@ -199,6 +199,90 @@ def test_sprites_policy_read_back_must_be_an_object(body):
         SpritesClient(Recorder(ok(body=body)), "t").get_network_policy(NAME)
 
 
+# --------------------------------------------------- checkpoints (#819, D95)
+
+_CREATE_STREAM = (
+    b'{"data": "Creating checkpoint...", "time": "t", "type": "info"}\n'
+    b'{"data": "Checkpoint v3 created", "time": "t", "type": "complete"}\n'
+)
+_RESTORE_STREAM = (
+    b'{"data": "Restoring to checkpoint v3...", "time": "t", "type": "info"}\n'
+    b'{"data": "Restored to v3", "time": "t", "type": "complete"}\n'
+)
+
+
+def test_checkpoint_create_reads_the_id_from_the_list_read_back():
+    t = Recorder(
+        ok(body=_CREATE_STREAM),
+        ok([{"id": "v3", "create_time": "t", "comment": "c"}, {"id": "v2"}]),
+    )
+    sc = SpritesClient(t, "org/1/secret")
+    assert sc.checkpoint(NAME, "comment") == "v3"
+    methods_paths = [(r[0], r[1]) for r in t.requests]
+    assert methods_paths == [
+        ("POST", f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoint"),
+        ("GET", f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoints"),
+    ]
+    assert json.loads(t.requests[0][3]) == {"comment": "comment"}
+
+
+def test_an_error_event_in_a_checkpoint_stream_is_the_named_failure():
+    stream = (
+        b'{"type": "error", "error": "Checkpoint failed: disk full", "time": "t"}\n'
+    )
+    with pytest.raises(BoundaryError, match="disk full"):
+        SpritesClient(Recorder(ok(body=stream)), "t").checkpoint(NAME, "c")
+
+
+def test_a_checkpoint_stream_without_a_complete_event_is_an_error():
+    stream = b'{"data": "Creating checkpoint...", "time": "t", "type": "info"}\n'
+    with pytest.raises(BoundaryError, match="no complete event"):
+        SpritesClient(Recorder(ok(body=stream)), "t").checkpoint(NAME, "c")
+
+
+def test_an_empty_checkpoint_list_after_a_create_is_an_error():
+    with pytest.raises(BoundaryError, match="empty"):
+        SpritesClient(Recorder(ok(body=_CREATE_STREAM), ok([])), "t").checkpoint(
+            NAME, "c"
+        )
+
+
+def test_an_unusable_newest_checkpoint_id_is_refused():
+    with pytest.raises(BoundaryError, match="usable checkpoint id"):
+        SpritesClient(
+            Recorder(ok(body=_CREATE_STREAM), ok([{"id": "a/b"}])), "t"
+        ).checkpoint(NAME, "c")
+
+
+def test_restore_posts_the_encoded_path_and_needs_a_complete_event():
+    t = Recorder(ok(body=_RESTORE_STREAM))
+    SpritesClient(t, "org/1/secret").restore(NAME, "v3")
+    assert t.requests[0][1] == (
+        f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoints/v3/restore"
+    )
+    assert t.requests[0][3] is None
+
+
+def test_a_restore_stream_without_a_complete_event_is_an_error():
+    with pytest.raises(BoundaryError, match="no complete event"):
+        SpritesClient(
+            Recorder(ok(body=b'{"type": "info", "data": "x"}\n')), "t"
+        ).restore(NAME, "v3")
+
+
+def test_a_restore_of_an_unknown_checkpoint_is_a_not_found():
+    with pytest.raises(NotFoundError):
+        SpritesClient(Recorder(ok(status=404)), "t").restore(NAME, "v3")
+
+
+@pytest.mark.parametrize("checkpoint_id", ["", "a/b", "x" * 65, "bad id"])
+def test_a_restore_of_an_unusable_id_is_refused_before_any_call(checkpoint_id):
+    t = Recorder()
+    with pytest.raises(BoundaryError, match="usable checkpoint id"):
+        SpritesClient(t, "t").restore(NAME, checkpoint_id)
+    assert t.requests == []
+
+
 # The handler trickles a response for _TRICKLE_S and only then sets
 # `finished`; a bounded call returns with it still unset, so no assertion
 # here is a wall-clock bound.

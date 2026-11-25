@@ -120,7 +120,9 @@ class LocalSprites(FakeSprites):
     def _note_policy(self, name: str) -> None:
         """Records whether this exec ran under deny-all (issue #819, D95):
         the order proof's raw material, shared with the fake's own exec."""
-        self.policy_deny_at_exec.append(self._get(name).network_rules == list(DENY_ALL))
+        denied = self._get(name).network_rules == list(DENY_ALL)
+        self.policy_deny_at_exec.append(denied)
+        self.policy_deny_named.append((name, denied))
 
     def _egress_answer(self, script: str) -> bytes:
         """The egress verdict lines the deny-all policy produces: one

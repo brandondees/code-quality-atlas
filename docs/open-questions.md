@@ -254,6 +254,70 @@ existed; their history predates it.)*
 
 **Update (2026-11-24, fix round 1 on #828 — the read source and the placeholder, as implemented):** the entry above was written before the implementation chose these two shapes, and it describes a weaker design on the exact axis the change exists to enforce; the original text stands as recorded, and this note is the correction slices 2 and 3 read. **The setup spec is read from the repo's default branch**, the same read source the S7 proposals take (`cli.py`'s `_setup_commands`, the default branch's `REVIEW.md`, never the merge base and never the PR head) -- not from the merge-base `REVIEW.md` the entry describes. The merge-base framing is superseded because it is the weaker channel: the merge base of a stacked PR contains the earlier stacked PRs' content, so a same-repo **or stacked** PR that could carry its own setup commands would name installs into its own review's runner while egress is allowed -- exactly what the default-branch read refuses. The entry's narrower invariant ("the upload comes after the flip") remains true, but it is not the one that justifies the shipped design. **The `{python}` placeholder is the program token only**: an argument carrying it is not a token the grammar accepts, so the line is unusable, like any other out-of-grammar token (pinned by `test_the_placeholder_is_the_program_token_only`).
 
+**Update (2026-11-23, slice 2, the checkpoint seam as built):** the setup
+pass is one runner per review that provisions exactly as a setup runner
+does -- the spec's commands with egress allowed, then the verified
+deny-all flip and the behavioral egress proof -- and checkpoints the
+result, and is **destroyed once the checkpoint is made**: no second
+long-lived runner needs holding awake, and the survival question's two
+live answers both have a recorded shape. The bake runs only when at
+least one lens is left to run (every lens reused by the delta prelude
+means nothing will restore, so no runner with egress open runs for
+nothing), on the smaller of the review wall that is left and its own
+`BAKE_WALL_S` (900s) cap, since it runs serially before any lens starts.
+What happens when no checkpoint exists is decided **before a lens runner
+starts**, and it is classified: a **deterministic setup-phase failure**
+in the bake means the lenses run **no setup at all**, while any other
+failure (a create the API refused, a deadline, a failed checkpoint call)
+leaves every lens the per-lens-setup fallback, each named on the
+telemetry. What counts as deterministic is stated per failure, not guessed
+from one sample: the interpreter phase is deterministic only when the
+resolution **ran and established that no trusted interpreter exists** --
+the fresh runners every lens gets run the same image -- while a
+resolution that failed to *run* is never deterministic (a machinery
+failure a fresh runner may not repeat, so the fallback stands); a
+declared command that exited nonzero is classified deterministic, and
+that classification is a chosen default rather than a proof, recorded
+here because an external reviewer challenged it and the challenge is
+half right: a single nonzero exit cannot prove the command would fail
+again, so the skip is chosen on the worst cases -- skipped, a transient
+failure costs the pre-#819 status quo (the tools unavailable, the review
+completing partial); retried, a deterministic failure costs every lens's
+runner failing and the review posting with no lens run at all, which is
+strictly worse. The classification's gate consequence is stated with it:
+a **deterministic** failure's FAILED report stays on the draft's Runner
+line -- nothing re-ran its work, so the declared-setup gap is real and
+the review posts partial (the way slice 1's own failed setup does) --
+while a **recovered** fallback failure's report stands down from the
+Runner line and shows beside the lens runners instead, because the work
+was re-run and the review can approve.
+A
+restore that does not happen at lens time -- an unknown id, which is
+also the shape a restore the API will not perform cross-sprite takes, a
+refusal, an incomplete stream -- raises `RestoreRefusedError` past that
+run's report and the lens **retries once on a fresh runner running the
+setup phase itself**, the reviewed slice-1 provisioning whose own flip
+allows egress again before it verifies deny: the denied network is never
+re-opened on the runner that lost the restore, the retry happens only
+while the wall has room, and a lens with no spec to fall back to is NOT
+RUN with the refusal named.
+The fake models the hopeful half -- a checkpoint outliving its sprite's
+deletion -- and the refused half is the unknown-id `NotFoundError`, so
+the tests cover both answers and the live check decides which one is
+real. The evidence base for that question is split, and the split is
+recorded: the official API reference (the delete-a-sprite and
+restore-checkpoint pages) is silent on whether deleting a sprite deletes
+its checkpoints, while a Fly community thread claims deletion deletes
+them -- so the live check, not either text, decides; should deletion
+delete them, the retry above is the shipped degrade path and the
+follow-up is the bake's destroy deferred until after the last restore
+(with the Tasks hold). The id the controller accepts is read from the
+checkpoint list it fetches after the create (the stream's completion
+text carries it only in prose), held to a conservative charset, and the
+create and restore
+streams are read as the document's NDJSON progress events: an `error`
+event is the named failure, a stream with no `complete` event is one.
+
 ## Open questions
 
 **Live state (2026-06-12).** Most of the questions below were answered by what

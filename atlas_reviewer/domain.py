@@ -213,3 +213,16 @@ class RunnerReport:
     cleanup: CleanupStatus
     runner_name: str | None
     note: str
+    # Whether the run's setup phase failed deterministically (issue #819,
+    # D95) -- a declared command that failed, or no trusted interpreter
+    # for the spec's `{python}` commands. False for every run without a
+    # setup phase, and for a run that failed before its setup phase could
+    # classify; the bake's classifier reads it instead of matching the
+    # note's wording, so a transient failure cannot read as a
+    # deterministic one.
+    setup_failed: bool = False
+    # Whether this run is the setup pass itself -- the provisioning runner
+    # whose checkpoint the lens runners restore (issue #819, D95). The
+    # draft uses it to show a failed provisioning pass beside the lens
+    # runners without making it the coverage-bearing Runner line.
+    provisioning: bool = False
