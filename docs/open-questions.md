@@ -318,6 +318,30 @@ create and restore
 streams are read as the document's NDJSON progress events: an `error`
 event is the named failure, a stream with no `complete` event is one.
 
+**Update (2026-11-23, slice 3, the baked interpreter as built):** the
+interpreter the setup phase resolved and ran its `{python}` commands with
+is carried out of the setup pass with the checkpoint, and every lens
+runner's staging probe asks about it **first**: `choose_pytest` takes the
+baked interpreter as its own `preferred` argument and selects it whenever
+the guest reported it -- including when it is the system python, which is
+a member of the default candidate list and would otherwise lose to a
+newer pyenv -- so the restore is expected to have kept exactly that
+interpreter pytest-capable,
+and the staging telemetry names both -- `baked_python` and `pytest`. A
+probe that answers with a different interpreter (a restore that lost the
+baked state, or a repo whose spec installed into a second interpreter the
+default order prefers) is a named error on the staging telemetry, which
+says what it answered and what that means: `run_tests` and `mutate` run
+on the interpreter the probe found -- which does not carry the repo's
+setup-installed dependencies -- or stay unavailable when the probe found
+none; the mismatch is on the telemetry either way, never a silent return
+to the unconfigured image's behavior. The offline chain is
+pinned end to end: a repo with a setup spec bakes once with egress
+allowed, the lens runner restores the checkpoint, the probe confirms the
+baked interpreter, and the lens's `run_tests` call returns a real run --
+which is what makes the parity Minors 640-m1, 661-m3 and 661-m4
+scoreable, their `needs` being exactly `run_tests` and `mutate`.
+
 ## Open questions
 
 **Live state (2026-06-12).** Most of the questions below were answered by what
