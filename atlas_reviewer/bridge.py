@@ -1670,14 +1670,6 @@ class Bridge:
         head[mutation.path] = mutated
         return head
 
-    def _sweep(self) -> None:
-        """The runner's stray-process sweep (D80 round 2): executed code
-        can leave a detached process that outlives every exec, so every
-        re-stage and every execution is preceded by a sweep that kills
-        and verifies away the runner's strays. A survivor is fail-closed:
-        `BoundaryError`, an `unavailable` gap."""
-        self.session.sweep()
-
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters
         the session limits spend begin again -- the execution tools' caps
@@ -1868,13 +1860,9 @@ class Bridge:
                 started,
             )
         try:
-            # The sweep runs before every execution (D80 round 2): a
-            # detached process an earlier run left behind must be gone
-            # before the re-stage rebuilds and the new copy runs. Then,
-            # since the last execution could have rewritten anything it
+            # Since the last execution could have rewritten anything it
             # could reach, the execution starts from a re-staged,
             # digest-checked repository and trees.
-            self._sweep()
             if self._suspect:
                 self._restage()
             budget = (
@@ -1918,16 +1906,14 @@ class Bridge:
         controller-held tarballs (D80 round 2), because executed code can
         rewrite anything it can reach and git does not re-verify a loose
         object on read: the tarballs are the one source of truth it can
-        never touch. The sweep runs first -- a stray process alive during
-        the rebuild could forge what it writes -- and the staging is
-        deterministic, so the recorded BASE and HEAD ids must come back
-        exactly -- anything else is a boundary error, a gap. A recorded
+        never touch. The staging is deterministic, so the recorded BASE
+        and HEAD ids must come back exactly -- anything else is a
+        boundary error, a gap. A recorded
         mutation re-applies on a fresh copy, and the mutant commit is
         re-created with the same id, so the reads at MUTANT keep serving
         the mutation the record names. Cleared, the runner's state is
         exactly what the controller staged, with nothing alive that could
         rewrite it before the caller's read."""
-        self._sweep()
         digests = {
             rev: hashlib.sha256(data).hexdigest() for rev, data in self.trees.staged()
         }
