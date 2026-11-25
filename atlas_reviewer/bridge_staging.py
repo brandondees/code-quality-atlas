@@ -242,28 +242,29 @@ def git_resolve_script(
 
 
 def choose_pytest(
-    text: str, candidates: Sequence[str] = PYTEST_CANDIDATES
+    text: str,
+    candidates: Sequence[str] = PYTEST_CANDIDATES,
+    preferred: str | None = None,
 ) -> TrustedPython | None:
-    """The interpreter the guest reported with an importable pytest,
-    preferring a **literal candidate the controller itself named** -- the
-    baked interpreter a setup pass verified (issue #819, D95), which the
-    restore is expected to have kept pytest-capable -- over the default
-    order's newest pyenv interpreter, else the system one. Only paths of
-    the trusted shapes, or exactly a literal candidate the controller
-    itself named, are accepted from the guest's answer; unreported
-    candidates count as unavailable. Callers that name no literal path
-    (the default) keep the default order exactly."""
+    """The interpreter the guest reported with an importable pytest. The
+    default order is the newest pyenv interpreter, else the system one;
+    `preferred` -- the baked interpreter a setup pass verified (issue
+    #819, D95) -- is chosen whenever the guest reported it, whichever of
+    the two is newer, **including when the baked interpreter is the
+    system python**: the system path is also a member of the default
+    list, so the preference must be tracked separately from
+    default-candidate membership or the repo's installed dependencies,
+    which live on the baked interpreter, lose to a newer pyenv. Only
+    paths of the trusted shapes, or exactly a literal candidate the
+    controller itself named, are accepted from the guest's answer;
+    unreported candidates count as unavailable. With no `preferred` the
+    default order is unchanged."""
     found = [
         (path, (int(a), int(b), int(c)))
         for path, a, b, c in _PYTEST_RE.findall(text)
         if trusted_path(path) or path in candidates
     ]
-    # The preference is for the candidates the caller added beyond the
-    # default probe list -- the baked interpreter -- not for the system
-    # python, which is a member of the default list and must not jump
-    # the default order.
-    extra = tuple(c for c in candidates if c not in PYTEST_CANDIDATES)
-    named = [c for c in found if c[0] in extra]
+    named = [c for c in found if preferred is not None and c[0] == preferred]
     pyenv = sorted((c for c in found if c[0] != SYSTEM_PYTHON), key=_newest)
     system = [c for c in found if c[0] == SYSTEM_PYTHON]
     chosen = [*named, *pyenv, *system][:1]
@@ -431,17 +432,21 @@ def stage(
     root: str = BRIDGE_ROOT,
     unpack: UnpackLimits = DEFAULT_UNPACK,
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
+    preferred_pytest: str | None = None,
 ) -> Staged:
     """Raises `BoundaryError` when git is missing or untrusted, an upload
     falls short, the runner refuses a tree past `unpack`, or staging does
-    not report every commit."""
+    not report every commit. `preferred_pytest` is the baked interpreter
+    the setup pass verified (issue #819, D95): the probe asks about it
+    among `pytest_candidates` and `choose_pytest` selects it when the
+    guest reported it, over the default order."""
     code, text = session.exec(
         "resolve git",
         git_resolve_script(root, pytest_candidates),
         stage="bridge staging",
     )
     git, version = choose_git(code, text)
-    pytest = choose_pytest(text, pytest_candidates)
+    pytest = choose_pytest(text, pytest_candidates, preferred=preferred_pytest)
     revs = tuple(rev for rev, _ in trees.staged())
     for rev, data in trees.staged():
         session.upload(

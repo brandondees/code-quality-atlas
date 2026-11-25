@@ -7,6 +7,7 @@ policy record and per-sprite checkpoint records; the coordinator tests
 run the multi-lens fan-out through the local runner. Nothing here
 contacts GitHub, a live Sprite or a model."""
 
+import re
 from dataclasses import replace
 
 import pytest
@@ -521,12 +522,24 @@ def test_the_bake_names_no_interpreter_without_a_setup_phase():
     assert baked.python is None
 
 
-def test_choose_pytest_prefers_the_literal_candidate_the_caller_added():
+def test_choose_pytest_prefers_the_baked_interpreter_over_a_newer_pyenv():
     from atlas_reviewer.bridge_staging import PYTEST_CANDIDATES, choose_pytest
 
     text = f"atlas-pytest:{PYENV_PYTHON}:3.13.7\natlas-pytest:{BAKED}:3.12.9\n"
-    chosen = choose_pytest(text, (BAKED, *PYTEST_CANDIDATES))
+    chosen = choose_pytest(text, (BAKED, *PYTEST_CANDIDATES), preferred=BAKED)
     assert chosen is not None and chosen.path == BAKED
+
+
+def test_choose_pytest_prefers_the_baked_system_python_over_a_newer_pyenv():
+    """The system path is a member of the default candidate list, so the
+    preference must be tracked separately from default-candidate
+    membership: a repo whose setup installed into the system interpreter
+    keeps its tools on it even when a newer pyenv also has pytest."""
+    from atlas_reviewer.bridge_staging import PYTEST_CANDIDATES, choose_pytest
+
+    text = f"atlas-pytest:{PYENV_PYTHON}:3.13.7\natlas-pytest:{SYSTEM_PYTHON}:3.12.9\n"
+    chosen = choose_pytest(text, PYTEST_CANDIDATES, preferred=SYSTEM_PYTHON)
+    assert chosen is not None and chosen.path == SYSTEM_PYTHON
 
 
 def test_choose_pytest_keeps_the_default_order_when_nothing_was_added():
@@ -550,20 +563,30 @@ class _RecordingFake(FakeSprites):
         self.restores.append((name, checkpoint_id))
 
 
-def _bridge_sprites(answer, probe=None):
-    """A FakeSprites staging like `test_bridge_runs.fake_bridge`'s, with
-    the pytest probe reporting the baked interpreter (`probe` overrides
-    the reported line, for a restore that lost the baked pytest)."""
+def _bridge_sprites(answer, *, report_baked=True):
+    """A FakeSprites staging like `test_bridge_runs.fake_bridge`'s, whose
+    pytest probe answers from the candidates the probe script names: the
+    baked interpreter is reported only when the controller actually asked
+    about it -- so a dropped handoff fails the acceptance test -- and the
+    image's own newer pyenv always competes (`report_baked=False` models
+    a restore that lost the baked pytest)."""
     from .test_bridge_runs import ReplyRule
+
+    def git_answer(script: str) -> str:
+        loops = re.findall(r"for p in (.+?); do", script)
+        words = loops[-1].split() if loops else []
+        literals = [w for w in words if "*" not in w]
+        lines = ["atlas-git:/usr/bin/git", "git version 2.43.0"]
+        if report_baked and BAKED in literals:
+            lines.append(f"atlas-pytest:{BAKED}:3.12.9")
+        lines.append(f"atlas-pytest:{PYENV_PYTHON}:3.13.7")
+        return "\n".join(lines) + "\n"
 
     return _RecordingFake(
         rules=(
             ReplyRule(
                 "atlas-git",
-                lambda _script: (
-                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
-                    f"atlas-pytest:{probe or BAKED}:3.12.9\n"
-                ),
+                git_answer,
             ),
             ReplyRule(
                 "atlas-staged",
@@ -628,7 +651,8 @@ def test_run_bridge_names_a_baked_interpreter_the_probe_cannot_confirm(tmp_path)
     from .test_bridge_runs import SUITE, framed, staged, trees
 
     api = _bridge_sprites(
-        lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"), probe=PYENV_PYTHON
+        lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"),
+        report_baked=False,
     )
     api.create(BAKE_NAME)
     api.checkpoint(BAKE_NAME, "bake")
@@ -679,6 +703,12 @@ def test_the_whole_chain_scores_a_run_tests_call(tmp_path):
     assert Cause.TOOL_GAP not in lens.outcome.causes
     assert lens.outcome.test_runs == 1
     assert api.live_names() == ()
+    # The test command itself ran on the baked interpreter: the run exec's
+    # script embeds the staged pytest path, and a dropped handoff -- the
+    # probe never asked about BAKED, so the fake reports only the image's
+    # own newer pyenv -- would stage that one instead and fail here.
+    run_scripts = [argv[-1] for argv in api.argv_seen if "__ATLAS_RUN__" in argv[-1]]
+    assert run_scripts and all(BAKED in script for script in run_scripts)
     denies = _denies_by_runner(api)
     bake_flags = [
         flags

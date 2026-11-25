@@ -2356,7 +2356,14 @@ def run_bridge(
             if baked_python is not None
             else pytest_candidates
         )
-        staged = stage(session, trees, root, unpack, candidates)
+        staged = stage(
+            session,
+            trees,
+            root,
+            unpack,
+            candidates,
+            preferred_pytest=(baked_python.path if baked_python is not None else None),
+        )
         confirmed = baked_python is None or (
             staged.pytest is not None and staged.pytest.path == baked_python.path
         )
