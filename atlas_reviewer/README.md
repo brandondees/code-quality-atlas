@@ -863,20 +863,21 @@ unusable value or a repeated key runs no setup phase and is named with a
 note that never echoes the rejected text; a command that fails, times out,
 or outlives its budget fails the run.
 
-**The state is checkpointed once and shared.** The setup phase's result
-is the "pre-baked image with dev dependencies per repo" the direction
-asked for, as far as the Sprites API allows: the API document the adapter
-is written against (OpenAPI 0.1.12) has no create-from-image parameter,
-so the shared state is a checkpoint — created once after the deny-all
-flip, restored by each lens's runner instead of re-running the setup
-there. A restore the API refuses fails that lens's run closed and the
-lens retries once on a fresh runner running the setup phase itself.
-Three capabilities the document does not settle stay behind seams with
-the parent's live check as the judge: whether a restore crosses sprites,
-whether a checkpoint survives deleting the sprite that created it (the
-official API reference is silent on this; a community thread claims
-deletion deletes them), and what a fresh Sprite's default network state
-is.
+**The shared-bake design is retained, pending an image path.** The
+setup phase's result is the "pre-baked image with dev dependencies per
+repo" the direction asked for, and the bake/checkpoint machinery that
+builds it stays in the code. The live Sprite checks of Nov 25 found what
+the design needs and does not have yet: checkpoint ids are scoped to one
+sprite (a restore on another sprite fails `SBD checkpoint not found`),
+checkpoints do not survive their sprite's deletion, and the checkpoint
+list's first entry is a synthetic `Current` the adapter's id selection
+had to learn to skip (the id now comes from the create stream's own
+completion text). Same-sprite restore works — it reverted a marker and
+brought back a pip install in the pyenv tree, keeping deny-all — but the
+lenses run on separate sprites, so until an image-build path exists
+(the current API has no create-from-image parameter; under evaluation),
+each lens runs the setup itself: the same provisioning order as above,
+a few seconds of pip time per lens, measured live.
 
 ## The BYOK settings page (config slice S10, part B1)
 
