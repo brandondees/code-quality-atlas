@@ -271,7 +271,7 @@ review's runner while the network is open), and it is the same
 fail-open-with-a-named-note read the other keys use. Without a line the
 runner stays deny-all from the start, exactly as before.
 
-review_setup_commands: {python} -m pip install --no-user pytest cryptography opentelemetry-sdk   # this repo's own setting; not a default for copies
+review_setup_commands: {python} -m pip install pytest cryptography opentelemetry-sdk   # this repo's own setting; not a default for copies
 
 ## Scope discipline
 

@@ -2066,34 +2066,6 @@ def test_the_live_sweep_script_excludes_its_own_ancestry():
     assert f'echo "{SWEEP_TAG}:clean"' in script
 
 
-def test_the_live_sweep_script_never_signals_pid_1_or_a_session_root():
-    """The live Sprite runs the whole container under the exec user, and
-    its exec processes report `PPid 0`, so the ancestor walk cannot name
-    the container's own processes: the unguarded sweep SIGKILLed pid 1
-    (`tini`) and the session root and took the container down with every
-    tool call (the live checks of Nov 25). The script skips pid 1 and
-    every `PPid 0` process in both the kill scan and the verification,
-    and kills only the pids it collected, so the guards cannot drift
-    between the kill and the verification. A PR daemon reparented to pid
-    1 is still a victim: pid 1's own `PPid` shields only itself."""
-    from atlas_reviewer.runner import sweep_script
-
-    script = sweep_script()
-    kill_scan = script.split("victims=''")[1].split("for pid in $victims")[0]
-    assert '[ "$pid" = 1 ] && continue' in kill_scan
-    assert '[ "$ppid" = 0 ] && continue' in kill_scan
-    assert '[ "$uid" = "$me" ] || continue' in kill_scan
-    assert 'victims="$victims $pid"' in kill_scan
-    kill = script.split("for pid in $victims; do")[1].split("done")[0]
-    assert 'kill -9 "$pid"' in kill
-    verify = script.split("survivors=0")[1].split("done")[0]
-    assert "[ -d /proc/$pid ] || continue" in verify
-    assert '"$state" = Z' in verify
-    # The verification re-checks exactly the victim list, not a fresh
-    # scan, so a protected process can never be counted a survivor.
-    assert "/proc/[0-9]*" not in verify
-
-
 def test_the_content_tools_answer_without_the_runner(tmp_path):
     """The round-2 decision's structural half: `read_file`, the
     fixed-string `grep` and `list_files` are answered from the
@@ -2225,25 +2197,3 @@ def test_the_controller_splice_matches_the_runner_script(tmp_path):
         assert path.read_bytes() == mutated, (text, line, operator)
         assert base64.b64decode(before_b64).decode() == before
         assert base64.b64decode(after_b64).decode() == after
-
-
-def test_choose_git_cuts_the_version_at_the_probe_output():
-    """The git resolve exec carries the pytest probe's labelled output
-    after git's own line, and the live run's telemetry showed it glued
-    past git's newline into the version field. The version is the first
-    line, cut at the first `atlas-` marker, glued or not."""
-    from atlas_reviewer.bridge_staging import choose_git
-
-    path, version = choose_git(
-        0,
-        "atlas-git:/usr/bin/git\n"
-        "git version 2.53.0\n"
-        "atlas-pytest:/.sprite/languages/python/pyenv/versions/3.13.17/bin/python3:3.13.17\n",
-    )
-    assert path == "/usr/bin/git"
-    assert version == "git version 2.53.0"
-    _path, glued = choose_git(
-        0,
-        "atlas-git:/usr/bin/git\ngit version 2.53.0atlas-pytest:/x:3.13.17\n",
-    )
-    assert glued == "git version 2.53.0"

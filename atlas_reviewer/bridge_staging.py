@@ -333,14 +333,9 @@ def mutant_commit_steps(
 
 def choose_git(code: int | None, text: str) -> tuple[str, str]:
     """The reported git path, accepted only if it is exactly one of
-    `GIT_PATHS`, and its version line (untrusted, for telemetry). The
-    version is the first line after the path, cut at the first `atlas-`
-    marker: the same exec carries the pytest probe's labelled output, the
-    live run's telemetry showed it glued past git's own newline, and the
-    version is the one field that must not quote the probe's lines."""
+    `GIT_PATHS`, and its version line (untrusted, for telemetry)."""
     _, found, after = text.rpartition(f"{GIT_TAG}:")
     path, _, version = after.partition("\n")
-    version = version.split("atlas-")[0].rstrip()
     if code != 0 or not found or path not in GIT_PATHS:
         raise BoundaryError(
             f"no trusted git in the runner (exit {code}): "

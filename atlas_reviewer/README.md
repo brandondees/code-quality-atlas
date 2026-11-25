@@ -841,20 +841,20 @@ source the S7 proposals take, never the PR head and never the merge-base,
 because a PR that could carry its own setup commands would name installs
 into its own review's runner while the network is open.
 
-**The order is the guarantee.** Every lens runner that gets a setup
-spec provisions in the same order: create, resolve the trusted
-interpreter, run each declared command bounded (from the neutral
-directory, still before any PR content is uploaded or unpacked), **then**
-set deny-all, read it back exactly, cap memory, and run the behavioral
-egress check — whose `CONNECTED` answer fails the run closed. Every exec
-of the review — the staging probe, the tool runs, `run_tests` and
-`mutate` — happens after that read-back. The first design shared the
-setup state across lenses through a Sprite checkpoint, but the live
-Sprite checks of Nov 25 found checkpoint ids scoped to one sprite, no
-survival across deletion, and no cross-sprite restore — so the shared
-bake was removed and every lens runs the setup itself (a few seconds of
-pip time per lens, measured live). Without a setup spec the lifecycle is
-unchanged: deny-all
+**The order is the guarantee.** A runner given a setup spec provisions in
+a different order: create, resolve the trusted interpreter, run each
+declared command bounded (from the neutral directory, still before any PR
+content is uploaded or unpacked), **then** set deny-all, read it back
+exactly, cap memory, and run the behavioral egress check — whose
+`CONNECTED` answer fails the run closed. Every exec of the review — the
+staging probe, the tool runs, `run_tests` and `mutate` — happens after
+that read-back. A runner **restoring** the shared checkpoint provisions
+in its own order: create, set deny-all, read it back exactly, **then**
+restore the checkpoint, cap memory, and run the same behavioral egress
+check — the proof follows the restore, because the restored state is the
+one thing the flip cannot have seen (a checkpoint can carry services or
+proxy state a fresh image does not have). Without a setup spec the
+lifecycle is unchanged: deny-all
 from the start, and the existing order tests still pin it. The value's
 grammar is the S7 proposals' token grammar with one addition: the program
 token may be the `{python}` placeholder, substituted with the interpreter
@@ -863,17 +863,20 @@ unusable value or a repeated key runs no setup phase and is named with a
 note that never echoes the rejected text; a command that fails, times out,
 or outlives its budget fails the run.
 
-**Install where `-I` can see it.** The setup commands run under the
-runner's minimal environment with `HOME=/tmp`, and the Sprite's
-interpreter tree is not writable by the exec user in the way pip's
-writability check expects: a bare `pip install` falls back to a **user
-install** into `/tmp/.local`, which `-I` (isolated mode — no user site)
-cannot import and no checkpoint captured. The live checks showed the
-symptom exactly: staging reported `pytest: none` while a non-isolated
-import found `/tmp/.local/.../pytest`. Write the spec's installs with
-`--no-user` — `review_setup_commands: {python} -m pip install --no-user
-pytest` — which lands in the interpreter's own site-packages, imports
-under `-I`, and is what this repo's own `REVIEW.md` sets.
+**The state is checkpointed once and shared.** The setup phase's result
+is the "pre-baked image with dev dependencies per repo" the direction
+asked for, as far as the Sprites API allows: the API document the adapter
+is written against (OpenAPI 0.1.12) has no create-from-image parameter,
+so the shared state is a checkpoint — created once after the deny-all
+flip, restored by each lens's runner instead of re-running the setup
+there. A restore the API refuses fails that lens's run closed and the
+lens retries once on a fresh runner running the setup phase itself.
+Three capabilities the document does not settle stay behind seams with
+the parent's live check as the judge: whether a restore crosses sprites,
+whether a checkpoint survives deleting the sprite that created it (the
+official API reference is silent on this; a community thread claims
+deletion deletes them), and what a fresh Sprite's default network state
+is.
 
 ## The BYOK settings page (config slice S10, part B1)
 

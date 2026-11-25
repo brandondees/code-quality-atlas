@@ -274,7 +274,7 @@ fail-open-with-a-named-note read the other keys use. Without a line the
 runner stays deny-all from the start, exactly as before.
 
 ```text
-# review_setup_commands: {python} -m pip install --no-user pytest   # example — uncomment and set your repo's own value, or delete to run no setup phase
+# review_setup_commands: {python} -m pip install pytest   # example — uncomment and set your repo's own value, or delete to run no setup phase
 ```
 
 ## Scope discipline
