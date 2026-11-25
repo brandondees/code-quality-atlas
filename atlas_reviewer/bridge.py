@@ -146,8 +146,9 @@ RUN_TOOLS = frozenset({"run_tests", "mutate"})
 
 # The file-content tools answered from the controller's own copy of the
 # trees and the deterministic splice (D80 round 2): executed code can
-# start a process no sweep can name, so nothing read back from the
-# runner is trusted as content. `read_file` and `list_files` are always
+# leave processes running in the runner (the per-call sweep that once
+# killed them is retired -- see D80's update), so nothing read back from
+# the runner is trusted as content. `read_file` and `list_files` are always
 # local; `grep` is local only in its fixed-string mode -- a substring
 # scan is linear and cannot crash -- while the regex mode stays on the
 # runner, where `timeout` bounds it, where a bad pattern is git's exit
@@ -156,11 +157,12 @@ RUN_TOOLS = frozenset({"run_tests", "mutate"})
 # (D80 round 3).
 LOCAL_TOOLS = frozenset({"read_file", "grep", "list_files"})
 
-# The tools that still read the runner's repository (the diff trio): their
-# integrity rests on the sweep -- after a verified sweep, no process is
-# alive to write between the rebuild and the read -- and on the finding
-# gate, whose quotes verify against controller-held head content a forged
-# diff cannot mint.
+# The tools that still read the runner's repository (the diff trio):
+# executed code can leave processes running between the rebuild and the
+# read (the per-call sweep is retired -- see D80's update), so the
+# integrity here rests on the re-stage from the controller-held tarballs
+# and on the finding gate, whose quotes verify against controller-held
+# head content a forged diff cannot mint.
 
 PYTEST_FLAGS = ("-q", "--color=no", "-p", "no:cacheprovider")
 
@@ -1670,14 +1672,6 @@ class Bridge:
         head[mutation.path] = mutated
         return head
 
-    def _sweep(self) -> None:
-        """The runner's stray-process sweep (D80 round 2): executed code
-        can leave a detached process that outlives every exec, so every
-        re-stage and every execution is preceded by a sweep that kills
-        and verifies away the runner's strays. A survivor is fail-closed:
-        `BoundaryError`, an `unavailable` gap."""
-        self.session.sweep()
-
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters
         the session limits spend begin again -- the execution tools' caps
@@ -1823,13 +1817,14 @@ class Bridge:
         """`read_file`, fixed-string `grep` and `list_files` are answered
         from the controller's own copy of the trees and the recorded
         mutation's splice (D80 round 2's decision): executed PR code can
-        leave a process no sweep can name alive in the runner, so nothing
-        read back from the runner is trusted as content -- these tools
-        serve the controller-held bytes and never exec. The regex mode of
+        leave processes running in the runner (the per-call sweep that
+        once killed them is retired -- see D80's update), so nothing read
+        back from the runner is trusted as content -- these tools serve
+        the controller-held bytes and never exec. The regex mode of
         `grep` is not among them: it stays on the runner (D80 round 3),
-        inside the re-staged, swept, timeout-bounded exec the diff trio
-        rides. The result then runs through the same rendering, capping,
-        secret scan and ledger the runner-served results use."""
+        inside the re-staged, timeout-bounded exec the diff trio rides.
+        The result then runs through the same rendering, capping, secret
+        scan and ledger the runner-served results use."""
         rev = call.get("rev")
         files = self._contents.get(rev)
         if files is None:  # pragma: no cover - validate gates the revisions
@@ -1868,13 +1863,9 @@ class Bridge:
                 started,
             )
         try:
-            # The sweep runs before every execution (D80 round 2): a
-            # detached process an earlier run left behind must be gone
-            # before the re-stage rebuilds and the new copy runs. Then,
-            # since the last execution could have rewritten anything it
+            # Since the last execution could have rewritten anything it
             # could reach, the execution starts from a re-staged,
             # digest-checked repository and trees.
-            self._sweep()
             if self._suspect:
                 self._restage()
             budget = (
@@ -1918,16 +1909,14 @@ class Bridge:
         controller-held tarballs (D80 round 2), because executed code can
         rewrite anything it can reach and git does not re-verify a loose
         object on read: the tarballs are the one source of truth it can
-        never touch. The sweep runs first -- a stray process alive during
-        the rebuild could forge what it writes -- and the staging is
-        deterministic, so the recorded BASE and HEAD ids must come back
-        exactly -- anything else is a boundary error, a gap. A recorded
+        never touch. The staging is deterministic, so the recorded BASE
+        and HEAD ids must come back exactly -- anything else is a
+        boundary error, a gap. A recorded
         mutation re-applies on a fresh copy, and the mutant commit is
         re-created with the same id, so the reads at MUTANT keep serving
         the mutation the record names. Cleared, the runner's state is
         exactly what the controller staged, with nothing alive that could
         rewrite it before the caller's read."""
-        self._sweep()
         digests = {
             rev: hashlib.sha256(data).hexdigest() for rev, data in self.trees.staged()
         }
