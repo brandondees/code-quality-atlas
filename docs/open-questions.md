@@ -321,9 +321,12 @@ event is the named failure, a stream with no `complete` event is one.
 **Update (2026-11-23, slice 3, the baked interpreter as built):** the
 interpreter the setup phase resolved and ran its `{python}` commands with
 is carried out of the setup pass with the checkpoint, and every lens
-runner's staging probe asks about it **first**: `choose_pytest` prefers a
-literal candidate the caller added beyond the default probe list, so the
-restore is expected to have kept exactly that interpreter pytest-capable,
+runner's staging probe asks about it **first**: `choose_pytest` takes the
+baked interpreter as its own `preferred` argument and selects it whenever
+the guest reported it -- including when it is the system python, which is
+a member of the default candidate list and would otherwise lose to a
+newer pyenv -- so the restore is expected to have kept exactly that
+interpreter pytest-capable,
 and the staging telemetry names both -- `baked_python` and `pytest`. A
 probe that answers with a different interpreter (a restore that lost the
 baked state, or a repo whose spec installed into a second interpreter the
