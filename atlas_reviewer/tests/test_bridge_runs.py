@@ -2013,3 +2013,53 @@ def test_the_controller_splice_matches_the_runner_script(tmp_path):
         assert path.read_bytes() == mutated, (text, line, operator)
         assert base64.b64decode(before_b64).decode() == before
         assert base64.b64decode(after_b64).decode() == after
+
+
+def test_a_run_that_writes_into_the_repos_objects_does_not_reach_the_reads(tmp_path):
+    """The surviving re-stage protection, pinned without the retired
+    sweep (D80's retirement): a PR test writes a corrupt loose blob into
+    the runner's repository during its run -- the shape the deleted
+    between-call daemon fixture modeled -- and the later runner-side
+    read re-stages first, so the forgery never reaches the diff trio and
+    the next run executes the real tree."""
+    poison = (
+        "import glob, zlib, os\n"
+        "from pathlib import Path\n\n"
+        "def test_forge():\n"
+        "    repo = Path(__file__).resolve().parents[2] / 'repo.git'\n"
+        "    for path in glob.glob(os.path.join(repo, 'objects', '[0-9a-f][0-9a-f]', '*')):\n"
+        "        raw = open(path, 'rb').read()\n"
+        "        data = zlib.decompress(raw)\n"
+        "        if b'def total' in data:\n"
+        "            forged = data.replace(b'return sum(xs)', b'return 999')\n"
+        "            tmp = path + '.tmp'\n"
+        "            open(tmp, 'wb').write(zlib.compress(forged))\n"
+        "            os.replace(tmp, path)\n"
+    )
+    old_calc = b"def total(xs):\n    return -1\n"
+    source = trees(
+        {**SUITE, "test_forge.py": poison.encode()}, base={"calc.py": old_calc}
+    )
+    collected = {}
+
+    def body(bridge):
+        out = {}
+        # The forging run poisons the runner's own object store: the
+        # corrupt blob is written at the real blob's path, so every
+        # runner-side read that walks the tree hits it.
+        out["run"] = bridge.call("run_tests", {"path": "test_forge.py"})
+        # A runner-side read that follows an execution re-stages first.
+        out["diff"] = bridge.call("diff_file", {"path": "calc.py"})
+        out["run2"] = bridge.call("run_tests", {})
+        collected.update(out)
+        return "done"
+
+    (report, *_) = bridge_run(tmp_path, body, source=source)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert collected["diff"].status is Status.OK, collected["diff"].error.text
+    # The re-stage served the controller-staged delta, not the forgery.
+    assert "return sum(xs)" in collected["diff"].content.text
+    assert "999" not in collected["diff"].content.text
+    # The next run executes the re-staged real tree.
+    (run2,) = collected["run2"].runs
+    assert run2.exit == 0

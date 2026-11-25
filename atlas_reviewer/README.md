@@ -2173,24 +2173,8 @@ a `Bridge` to the caller.
     controls both the haystack and, by injection, the pattern), a bad
     pattern is git's exit status (a gap, not an uncaught `re.error`),
     and the dialect is `git grep -E`'s POSIX extended regex, unchanged
-    from before the local path existed. It rides the same sweep,
-    re-stage and quote-gate protections as the diff trio.
-  - **A stray-process sweep precedes every re-stage and every execution**
-    (`Session.sweep`): the live sweep kills every process of the
-    execution user except the exec chain's own ancestors (walked by
-    `PPid` to init; zombies skipped), waits, then verifies with a second
-    scan; a survivor, a failed sweep, or no answer is fail-closed
-    (`unavailable`, a gap). This is what the diff trio's runner reads
-    (`diff_stat`, `diff_file`, renames -- and the regex mode of `grep`,
-    which stays runner-side) rest on -- after a verified
-    sweep, no process is alive to write between the rebuild and the read
-    -- together with the finding gate, whose quotes verify against
-    controller-held head content a forged diff cannot mint. The sweep's
-    uid scope on a real Sprite is reasoned from the single-review
-    disposable-runner model and has not been observed on a live Sprite;
-    the local runner's sweep is the testable stand-in, scoped to the
-    processes the runner spawned or adopted (`PR_SET_CHILD_SUBREAPER`),
-    because the test machine's other work shares the uid.
+    from before the local path existed. It rides the same re-stage and
+    quote-gate protections as the diff trio.
   - **The re-stage from the controller-held tarballs** (below) closes
     every *timestamped* tamper: the repository, `trees`, the scratch and
     the staging indexes are removed and rebuilt from freshly re-uploaded,
@@ -2199,10 +2183,17 @@ a `Bridge` to the caller.
     mutation re-applies deterministically and the re-created mutant id is
     checked against the record.
   Each execution call -- and every runner read that follows one --
-  sweeps, re-stages, and only then serves or runs; the reads and the next
-  run are genuine even with a daemon detached from its exec's group
-  re-forging the object store continuously (the regression fixture).
-  The argv is built by the bridge and never by the model: `<trusted
+  re-stages, and only then serves or runs. The re-stage rebuilds the
+  repository and trees from the controller-held tarballs, so executed
+  code's own writes and timestamped tamper are healed; what the retired
+  per-call sweep used to add on top -- killing processes a PR's tests
+  detached between the rebuild and the read -- is an accepted residual
+  (recorded on D80): a process detached by executed code can keep
+  running and re-forge the runner-side object store, which can mislead
+  the diff trio's and the regex `grep`'s reads, but the finding gate's
+  quotes verify against controller-held head content, so a forged diff
+  cannot mint a verified finding. The argv is built by the bridge and
+  never by the model: `<trusted
   interpreter> -I -B -m pytest -q --color=no -p no:cacheprovider
   <selector>` -- isolated (`-I`: no `PYTHON*` variables, no user site,
   cwd off `sys.path`, so a PR `pytest.py` cannot shadow the runner
