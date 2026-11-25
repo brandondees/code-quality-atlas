@@ -879,6 +879,18 @@ lenses run on separate sprites, so until an image-build path exists
 each lens runs the setup itself: the same provisioning order as above,
 a few seconds of pip time per lens, measured live.
 
+**Install where `-I` can see it.** The setup commands run under the
+runner's minimal environment with `HOME=/tmp`, and the Sprite's
+interpreter tree is not writable by the exec user in the way pip's
+writability check expects: a bare `pip install` falls back to a **user
+install** into `/tmp/.local`, which `-I` (isolated mode — no user site)
+cannot import and no checkpoint captured. The live checks showed the
+symptom exactly: staging reported `pytest: none` while a non-isolated
+import found `/tmp/.local/.../pytest`. Write the spec's installs with
+`--no-user` — `review_setup_commands: {python} -m pip install --no-user
+pytest` — which lands in the interpreter's own site-packages, imports
+under `-I`, and is what this repo's own `REVIEW.md` sets.
+
 ## The BYOK settings page (config slice S10, part B1)
 
 Part B1 is the intake surface: a GitHub App installation's admin signs

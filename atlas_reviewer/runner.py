@@ -622,17 +622,32 @@ SWEEP_SETTLE_S = 0.5
 
 def sweep_script() -> str:
     """Kills every process of the execution user that is not an ancestor
-    of the sweep itself, then verifies none remain (`D80` round 2). The
-    runner is a single-review disposable Sprite: the execution user's
-    processes are this review's own exec chain -- protected by walking
-    `PPid` from here to init -- and whatever a PR's tests left behind,
-    detached from it (`start_new_session` or a double fork), which is
-    exactly the population a between-call daemon needs. Zombies are
-    skipped: they are dead, hold no code, and their reaping belongs to
-    the parent. The verification is fail-closed: any surviving process of
-    the execution user prints a survivor count and fails the script, and
-    `parse_sweep` turns that into a boundary error. `ps` is not assumed;
-    the scan reads `/proc` directly."""
+    of the sweep itself, the container's init, or a session root, then
+    verifies none remain (`D80` round 2). The runner is a single-review
+    disposable Sprite: the execution user's processes are this review's
+    own exec chain -- protected by walking `PPid` from here toward init --
+    and whatever a PR's tests left behind, detached from it
+    (`start_new_session` or a double fork), which is exactly the
+    population a between-call daemon needs. Zombies are skipped: they are
+    dead, hold no code, and their reaping belongs to the parent.
+
+    Two processes are never the sweep's to kill, whatever their uid (the
+    live Sprite runs the whole container under one user, so uid alone
+    would name them): pid 1 is the container's init (`tini`), and a
+    process whose `PPid` is 0 is an init or session root the exec
+    machinery owns. The live run showed both: exec processes report
+    `PPid 0`, so the ancestor walk cannot see the exec chain's parents,
+    and the unguarded sweep SIGKILLed pid 1 and its session root, taking
+    the container down with every tool call (the live checks of Nov 25).
+    A detached PR daemon is still caught: reparenting lands it on pid 1,
+    whose own `PPid` shields only itself.
+
+    The scan collects the victim list first, kills it, and re-checks
+    exactly that list, so the guard skips cannot drift between the kill
+    and the verification. The verification is fail-closed: any victim
+    still alive and not a zombie prints a survivor count and fails the
+    script, and `parse_sweep` turns that into a boundary error. `ps` is
+    not assumed; the scan reads `/proc` directly."""
     return "\n".join(
         (
             "me=$(id -u)",
@@ -645,10 +660,16 @@ def sweep_script() -> str:
                 "p=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null); "
                 "done"
             ),
+            "victims=''",
             "for dir in /proc/[0-9]*; do",
             "  pid=${dir#/proc/}",
             '  case "$ancestors" in *" $pid "*) continue ;; esac',
             '  [ "$pid" = "$self" ] && continue',
+            '  [ "$pid" = 1 ] && continue',
+            (
+                "  ppid=$(awk '/^PPid:/{print $2}' \"$dir/status\" 2>/dev/null); "
+                '[ "$ppid" = 0 ] && continue'
+            ),
             (
                 "  state=$(awk '/^State:/{print $2}' \"$dir/status\" 2>/dev/null); "
                 '[ "$state" = Z ] && continue'
@@ -657,21 +678,16 @@ def sweep_script() -> str:
                 "  uid=$(awk '/^Uid:/{print $2}' \"$dir/status\" 2>/dev/null); "
                 '[ "$uid" = "$me" ] || continue'
             ),
-            '  kill -9 "$pid" 2>/dev/null || true',
+            '  victims="$victims $pid"',
             "done",
+            'for pid in $victims; do kill -9 "$pid" 2>/dev/null || true; done',
             f"sleep {SWEEP_SETTLE_S}",
             "survivors=0",
-            "for dir in /proc/[0-9]*; do",
-            "  pid=${dir#/proc/}",
-            '  case "$ancestors" in *" $pid "*) continue ;; esac',
-            '  [ "$pid" = "$self" ] && continue',
+            "for pid in $victims; do",
+            "  [ -d /proc/$pid ] || continue",
             (
-                "  state=$(awk '/^State:/{print $2}' \"$dir/status\" 2>/dev/null); "
-                '[ "$state" = Z ] && continue'
-            ),
-            (
-                "  uid=$(awk '/^Uid:/{print $2}' \"$dir/status\" 2>/dev/null); "
-                '[ "$uid" = "$me" ] || continue'
+                "  state=$(awk '/^State:/{print $2}' \"/proc/$pid/status\" "
+                '2>/dev/null); [ "$state" = Z ] && continue'
             ),
             "  survivors=$((survivors+1))",
             "done",
