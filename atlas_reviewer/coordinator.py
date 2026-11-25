@@ -1307,18 +1307,32 @@ def _review_lenses(
     # whose lens runners all completed. The bake's report still joins the
     # draft's runner records below -- visible, never gating.
     reports = tuple(ran.report for ran in runs if ran.report is not None)
+    # The bake report leaves the coverage input only when its work was
+    # actually re-run: a FAILED bake whose per-lens fallback ran (not
+    # `setup_failed`). A **deterministic** setup failure's FAILED report
+    # stays on it -- nothing re-ran its work, the lenses ran without a
+    # setup and their COMPLETED outcomes carry no tool gap unless a lens
+    # happens to call the tools, so the review must not approve past a
+    # declared setup that never ran.
+    recovered = (
+        baked is not None
+        and baked.report is not None
+        and baked.report.status is RunnerStatus.FAILED
+        and not baked.setup_failed
+    )
     bake_report = (
         baked.report
-        if baked is not None
-        and baked.report is not None
-        and baked.report.status is not RunnerStatus.COMPLETED
+        if baked is not None and baked.report is not None and recovered
         else None
     )
-    if baked is not None and baked.report is not None and bake_report is None:
+    if baked is not None and baked.report is not None and not recovered:
         # The setup pass's completed report rides the draft's runner
         # records like any lens's, cleanup included -- a bake whose
         # destroy went unverified still holds the Runner line, the way
-        # any runner's unverified cleanup does.
+        # any runner's unverified cleanup does; and a deterministic
+        # setup failure's FAILED report stays on it for the same reason
+        # inverted: the gap is real, so the review posts COMMENT, the
+        # way slice 1's own failed setup does.
         reports = (baked.report, *reports)
     review = synthesize(
         [ran.result for ran in runs],
@@ -3900,26 +3914,33 @@ def render_draft(
     # provisioning never failed. It is marked `provisioning`, so a lens
     # runner's own failure (the coverage-bearing Runner line when it is
     # the first non-completed) is never mislabeled here.
-    lines.extend(_recovered_runner_lines(review.runners, scrub=scrub))
+    lines.extend(_recovered_runner_lines(review.runners, review.runner, scrub=scrub))
     return "\n".join(lines) + "\n"
 
 
 def _recovered_runner_lines(
-    runners: Sequence[RunnerReport], *, scrub: Callable[[str], str]
+    runners: Sequence[RunnerReport],
+    coverage_runner: RunnerReport | None,
+    *,
+    scrub: Callable[[str], str],
 ) -> list[str]:
     """One line per failed provisioning pass in the runner records (issue
     #819, D95): the setup pass whose checkpoint the lens runners restore,
     marked `provisioning`, whose failure the per-lens fallback recovered
-    or the no-setup path made irrelevant -- shown beside the lens
-    runners, never mistaken for the coverage-bearing Runner line, which
-    `_combined_runner` computes from the lens runners alone."""
+    -- shown beside the lens runners, never mistaken for the
+    coverage-bearing Runner line. A deterministic setup failure's FAILED
+    report *is* the coverage-bearing Runner line (nothing re-ran its
+    work), so it renders there and not here; the identity check keeps the
+    two apart."""
     return [
         f"Setup pass `{r.runner_name}`: status {r.status.value}; "
         f"cleanup {r.cleanup.value}; its work was re-run on the lens "
         "runners or the lenses ran without it, quoted: "
         + quote_untrusted(r.note, QUOTED_CHARS, scrub=scrub)
         for r in runners
-        if r.provisioning and r.status is not RunnerStatus.COMPLETED
+        if r.provisioning
+        and r.status is not RunnerStatus.COMPLETED
+        and r is not coverage_runner
     ]
 
 

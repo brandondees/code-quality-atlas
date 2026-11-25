@@ -369,6 +369,14 @@ def test_a_deterministic_setup_failure_runs_no_per_lens_setup(tmp_path):
     assert api.restores == []
     lens = next(entry for entry in result.lenses if entry.index == 1)
     assert lens.state.value == "complete" or lens.outcome is not None
+    # The declared setup never ran and nothing re-ran it: the bake's
+    # FAILED report is the coverage-bearing Runner line, so the review
+    # cannot approve past a setup that never ran -- the same shape
+    # slice 1's own failed setup produces.
+    assert result.coverage_complete is False
+    assert result.runner is not None
+    assert result.runner.status is RunnerStatus.FAILED
+    assert result.runner.provisioning
 
 
 def test_the_bake_is_skipped_when_no_lens_is_left_to_run():

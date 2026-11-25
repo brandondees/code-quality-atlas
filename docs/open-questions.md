@@ -284,7 +284,14 @@ again, so the skip is chosen on the worst cases -- skipped, a transient
 failure costs the pre-#819 status quo (the tools unavailable, the review
 completing partial); retried, a deterministic failure costs every lens's
 runner failing and the review posting with no lens run at all, which is
-strictly worse. A
+strictly worse. The classification's gate consequence is stated with it:
+a **deterministic** failure's FAILED report stays on the draft's Runner
+line -- nothing re-ran its work, so the declared-setup gap is real and
+the review posts partial (the way slice 1's own failed setup does) --
+while a **recovered** fallback failure's report stands down from the
+Runner line and shows beside the lens runners instead, because the work
+was re-run and the review can approve.
+A
 restore that does not happen at lens time -- an unknown id, which is
 also the shape a restore the API will not perform cross-sprite takes, a
 refusal, an incomplete stream -- raises `RestoreRefusedError` past that
@@ -304,9 +311,10 @@ its checkpoints, while a Fly community thread claims deletion deletes
 them -- so the live check, not either text, decides; should deletion
 delete them, the retry above is the shipped degrade path and the
 follow-up is the bake's destroy deferred until after the last restore
-(with the Tasks hold). The id the controller accepts is read from the checkpoint list it
-fetches after the create (the stream's completion text carries it only
-in prose), held to a conservative charset, and the create and restore
+(with the Tasks hold). The id the controller accepts is read from the
+checkpoint list it fetches after the create (the stream's completion
+text carries it only in prose), held to a conservative charset, and the
+create and restore
 streams are read as the document's NDJSON progress events: an `error`
 event is the named failure, a stream with no `complete` event is one.
 
