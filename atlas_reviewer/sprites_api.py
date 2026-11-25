@@ -67,6 +67,13 @@ EXEC_STDIN_MAX_BYTES = 10 * 1024 * 1024
 # #819, D95): the document's examples show short version-like ids ("v7");
 # anything outside this charset never reaches a URL path unencoded.
 _CHECKPOINT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+# The create stream's completion text names the new id ("Checkpoint v2
+# created successfully", live-verified Nov 25) -- the one reliable source,
+# because the list's first entry is always a synthetic `Current`.
+_CREATED_ID = re.compile(r"Checkpoint ([A-Za-z0-9._-]{1,64}) created")
+# The synthetic first list entry the live API prepends (live-verified Nov
+# 25); it is not a restorable checkpoint.
+_CURRENT_ID = "Current"
 
 
 @dataclass(frozen=True)
@@ -278,28 +285,35 @@ class SpritesClient:
         return True
 
     def checkpoint(self, name: str, comment: str) -> str:
-        """Creates a checkpoint and returns its id. The create's own NDJSON
-        stream carries the id only inside its completion text ("Checkpoint
-        v3 created successfully" per the document's example), so the
-        parseable source is the checkpoint list read after the create;
-        the document's list example shows the newest entry first, which is
-        the ordering the first entry relies on (unconfirmed -- the live
-        check names it)."""
+        """Creates a checkpoint and returns its id, parsed from the
+        create stream's own completion text ("Checkpoint v2 created
+        successfully" -- the live checks of Nov 25). The list read is
+        only the fallback, and its first entry is always a synthetic
+        `Current` the live API prepends, so any entry whose id is
+        `Current` is skipped before the newest real one is taken; the
+        list-first read was the bug the live run caught (the restore
+        then failed `invalid checkpoint ID "Current"`)."""
         resp = self._call(
             "POST", f"{self._path(name)}/checkpoint", {"comment": comment}
         )
-        _ndjson_complete(resp.body, "checkpoint create")
-        entries = self.list_checkpoints(name)
-        if not entries:
-            raise BoundaryError("the checkpoint list is empty after a create")
-        checkpoint_id = entries[0].get("id")
-        if not isinstance(checkpoint_id, str) or not _CHECKPOINT_ID.fullmatch(
-            checkpoint_id
-        ):
-            raise BoundaryError(
-                "the newest checkpoint's id is not a usable checkpoint id"
-            )
-        return checkpoint_id
+        complete = _ndjson_complete(resp.body, "checkpoint create")
+        match = _CREATED_ID.search(complete)
+        if match is not None:
+            checkpoint_id = match.group(1)
+            if _CHECKPOINT_ID.fullmatch(checkpoint_id):
+                return checkpoint_id
+        for entry in self.list_checkpoints(name):
+            checkpoint_id = entry.get("id")
+            if (
+                isinstance(checkpoint_id, str)
+                and checkpoint_id != _CURRENT_ID
+                and _CHECKPOINT_ID.fullmatch(checkpoint_id)
+            ):
+                return checkpoint_id
+        raise BoundaryError(
+            "the checkpoint create named no usable id in its stream and "
+            f"the sprite's checkpoint list holds none beyond {_CURRENT_ID!r}"
+        )
 
     def list_checkpoints(self, name: str) -> list[Json]:
         resp = self._call("GET", f"{self._path(name)}/checkpoints")

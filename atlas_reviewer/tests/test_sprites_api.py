@@ -201,29 +201,55 @@ def test_sprites_policy_read_back_must_be_an_object(body):
 
 # --------------------------------------------------- checkpoints (#819, D95)
 
+# The live create stream (Nov 25): an info line, then the completion text
+# that names the new id.
 _CREATE_STREAM = (
     b'{"data": "Creating checkpoint...", "time": "t", "type": "info"}\n'
-    b'{"data": "Checkpoint v3 created", "time": "t", "type": "complete"}\n'
+    b'{"data": "Checkpoint v2 created successfully", "time": "t", '
+    b'"type": "complete"}\n'
 )
-_RESTORE_STREAM = (
-    b'{"data": "Restoring to checkpoint v3...", "time": "t", "type": "info"}\n'
-    b'{"data": "Restored to v3", "time": "t", "type": "complete"}\n'
-)
+# The live list shape (Nov 25): a synthetic `Current` first, then the real
+# checkpoints newest-first.
+_CURRENT_FIRST = [
+    {"id": "Current", "comment": ""},
+    {"id": "v2", "comment": "c"},
+    {"id": "v1", "comment": "initial checkpoint"},
+]
 
 
-def test_checkpoint_create_reads_the_id_from_the_list_read_back():
-    t = Recorder(
-        ok(body=_CREATE_STREAM),
-        ok([{"id": "v3", "create_time": "t", "comment": "c"}, {"id": "v2"}]),
-    )
+def test_checkpoint_create_parses_the_id_from_the_create_stream():
+    """The live shape (Nov 25): the completion text names the id, so the
+    list read never happens."""
+    t = Recorder(ok(body=_CREATE_STREAM))
     sc = SpritesClient(t, "org/1/secret")
-    assert sc.checkpoint(NAME, "comment") == "v3"
-    methods_paths = [(r[0], r[1]) for r in t.requests]
-    assert methods_paths == [
-        ("POST", f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoint"),
-        ("GET", f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoints"),
+    assert sc.checkpoint(NAME, "comment") == "v2"
+    assert [(r[0], r[1]) for r in t.requests] == [
+        ("POST", f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoint")
     ]
     assert json.loads(t.requests[0][3]) == {"comment": "comment"}
+
+
+def test_an_idless_create_falls_back_past_the_synthetic_current():
+    """A completion that names no id falls back to the list, whose first
+    entry is the live API's synthetic `Current` -- the bug the live run
+    caught (returning it failed `invalid checkpoint ID "Current"`). The
+    fallback skips it and takes the newest real checkpoint."""
+    stream = (
+        b'{"data": "Creating checkpoint...", "time": "t", "type": "info"}\n'
+        b'{"data": "Checkpoint created", "time": "t", "type": "complete"}\n'
+    )
+    t = Recorder(ok(body=stream), ok(_CURRENT_FIRST))
+    assert SpritesClient(t, "org/1/secret").checkpoint(NAME, "c") == "v2"
+
+
+def test_a_create_with_no_usable_id_anywhere_is_an_error():
+    stream = (
+        b'{"data": "Creating checkpoint...", "time": "t", "type": "info"}\n'
+        b'{"data": "Checkpoint created", "time": "t", "type": "complete"}\n'
+    )
+    t = Recorder(ok(body=stream), ok([{"id": "Current", "comment": ""}]))
+    with pytest.raises(BoundaryError, match="Current"):
+        SpritesClient(t, "org/1/secret").checkpoint(NAME, "c")
 
 
 def test_an_error_event_in_a_checkpoint_stream_is_the_named_failure():
@@ -240,25 +266,15 @@ def test_a_checkpoint_stream_without_a_complete_event_is_an_error():
         SpritesClient(Recorder(ok(body=stream)), "t").checkpoint(NAME, "c")
 
 
-def test_an_empty_checkpoint_list_after_a_create_is_an_error():
-    with pytest.raises(BoundaryError, match="empty"):
-        SpritesClient(Recorder(ok(body=_CREATE_STREAM), ok([])), "t").checkpoint(
-            NAME, "c"
-        )
-
-
-def test_an_unusable_newest_checkpoint_id_is_refused():
-    with pytest.raises(BoundaryError, match="usable checkpoint id"):
-        SpritesClient(
-            Recorder(ok(body=_CREATE_STREAM), ok([{"id": "a/b"}])), "t"
-        ).checkpoint(NAME, "c")
-
-
 def test_restore_posts_the_encoded_path_and_needs_a_complete_event():
-    t = Recorder(ok(body=_RESTORE_STREAM))
-    SpritesClient(t, "org/1/secret").restore(NAME, "v3")
+    restore_stream = (
+        b'{"data": "Restoring to checkpoint v2...", "time": "t", "type": "info"}\n'
+        b'{"data": "Restored to v2", "time": "t", "type": "complete"}\n'
+    )
+    t = Recorder(ok(body=restore_stream))
+    SpritesClient(t, "org/1/secret").restore(NAME, "v2")
     assert t.requests[0][1] == (
-        f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoints/v3/restore"
+        f"https://api.sprites.dev/v1/sprites/{NAME}/checkpoints/v2/restore"
     )
     assert t.requests[0][3] is None
 
@@ -267,12 +283,12 @@ def test_a_restore_stream_without_a_complete_event_is_an_error():
     with pytest.raises(BoundaryError, match="no complete event"):
         SpritesClient(
             Recorder(ok(body=b'{"type": "info", "data": "x"}\n')), "t"
-        ).restore(NAME, "v3")
+        ).restore(NAME, "v2")
 
 
 def test_a_restore_of_an_unknown_checkpoint_is_a_not_found():
     with pytest.raises(NotFoundError):
-        SpritesClient(Recorder(ok(status=404)), "t").restore(NAME, "v3")
+        SpritesClient(Recorder(ok(status=404)), "t").restore(NAME, "v2")
 
 
 @pytest.mark.parametrize("checkpoint_id", ["", "a/b", "x" * 65, "bad id"])
