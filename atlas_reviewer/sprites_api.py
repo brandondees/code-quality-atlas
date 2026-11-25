@@ -9,7 +9,6 @@ fetched 2026-11-07), and matches the 2026-11-06 live validation:
   /v1/sprites/{name}`
 - `POST|GET /v1/sprites/{name}/policy/network` `{"rules": [...]}`
 - `POST /v1/sprites/{name}/policy/resources` `{"memory": {"limit_mb"}}`
-- `POST /v1/sprites/{name}/checkpoint` `{"comment"}`, `GET /v1/sprites/{name}/checkpoints`, and `POST /v1/sprites/{name}/checkpoints/{checkpoint_id}/restore` (issue #819, D95). Each of the three answers a streaming NDJSON progress whose documented event types are `info`, `error`, `complete` and `keepalive`; an `error` event is the named failure and a `complete` event ends it. The document gives the id no field of its own in the stream -- the completion text carries it ("Checkpoint v3 created successfully") -- so the controller reads the id from the checkpoint list it fetches after the create, whose example shows the newest entry first; whether that ordering, a restore that crosses sprites, and a checkpoint's survival of its sprite's deletion hold live is the live check D95 names.
 - `POST /v1/sprites/{name}/exec` (https://docs.fly.io/sprites/api/exec/execute-command):
   argv as repeated `cmd` query parameters, always with `stdin=true` and a
   raw `application/octet-stream` body (empty when there is no input), at
@@ -39,7 +38,6 @@ environment, a file, or a connector into a Sprite.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -63,10 +61,6 @@ from atlas_reviewer.ports import (
 API_URL = "https://api.sprites.dev"
 RUNNER_PREFIX = "cqa-rev-"
 EXEC_STDIN_MAX_BYTES = 10 * 1024 * 1024
-# The checkpoint-id shape the controller accepts from the API (issue
-# #819, D95): the document's examples show short version-like ids ("v7");
-# anything outside this charset never reaches a URL path unencoded.
-_CHECKPOINT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
 @dataclass(frozen=True)
@@ -126,43 +120,6 @@ def parse_retry_after(value: str | None) -> float | None:
         return max((when - datetime.now(UTC)).total_seconds(), 0.0)
     except (ValueError, TypeError, OverflowError):
         return None
-
-
-def _one_line(text: str, cap: int = 200) -> str:
-    flat = " ".join(text.split())
-    return flat[:cap]
-
-
-def _ndjson_complete(raw: bytes, what: str) -> str:
-    """The `complete` event's data text from one NDJSON progress stream
-    (the shape the document gives the checkpoint create and restore
-    responses), or a `BoundaryError` naming `what`: an `error` event is
-    the named failure, and a stream with no `complete` event is an
-    incomplete one. Unparseable lines are skipped -- a keepalive or a
-    future event shape must not fail a stream that completes."""
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BoundaryError(f"the {what} stream is not UTF-8") from exc
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        kind = event.get("type")
-        if kind == "error":
-            raise BoundaryError(
-                f"the {what} failed: {_one_line(str(event.get('error') or 'unspecified'))}"
-            )
-        if kind == "complete":
-            data = event.get("data")
-            return data if isinstance(data, str) else ""
-    raise BoundaryError(f"the {what} stream carried no complete event")
 
 
 def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
@@ -276,48 +233,3 @@ class SpritesClient:
         except NotFoundError:
             return False
         return True
-
-    def checkpoint(self, name: str, comment: str) -> str:
-        """Creates a checkpoint and returns its id. The create's own NDJSON
-        stream carries the id only inside its completion text ("Checkpoint
-        v3 created successfully" per the document's example), so the
-        parseable source is the checkpoint list read after the create;
-        the document's list example shows the newest entry first, which is
-        the ordering the first entry relies on (unconfirmed -- the live
-        check names it)."""
-        resp = self._call(
-            "POST", f"{self._path(name)}/checkpoint", {"comment": comment}
-        )
-        _ndjson_complete(resp.body, "checkpoint create")
-        entries = self.list_checkpoints(name)
-        if not entries:
-            raise BoundaryError("the checkpoint list is empty after a create")
-        checkpoint_id = entries[0].get("id")
-        if not isinstance(checkpoint_id, str) or not _CHECKPOINT_ID.fullmatch(
-            checkpoint_id
-        ):
-            raise BoundaryError(
-                "the newest checkpoint's id is not a usable checkpoint id"
-            )
-        return checkpoint_id
-
-    def list_checkpoints(self, name: str) -> list[Json]:
-        resp = self._call("GET", f"{self._path(name)}/checkpoints")
-        try:
-            data = json.loads(resp.body)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise BoundaryError("the checkpoint list is not JSON") from exc
-        if not isinstance(data, list):
-            raise BoundaryError("the checkpoint list is not a list")
-        return [entry for entry in data if isinstance(entry, dict)]
-
-    def restore(self, name: str, checkpoint_id: str) -> None:
-        if not _CHECKPOINT_ID.fullmatch(checkpoint_id):
-            raise BoundaryError(
-                "the checkpoint id to restore is not a usable checkpoint id"
-            )
-        resp = self._call(
-            "POST",
-            f"{self._path(name)}/checkpoints/{quote(checkpoint_id, safe='')}/restore",
-        )
-        _ndjson_complete(resp.body, "checkpoint restore")

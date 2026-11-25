@@ -72,7 +72,6 @@ from atlas_reviewer.bridge_staging import (
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import KILL_AFTER_S
-from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -94,7 +93,7 @@ from atlas_reviewer.runner import (
     run_session,
 )
 from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits
-from atlas_reviewer.telemetry import ERROR, OK, Telemetry
+from atlas_reviewer.telemetry import ERROR, Telemetry
 
 HEADER = "__ATLAS_BRIDGE__"
 UNKNOWN_TOOL = "(unknown tool)"
@@ -2314,8 +2313,6 @@ def run_bridge(
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
     approvals: RunApprovals | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
-    baked_python: TrustedPython | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2331,16 +2328,7 @@ def run_bridge(
     nothing, and every `command` a call then names is refused. `setup`
     (issue #819, D95) is the repo's declared setup phase: it runs with
     egress still allowed, before the deny-all flip and before staging
-    uploads anything, so its installs can reach their indexes. A
-    `restore` names the shared post-setup checkpoint this runner starts
-    from instead -- deny-all is verified first, the checkpoint is
-    restored, and the egress proof follows it; a restore that does not
-    happen raises `RestoreRefusedError` past this report, for the
-    caller's fresh-runner retry (issue #819, D95). `baked_python` is the
-    interpreter the setup pass verified: the staging probe asks about it
-    first and the staging telemetry names it, so a restore that lost the
-    baked pytest is a named error, not a silent return to the unconfigured
-    image."""
+    uploads anything, so its installs can reach their indexes."""
     telemetry = telemetry or Telemetry(clock)
     try:
         check_sizes(trees, unpack=unpack)
@@ -2351,22 +2339,7 @@ def run_bridge(
         )
 
     def session_body(session: Session) -> str:
-        candidates = (
-            (baked_python.path, *pytest_candidates)
-            if baked_python is not None
-            else pytest_candidates
-        )
-        staged = stage(
-            session,
-            trees,
-            root,
-            unpack,
-            candidates,
-            preferred_pytest=(baked_python.path if baked_python is not None else None),
-        )
-        confirmed = baked_python is None or (
-            staged.pytest is not None and staged.pytest.path == baked_python.path
-        )
+        staged = stage(session, trees, root, unpack, pytest_candidates)
         telemetry.record(
             "bridge staging", "staged",
             {
@@ -2374,18 +2347,7 @@ def run_bridge(
                 "git": staged.git,
                 "git_version": staged.git_version,
                 "pytest": staged.pytest.path if staged.pytest else "none",
-                "baked_python": baked_python.path if baked_python else "none",
             },
-            status=ERROR if not confirmed else OK,
-            error=(
-                ""
-                if confirmed
-                else "the baked interpreter was not confirmed by the staging "
-                f"probe, which answered {staged.pytest.path if staged.pytest else 'no interpreter'}; "
-                "run_tests and mutate run on what the probe found, or stay "
-                "unavailable if it found none -- the repo's setup-installed "
-                "dependencies are not on that interpreter"
-            ),
         )  # fmt: skip
         return body(
             Bridge(
@@ -2405,6 +2367,5 @@ def run_bridge(
     return run_session(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate,
-        setup=setup, restore=restore,
+        create_retries=create_retries, create_gate=create_gate, setup=setup,
     )  # fmt: skip

@@ -152,7 +152,6 @@ from atlas_reviewer.head_change import (
     PROGRESS_REVIEW_STEP,
     cap_reading,
 )
-from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -215,13 +214,9 @@ from atlas_reviewer.rounds import (
     records_for,
 )
 from atlas_reviewer.runner import (
-    BAKE_WALL_S,
     DEFAULT_CREATE_RETRIES,
-    Baked,
     CreateRefusedError,
-    RestoreRefusedError,
     SetupSpec,
-    bake_setup,
     event_runner_name,
     lens_runner_name,
 )
@@ -727,7 +722,6 @@ def review_lens(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -783,7 +777,6 @@ def review_lens(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=setup,
-            restore=restore,
         )
         single = synthesize(
             [ran.result],
@@ -858,12 +851,12 @@ def review_lenses(
     proposed additions to the #734 execution-tool allow-list, read from
     the default-branch `REVIEW.md` before this entry point is called;
     `approval_channel` is the approval channel they become requests on.
-    Issue #819 (D95): `setup` is the reviewed repo's setup spec -- one
-    setup pass bakes it with egress allowed, flips to deny-all and
-    checkpoints the result, and every lens runner restores that one
-    checkpoint instead of re-running the setup; a bake that cannot make
-    a checkpoint is named on the telemetry and every lens falls back to
-    running the setup phase on its own runner.
+    Issue #819 (D95): `setup` is the reviewed repo's setup spec -- every
+    lens runner runs it with egress allowed, flips to deny-all and proves
+    the flip held, before anything of the lens runs; the live Sprite
+    checks found checkpoint ids scoped to one sprite and no survival
+    across deletion, so the shared-bake path the first design drafted is
+    gone and per-lens setup is the shipped shape.
     The decided channel is pre-approval (D88's update): installation
     admins pre-approve a repo's extra commands on the S10 settings page
     (part B), the run reads that pre-approved set once at start, and
@@ -1034,73 +1027,6 @@ def review_lenses(
     )
 
 
-SETUP_LENS = "setup"
-
-
-def _bake_setup_pass(
-    sprites: SpritesApi,
-    runner_ledger: RunnerLedger,
-    setup: SetupSpec | None,
-    event: PrEvent,
-    deadline: float,
-    clock: Clock,
-    telemetry: Telemetry | None,
-    gate: threading.Semaphore | None,
-    create_retries: int,
-    *,
-    names: Sequence[str] = (),
-    bake_wall_s: float = BAKE_WALL_S,
-) -> Baked | None:
-    """The setup pass ahead of fan-out (issue #819, D95): with a setup
-    spec and at least one lens left to run, one runner bakes the repo's
-    declared installs with egress allowed, flips to deny-all, and
-    checkpoints the result every lens restores from. The bake gets the
-    smaller of the review wall that is left and `bake_wall_s` -- it runs
-    serially before any lens starts, so a slow install cannot spend the
-    whole wall by itself. None means no spec, no lens left to run, or a
-    bake that could not make a checkpoint: a create the API refused (its
-    own error is on the telemetry), a deadline, or a failed checkpoint
-    call leave every lens the per-lens-setup fallback, named; a
-    **deterministic setup-phase failure** (`Baked.setup_failed` -- a
-    command that failed, no trusted interpreter) leaves the lenses no
-    setup at all, also named, because the same commands would fail
-    identically with egress open again."""
-    if setup is None or not setup.commands or not names:
-        return None
-    try:
-        baked = bake_setup(
-            sprites,
-            runner_ledger,
-            setup,
-            name=lens_runner_name(event, SETUP_LENS),
-            deadline_s=min(max(deadline - clock.monotonic(), 0.0), bake_wall_s),
-            clock=clock,
-            telemetry=telemetry,
-            create_gate=gate,
-            create_retries=create_retries,
-        )
-    except CreateRefusedError as exc:
-        if telemetry is not None:
-            telemetry.record("setup bake", "refused", status=ERROR, error=str(exc))
-        return None
-    if baked.checkpoint_id is None and telemetry is not None:
-        note = baked.report.note if baked.report is not None else "no report"
-        telemetry.record(
-            "setup bake",
-            "failed",
-            status=ERROR,
-            error=(
-                "the setup phase failed deterministically on its own runner, "
-                "so the lenses run no setup of their own"
-                if baked.setup_failed
-                else "no checkpoint was made; every lens runs the setup phase "
-                "on its own runner"
-            )
-            + f" ({note})",
-        )
-    return baked
-
-
 def _review_lenses(
     trace: ReviewTrace,
     event: PrEvent,
@@ -1135,7 +1061,6 @@ def _review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
 ) -> AgenticReview:
     funding = noted_funding_source()
     files = split_files(diff)
@@ -1181,40 +1106,6 @@ def _review_lenses(
         names = planned
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
-    # The shared post-setup checkpoint (issue #819, D95): with a setup
-    # spec, one setup pass bakes the repo's declared installs with egress
-    # allowed, flips to deny-all and checkpoints the result; every lens
-    # runner then restores that one checkpoint instead of re-running the
-    # setup. A bake that could not make a checkpoint -- a refusal, a
-    # failure, a deadline -- is named on the telemetry and every lens
-    # falls back to running the setup phase on its own runner, the
-    # slice-1 shape; a restore that is refused later retries once on a
-    # fresh runner running the setup phase itself (issue #819, D95).
-    baked = _bake_setup_pass(
-        sprites, runner_ledger, setup, event, deadline, clock, telemetry,
-        gate, resolved.create_retries, names=names,
-    )  # fmt: skip
-    if setup is None or not setup.commands:
-        runner_setup = None
-        runner_restore = None
-        runner_baked = None
-    elif baked is not None and baked.checkpoint_id is not None:
-        # The restore path, with the spec carried alongside: a restore
-        # that is refused at lens time retries once on a fresh runner
-        # running the setup phase itself (issue #819, D95).
-        runner_setup = setup
-        runner_restore = baked.checkpoint_id
-        runner_baked = baked.python
-    elif baked is not None and baked.setup_failed:
-        # The bake's own setup failed deterministically; the same
-        # commands would fail identically per lens, so no setup runs.
-        runner_setup = None
-        runner_restore = None
-        runner_baked = None
-    else:
-        runner_setup = setup
-        runner_restore = None
-        runner_baked = None
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         if spend.halted:
@@ -1266,9 +1157,7 @@ def _review_lenses(
             ranks=path_ranks,
             run_proposals=run_proposals,
             approval_channel=approval_channel,
-            setup=runner_setup,
-            restore=runner_restore,
-            baked_python=runner_baked,
+            setup=setup,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1306,40 +1195,7 @@ def _review_lenses(
     )
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
-    # The coverage input is the lens runners' reports alone: the bake is a
-    # provisioning pass, and a bake failure the fallback fully recovered
-    # (or made irrelevant, on the no-setup path where the lens outcomes
-    # carry the gap) must not hold `coverage_complete` open on a review
-    # whose lens runners all completed. The bake's report still joins the
-    # draft's runner records below -- visible, never gating.
     reports = tuple(ran.report for ran in runs if ran.report is not None)
-    # The bake report leaves the coverage input only when its work was
-    # actually re-run: a FAILED bake whose per-lens fallback ran (not
-    # `setup_failed`). A **deterministic** setup failure's FAILED report
-    # stays on it -- nothing re-ran its work, the lenses ran without a
-    # setup and their COMPLETED outcomes carry no tool gap unless a lens
-    # happens to call the tools, so the review must not approve past a
-    # declared setup that never ran.
-    recovered = (
-        baked is not None
-        and baked.report is not None
-        and baked.report.status is RunnerStatus.FAILED
-        and not baked.setup_failed
-    )
-    bake_report = (
-        baked.report
-        if baked is not None and baked.report is not None and recovered
-        else None
-    )
-    if baked is not None and baked.report is not None and not recovered:
-        # The setup pass's completed report rides the draft's runner
-        # records like any lens's, cleanup included -- a bake whose
-        # destroy went unverified still holds the Runner line, the way
-        # any runner's unverified cleanup does; and a deterministic
-        # setup failure's FAILED report stays on it for the same reason
-        # inverted: the gap is real, so the review posts COMMENT, the
-        # way slice 1's own failed setup does.
-        reports = (baked.report, *reports)
     review = synthesize(
         [ran.result for ran in runs],
         secrets,
@@ -1409,7 +1265,7 @@ def _review_lenses(
         replace(
             review,
             changed=changed,
-            runners=reports if bake_report is None else (bake_report, *reports),
+            runners=reports,
             delta_from=delta.delta_from if delta is not None else "",
             delta_paths=frozenset(delta.resolution_paths)
             if delta is not None
@@ -1684,8 +1540,6 @@ def _review_one(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
-    baked_python: TrustedPython | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1832,45 +1686,23 @@ def _review_one(
                 deadline, started, session, scrub, evidence_digest,
             )  # fmt: skip
 
-    def run_bridge_call(**overrides: Any) -> RunnerReport:
-        return run_bridge(
-            sprites, runner_ledger, trees, in_session,
-            redactor=scrubber, changed=scope, name=name,
-            deadline_s=max(deadline - clock.monotonic(), 0.0), clock=clock,
-            telemetry=telemetry,
-            root=bridge_root,
-            create_gate=create_gate,
-            create_retries=create_retries,
-            approvals=approvals,
-            **overrides,
-        )  # fmt: skip
-
-    try:
-        report = run_bridge_call(
-            setup=setup, restore=restore, baked_python=baked_python
-        )
-    except RestoreRefusedError as exc:
-        # The shared checkpoint could not be restored into this lens's
-        # runner (issue #819, D95): an unknown id -- the shape a restore
-        # the API will not perform cross-sprite takes -- a refusal, an
-        # incomplete restore. The retry is a **fresh runner** running the
-        # setup phase itself, the reviewed slice-1 shape: its own
-        # provisioning allows egress again before its own flip, and the
-        # denied network is never re-opened on the runner that lost the
-        # restore. Once, and only while the wall has room; without a
-        # setup spec to fall back to, the lens is NOT RUN with the
-        # refusal named.
-        if setup is None or clock.monotonic() >= deadline:
-            missing = LensResult(lens, index, None, None, reason=str(exc), scope=scope)
-            return _LensRun(missing, [], None, spend, ())
-        if telemetry is not None:
-            telemetry.record(
-                "checkpoint restore",
-                "refused; retrying on a fresh runner with the setup phase",
-                status=ERROR,
-                error=str(exc),
-            )
-        report = run_bridge_call(setup=setup, restore=None, baked_python=None)
+    report = run_bridge(
+        sprites,
+        runner_ledger,
+        trees,
+        in_session,
+        redactor=scrubber,
+        changed=scope,
+        name=name,
+        deadline_s=max(deadline - clock.monotonic(), 0.0),
+        clock=clock,
+        telemetry=telemetry,
+        root=bridge_root,
+        create_gate=create_gate,
+        create_retries=create_retries,
+        approvals=approvals,
+        setup=setup,
+    )
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),
         lens=lens,
@@ -3917,40 +3749,7 @@ def render_draft(
             + ", ".join(f"`{name}`" for name in unverified)
             + "; recover each with `sweep --runner NAME --force-live`."
         )
-    # A provisioning pass in the records that failed -- the setup pass
-    # whose checkpoint the lens runners restore -- is still the draft's
-    # to show: the review ran past it, and hiding it would read as if the
-    # provisioning never failed. It is marked `provisioning`, so a lens
-    # runner's own failure (the coverage-bearing Runner line when it is
-    # the first non-completed) is never mislabeled here.
-    lines.extend(_recovered_runner_lines(review.runners, review.runner, scrub=scrub))
     return "\n".join(lines) + "\n"
-
-
-def _recovered_runner_lines(
-    runners: Sequence[RunnerReport],
-    coverage_runner: RunnerReport | None,
-    *,
-    scrub: Callable[[str], str],
-) -> list[str]:
-    """One line per failed provisioning pass in the runner records (issue
-    #819, D95): the setup pass whose checkpoint the lens runners restore,
-    marked `provisioning`, whose failure the per-lens fallback recovered
-    -- shown beside the lens runners, never mistaken for the
-    coverage-bearing Runner line. A deterministic setup failure's FAILED
-    report *is* the coverage-bearing Runner line (nothing re-ran its
-    work), so it renders there and not here; the identity check keeps the
-    two apart."""
-    return [
-        f"Setup pass `{r.runner_name}`: status {r.status.value}; "
-        f"cleanup {r.cleanup.value}; its work was re-run on the lens "
-        "runners or the lenses ran without it, quoted: "
-        + quote_untrusted(r.note, QUOTED_CHARS, scrub=scrub)
-        for r in runners
-        if r.provisioning
-        and r.status is not RunnerStatus.COMPLETED
-        and r is not coverage_runner
-    ]
 
 
 def _cache_lines(
