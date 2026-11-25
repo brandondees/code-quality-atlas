@@ -848,7 +848,13 @@ content is uploaded or unpacked), **then** set deny-all, read it back
 exactly, cap memory, and run the behavioral egress check — whose
 `CONNECTED` answer fails the run closed. Every exec of the review — the
 staging probe, the tool runs, `run_tests` and `mutate` — happens after
-that read-back. Without a setup spec the lifecycle is unchanged: deny-all
+that read-back. A runner **restoring** the shared checkpoint provisions
+in its own order: create, set deny-all, read it back exactly, **then**
+restore the checkpoint, cap memory, and run the same behavioral egress
+check — the proof follows the restore, because the restored state is the
+one thing the flip cannot have seen (a checkpoint can carry services or
+proxy state a fresh image does not have). Without a setup spec the
+lifecycle is unchanged: deny-all
 from the start, and the existing order tests still pin it. The value's
 grammar is the S7 proposals' token grammar with one addition: the program
 token may be the `{python}` placeholder, substituted with the interpreter
@@ -863,11 +869,14 @@ asked for, as far as the Sprites API allows: the API document the adapter
 is written against (OpenAPI 0.1.12) has no create-from-image parameter,
 so the shared state is a checkpoint — created once after the deny-all
 flip, restored by each lens's runner instead of re-running the setup
-there (that is the checkpoint slice's work, issue #819's second PR).
+there. A restore the API refuses fails that lens's run closed and the
+lens retries once on a fresh runner running the setup phase itself.
 Three capabilities the document does not settle stay behind seams with
 the parent's live check as the judge: whether a restore crosses sprites,
-whether a checkpoint survives deleting the sprite that created it, and
-what a fresh Sprite's default network state is.
+whether a checkpoint survives deleting the sprite that created it (the
+official API reference is silent on this; a community thread claims
+deletion deletes them), and what a fresh Sprite's default network state
+is.
 
 ## The BYOK settings page (config slice S10, part B1)
 

@@ -1300,21 +1300,25 @@ def _review_lenses(
     )
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
+    # The coverage input is the lens runners' reports alone: the bake is a
+    # provisioning pass, and a bake failure the fallback fully recovered
+    # (or made irrelevant, on the no-setup path where the lens outcomes
+    # carry the gap) must not hold `coverage_complete` open on a review
+    # whose lens runners all completed. The bake's report still joins the
+    # draft's runner records below -- visible, never gating.
     reports = tuple(ran.report for ran in runs if ran.report is not None)
-    if (
-        baked is not None
+    bake_report = (
+        baked.report
+        if baked is not None
         and baked.report is not None
-        and (baked.report.status is RunnerStatus.COMPLETED)
-    ):
+        and baked.report.status is not RunnerStatus.COMPLETED
+        else None
+    )
+    if baked is not None and baked.report is not None and bake_report is None:
         # The setup pass's completed report rides the draft's runner
         # records like any lens's, cleanup included -- a bake whose
         # destroy went unverified still holds the Runner line, the way
-        # any runner's unverified cleanup does. A FAILED bake does not:
-        # its work was re-run on the lens runners (the fallback) or the
-        # lenses ran without a setup and their own outcomes carry the
-        # gap, so a failed row here would hold `coverage_complete` open
-        # on a review whose runners all completed. The failure lives on
-        # the telemetry, which `_bake_setup_pass` records at ERROR.
+        # any runner's unverified cleanup does.
         reports = (baked.report, *reports)
     review = synthesize(
         [ran.result for ran in runs],
@@ -1385,7 +1389,7 @@ def _review_lenses(
         replace(
             review,
             changed=changed,
-            runners=reports,
+            runners=reports if bake_report is None else (bake_report, *reports),
             delta_from=delta.delta_from if delta is not None else "",
             delta_paths=frozenset(delta.resolution_paths)
             if delta is not None
@@ -3890,7 +3894,33 @@ def render_draft(
             + ", ".join(f"`{name}`" for name in unverified)
             + "; recover each with `sweep --runner NAME --force-live`."
         )
+    # A provisioning pass in the records that failed -- the setup pass
+    # whose checkpoint the lens runners restore -- is still the draft's
+    # to show: the review ran past it, and hiding it would read as if the
+    # provisioning never failed. It is marked `provisioning`, so a lens
+    # runner's own failure (the coverage-bearing Runner line when it is
+    # the first non-completed) is never mislabeled here.
+    lines.extend(_recovered_runner_lines(review.runners, scrub=scrub))
     return "\n".join(lines) + "\n"
+
+
+def _recovered_runner_lines(
+    runners: Sequence[RunnerReport], *, scrub: Callable[[str], str]
+) -> list[str]:
+    """One line per failed provisioning pass in the runner records (issue
+    #819, D95): the setup pass whose checkpoint the lens runners restore,
+    marked `provisioning`, whose failure the per-lens fallback recovered
+    or the no-setup path made irrelevant -- shown beside the lens
+    runners, never mistaken for the coverage-bearing Runner line, which
+    `_combined_runner` computes from the lens runners alone."""
+    return [
+        f"Setup pass `{r.runner_name}`: status {r.status.value}; "
+        f"cleanup {r.cleanup.value}; its work was re-run on the lens "
+        "runners or the lenses ran without it, quoted: "
+        + quote_untrusted(r.note, QUOTED_CHARS, scrub=scrub)
+        for r in runners
+        if r.provisioning and r.status is not RunnerStatus.COMPLETED
+    ]
 
 
 def _cache_lines(

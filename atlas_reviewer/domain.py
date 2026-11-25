@@ -221,3 +221,8 @@ class RunnerReport:
     # note's wording, so a transient failure cannot read as a
     # deterministic one.
     setup_failed: bool = False
+    # Whether this run is the setup pass itself -- the provisioning runner
+    # whose checkpoint the lens runners restore (issue #819, D95). The
+    # draft uses it to show a failed provisioning pass beside the lens
+    # runners without making it the coverage-bearing Runner line.
+    provisioning: bool = False

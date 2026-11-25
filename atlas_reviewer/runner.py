@@ -1646,8 +1646,11 @@ def bake_setup(
         create_retries=create_retries, create_gate=create_gate, setup=spec,
     )  # fmt: skip
     if report.status is not RunnerStatus.COMPLETED or not found:
-        return Baked(None, report, setup_failed=report.setup_failed)
-    return Baked(found[0], report)
+        return Baked(
+            None, replace(report, provisioning=True),
+            setup_failed=report.setup_failed,
+        )  # fmt: skip
+    return Baked(found[0], replace(report, provisioning=True))
 
 
 def _raw_exec(run: _Run, step: _Exec) -> bytes:

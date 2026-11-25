@@ -11,6 +11,7 @@ from dataclasses import replace
 
 import pytest
 
+from atlas_reviewer.coordinator import render_draft
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import (
     ExecRule,
@@ -20,6 +21,7 @@ from atlas_reviewer.fakes import (
 )
 from atlas_reviewer.local_runner import LocalSprites
 from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     DEFAULT_CREATE_RETRIES,
     RestoreRefusedError,
@@ -302,6 +304,16 @@ def test_a_recovered_bake_failure_does_not_hold_coverage_open(tmp_path):
     )  # fmt: skip
     assert api.restores == []
     assert result.coverage_complete is True
+    # The failed bake stays visible in the draft's runner records -- as
+    # the provisioning pass, never as the coverage-bearing Runner line --
+    # and the draft says its work was re-run.
+    assert result.runner is not None
+    assert result.runner.status is RunnerStatus.COMPLETED
+    failed = [r for r in result.runners if r.status is RunnerStatus.FAILED]
+    assert len(failed) == 1 and failed[0].provisioning
+    draft = render_draft(result, Redactor())
+    assert "Setup pass `" in draft
+    assert "its work was re-run on the lens runners" in draft
 
 
 # ------------------------------------- the degrade path and the bake bounds
