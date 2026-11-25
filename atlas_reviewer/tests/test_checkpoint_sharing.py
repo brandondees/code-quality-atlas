@@ -12,7 +12,7 @@ from dataclasses import replace
 import pytest
 
 from atlas_reviewer.attestation import Cause
-from atlas_reviewer.coordinator import render_draft (The review fixes from #831's round 1 rebased onto the baked-interpreter slice: the restore-refusal retry, the bake skipped for a fully-reused plan, the bake's own wall cap, the deterministic-setup-failure classification, and the redundant _path call removed)
+from atlas_reviewer.coordinator import render_draft
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import (
     PYENV_PYTHON,
