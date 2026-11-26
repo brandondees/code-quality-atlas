@@ -98,7 +98,20 @@ jobs:
     # Everything else is Python, actions/setup-python (which publishes both
     # arches), or pure-Node actions.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 minutes bounded this job until the parity-key liveness step
+    # landed. That step runs five anchor-suite passes -- three liveness
+    # mutants plus the two cached baselines, each pass the anchor
+    # commit's whole suite -- and two consecutive runs were cancelled at
+    # exactly 15m20s with the liveness step still inside its first suite.
+    # One pass measured 1m52s locally (2,999 tests at the round-5
+    # anchor); the hosted runner runs this repo's suites about twice as
+    # slow as this machine (the reviewer-service step: 10m21s there,
+    # ~6.5 minutes here), so five passes land around 15-25 minutes on
+    # top of the ~13 minutes the steps before it take. 90 bounds the job
+    # with headroom for runner variance without letting a hung run eat
+    # hours; the liveness test's own per-suite subprocess bound (20
+    # minutes) still fails a hanging suite rather than the job clock.
+    timeout-minutes: 90
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
     # but the permission must be granted unconditionally at the job level
