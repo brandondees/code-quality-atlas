@@ -26,6 +26,7 @@ from atlas_reviewer.bridge import (
     SessionLimits,
     Status,
     ToolLimits,
+    _aim_refusal,
     _MutBlock,
     _pytest_argv,
     _run_status,
@@ -33,6 +34,7 @@ from atlas_reviewer.bridge import (
     _splice,
     mutant_outcome,
     mutate_script,
+    mutation_refusal,
     parse_mutation,
     parse_run_blocks,
     parse_summary,
@@ -198,12 +200,13 @@ def test_choose_pytest_needs_a_three_part_version():
 # ------------------------------------------------- the fixed mutation script
 
 
-def edit(tmp_path, text, line, operator):
+def edit(tmp_path, text, line, operator, operand=None):
     path = tmp_path / "m.py"
     if text is not None:
         path.write_text(text, encoding="utf-8")
+    extra = [str(operand)] if operand is not None else []
     result = subprocess.run(
-        [sys.executable, "-I", "-c", MUTATION_SCRIPT, str(path), str(line), operator],
+        [sys.executable, "-I", "-c", MUTATION_SCRIPT, str(path), str(line), operator, *extra],
         check=False, capture_output=True, text=True,
     )  # fmt: skip
     return result, path
@@ -532,18 +535,16 @@ def test_a_mutant_the_tests_do_not_pin_survives(tmp_path):
     assert "survived" in render(result)
 
 
-def test_a_mutation_that_does_not_apply_is_inconclusive_and_commits_nothing(tmp_path):
+def test_a_mutation_that_does_not_apply_is_refused_and_commits_nothing(tmp_path):
     (result,), bridge = calls(
         tmp_path,
         ("mutate", {"path": "calc.py", "line": 1, "operator": "negate-condition"}),
     )
-    assert result.status is Status.OK
-    assert result.outcome is MutantOutcome.INCONCLUSIVE
-    assert "the operator does not apply" in result.outcome_reason
-    (baseline,) = result.runs
-    assert baseline.exit == 0
-    assert "mutated run: not run" in render(result)
-    assert result.mutation.commit == ""
+    assert result.status is Status.REJECTED
+    assert "the mutant was refused" in result.error.text
+    assert "the operator does not apply" in result.error.text
+    assert result.runs == ()
+    assert result.mutation is None or result.mutation.commit == ""
     assert Rev.MUTANT not in bridge.commits
 
 
@@ -916,6 +917,9 @@ def test_a_mutation_step_that_failed_is_inconclusive(tmp_path):
 
 
 def test_a_refusal_reason_from_the_mutation_script_is_carried(tmp_path):
+    """The script's own refusal is a rejected call carrying the reason
+    (D80's 2026-11-26 update) -- the model's error to re-aim, not an
+    inconclusive verdict."""
     out = b"1 passed in 0.01s\n"
     payload = b"no " + base64.b64encode(b"the file does not parse")
 
@@ -931,10 +935,8 @@ def test_a_refusal_reason_from_the_mutation_script_is_carried(tmp_path):
         tmp_path, answer,
         (("mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}),),
     )  # fmt: skip
-    assert result.outcome is MutantOutcome.INCONCLUSIVE
-    assert result.outcome_reason == (
-        "the mutation did not apply: the file does not parse"
-    )
+    assert result.status is Status.REJECTED
+    assert "the file does not parse" in result.error.text
 
 
 def test_a_mutation_that_applies_but_commits_nothing_is_inconclusive(tmp_path):
@@ -2000,35 +2002,112 @@ def test_the_controller_splice_matches_the_runner_script(tmp_path):
     controller's mutant map: for every fixture shape, `_splice`'s mutated
     bytes and before/after are exactly what `MUTATION_SCRIPT` writes and
     prints."""
+    guard = "def go(job):\n    if job.superseded or job.cancel.is_set():\n        return 0\n    return 1\n"
+    loop = "def find(xs):\n    for x in xs:\n        if x:\n            break\n    return None\n"
     shapes = (
-        (CALC, 2, "negate-condition"),
-        (CALC, 2, "remove-guard"),
-        (REQUIRE, 2, "negate-condition"),
-        (REQUIRE, 2, "remove-guard"),
+        (CALC, 2, "negate-condition", None),
+        (CALC, 2, "remove-guard", None),
+        (REQUIRE, 2, "negate-condition", None),
+        (REQUIRE, 2, "remove-guard", None),
         (
             "def spin(n):\n    while n > 0:\n        n -= 1\n    return n\n",
             2,
             "negate-condition",
+            None,
         ),
-        ("def pick(n):\n    return 1 if n else 2\n", 2, "negate-condition"),
+        ("def pick(n):\n    return 1 if n else 2\n", 2, "negate-condition", None),
         (
             "def pick(n):\n    if (\n        n\n    ):\n        return 1\n    return 2\n",
             2,
             "negate-condition",
+            None,
         ),
-        ("x = 1\n", 1, "remove-guard"),  # not applicable: both refuse
+        # drop-operand: keep either side, both orders
+        (guard, 2, "drop-operand", 2),
+        (guard, 2, "drop-operand", 1),
+        # break-continue: break becomes continue; a continue becomes break
+        (loop, 4, "break-continue", None),
+        (
+            "def find(xs):\n    for x in xs:\n        if x:\n            continue\n    return None\n",
+            4,
+            "break-continue",
+            None,
+        ),
+        # flip-compare: each spelling pair, including the two-word ones
+        ("def pick(n):\n    return 1 if n < 2 else 0\n", 2, "flip-compare", None),
+        ("def pick(n):\n    return 1 if n >= 2 else 0\n", 2, "flip-compare", None),
+        ("def same(a, b):\n    return a is not b\n", 2, "flip-compare", None),
+        ("def has(xs, x):\n    return x in xs\n", 2, "flip-compare", None),
+        ("def has(xs, x):\n    return x not in xs\n", 2, "flip-compare", None),
+        # not applicable: both refuse
+        ("x = 1\n", 1, "remove-guard", None),
+        (guard, 2, "drop-operand", None),  # no operand named
+        (guard, 2, "drop-operand", 3),  # index out of range
+        (guard, 2, "break-continue", None),  # no break or continue at the line
+        (loop, 4, "flip-compare", None),  # no comparison at the line
+        (
+            "def same(a, b):\n    return a != b\n",
+            2,
+            "break-continue",
+            None,
+        ),  # not a loop statement: compiles, but not a break/continue at the line
+        ("x = 1\n", 99, "negate-condition", None),  # no statement at the line
+        (
+            "def pick(n):\n    return (n) == 2\n",
+            2,
+            "flip-compare",
+            None,
+        ),  # the spelling between the operands is not the bare operator
+        ("def broken(:\n", 1, "negate-condition", None),  # the file does not parse
+        # A multi-byte identifier earlier in the file shifts every byte
+        # column against its character index: the AST's columns are
+        # UTF-8 byte offsets, so a kept operand on a line whose prefix
+        # carries one slices wrong unless both implementations convert
+        # (the round-4 CodeRabbit finding on #845: `return eady`).
+        (
+            "def f(\u00e9, ready):\n    return \u00e9 or ready\n",
+            2,
+            "drop-operand",
+            2,
+        ),
+        (
+            "def f(\u00e9, ready):\n    return \u00e9 or ready\n",
+            2,
+            "drop-operand",
+            1,
+        ),
+        (
+            "value = f(\u00e9)\nif value == 2:\n    pass\n",
+            2,
+            "negate-condition",
+            None,
+        ),
     )
-    for text, line, operator in shapes:
-        result, path = edit(tmp_path, text, line, operator)
+    for text, line, operator, operand in shapes:
+        result, path = edit(tmp_path, text, line, operator, operand)
         status, rest = payload_of(result)
-        spliced = _splice(text.encode(), line, operator)
+        spliced = _splice(text.encode(), line, operator, operand)
         if status == "no":
             assert spliced is None, (text, line, operator)
+            # The aim check refuses with the script's own reason: the
+            # pre-exec refusal says what the runner would have said.
+            assert _aim_refusal(text.encode(), line, operator, operand) == (
+                mutation_refusal(f"no {rest}".encode(), 0)
+            ), (text, line, operator)
             continue
         assert spliced is not None
         before_b64, after_b64 = rest.split(" ")
         mutated, before, after = spliced
         assert path.read_bytes() == mutated, (text, line, operator)
+        # The kept operand's own characters, not a byte-shifted misread
+        # of them: the mutant's replacement text is the operand the
+        # grammar named, byte-converted.
+        if operator == "drop-operand" and status == "ok":
+            after_decoded = base64.b64decode(after_b64).decode()
+            assert "\u00e9" not in after_decoded or operand == 1, (
+                text,
+                after_decoded,
+            )
         assert base64.b64decode(before_b64).decode() == before
         assert base64.b64decode(after_b64).decode() == after
 
@@ -2367,3 +2446,297 @@ def test_every_built_copy_is_writable_and_made_when_empty(tmp_path):
         ).returncode
         == 0
     )
+
+
+# ------------------------------------------------- the operator set
+
+
+def test_drop_operand_keeps_the_named_side_and_the_unpinned_one_survives(tmp_path):
+    """The shape the unpinned guard Minors take (D80's 2026-11-26
+    update): dropping one operand of an `or` the tests do not pin
+    survives, dropping the pinned one is killed, and negating the whole
+    condition is killed too -- the case the two older operators could not
+    separate."""
+    source = trees(
+        {
+            "clamp.py": (
+                b"def clamp(n):\n"
+                b"    if n < 0 or n > 9:\n"
+                b"        return 0\n"
+                b"    return n\n"
+            ),
+            "test_clamp.py": (
+                b"from clamp import clamp\n\n"
+                b"def test_middle():\n    assert clamp(5) == 5\n\n"
+                b"def test_low():\n    assert clamp(-1) == 0\n"
+            ),
+        }
+    )
+    kept_low, kept_high, negated = calls(
+        tmp_path,
+        ("mutate", {"path": "clamp.py", "line": 2, "operator": "drop-operand", "operand": 1}),
+        ("mutate", {"path": "clamp.py", "line": 2, "operator": "drop-operand", "operand": 2}),
+        ("mutate", {"path": "clamp.py", "line": 2, "operator": "negate-condition"}),
+        source=source,
+    )[0]  # fmt: skip
+
+    # Keeping `n < 0` and dropping `n > 9` survives -- the unpinned side
+    # the drop exists to expose; keeping the pinned side is killed; and
+    # negating the whole condition is killed too, which is why neither
+    # older operator could separate the two.
+    assert kept_low.outcome is MutantOutcome.SURVIVED
+    assert kept_high.outcome is MutantOutcome.KILLED
+    assert negated.outcome is MutantOutcome.KILLED
+
+
+def test_break_continue_swap_is_a_real_verdict(tmp_path):
+    source = trees(
+        {
+            "count.py": (
+                b"def count_to(xs, stop):\n"
+                b"    seen = 0\n"
+                b"    for x in xs:\n"
+                b"        if x == stop:\n"
+                b"            break\n"
+                b"        seen += 1\n"
+                b"    return seen\n"
+            ),
+            "test_count.py": (
+                b"from count import count_to\n\n"
+                b"def test_stops_at_the_marker():\n"
+                b"    assert count_to(['a', 'b', 'stop', 'c'], 'stop') == 2\n"
+            ),
+        }
+    )
+    result = one(
+        tmp_path, "mutate",
+        {"path": "count.py", "line": 5, "operator": "break-continue"},
+        source=source,
+    )  # fmt: skip
+    # `continue` keeps scanning and counts the tail: killed, with a real
+    # verdict rather than an operator that cannot express the defect.
+    assert result.outcome is MutantOutcome.KILLED
+
+
+def test_flip_compare_negates_the_first_comparison(tmp_path):
+    """A flip on a comparison the tests execute is killed -- the branch
+    always turns -- and one on a line no test reaches survives: the
+    unpinned-guard evidence the flip exists to expose (D80's 2026-11-26
+    update)."""
+    source = trees(
+        {
+            "sign.py": (
+                b"def sign(mode, n):\n"
+                b"    if mode != 'pos':\n"
+                b"        return 0\n"
+                b"    if n > 0:\n"
+                b"        return 1\n"
+                b"    return 0\n"
+            ),
+            "test_sign.py": (
+                b"from sign import sign\n\n"
+                b"def test_other_mode():\n    assert sign('neg', 5) == 0\n"
+            ),
+        }
+    )
+    killed, survived = calls(
+        tmp_path,
+        ("mutate", {"path": "sign.py", "line": 2, "operator": "flip-compare"}),
+        ("mutate", {"path": "sign.py", "line": 4, "operator": "flip-compare"}),
+        source=source,
+    )[0]  # fmt: skip
+    assert killed.outcome is MutantOutcome.KILLED
+    assert survived.outcome is MutantOutcome.SURVIVED
+
+
+def test_a_misaimed_mutant_is_rejected_and_costs_nothing(tmp_path):
+    result = one(
+        tmp_path, "mutate",
+        {"path": "calc.py", "line": 1, "operator": "negate-condition"},
+    )  # fmt: skip
+    assert result.status is Status.REJECTED
+    assert "the mutant was refused" in result.error.text
+    assert "does not apply" in result.error.text
+    assert result.outcome is None
+
+
+def test_drop_operand_names_the_operand_it_keeps(tmp_path):
+    result = one(
+        tmp_path, "mutate", {"path": "calc.py", "line": 2, "operator": "drop-operand"}
+    )  # fmt: skip
+    assert result.status is Status.REJECTED
+    assert "drop-operand names the operand it keeps" in result.error.text
+
+
+def test_only_drop_operand_takes_an_operand_index(tmp_path):
+    result = one(
+        tmp_path, "mutate",
+        {"path": "calc.py", "line": 2, "operator": "negate-condition", "operand": 1},
+    )  # fmt: skip
+    assert result.status is Status.REJECTED
+    assert "only drop-operand takes an operand index" in result.error.text
+
+
+def test_the_operand_index_is_bounded(tmp_path):
+    for bad in (0, 65, "2", True, 1.5):
+        result = one(
+            tmp_path, "mutate",
+            {"path": "calc.py", "line": 2, "operator": "drop-operand", "operand": bad},
+        )  # fmt: skip
+        assert result.status is Status.REJECTED
+        assert "operand" in result.error.text
+
+
+def test_a_misaimed_mutant_is_refused_before_anything_runs(tmp_path):
+    """The aim check runs against the controller's own copy of the head
+    tree before any exec (round-2 review of #845): a mis-aimed mutate
+    dispatches no runner exec at all -- no baseline included -- so the
+    refusal spends nothing, the mutant cap never charges it, and a lens
+    cannot spend its session on mis-aims that each ran a full baseline
+    under the old post-exec refusal."""
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            return (
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(0, "a" * 40, ok_payload(b"not xs", b"not (not xs):"))
+                + framed(0, out)
+            )
+        return staged() + framed(0, out)
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ReplyRule("__ATLAS_RUN__", answer),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        for _ in range(5):
+            results.append(
+                bridge.call(
+                    "mutate",
+                    {"path": "calc.py", "line": 1, "operator": "negate-condition"},
+                )
+            )
+        results.append(
+            bridge.call(
+                "mutate", {"path": "calc.py", "line": 2, "operator": "negate-condition"}
+            )
+        )
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-aim-check",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+        session_limits=SessionLimits(max_mutants=1),
+    )
+    misaimed, valid = results[:5], results[5]
+    assert all(r.status is Status.REJECTED for r in misaimed)
+    assert all("the mutant was refused" in r.error.text for r in misaimed)
+    # The refusal charged no slot: the valid mutant runs under a cap of 1.
+    assert valid.status is Status.OK
+    assert valid.outcome is MutantOutcome.SURVIVED
+    # And the mis-aims dispatched no runner exec: one mutate exec total,
+    # the valid call's (the fake records the sprite's name per exec, so
+    # the execs are told apart by the mutation step's own temp-file name
+    # in the script).
+    mutate_execs = [
+        c for c in sprites.calls if c[0] == "exec" and "atlas-mutant" in c[2]
+    ]
+    assert len(mutate_execs) == 1
+
+
+def test_a_machinery_write_refusal_stays_inconclusive_and_charges(tmp_path):
+    """The runner script's temporary-write OSError reads as a refusal --
+    'the copy could not be written' -- but it is a machinery failure, not
+    the model's mis-aim: the aim was valid (the preflight passed it) and
+    the baseline already ran, so charging it as a free REJECTED would
+    hide a broken runner behind the lens's clean state and skip the
+    mutant slot its executed work earned. The write refusal stays on the
+    inconclusive path."""
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            reason = base64.b64encode(b"the copy could not be written").decode()
+            return (
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(0, "-", b"no " + reason.encode())
+                + framed(0, out)
+            )
+        return staged() + framed(0, out)
+
+    (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,), source=trees(SUITE))
+    # The machinery refusal stays on the inconclusive path: the tool
+    # ran (the baseline executed and is charged), the verdict is the
+    # named inconclusive, and the reason says what failed -- not a
+    # REJECTED the caps would treat as free.
+    assert result.status is Status.OK
+    assert result.outcome is MutantOutcome.INCONCLUSIVE
+    assert "the copy could not be written" in (result.outcome_reason or "")
+
+
+def test_a_parser_resource_failure_in_the_preflight_is_a_named_gap(
+    tmp_path, monkeypatch
+):
+    """A file whose nesting exhausts the parser's stack raises
+    RecursionError from ast.parse -- before any exec, outside every
+    handler the exec path has. The preflight reports it as the named
+    unavailable gap (machinery, not a mis-aim; nothing ran, nothing is
+    charged) instead of letting the exception escape the bridge."""
+    results = []
+
+    def body(bridge):
+        results.append(
+            bridge.call(
+                "mutate",
+                {"path": "calc.py", "line": 2, "operator": "negate-condition"},
+            )
+        )
+        results.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    from atlas_reviewer import bridge as bridge_module
+
+    def exploding_parse(*args, **kwargs):
+        raise RecursionError("the parser ran out of stack")
+
+    monkeypatch.setattr(bridge_module.ast, "parse", exploding_parse)
+    report, *_ = bridge_run(tmp_path, body)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    mutate, read = results
+    assert mutate.status is Status.UNAVAILABLE
+    assert "the mutant preflight could not parse the head file" in mutate.error.text
+    assert "RecursionError" in mutate.error.text
+    # The read tool is untouched by the preflight's own failure.
+    assert read.status is Status.OK

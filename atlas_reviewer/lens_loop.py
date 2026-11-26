@@ -840,6 +840,7 @@ _ARG_SCHEMA: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         "regex": {"type": "boolean", "description": "pattern is a POSIX extended regex (git grep -E's dialect), not a fixed string; an invalid regex is a gap"},
         "line": {"type": "integer", "minimum": 1, "description": "the line the statement to mutate starts at"},
         "operator": {"type": "string", "enum": list(MUTANT_OPERATORS), "description": "the one mutation to apply"},
+        "operand": {"type": "integer", "minimum": 1, "description": "drop-operand only: the 1-based operand of the and/or at the named line to keep, the rest dropped"},
         "tests": {"type": "string", "description": "test selector for both runs: a file, a directory or file.py::node_id, empty for the whole suite"},
         "command": {"type": "string", "description": "name one proposed test command (the reviewed repo's default-branch REVIEW.md proposes them); it runs only if the run's allow-list carries it pre-approved (installation admins pre-approve on the S10 settings page), takes no selector, and an unapproved one is a named gap"},
     }

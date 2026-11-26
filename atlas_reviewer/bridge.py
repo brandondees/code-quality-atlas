@@ -521,6 +521,10 @@ class MutationRecord:
     before: str
     after: str
     commit: str
+    # `drop-operand`'s kept-operand index (D80's 2026-11-26 update),
+    # carried so a re-staged re-apply splices the same operand; None for
+    # every other operator.
+    operand: int | None = None
 
 
 @dataclass(frozen=True)
@@ -625,10 +629,17 @@ def _status(tool: str, code: int) -> Status:
 
 # ------------------------------------------------------------ run tools (D80)
 
+# The one refusal MUTATION_SCRIPT can produce for a machinery failure
+# rather than a mis-aim: the temporary write's OSError. The caller maps
+# aim refusals to REJECTED (the model re-aims) and this one to the
+# inconclusive path, where the executed work is charged.
+_WRITE_REFUSAL = "the copy could not be written"
+
 MUTATION_SCRIPT = """\
 import ast, base64, os, sys
 
 path, line, operator = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+operand = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else None
 
 
 def refuse(reason):
@@ -638,7 +649,8 @@ def refuse(reason):
 
 try:
     with open(path, "rb") as handle:
-        source = handle.read().decode("utf-8")
+        raw = handle.read()
+    source = raw.decode("utf-8")
 except (OSError, UnicodeDecodeError):
     refuse("the file could not be read as UTF-8 text")
 try:
@@ -648,6 +660,9 @@ except SyntaxError:
 kind = {
     "negate-condition": (ast.If, ast.While, ast.IfExp),
     "remove-guard": (ast.If,),
+    "drop-operand": (ast.BoolOp,),
+    "break-continue": (ast.Break, ast.Continue),
+    "flip-compare": (ast.Compare,),
 }[operator]
 at_line = sorted(
     (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
@@ -664,12 +679,40 @@ if target is None:
 # string quoting and formatting included -- and the mutated run's source
 # is the head source plus one edit. Line offsets are computed over "\\n"
 # only, matching how the parser numbers lines.
+# The AST's column offsets are UTF-8 byte offsets, not character
+# indices: a column past a multi-byte character names a position one or
+# more characters earlier in the decoded text, so every column is
+# converted to its character index against the line's own bytes before
+# it is added to the line's offset.
+byte_lines = raw.split(b"\\n")
+char_lines = source.split("\\n")
+if len(byte_lines) != len(char_lines):
+    refuse("the file's byte and character line counts disagree")
+
 offsets = [0]
-for part in source.split("\\n"):
+for part in char_lines:
     offsets.append(offsets[-1] + len(part) + 1)
 
 def span(lineno, col, end_lineno, end_col):
-    return offsets[lineno - 1] + col, offsets[end_lineno - 1] + end_col
+    line = byte_lines[lineno - 1]
+    end_line = byte_lines[end_lineno - 1]
+    return (
+        offsets[lineno - 1] + len(line[:col].decode("utf-8")),
+        offsets[end_lineno - 1] + len(end_line[:end_col].decode("utf-8")),
+    )
+
+FLIPS = {
+    "Eq": ("==", "!="),
+    "NotEq": ("!=", "=="),
+    "Lt": ("<", ">="),
+    "LtE": ("<=", ">"),
+    "Gt": (">", "<="),
+    "GtE": (">=", "<"),
+    "Is": ("is", "is not"),
+    "IsNot": ("is not", "is"),
+    "In": ("in", "not in"),
+    "NotIn": ("not in", "in"),
+}
 
 if operator == "negate-condition":
     start, end = span(
@@ -677,15 +720,55 @@ if operator == "negate-condition":
         target.test.end_lineno, target.test.end_col_offset,
     )
     replacement = "not (" + source[start:end] + ")"
-else:
+elif operator == "remove-guard":
     start, end = span(
         target.body[0].lineno, target.body[0].col_offset,
         target.body[-1].end_lineno, target.body[-1].end_col_offset,
     )
     replacement = "pass"
+elif operator == "drop-operand":
+    if operand is None:
+        refuse("drop-operand names the operand it keeps")
+    if not 1 <= operand <= len(target.values):
+        refuse("the operand index is out of range")
+    kept = target.values[operand - 1]
+    # The whole `and`/`or` expression is the mutated span; the kept
+    # operand's own source is what replaces it, so the others drop.
+    start, end = span(
+        target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+    )
+    kstart, kend = span(
+        kept.lineno, kept.col_offset, kept.end_lineno, kept.end_col_offset,
+    )
+    replacement = source[kstart:kend]
+elif operator == "break-continue":
+    start, end = span(
+        target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+    )
+    replacement = "continue" if isinstance(target, ast.Break) else "break"
+else:
+    left_end = (
+        target.left.end_lineno, target.left.end_col_offset,
+    )
+    right_start = (
+        target.comparators[0].lineno, target.comparators[0].col_offset,
+    )
+    start, end = span(left_end[0], left_end[1], right_start[0], right_start[1])
+    region = source[start:end]
+    name = type(target.ops[0]).__name__
+    if name not in FLIPS:
+        refuse("that comparison operator has no flip")
+    old_text, new_text = FLIPS[name]
+    if region.strip() != old_text:
+        refuse("the comparison's spelling is not the operator the AST named")
+    lead = region[: len(region) - len(region.lstrip())]
+    replacement = lead + new_text + region[len(lead) + len(old_text):]
 before = source[start:end]
 mutated = source[:start] + replacement + source[end:]
-compile(mutated, path, "exec")
+try:
+    compile(mutated, path, "exec")
+except SyntaxError:
+    refuse("the mutated file does not compile")
 temporary = path + ".atlas-mutant"
 try:
     with open(temporary, "w", encoding="utf-8") as handle:
@@ -747,12 +830,109 @@ def _tree_files(tarball: bytes) -> dict[str, bytes]:
     return files
 
 
-def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] | None:
+# The comparison flip's spelling pairs, keyed by the ast operator class
+# name: negation pairs, longest first when it matters (`is not` before
+# `is`). The runner's MUTATION_SCRIPT carries the same table; the parity
+# test pins the two together.
+_COMPARE_FLIPS = {
+    "Eq": ("==", "!="),
+    "NotEq": ("!=", "=="),
+    "Lt": ("<", ">="),
+    "LtE": ("<=", ">"),
+    "Gt": (">", "<="),
+    "GtE": (">=", "<"),
+    "Is": ("is", "is not"),
+    "IsNot": ("is not", "is"),
+    "In": ("in", "not in"),
+    "NotIn": ("not in", "in"),
+}
+
+
+_SPLICE_KINDS = {
+    "negate-condition": (ast.If, ast.While, ast.IfExp),
+    "remove-guard": (ast.If,),
+    "drop-operand": (ast.BoolOp,),
+    "break-continue": (ast.Break, ast.Continue),
+    "flip-compare": (ast.Compare,),
+}
+
+
+def _splice_target(at_line: list[ast.AST], operator: str) -> ast.AST | None:
+    """The node at the named line the operator applies to: the first node
+    of the operator's kind in source-column order."""
+    kind = _SPLICE_KINDS[operator]
+    return next((node for node in at_line if isinstance(node, kind)), None)
+
+
+def _splice_edit(
+    source: str,
+    span: Callable[[int, int, int | None, int | None], tuple[int, int]],
+    target: ast.AST,
+    operator: str,
+    operand: int | None,
+) -> tuple[int, int, str] | None:
+    """The mutated span and its replacement text, or None when the edit
+    does not apply -- the same per-operator shapes MUTATION_SCRIPT
+    splices, pinned together by the parity test."""
+    if operator == "negate-condition":
+        assert isinstance(target, (ast.If, ast.While, ast.IfExp))
+        start, end = span(
+            target.test.lineno, target.test.col_offset,
+            target.test.end_lineno, target.test.end_col_offset,
+        )  # fmt: skip
+        return start, end, f"not ({source[start:end]})"
+    if operator == "remove-guard":
+        assert isinstance(target, ast.If)
+        start, end = span(
+            target.body[0].lineno, target.body[0].col_offset,
+            target.body[-1].end_lineno, target.body[-1].end_col_offset,
+        )  # fmt: skip
+        return start, end, "pass"
+    if operator == "drop-operand":
+        assert isinstance(target, ast.BoolOp)
+        if operand is None or not 1 <= operand <= len(target.values):
+            return None
+        kept = target.values[operand - 1]
+        # The whole `and`/`or` expression is the mutated span; the kept
+        # operand's own source is what replaces it, so the others drop.
+        start, end = span(
+            target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+        )  # fmt: skip
+        kstart, kend = span(
+            kept.lineno, kept.col_offset, kept.end_lineno, kept.end_col_offset,
+        )  # fmt: skip
+        return start, end, source[kstart:kend]
+    if operator == "break-continue":
+        assert isinstance(target, (ast.Break, ast.Continue))
+        start, end = span(
+            target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+        )  # fmt: skip
+        return start, end, "continue" if isinstance(target, ast.Break) else "break"
+    assert isinstance(target, ast.Compare)
+    # end_lineno/end_col_offset are Optional in the ast stubs but set for
+    # every node a parse produces -- the same cast span's body makes.
+    start, end = span(
+        target.left.end_lineno or target.left.lineno,
+        target.left.end_col_offset or target.left.col_offset,
+        target.comparators[0].lineno, target.comparators[0].col_offset,
+    )  # fmt: skip
+    region = source[start:end]
+    pair = _COMPARE_FLIPS.get(type(target.ops[0]).__name__)
+    if pair is None or region.strip() != pair[0]:
+        return None
+    lead = region[: len(region) - len(region.lstrip())]
+    return start, end, lead + pair[1] + region[len(lead) + len(pair[0]) :]
+
+
+def _splice(
+    content: bytes, line: int, operator: str, operand: int | None = None
+) -> tuple[bytes, str, str] | None:
     """The controller-side form of `MUTATION_SCRIPT`'s span splice (D80
     round 2): the same parse, the same mutated span, the same replacement
-    -- `None` when the edit does not apply. One splice semantics for the
-    runner's mutant commit and the controller's mutant map; the parity
-    between this and the script is pinned by
+    -- `None` when the edit does not apply, `operand` naming the operand
+    `drop-operand` keeps. One splice semantics for the runner's mutant
+    commit and the controller's mutant map; the parity between this and
+    the script is pinned by
     `test_the_controller_splice_matches_the_runner_script`."""
     try:
         source = content.decode("utf-8")
@@ -763,6 +943,51 @@ def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] 
         (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
         key=lambda node: getattr(node, "col_offset", 0),
     )
+    span = _line_span(source, content)
+
+    target = _splice_target(at_line, operator)
+    if target is None:
+        return None
+    located = _splice_edit(source, span, target, operator, operand)
+    if located is None:
+        return None
+    start, end, replacement = located
+    before = source[start:end]
+    mutated = f"{source[:start]}{replacement}{source[end:]}"
+    try:
+        compile(mutated, "<mutant>", "exec")
+    except SyntaxError:
+        return None
+    return mutated.encode("utf-8"), before, replacement
+
+
+def _line_span(
+    source: str, raw: bytes | None = None
+) -> Callable[[int, int, int | None, int | None], tuple[int, int]]:
+    """The line/column → offset span over one source text, computed over
+    `"\\n"` only the way the parser numbers lines -- the one builder both
+    the controller's splice and its aim check span with.
+
+    The AST's column offsets are **UTF-8 byte** offsets, not character
+    indices -- a column past a multi-byte character names a position one
+    or more characters earlier in the decoded text -- so every column is
+    converted to its character index before it is added to the line's
+    offset. That needs the line's own bytes, which only the caller that
+    still holds the raw file provides; a span built without them passes
+    columns through unchanged (an ASCII-only file's columns coincide,
+    and the callers that hold the bytes always pass them)."""
+    byte_lines = raw.split(b"\n") if raw is not None else None
+    if byte_lines is not None:
+        # The decoded text and the raw bytes must agree on the line
+        # count: a split that disagrees decodes nothing this file
+        # produced.
+        assert len(byte_lines) == len(source.split("\n"))
+
+    def _char_col(lineno: int, byte_col: int) -> int:
+        if byte_lines is None:
+            return byte_col
+        return len(byte_lines[lineno - 1][:byte_col].decode("utf-8"))
+
     offsets = [0]
     for part in source.split("\n"):
         offsets.append(offsets[-1] + len(part) + 1)
@@ -773,42 +998,72 @@ def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] 
         # end_lineno/end_col_offset are Optional in the ast stubs but set
         # for every node a parse produces.
         return (
-            offsets[lineno - 1] + col,
-            offsets[(end_lineno or lineno) - 1] + (end_col or col),
+            offsets[lineno - 1] + _char_col(lineno, col),
+            offsets[(end_lineno or lineno) - 1]
+            + _char_col(end_lineno or lineno, end_col or col),
         )
 
-    if operator == "negate-condition":
-        target = next(
-            (
-                node
-                for node in at_line
-                if isinstance(node, (ast.If, ast.While, ast.IfExp))
-            ),
-            None,
-        )
-        if target is None:
-            return None
-        start, end = span(
-            target.test.lineno, target.test.col_offset,
-            target.test.end_lineno, target.test.end_col_offset,
-        )  # fmt: skip
-        replacement = f"not ({source[start:end]})"
-    else:
-        target = next((node for node in at_line if isinstance(node, ast.If)), None)
-        if target is None:
-            return None
-        start, end = span(
-            target.body[0].lineno, target.body[0].col_offset,
-            target.body[-1].end_lineno, target.body[-1].end_col_offset,
-        )  # fmt: skip
-        replacement = "pass"
-    before = source[start:end]
-    mutated = f"{source[:start]}{replacement}{source[end:]}"
+    return span
+
+
+def _aim_refusal(
+    content: bytes, line: int, operator: str, operand: int | None
+) -> str | None:
+    """The controller-side form of `MUTATION_SCRIPT`'s refusal reasons
+    (D80's 2026-11-26 update, round-2 review of #845): the same checks in
+    the script's own order, with its own reason strings, run against the
+    controller's own copy of the head tree **before any exec** -- a
+    mis-aimed `mutate` is refused before its baseline can run, so the
+    refusal really spends nothing (the execution caps count what ran, and
+    nothing ran), instead of the old post-exec refusal that let a lens
+    burn a full baseline per mis-aim without ever taking a `max_mutants`
+    slot. The script's refusal step stays as the parity backstop for an
+    aim that slips past this check; the reasons' parity with the script
+    is pinned alongside the splice's."""
     try:
-        compile(mutated, "<mutant>", "exec")
+        source = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return "the file could not be read as UTF-8 text"
+    try:
+        tree = ast.parse(source)
     except SyntaxError:
-        return None
-    return mutated.encode("utf-8"), before, replacement
+        return "the file does not parse"
+    kind = _SPLICE_KINDS[operator]
+    at_line = sorted(
+        (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
+        key=lambda node: getattr(node, "col_offset", 0),
+    )
+    target = next((node for node in at_line if isinstance(node, kind)), None)
+    if target is None:
+        return (
+            "the operator does not apply to the statement at that line"
+            if at_line
+            else "no statement starts at that line"
+        )
+    span = _line_span(source, content)
+    if operator == "drop-operand":
+        assert isinstance(target, ast.BoolOp)
+        if operand is None:
+            return "drop-operand names the operand it keeps"
+        if not 1 <= operand <= len(target.values):
+            return "the operand index is out of range"
+    elif operator == "flip-compare":
+        assert isinstance(target, ast.Compare)
+        name = type(target.ops[0]).__name__
+        if name not in _COMPARE_FLIPS:
+            return "that comparison operator has no flip"
+        old_text, _replacement = _COMPARE_FLIPS[name]
+        start, end = span(
+            target.left.end_lineno or target.left.lineno,
+            target.left.end_col_offset or target.left.col_offset,
+            target.comparators[0].lineno,
+            target.comparators[0].col_offset,
+        )
+        if source[start:end].strip() != old_text:
+            return "the comparison's spelling is not the operator the AST named"
+    if _splice(content, line, operator, operand) is None:
+        return "the mutated file does not compile"
+    return None
 
 
 class _MissingPath(ValueError):
@@ -1028,12 +1283,14 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
     )
+    operand = call.get("operand")
+    operand_arg = "" if operand is None else f" {operand}"
     edit = (
         f"( cd {scratch}; exec timeout -k {KILL_AFTER_S} "
         f"{MUTATE_EDIT_TIMEOUT_S} "
         f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
         f"{quote(call.get('path'))} {call.get('line')} "
-        f"{quote(call.get('operator'))} ) > mut 2> mut_err"
+        f"{quote(call.get('operator'))}{operand_arg} ) > mut 2> mut_err"
     )
     commit = "; ".join(
         mutant_commit_steps(
@@ -1161,7 +1418,9 @@ def restage_script(
                 f"{MUTATE_EDIT_TIMEOUT_S} "
                 f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
                 f"{quote(mutation.path)} {mutation.line} "
-                f"{quote(mutation.operator)} ) > mut 2> mut_err"
+                f"{quote(mutation.operator)}"
+                f"{'' if mutation.operand is None else f' {mutation.operand}'}"
+                " ) > mut 2> mut_err"
             ),
             "  m=$?",
             "  payload=$(head -n 1 mut)",
@@ -1348,6 +1607,25 @@ def parse_mutation(payload: bytes, apply_exit: int) -> tuple[bool, str, str, str
             return False, "", "", "the mutation step refused without a reason"
         return False, "", "", reason
     return False, "", "", "the mutation step did not report its edit"
+
+
+def mutation_refusal(payload: bytes, apply_exit: int) -> str | None:
+    """The fixed script's own refusal reason -- why the mutation did not
+    apply -- or None when the step did not refuse. Only the script's
+    `no <reason>` answer at exit 0 is a refusal: a step that failed
+    outright (a nonzero exit) is not, and stays the inconclusive path
+    mutant_outcome already names, because a machinery failure is not the
+    model's error to re-aim."""
+    if apply_exit != 0:
+        return None
+    text = payload.decode("utf-8", errors="replace").rstrip("\n")
+    status, _, rest = text.partition(" ")
+    if status != "no":
+        return None
+    try:
+        return base64.b64decode(rest, validate=True).decode("utf-8", errors="replace")
+    except ValueError:
+        return "the mutation step refused without a reason"
 
 
 def mutant_outcome(
@@ -1719,7 +1997,9 @@ class Bridge:
         head = dict(self._contents[Rev.HEAD])
         mutation = self._mutation
         assert mutation is not None
-        spliced = _splice(head[mutation.path], mutation.line, mutation.operator)
+        spliced = _splice(
+            head[mutation.path], mutation.line, mutation.operator, mutation.operand
+        )
         if spliced is None:
             raise BoundaryError(
                 "the recorded mutation does not re-apply to the controller's copy"
@@ -1898,29 +2178,52 @@ class Bridge:
             return self._failed(call, Status.FAILED, str(exc), started)
         return self._result(call, reply, (), self.clock.monotonic() - started)
 
-    def _run_exec(self, call: Call, limits: ToolLimits, started: float) -> BridgeResult:
-        """`run_tests` and `mutate` (D80): one exec per call, its reply
-        parsed into run blocks (and, for `mutate`, the mutation's), the
-        mutant's verdict computed here from the runs' exits and the
-        controller's own parse of their summary lines -- never from text
-        the test processes chose to print. A missing interpreter, a
-        malformed reply and a lost output are gaps, never crashes; the
-        verdicts themselves are in-band evidence, like every status the
-        exec stream carries. A `run_tests` call naming an approved
-        proposed command (S7, D88) runs the proposal's own bridge-built
-        argv instead of the pytest one. Neither ever runs as root
-        (Brandon's Nov 25 decision): both go through the no-root guard,
-        which runs through the interpreter the staging probe resolved --
-        the pytest-capable one when there is one, else any candidate that
-        runs -- so a runner with no interpreter at all refuses both,
-        named. The built-in entry also needs the pytest-capable
-        interpreter itself. A runner whose collection probe failed (the
-        test environment cannot import or collect the repo's tests)
-        refuses both with that named gap -- the run would only produce
-        INCONCLUSIVE mutants and red baselines the lens cannot read as
-        evidence."""
-        command = call.get("command") if call.tool == "run_tests" else ""
-        argv = self._command_argv(call) if command else None
+    def _mutate_aim_refusal(self, call: Call, started: float) -> BridgeResult | None:
+        """The mis-aim gate (round-2 review of #845): the controller's own
+        copy of the head tree answers the aim check with no exec, so a
+        mis-aimed `mutate` is refused before its baseline can run and the
+        refusal really spends nothing -- the execution caps count what
+        ran, and nothing ran -- where the old post-exec refusal let a
+        lens burn a full baseline per mis-aim without ever taking a
+        `max_mutants` slot. The runner script's refusal step stays as the
+        parity backstop for an aim that slips past this check.
+
+        A file the parser cannot even process -- a nesting so deep the
+        parser exhausts its stack, or a resource failure -- is a
+        machinery gap, not a mis-aim: the preflight reports it as the
+        named unavailable result (a tool gap that holds the review at
+        COMMENT, and charges nothing, because nothing ran) instead of
+        letting the exception escape the bridge with no structured
+        result."""
+        try:
+            refusal = _aim_refusal(
+                self._contents.get(Rev.HEAD, {}).get(call.get("path"), b""),
+                call.get("line"),
+                call.get("operator"),
+                call.get("operand"),
+            )
+        except (RecursionError, MemoryError) as exc:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                "the mutant preflight could not parse the head file: "
+                f"{type(exc).__name__}",
+                started,
+            )
+        if refusal is not None:
+            return self._refused(
+                call.tool, Status.REJECTED, f"the mutant was refused: {refusal}"
+            )
+        return None
+
+    def _runner_gates(
+        self, call: Call, argv: str | None, started: float
+    ) -> BridgeResult | None:
+        """The execution tools' runner gates, in the order the slices
+        established: a missing pytest-capable interpreter, then a missing
+        no-root-guard interpreter, then a failed collection probe. The
+        built-in `run_tests` entry needs the pytest-capable interpreter
+        itself; a proposed command (S7, D88) does not."""
         if argv is None and self.staged.pytest is None:
             return self._failed(
                 call,
@@ -1944,6 +2247,38 @@ class Bridge:
                 f"in the staged copy: {self.staged.collection_note}",
                 started,
             )
+        return None
+
+    def _run_exec(self, call: Call, limits: ToolLimits, started: float) -> BridgeResult:
+        """`run_tests` and `mutate` (D80): one exec per call, its reply
+        parsed into run blocks (and, for `mutate`, the mutation's), the
+        mutant's verdict computed here from the runs' exits and the
+        controller's own parse of their summary lines -- never from text
+        the test processes chose to print. A missing interpreter, a
+        malformed reply and a lost output are gaps, never crashes; the
+        verdicts themselves are in-band evidence, like every status the
+        exec stream carries. A `run_tests` call naming an approved
+        proposed command (S7, D88) runs the proposal's own bridge-built
+        argv instead of the pytest one. Neither ever runs as root
+        (Brandon's Nov 25 decision): both go through the no-root guard,
+        which runs through the interpreter the staging probe resolved --
+        the pytest-capable one when there is one, else any candidate that
+        runs -- so a runner with no interpreter at all refuses both,
+        named. The built-in entry also needs the pytest-capable
+        interpreter itself. A runner whose collection probe failed (the
+        test environment cannot import or collect the repo's tests)
+        refuses both with that named gap -- the run would only produce
+        INCONCLUSIVE mutants and red baselines the lens cannot read as
+        evidence."""
+        command = call.get("command") if call.tool == "run_tests" else ""
+        argv = self._command_argv(call) if command else None
+        refused = self._runner_gates(call, argv, started)
+        if refused is not None:
+            return refused
+        if call.tool == "mutate":
+            refused = self._mutate_aim_refusal(call, started)
+            if refused is not None:
+                return refused
         try:
             # Since the last execution could have rewritten anything it
             # could reach, the execution starts from a re-staged,
@@ -1960,6 +2295,12 @@ class Bridge:
                 if call.tool == "mutate"
                 else limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
             )
+            # PR code runs during the exec, whatever its outcome: the
+            # bridge is suspect from the moment the exec starts, so an
+            # exec that raises -- a lost connection mid-run -- still
+            # leaves every later read re-staging instead of serving what
+            # the failed run's code left behind.
+            self._suspect = True
             code, text = self.session.exec(
                 f"bridge {call.tool}",
                 mutate_script(self.staged, call, limits)
@@ -1968,7 +2309,6 @@ class Bridge:
                 stage="bridge",
                 budget_s=budget,
             )
-            self._suspect = True
             blocks = parse_run_blocks(text) if code == 0 else None
             if blocks is None:
                 raise BoundaryError(
@@ -1977,9 +2317,35 @@ class Bridge:
             for block in blocks:
                 if isinstance(block, _RunBlock) and (problem := block.problem()):
                     raise _LostOutputError(problem)
+            if call.tool == "mutate":
+                mut = next((b for b in blocks if isinstance(b, _MutBlock)), None)
+                if mut is not None:
+                    refusal = mutation_refusal(mut.payload, mut.apply_exit)
+                    if refusal is not None and refusal != _WRITE_REFUSAL:
+                        # A mis-aimed mutant is the model's error to
+                        # re-aim (D80's 2026-11-26 update): a refused
+                        # call, not an inconclusive verdict -- an
+                        # inconclusive one is an execution gap that holds
+                        # the review at COMMENT, and the model's own
+                        # wrong line number must not cost the lens its
+                        # clean state. The pre-exec aim check has already
+                        # refused every mis-aim without an exec, so a
+                        # refusal that arrives here is the runner
+                        # script's own backstop -- or a machinery
+                        # failure: the temporary write's OSError reads
+                        # as a copy that could not be written, which is
+                        # not an aim at all, and charging it as the
+                        # model's free mis-aim would hide a broken
+                        # runner behind a clean state. Machinery
+                        # failures stay on the inconclusive path, where
+                        # their executed work is charged.
+                        return self._refused(
+                            call.tool,
+                            Status.REJECTED,
+                            f"the mutant was refused: {refusal}",
+                        )
             return self._run_result(call, blocks, started)
         except StreamTimeoutError as exc:
-            self._suspect = True
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
         except _LostOutputError as exc:
             return self._failed(call, Status.FAILED, str(exc), started)
@@ -2121,6 +2487,7 @@ class Bridge:
             before,
             after,
             "" if applied.commit in ("-", "") else applied.commit,
+            call.get("operand"),
         )
         if record.commit:
             # A re-stage re-applies this mutation deterministically (D80
