@@ -722,6 +722,7 @@ def review_lens(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    pr_body: str = "",
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -777,6 +778,7 @@ def review_lens(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=setup,
+            pr_body=pr_body,
         )
         single = synthesize(
             [ran.result],
@@ -830,6 +832,7 @@ def review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    pr_body: str = "",
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -1021,6 +1024,7 @@ def review_lenses(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=setup,
+            pr_body=pr_body,
         ),
     )
 
@@ -1059,6 +1063,7 @@ def _review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    pr_body: str = "",
 ) -> AgenticReview:
     funding = noted_funding_source()
     files = split_files(diff)
@@ -1157,6 +1162,7 @@ def _review_lenses(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=runner_setup,
+            pr_body=pr_body,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1229,6 +1235,7 @@ def _review_lenses(
             contract or finding_contract(),
             trace,
             redactor,
+            pr_body,
         )
         # The reused lenses' D73 re-assessment (round-1 review of #760,
         # Major B) composes after the carry-forward: its priors are the
@@ -1256,6 +1263,7 @@ def _review_lenses(
             contract or finding_contract(),
             trace,
             redactor,
+            pr_body,
         )
     _record_decisions(telemetry, decisions, decision_failure)
     return _record_round(
@@ -1539,6 +1547,7 @@ def _review_one(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    pr_body: str = "",
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1648,6 +1657,7 @@ def _review_one(
             scope,
             trace,
             deadline,
+            pr_body,
         )
     session = _Session()
     scrubber = Redactor(
@@ -1672,6 +1682,7 @@ def _review_one(
         fence_nonce,
         trees.head,
         diff,
+        pr_body=pr_body,
     )
     name = runner_name or event_runner_name(event)
 
@@ -1770,6 +1781,7 @@ def _reused_with_reassessment(
     scope: frozenset[str],
     trace: ReviewTrace,
     deadline: float,
+    pr_body: str = "",
 ) -> _LensRun:
     """The reuse path with D73's re-assessment wired: compose the reused
     result's effective findings from the settled outcome and every
@@ -1842,6 +1854,7 @@ def _reused_with_reassessment(
             resolved,
             clock,
             deadline,
+            pr_body=pr_body,
         )
     except Exception as exc:  # noqa: BLE001 - a supplementary call's failure must not fail the review
         # The last guard: whatever the call or its judging raised beyond
@@ -1885,6 +1898,7 @@ def _reassess_call(
     resolved: Limits,
     clock: Clock,
     deadline: float,
+    pr_body: str = "",
 ) -> AttemptOutcome:
     """One bounded re-assessment call (D73): the prior findings and the
     review's context blocks in, one final reply out, quote-checked like an
@@ -1990,6 +2004,7 @@ def _reassess_call(
             sources,
             trees.head,
             resolved.quote_tolerance,
+            pr_body=pr_body,
         )
     except ContractError as exc:
         return AttemptOutcome(
@@ -2409,6 +2424,7 @@ def _with_carryforward(
     contract: str,
     trace: ReviewTrace,
     redactor: Redactor,
+    pr_body: str = "",
 ) -> AgenticReview:
     """The delta review's carry-forward step (#702, D79): the earlier
     review's findings -- the round log's records at `delta_from`, read
@@ -2807,6 +2823,7 @@ def _reassess_reused_lens(
     contract: str,
     scrub: Callable[[str], str],
     order: int,
+    pr_body: str = "",
 ) -> tuple[LensDecision, list[tuple[int, MintedFinding]], list[MintedFinding]]:
     """One reused lens's D73 re-assessment (round-1 review of #760,
     Major B): the trigger check against the digests, the bounded call on
@@ -2869,6 +2886,7 @@ def _reassess_reused_lens(
                 resolved,
                 clock,
                 deadline,
+                pr_body=pr_body,
             )
         except Exception as exc:  # noqa: BLE001 -- a supplementary call's failure must not fail the review
             outcome = AttemptOutcome(
@@ -2973,6 +2991,7 @@ def _with_reused_reassessment(
     contract: str,
     trace: ReviewTrace,
     redactor: Redactor,
+    pr_body: str = "",
 ) -> tuple[AgenticReview, tuple[LensDecision, ...]]:
     """The reused lenses' D73 re-assessment (round-1 review of #760,
     Major B). Brandon's D73 is binding on the delta-reuse path exactly as
@@ -3053,6 +3072,7 @@ def _with_reused_reassessment(
             contract,
             scrub,
             reassessed_count,
+            pr_body,
         )
         new_decision, lens_swaps, lens_additions = outcome
         swaps.extend(lens_swaps)

@@ -3331,3 +3331,41 @@ def test_a_failed_sweep_degrades_to_no_evidence(monkeypatch):
 
     monkeypatch.setenv("ATLAS_SWEEP_LENSES", LENS)
     assert _sweep_evidence(ExplodingBridge(), job(), FakeClock()) == ""
+
+
+def test_a_pull_request_body_finding_verifies_and_reaches_the_draft(tmp_path):
+    """The body location form end to end (issue #713's harness-parity
+    slice): a finding located at `pull_request.body` with the description's
+    own line as its evidence verifies against the body the controller
+    held, and the lens stays clean."""
+    the_body = (
+        "## Tests\n\n`gate` on `61273b4f` (run 43429340358). "
+        "This pull request targets main at d10fc746.\n"
+    )
+    head = {"calc.py": CALC_ROUND, "config/keys.py": EXEC_TOKEN_LINE}
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF, pr_body=the_body,
+    )  # fmt: skip
+    source = SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD)
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [
+            final(
+                finding(
+                    location="pull_request.body",
+                    evidence="`gate` on `61273b4f` (run 43429340358)",
+                    finding="the CI line names a head this PR no longer has",
+                )
+            )
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert Cause.QUOTES_FAILED not in outcome.causes
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert str(checked.finding.location) == "pull_request.body"
