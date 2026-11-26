@@ -218,6 +218,19 @@ def _operand_index(value: Any, _revs: frozenset[Rev]) -> int:
     return value
 
 
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def _sha(value: Any, _revs: frozenset[Rev]) -> str:
+    """A full commit SHA the model names for `git_show`: lowercase hex
+    only, so it is one exact object and never a ref the runner's git
+    would resolve from somewhere else."""
+    text = _string(value)
+    if not _SHA.fullmatch(text):
+        raise RejectedError(INVALID, "must be a full 40-hex commit SHA")
+    return text
+
+
 def _probe_content(value: Any, _revs: frozenset[Rev]) -> str:
     """The probe file's source, as the model wrote it: UTF-8 text within
     the size cap, no control characters beyond newline, tab and carriage
@@ -300,6 +313,20 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
         # to that path -- `::test_x`, or `::TestX::test_y` -- and empty runs
         # the whole probe file.
         "run_probe": (_Arg("content", _probe_content), _Arg("selector", _probe_selector, "")),
+        # The read-only history tools (D80's git-history update): the
+        # pull request's commit range and base's history, over the real
+        # refs the staged repository fetched from the controller's bundle.
+        # git_log needs nothing (the range is the controller's);
+        # git_show's rev must be inside the range or base's history -- the
+        # exec's rev guard refuses anything else -- and may name a path;
+        # git_blame names a path and the line span to blame.
+        "git_log": (),
+        "git_show": (_Arg("rev", _sha), _Arg("path", _prefix, "")),
+        "git_blame": (
+            _Arg("path", _path),
+            _Arg("line", _LINE),
+            _Arg("end_line", _LINE, None),
+        ),
         "mutate": (
             _Arg("path", _path),
             _Arg("line", _LINE),

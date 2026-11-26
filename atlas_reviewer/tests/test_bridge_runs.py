@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 
 import pytest
@@ -3331,3 +3332,183 @@ def test_probe_content_with_an_unpaired_surrogate_is_a_rejected_call(tmp_path):
         refused = one(tmp_path, tool, args)
         assert refused.status is Status.REJECTED, tool
         assert "not encodable as UTF-8" in refused.error.text
+
+
+# ------------------------------------------------- the history tools
+
+
+def _seed_history(tmp_path: Path) -> tuple[Path, str, str, bytes]:
+    """A real git repository with a two-commit history and a bundle of it:
+    the base commit carries the pre-change calc, the head commit the
+    change and its test. Returns the repo path, the base SHA, the head
+    SHA, and the bundle's bytes."""
+    repo = tmp_path / "seed"
+    repo.mkdir()
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def git(*argv: str) -> str:
+        done = subprocess.run(
+            ["git", *argv],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        return done.stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    (repo / "calc.py").write_text("def total(xs):\n    return sum(xs)\n")
+    git("add", "-A")
+    git("commit", "-qm", "base: the unchanged total")
+    base = git("rev-parse", "HEAD")
+    (repo / "calc.py").write_text(
+        "def total(xs):\n    return sum(xs)  # rounded later\n"
+    )
+    (repo / "test_calc.py").write_text(
+        "from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n"
+    )
+    git("add", "-A")
+    git("commit", "-qm", "head: the change under review")
+    head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/heads/atlas-history", head)
+    git(
+        "bundle", "create", str(tmp_path / "history.bundle"), "refs/heads/atlas-history"
+    )
+    return repo, base, head, (tmp_path / "history.bundle").read_bytes()
+
+
+def test_the_history_tools_read_the_staged_bundle(tmp_path):
+    """The git-history tools (D80's git-history update): the staged
+    repository carries the real history the bundle brought, the range's
+    log reads, a range commit shows, base's history is reachable, and a
+    revision outside both is a rejected call, not a failed one."""
+    _repo, base, head, bundle = _seed_history(tmp_path)
+    source = SourceTrees(
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        base,
+        head,
+    )
+    results = []
+
+    def body(bridge):
+        results.extend(
+            (
+                bridge.call("git_log", {}),
+                bridge.call("git_show", {"rev": head}),
+                bridge.call("git_show", {"rev": base, "path": "calc.py"}),
+                bridge.call("git_blame", {"path": "calc.py", "line": 1, "end_line": 2}),
+                bridge.call("git_show", {"rev": "f" * 40}),
+            )
+        )
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(),
+        MemoryLedger(),
+        source,
+        body,
+        redactor=Redactor(),
+        changed=frozenset({"calc.py"}),
+        name="cqa-history-test",
+        deadline_s=300,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        history_bundle=bundle,
+        history_base=base,
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    log, show_head, show_base, blame, outside = results
+    assert log.status is Status.OK
+    assert "the change under review" in log.content.text
+    assert head[:7] in log.content.text
+    assert show_head.status is Status.OK
+    assert "rounded later" in show_head.content.text
+    # A commit reachable from base is a valid rev too.
+    assert show_base.status is Status.OK
+    assert "def total" in show_base.content.text
+    assert blame.status is Status.OK
+    assert "def total(xs):" in blame.content.text
+    assert outside.status is Status.REJECTED
+    assert "outside the pull request" in outside.content.text
+
+
+def test_the_history_tools_report_a_run_with_no_bundle(tmp_path):
+    (no_log,) = calls(tmp_path, ("git_log", {}))[0]
+    assert no_log.status is Status.UNAVAILABLE
+    assert "no repository history was staged" in no_log.error.text
+
+
+def test_the_bundle_is_uploaded_in_chunks_and_the_cap_refuses(tmp_path, monkeypatch):
+    """A bundle over one exec's stdin rides in parts the staging step
+    concatenates; a bundle over the whole cap refuses the run named."""
+    import atlas_reviewer.bridge_staging as staging
+
+    _repo, base, head, bundle = _seed_history(tmp_path)
+    monkeypatch.setattr(staging, "HISTORY_CHUNK_BYTES", 256)
+    source = SourceTrees(
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        base,
+        head,
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("git_log", {}))
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(),
+        MemoryLedger(),
+        source,
+        body,
+        redactor=Redactor(),
+        changed=frozenset({"calc.py"}),
+        name="cqa-chunk-test",
+        deadline_s=300,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        history_bundle=bundle,
+        history_base=base,
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (log,) = results
+    assert log.status is Status.OK
+    assert "the change under review" in log.content.text
+    over = bundle + b"x" * (staging.HISTORY_BUNDLE_MAX_BYTES)
+    (report2, _sprites, _telemetry) = bridge_run(
+        tmp_path,
+        lambda bridge: "done",
+        source=source,
+        history_bundle=over,
+    )
+    assert report2.status is RunnerStatus.FAILED
+    assert "exceeds" in report2.note

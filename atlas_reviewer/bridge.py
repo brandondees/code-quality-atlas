@@ -146,6 +146,7 @@ _CONTINUATION = bytes(range(0x80, 0xC0))
 # and each call's script runs its processes to completion before it
 # returns.
 RUN_TOOLS = frozenset({"run_tests", "mutate", "run_probe"})
+HISTORY_TOOLS = frozenset({"git_log", "git_show", "git_blame"})
 
 # The file-content tools answered from the controller's own copy of the
 # trees and the deterministic splice (D80 round 2): executed code can
@@ -266,6 +267,12 @@ DEFAULT_LIMITS: Mapping[str, ToolLimits] = MappingProxyType(
         # (D80's probe-tool update), so it shares the clock and the output
         # cap; the override applies to it with the run tools.
         "run_probe": ToolLimits(16 * 1024, 180),
+        # The read-only history tools (D80's git-history update): a log
+        # and a blame are line-shaped reads, a show is byte-shaped; all
+        # three are read-only over the staged repository's real history.
+        "git_log": ToolLimits(16 * 1024, 15, 200),
+        "git_show": ToolLimits(16 * 1024, 15),
+        "git_blame": ToolLimits(16 * 1024, 15, 200),
     }
 )
 
@@ -394,6 +401,78 @@ def call_script(
             "base64 -w0 < shown; echo",
             f"head -c {STDERR_BYTES} err | base64 -w0; echo",
             "rm -f out err view shown",
+        )
+    )
+
+
+# The read-only history tools (D80's git-history update, the scope
+# addendum's slice H): git_log over the pull request's commit range,
+# git_show for a commit -- or a commit plus path -- and git_blame for a
+# path and line span, against the real history the staged repository
+# fetched from the controller's bundle. A revision is valid when it is an
+# ancestor of the pull request's head or of its base tip -- the PR's
+# range, or anything reachable from base -- and anything else is refused
+# before git runs. The tools are read-only: log, show and blame write
+# nothing, run under the same runner sandbox (deny-all egress, the
+# timeout and the byte/line caps), and never touch the working copy.
+
+
+def history_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+    """One history tool's exec, framed like the other git tools'. The rev
+    guard runs first inside the exec: a revision neither the head nor the
+    base tip reaches exits 99, which the controller reports as a rejected
+    call carrying the guard's own text."""
+    git = " ".join((quote(staged.git), "--git-dir=repo.git", *GIT_OPTIONS))
+    head = quote(staged.history_head)
+    base = quote(staged.history_base)
+    if call.tool == "git_log":
+        argv = f"log --oneline --no-decorate {base}..{head}"
+        precheck = "true"
+    elif call.tool == "git_show":
+        rev = quote(call.get("rev"))
+        path = call.get("path")
+        arg = f"{rev} -- {quote(path)}" if path else rev
+        argv = f"show {arg}"
+        # The guard runs with the same staged-repository git the tool
+        # itself uses: a bare `git` would read whatever the runner's
+        # default repository is, which is not the reviewed history.
+        precheck = (
+            f"{git} merge-base --is-ancestor {rev} {head} || "
+            f"{git} merge-base --is-ancestor {rev} {base}"
+        )
+    else:
+        path = quote(call.get("path"))
+        start = call.get("line")
+        end = call.get("end_line") or start
+        argv = f"blame --date=short -L {start},{end} {head} -- {path}"
+        precheck = "true"
+    shown_source = (
+        f"head -n {limits.max_lines} out | head -c {limits.max_bytes}"
+        if limits.max_lines
+        else f"head -c {limits.max_bytes} out"
+    )
+    # The control structures join with newlines: a `; `-joined `then;` or
+    # `else;` is a shell syntax error, and the exec would answer nothing.
+    return "\n".join(
+        (
+            f"cd {quote(staged.root)}",
+            f"export {' '.join(GIT_ENV)}",
+            f"if {precheck}; then",
+            (
+                f"  ( ulimit -f {RAW_OUTPUT_BLOCKS}; exec timeout -k {KILL_AFTER_S} "
+                f"{limits.timeout_s} {git} {argv} ) > out 2> err"
+            ),
+            "  s=$?",
+            "else",
+            f"  s={_REFUSED_EXIT}",
+            '  echo "the revision is outside the pull request range and base history" > out',
+            "fi",
+            "v=0",
+            f"{shown_source} > shown",
+            f'echo "{HEADER} $s $v $(wc -c < out) $(wc -l < out) $(wc -c < shown)"',
+            "base64 -w0 < shown; echo",
+            f"head -c {STDERR_BYTES} err 2>/dev/null | base64 -w0; echo",
+            "rm -f out err shown",
         )
     )
 
@@ -621,11 +700,16 @@ def parse_reply(text: str) -> _Reply | None:
     return _Reply(code, view_code, total, lines, shown, content, stderr)
 
 
+_REFUSED_EXIT = 99
 _CODE_STATUS = {
     0: Status.OK,
     _TIMED_OUT: Status.TIMED_OUT,
     _KILLED: Status.TIMED_OUT,
     _FILE_TOO_LARGE: Status.TOO_LARGE,
+    # The history tools' rev guard (D80's git-history update): a revision
+    # outside the pull request's range and base's history is the model's
+    # error to re-aim -- a rejected call, not a failed one.
+    _REFUSED_EXIT: Status.REJECTED,
 }
 
 
@@ -2315,6 +2399,17 @@ class Bridge:
         started = self.clock.monotonic()
         if call.tool in RUN_TOOLS:
             return self._run_exec(call, limits, started)
+        if call.tool in HISTORY_TOOLS:
+            if not self.staged.history_head:
+                return self._failed(
+                    call,
+                    Status.UNAVAILABLE,
+                    "no repository history was staged for this runner; the "
+                    "history tools read the bundle the run's staging "
+                    "carries, and this run staged none",
+                    started,
+                )
+            return self._run_history(call, limits, started)
         if call.tool in LOCAL_TOOLS and not (call.tool == "grep" and call.get("regex")):
             return self._run_local(call, limits, started)
         try:
@@ -2759,6 +2854,42 @@ class Bridge:
             raise _LostOutputError(problem)
         return reply
 
+    def _run_history(
+        self, call: Call, limits: ToolLimits, started: float
+    ) -> BridgeResult:
+        """The read-only history tools (D80's git-history update): one
+        exec against the staged repository's real history, framed and
+        parsed like the other git tools'. The rev guard inside the exec
+        refuses a revision outside the pull request's range and base's
+        history as a rejected call; the re-stage discipline applies as
+        everywhere, because executed PR code may have rewritten the
+        repository the history lives in."""
+        if self._suspect:
+            self._restage()
+        try:
+            code, text = self.session.exec(
+                f"bridge {call.tool}",
+                history_script(self.staged, call, limits),
+                stage="bridge",
+                budget_s=limits.timeout_s + EXEC_SLACK_S,
+            )
+            reply = parse_reply(text) if code == 0 else None
+            if reply is None:
+                raise BoundaryError(
+                    f"no bridge reply (exit {code}): "
+                    f"{guest_text(text, GUEST_TAIL_CHARS)}"
+                )
+            problem = reply.problem()
+            if problem is not None:
+                raise _LostOutputError(problem)
+        except StreamTimeoutError as exc:
+            return self._failed(call, Status.TIMED_OUT, str(exc), started)
+        except _LostOutputError as exc:
+            return self._failed(call, Status.FAILED, str(exc), started)
+        except BoundaryError as exc:
+            return self._failed(call, Status.UNAVAILABLE, str(exc), started)
+        return self._result(call, reply, (), self.clock.monotonic() - started)
+
     def _diff_paths(self, call: Call) -> tuple[str, ...]:
         """What `diff_file` diffs: its path, or both sides of the rename it
         is part of, so git pairs them instead of showing an add or a delete."""
@@ -2936,6 +3067,8 @@ def run_bridge(
     approvals: RunApprovals | None = None,
     setup: SetupSpec | None = None,
     env: Mapping[str, str] | None = None,
+    history_bundle: bytes | None = None,
+    history_base: str = "",
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2969,7 +3102,15 @@ def run_bridge(
         )
 
     def session_body(session: Session) -> str:
-        staged = stage(session, trees, root, unpack, pytest_candidates)
+        staged = stage(
+            session,
+            trees,
+            root,
+            unpack,
+            pytest_candidates,
+            history_bundle=history_bundle,
+            history_base=history_base,
+        )
         telemetry.record(
             "bridge staging", "staged",
             {

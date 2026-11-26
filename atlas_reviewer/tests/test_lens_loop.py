@@ -590,6 +590,7 @@ def test_the_model_sees_exactly_the_bridges_tools_and_arguments():
             "line": 1,
             "operator": "negate-condition",
             "content": "def test_x():\n    assert True\n",
+            "rev": "a" * 40,
         }
         validate(name, {a: sample[a] for a in required}, frozenset(Rev))
         for arg in required:
