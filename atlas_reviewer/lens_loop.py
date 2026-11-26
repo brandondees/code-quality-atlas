@@ -938,10 +938,15 @@ severity is exactly one of "blocker", "major", "minor" or "nit"; valence is
 route is one of "eng", "implementer", "product", "design", "legal" or
 "leadership". A finding whose severity cannot be read as one of those four
 names is dropped, and the review cannot approve. Any other value outside the
-contract sends the whole reply back. Quote evidence exactly as the head
-file reads at the cited lines, or, for code the pull request removed, as
-the diff's removed lines read. Every quote is checked, and a finding whose
-quote is not found is not reported."""
+contract sends the whole reply back. The location is a `file:line`/range,
+a bare file path, a `boundary:`/`component:` design reference, or --
+for a finding about the pull request's own description (a stale CI or
+stack line, a claim the code contradicts) -- exactly `pull_request.body`.
+Quote evidence exactly as the head file reads at the cited lines, as the
+diff's removed lines read for code the pull request removed, or, for a
+`pull_request.body` finding, exactly as the description reads. Every
+quote is checked, and a finding whose quote is not found is not
+reported."""
 
 _PAGED_NO_FINDINGS = """\
 With no findings, reply with "findings": []; that counts only if every
@@ -1520,6 +1525,11 @@ class LensJob:
     # PR does not change can still be checked. Empty: only `sources`.
     head_tree: bytes = b""
     diff: str = ""
+    # The pull request's own description, controller-held: the one source
+    # a `pull_request.body` finding's quote verifies against (issue #713's
+    # harness-parity slice). Empty when no description reached this run,
+    # which leaves such a finding unverified and unreported.
+    pr_body: str = ""
 
 
 @dataclass
@@ -2837,6 +2847,7 @@ def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutc
             reply.findings,
             with_head_files(job.sources, job.head_tree, p.head_reads),
             limits.quote_tolerance,
+            body=job.pr_body,
         )
     )
     if any(not c.verified for c in checked):

@@ -797,7 +797,11 @@ def test_synthesizer_contract_defines_bare_file_path_location_and_deleted_line_e
     # evidence bullet's exemption points at it by name rather than the
     # previously-undefined "repo-audit finding" phrase
     assert "a bare file path with no line" in md
-    assert "a bare-file-path location (no single line to quote)" in md
+    assert "A bare-file-path location (no single line to quote)" in md
+    # The pull request's own description is a defined location too, with
+    # its own quote rule (issue #713's harness-parity slice).
+    assert "exactly `pull_request.body`" in md
+    assert "quoted exactly as the description reads" in md
     assert "except a bare-file-path or design-time `boundary:`/`component:`" in md
     # (2) evidence for a finding about removed code may come from the
     # diff's deleted side, named as such, while the current-file rule still

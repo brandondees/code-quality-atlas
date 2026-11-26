@@ -11,6 +11,7 @@ from atlas_reviewer.lens_contract import (
     ContractError,
     DesignRef,
     LineRange,
+    PullBody,
     Route,
     Severity,
     Valence,
@@ -328,3 +329,33 @@ def test_a_whole_file_or_design_finding_needs_no_quote():
     ).findings
     assert whole.location == WholeFile("calc.py")
     assert design.location == DesignRef("component:billing")
+
+
+def test_the_pull_request_body_is_a_location():
+    assert parse_location("pull_request.body") == PullBody()
+    assert str(PullBody()) == "pull_request.body"
+    parsed = parse_reply(
+        reply(
+            finding(
+                location="pull_request.body",
+                evidence="`gate` on `61273b4f` (run 43429340358)",
+                severity="minor",
+                finding="the CI line names a head this PR no longer has",
+                fix="update the gate line to the current head",
+            )
+        )
+    )
+    (body_finding,) = parsed.findings
+    assert isinstance(body_finding.location, PullBody)
+    # A body finding without its quote is refused, like a file:line one.
+    with pytest.raises(ContractError):
+        parse_reply(
+            reply(
+                finding(
+                    location="pull_request.body",
+                    evidence="   ",
+                    finding="the CI line is stale",
+                    fix="update it",
+                )
+            )
+        )

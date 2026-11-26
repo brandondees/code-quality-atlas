@@ -47,7 +47,13 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from atlas_reviewer.diffs import split_files
-from atlas_reviewer.lens_contract import DesignRef, Finding, LineRange, WholeFile
+from atlas_reviewer.lens_contract import (
+    DesignRef,
+    Finding,
+    LineRange,
+    PullBody,
+    WholeFile,
+)
 from atlas_reviewer.runner import refused_archive
 
 MIN_FRAGMENT_CHARS = 8
@@ -64,6 +70,10 @@ class QuoteSource(StrEnum):
     HEAD_NEAR = "head near the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
+    # The pull request's own description (issue #713's harness-parity
+    # slice): the one source a PullBody finding's quote verifies against,
+    # the text the controller held when the lens ran.
+    PR_BODY = "pull-request body"
 
 
 @dataclass(frozen=True)
@@ -202,10 +212,27 @@ def _runs(text: str) -> tuple[tuple[str, ...], ...]:
 
 
 def check_quote(
-    finding: Finding, sources: SourceText, tolerance: int = QUOTE_TOLERANCE
+    finding: Finding,
+    sources: SourceText,
+    tolerance: int = QUOTE_TOLERANCE,
+    body: str = "",
 ) -> QuoteCheck:
     location = finding.location
     match location:
+        case PullBody():
+            quote = _quote_lines(finding.evidence)
+            if not quote:
+                return Unverified(finding, "the evidence quotes nothing")
+            if not body:
+                return Unverified(
+                    finding,
+                    "the pull-request description was not available to verify against",
+                )
+            if _found(quote, body.split("\n")):
+                return Verified(finding, QuoteSource.PR_BODY)
+            return Unverified(
+                finding, "the quote is not in the pull-request description"
+            )
         case DesignRef():
             return Verified(finding, QuoteSource.NOT_NEEDED)
         case WholeFile(path=path):
@@ -338,6 +365,9 @@ def drift_label(drift: int) -> str:
 
 
 def check_all(
-    findings: Iterable[Finding], sources: SourceText, tolerance: int = QUOTE_TOLERANCE
+    findings: Iterable[Finding],
+    sources: SourceText,
+    tolerance: int = QUOTE_TOLERANCE,
+    body: str = "",
 ) -> tuple[QuoteCheck, ...]:
-    return tuple(check_quote(f, sources, tolerance) for f in findings)
+    return tuple(check_quote(f, sources, tolerance, body) for f in findings)

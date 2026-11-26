@@ -402,6 +402,7 @@ def judge(
     sources: SourceText,
     head_tree: bytes,
     tolerance: int,
+    pr_body: str = "",
 ) -> JudgedReassess:
     """Quote-check the reply's findings against the head files and resolve
     every `revises` and `withdrawn` label against `prior` -- the verified
@@ -429,6 +430,7 @@ def judge(
             (rf.finding for rf in reply.findings),
             with_head_files(sources, head_tree, cited),
             tolerance,
+            body=pr_body,
         )
     )
     revises = []

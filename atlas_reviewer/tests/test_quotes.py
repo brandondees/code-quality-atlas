@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 import io
 import tarfile
+from dataclasses import replace
 
 import pytest
 
@@ -10,6 +11,7 @@ from atlas_reviewer.lens_contract import (
     DesignRef,
     Finding,
     LineRange,
+    PullBody,
     Route,
     Severity,
     Valence,
@@ -17,6 +19,7 @@ from atlas_reviewer.lens_contract import (
 )
 from atlas_reviewer.quotes import (
     QuoteSource,
+    SourceText,
     Unverified,
     Verified,
     check_all,
@@ -521,3 +524,33 @@ def test_a_symlink_at_head_is_not_followed_as_the_file():
 def test_a_blank_quote_is_not_verified():
     result = check(LineRange("calc.py", 3, 3), " \n ")
     assert result == Unverified(result.finding, "the evidence quotes nothing")
+
+
+def test_a_pull_request_body_finding_verifies_against_the_held_body():
+    """The body finding's quote verifies against the description the
+    controller held (issue #713's harness-parity slice), the way a file
+    quote verifies against the head file."""
+    body_finding = Finding(
+        PullBody(),
+        Severity.MINOR,
+        Valence.DEFECT,
+        Route.ENG,
+        Attribution.INTRODUCED,
+        "the CI line names a head this PR no longer has",
+        "update the gate line to the current head",
+        evidence="`gate` on `61273b4f` (run 43429340358)",
+    )
+    held = "`gate` on `61273b4f` (run 43429340358). This pull request targets main."
+    (check,) = check_all([body_finding], SourceText({}), body=held)
+    assert isinstance(check, Verified)
+    assert check.source is QuoteSource.PR_BODY
+    (changed,) = check_all(
+        [replace(body_finding, evidence="`gate` on `deadbeef` (run 1)")],
+        SourceText({}),
+        body=held,
+    )
+    assert not isinstance(changed, Verified)
+    assert "not in the pull-request description" in changed.reason
+    (no_body,) = check_all([body_finding], SourceText({}), body="")
+    assert not isinstance(no_body, Verified)
+    assert "not available" in no_body.reason

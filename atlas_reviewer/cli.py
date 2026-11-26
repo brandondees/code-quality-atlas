@@ -1277,6 +1277,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     operator_ceiling_max=ceiling_max,
                     run_proposals=proposals,
                     setup=setup,
+                    pr_body=pr_text,
                 )
                 review = replace(
                     review,

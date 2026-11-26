@@ -133,7 +133,21 @@ class DesignRef:
         return self.ref
 
 
-Location = LineRange | WholeFile | DesignRef
+@dataclass(frozen=True)
+class PullBody:
+    """The pull request's own description (issue #713's harness-parity
+    slice): a finding about what the description claims -- a stale CI
+    line, a stack line that no longer matches. The location is one fixed
+    string, the same path the parity key grades the body's findings by;
+    the evidence is quoted from the description and verified against the
+    text the controller held, like any file quote."""
+
+    def __str__(self) -> str:
+        return BODY_LOCATION
+
+
+BODY_LOCATION = "pull_request.body"
+Location = LineRange | WholeFile | DesignRef | PullBody
 
 
 @dataclass(frozen=True)
@@ -336,6 +350,8 @@ def parse_location(text: str) -> Location:
         raise ContractError("location path may not contain a double quote")
     if _DESIGN.fullmatch(text):
         return DesignRef(text)
+    if text == BODY_LOCATION:
+        return PullBody()
     lines = _RANGE.fullmatch(text)
     path = lines.group("path") if lines else text
     problem = path_problem(path)
@@ -351,6 +367,12 @@ def parse_location(text: str) -> Location:
 
 
 def _evidence(location: Location, evidence: str) -> str:
+    if isinstance(location, PullBody):
+        if not evidence.strip():
+            raise ContractError(
+                "a pull-request-body finding must quote the description"
+            )
+        return evidence
     if not isinstance(location, LineRange):
         return evidence
     if not evidence.strip():
