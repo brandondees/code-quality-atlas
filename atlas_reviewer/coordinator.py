@@ -723,6 +723,7 @@ def review_lens(
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
     pr_body: str = "",
+    tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -779,6 +780,7 @@ def review_lens(
             approval_channel=approval_channel,
             setup=setup,
             pr_body=pr_body,
+            tool_log=tool_log,
         )
         single = synthesize(
             [ran.result],
@@ -833,6 +835,7 @@ def review_lenses(
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
     pr_body: str = "",
+    tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
@@ -1064,6 +1067,7 @@ def _review_lenses(
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
     pr_body: str = "",
+    tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
     funding = noted_funding_source()
     files = split_files(diff)
@@ -1163,6 +1167,7 @@ def _review_lenses(
             approval_channel=approval_channel,
             setup=runner_setup,
             pr_body=pr_body,
+            tool_log=tool_log,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1548,6 +1553,7 @@ def _review_one(
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
     pr_body: str = "",
+    tool_log: Callable[[str], None] | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1683,6 +1689,7 @@ def _review_one(
         trees.head,
         diff,
         pr_body=pr_body,
+        tool_log=tool_log,
     )
     name = runner_name or event_runner_name(event)
 

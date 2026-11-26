@@ -9,14 +9,17 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from atlas_reviewer import cli
 from atlas_reviewer.budget import CallLimits
+from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
+from atlas_reviewer.parity_key import load_runs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
 from atlas_reviewer.runner import EGRESS_TAG, event_runner_name
 
@@ -1912,7 +1915,6 @@ def test_a_read_token_replaces_the_app_private_key(tmp_path):
     from argparse import Namespace
 
     from atlas_reviewer.clock import SystemClock
-    from atlas_reviewer.domain import PrEvent
     from atlas_reviewer.providers import OfflineProvider
     from atlas_reviewer.telemetry import Telemetry
 
@@ -3245,7 +3247,6 @@ def test_the_context_fit_is_measured_against_the_ranked_first_turn():
     ranking the real first turn carries, so the ranked listing's own
     header -- not the unranked one -- is what the room is sized against.
     Kills the scaffold-measured-unranked mutant."""
-    from types import SimpleNamespace
 
     from atlas_reviewer.cli import _NONCE_PROBE, _input_room_chars
     from atlas_reviewer.coordinator import first_turn
@@ -3359,3 +3360,114 @@ def test_select_provider_refuses_tenant_without_live_inference(tmp_path):
 
 def test_the_tenant_key_is_a_scrubbed_secret():
     assert "ATLAS_TENANT_MODEL_KEY" in cli.SECRET_ENV
+
+
+def test_eval_run_writes_a_draft_and_a_loadable_run_file(tmp_path):
+    """`eval-run` runs the product's own review path over the fixture
+    snapshot, writes the draft and an eval-parity run file (issue #713's
+    harness-parity slice). Offline: the scripted model, the in-memory
+    runner, no credentials."""
+    run_file = tmp_path / "runs" / "sample-1.json"
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+            "--run-file",
+            str(run_file),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    assert run_file.is_file()
+    runs = load_runs(run_file.parent)
+    assert len(runs) == 1
+    (record,) = runs
+    assert record.head_sha != ""
+    assert record.findings or record.lenses_run
+
+
+def test_eval_run_logs_the_tool_results_it_served(tmp_path):
+    tool_log = tmp_path / "tool_results.jsonl"
+    run_cli(
+        "--state-dir",
+        str(tmp_path / "state"),
+        "eval-run",
+        "--fixture",
+        str(FIXTURE),
+        "--lenses",
+        "tracing-correctness-and-invariants",
+        "--depth",
+        "triage",
+        "--pool-size",
+        "1",
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "blocker.json"),
+        "--out",
+        str(tmp_path / "draft.md"),
+        "--tool-log",
+        str(tool_log),
+    )
+    assert tool_log.is_file()
+    # The shipped scenario's scripted lens makes no tool calls, so the
+    # log is empty here; the per-line shape is pinned where the tools run
+    # (test_lens_loop's tool-log test). What this pins is the sink: the
+    # file exists beside the draft, empty or not.
+    for line in tool_log.read_text(encoding="utf-8").splitlines():
+        entry = json.loads(line)
+        assert set(entry) == {"tool", "status", "text"}
+
+
+def test_eval_lenses_owners_reads_the_parity_key():
+    event = PrEvent("brandondees/code-quality-atlas", 640, "a" * 40)
+    assert cli._eval_lenses(SimpleNamespace(lenses="owners"), event) == (
+        "reviewing-test-quality",
+        "hunting-silent-failures",
+        "reviewing-decision-lifecycle",
+    )
+    assert cli._eval_lenses(SimpleNamespace(lenses=" a , b "), event) == ("a", "b")
+    assert cli._eval_lenses(SimpleNamespace(lenses=None), event) is None
+
+
+def test_eval_run_without_lenses_still_runs_the_picker(tmp_path):
+    """Without --lenses the picker runs exactly as agentic-review's does;
+    the draft carries no fixed-set note."""
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
+    assert "the eval fixture's fixed set" not in draft
