@@ -66,6 +66,7 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     as_nobody,
     check_sizes,
+    guarded_env_exports,
     history_fetch_script,
     mutant_commit_steps,
     parse_history,
@@ -453,6 +454,7 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1387,6 +1389,7 @@ def run_test_script(
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1442,6 +1445,7 @@ def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f"  printf %s {quote(content)} | base64 -d > {scratch}/{quote(probe_path)}",
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1477,6 +1481,7 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     assert staged.shim_python is not None  # the caller refuses the call before this
     run = (
         f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+        f"{guarded_env_exports(scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
@@ -2959,24 +2964,6 @@ class Bridge:
             )
         return self._failed(call, Status.UNAVAILABLE, why, started)
 
-    def _test_tool_refusal(self, call: Call, started: float) -> BridgeResult | None:
-        """The test tools' collection gate: a runner whose collection
-        probe failed refuses them with that named gap -- the run would
-        only produce INCONCLUSIVE mutants and red baselines the lens
-        cannot read as evidence. The interpreter gates stay in
-        `_run_exec` ahead of it, in the order the slices before the bash
-        tool established: a missing pytest first, then a missing
-        no-root-guard interpreter, then this."""
-        if not self.staged.collection_ok:
-            return self._failed(
-                call,
-                Status.UNAVAILABLE,
-                "the test environment is broken: pytest collection failed "
-                f"in the staged copy: {self.staged.collection_note}",
-                started,
-            )
-        return None
-
     def _bash_refusal(self, call: Call, started: float) -> BridgeResult | None:
         """The bash tool's one gate (D80's bash-tool update): the no-root
         guard's interpreter. The test environment's own refusals -- a
@@ -3009,16 +2996,21 @@ class Bridge:
             # Since the last execution could have rewritten anything it
             # could reach -- the staged repository included, which the
             # copy's git points at -- the copy is built from a re-staged,
-            # digest-checked repository.
+            # digest-checked repository. And the command's own exec runs
+            # PR code, whatever its outcome: the bridge is suspect from
+            # the moment the exec starts, so an exec that raises -- a
+            # lost connection mid-command -- still leaves every later
+            # read re-staging instead of serving what the failed command
+            # left behind.
             if self._suspect:
                 self._restage()
+            self._suspect = True
             code, text = self.session.exec(
                 "bridge bash",
                 bash_script(self.staged, call, limits),
                 stage="bridge",
                 budget_s=limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S,
             )
-            self._suspect = True
             blocks = parse_run_blocks(text) if code == 0 else None
             if blocks is None:
                 raise BoundaryError(
@@ -3028,7 +3020,6 @@ class Bridge:
                 if isinstance(block, _RunBlock) and (problem := block.problem()):
                     raise _LostOutputError(problem)
         except StreamTimeoutError as exc:
-            self._suspect = True
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
         except _LostOutputError as exc:
             return self._failed(call, Status.FAILED, str(exc), started)
@@ -3570,6 +3561,7 @@ def sweep_script(
     def run_line(name: str) -> str:
         return (
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+            f"{guarded_env_exports(scratch)}"
             "export PYTHONDONTWRITEBYTECODE=1; "
             f"exec timeout -k {KILL_AFTER_S} {run_limit.timeout_s} {guarded} ) "
             f"> {name}_out 2> {name}_err"

@@ -375,6 +375,24 @@ def as_nobody(python: TrustedPython, argv: str) -> str:
     return f"{python.quoted} -I -c {shlex.quote(DROP_SHIM)} {argv}"
 
 
+def guarded_env_exports(scratch: str) -> str:
+    """The environment the guarded execs run under, set inside their own
+    subshell: the no-root guard's user is not the user that built the
+    copy, its `.git` file or the staged repository, and git (>= 2.35.2)
+    refuses that ownership mismatch outright (`detected dubious
+    ownership`) -- so any PR code running in the copy that invokes git
+    (the model's bash command, a repo's own test suite) would otherwise
+    fail there. The copy is declared a safe directory via the
+    environment: protected config, honored in the subshell where it is
+    set, and unreachable from repo-local config. Scoped to the copy's
+    own path, never `*`; the path is the caller's quoted word."""
+    return (
+        "export GIT_CONFIG_COUNT=1 "
+        "GIT_CONFIG_KEY_0=safe.directory "
+        f"GIT_CONFIG_VALUE_0={scratch}; "
+    )
+
+
 # The collection probe's own bound (D80's 2026-11-26 update): collecting
 # the staged copy's tests imports every test module once; a repo of this
 # size collects in tens of seconds, and the bound exists so a module that
@@ -506,6 +524,7 @@ def collection_script(
     quoted_scratch = shlex.quote(scratch)
     collect = (
         f"( cd {quoted_scratch}; ulimit -f 16384; "
+        f"{guarded_env_exports(quoted_scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {COLLECTION_BOUND_S} "
         f"{as_nobody(python, python.quoted + ' -I -B -m pytest --co -q')} "
