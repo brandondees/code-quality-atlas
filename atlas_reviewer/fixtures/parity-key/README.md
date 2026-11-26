@@ -37,7 +37,7 @@ citation. `needs` is what reaching the finding took: `ci`, `read`,
 | `661-m4` | same | `atlas_reviewer/rounds.py` 210–219 | The `findings_omitted` gate. The span starts at 210 so it does not cover 661-m2. |
 | `640-m1` | `0fe45e5ea79f3abd8e07488a01b623186df96692` | `atlas_reviewer/service_queue.py` 329 | `begin_post`'s cancel check. `still_current` is a different method. |
 | `640-m2` | same | `atlas_reviewer/service_post.py` 229–231 | `check is not None` skips the head check when the hook is missing. `post` is 217–236. |
-| `640-m3` | same | `docs/open-questions.md` 62, or `atlas_reviewer/README.md` 13–15 | Neither line says D46 amends D48. Either citation counts. |
+| `640-m3` | same | `docs/open-questions.md` 61 or 62, or `atlas_reviewer/README.md` 13–15 | Neither line says D46 amends D48, and D48's own line 61 still says the process publishes nothing to GitHub. Any of the three citations counts (line 61 added Nov 24). |
 | `801-m1` | `186e09f2944e561815462eb5d9795dba4229c488` | `atlas_reviewer/funding.py` 129–131 | The duplicate-name refusal formats the document's `{source.name!r}`. |
 | `801-m2` | same | `atlas_reviewer/funding.py` 207 | The duplicate-field refusal formats the document's `{key!r}`. |
 | `801-m3` | same | `atlas_reviewer/funding.py` 219–222 | The field-shape refusal formats `sorted(extra)` and `sorted(missing)`. |
