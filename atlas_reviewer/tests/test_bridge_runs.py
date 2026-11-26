@@ -65,6 +65,7 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     choose_pytest,
     parse_collection,
+    parse_history,
     stage_copy_steps,
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
@@ -3653,3 +3654,72 @@ def test_the_history_survives_a_restage(tmp_path):
     assert "the change under review" in log.content.text
     assert blame.status is Status.OK
     assert blame.content.text.count("rounded later") == 1
+
+
+def test_parse_history_refuses_a_wrong_head_verdict():
+    """The verification is what stands between a stale or wrong bundle's
+    history and the lenses reading it as the pull request's own: a
+    `wrong-head:<sha>` verdict is a staging failure naming the SHA the
+    bundle actually carried (the round-1 review's mutant silenced the
+    verdict and survived the suite -- this pins the branch)."""
+    with pytest.raises(BoundaryError) as excinfo:
+        parse_history(0, "atlas-history:wrong-head:" + "d" * 40 + "\n", "c" * 40)
+    assert "not the pull request's" in str(excinfo.value)
+    assert "d" * 40 in str(excinfo.value)
+
+
+def test_a_bundle_carrying_a_different_head_is_a_named_staging_failure(
+    tmp_path,
+):
+    """End to end: a bundle whose `atlas-history` ref points at a commit
+    that is not the pull request's head is refused at staging -- the run
+    completes, the history tools report the named no-history gap carrying
+    the wrong-head reason, and no other tool is touched."""
+    _repo, base, _head, _bundle = _seed_history(tmp_path)
+    # A bundle whose atlas-history ref points at the BASE commit: the
+    # fetched head is not the trees' head, which is the wrong-head
+    # verdict's whole job to catch.
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def git(*argv: str) -> None:
+        subprocess.run(
+            ["git", *argv],
+            cwd=_repo,
+            capture_output=True,
+            env=env,
+            check=True,
+        )
+
+    git("update-ref", "refs/heads/atlas-history", base)
+    git("bundle", "create", str(tmp_path / "wrong.bundle"), "refs/heads/atlas-history")
+    wrong_bundle = (tmp_path / "wrong.bundle").read_bytes()
+    content = {
+        "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+        "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+    }
+    source = SourceTrees(source_tarball(content), source_tarball(content), base, HEAD)
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("git_log", {}))
+        results.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    report, *_ = bridge_run(
+        tmp_path,
+        body,
+        source=source,
+        history_bundle=wrong_bundle,
+        history_base=base,
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    log, read = results
+    assert log.status is Status.UNAVAILABLE
+    assert "not the pull request's" in log.error.text
+    assert read.status is Status.OK

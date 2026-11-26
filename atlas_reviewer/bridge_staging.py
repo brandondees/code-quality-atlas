@@ -457,7 +457,12 @@ def parse_history(code: int | None, text: str, head: str) -> bool:
     its head is the pull request's own. A missing verdict or a failed
     fetch is a staging failure, named; a wrong head is too -- a bundle
     that does not carry what it claims must not be served as history."""
-    found = re.findall(r"^atlas-history:([^:\n]+)$", text, re.MULTILINE)
+    # The verdict is everything after the tag up to the line's end: the
+    # wrong-head verdict carries the SHA the bundle actually served, and
+    # a `[^:\n]` body would stop at that colon and leave the branch
+    # unreachable -- a wrong-head bundle would degrade as "gave no
+    # verdict" instead of naming the head it carried.
+    found = re.findall(r"^atlas-history:(\S+)$", text, re.MULTILINE)
     if code != 0 or not found:
         raise BoundaryError(
             "the history bundle gave no verdict "
