@@ -165,6 +165,11 @@ class Staged:
     # named no-history gap.
     history_head: str = ""
     history_base: str = ""
+    # Why the history is absent, when it is: the over-cap bundle, a fetch
+    # that failed, or a bundle whose head is not the pull request's. The
+    # history tools' named gap carries it; an empty string means the
+    # history is present (or the run staged no bundle and asked for none).
+    history_note: str = ""
     # The GitHub head SHA the head tree was fetched at (provenance, D80):
     # a test or mutant result is tagged with it, so a lens can cite the
     # evidence at the head it belongs to (D73).
@@ -410,7 +415,7 @@ def upload_history_bundle(session: Session, bundle: bytes, root: str) -> None:
         )
 
 
-def history_script(root: str, git: str, base: str, head: str) -> str:
+def history_fetch_script(root: str, git: str, base: str, head: str) -> str:
     """One staging exec (D80's git-history update): concatenate the
     bundle's parts, fetch its ref into the staged repository, and verify
     the fetched head is the pull request's own. The verdict is one
@@ -745,8 +750,6 @@ def stage(
             f"{quote(root)}/{rev.value.lower()}.tar.gz",
             f"{rev.value} tree upload",
         )
-    if history_bundle is not None:
-        upload_history_bundle(session, history_bundle, root)
     code, text = session.exec(
         "stage repository",
         stage_script(root, git, revs, unpack),
@@ -764,16 +767,24 @@ def stage(
             budget_s=COLLECTION_BUDGET_S,
         )
         collection_ok, collection_note = parse_collection(code, text)
-    history_head = ""
+    history_head, history_note = "", ""
     if history_bundle is not None:
-        code, text = session.exec(
-            "history fetch",
-            history_script(root, git, history_base, trees.head_sha),
-            stage="bridge staging",
-            budget_s=UNPACK_BUDGET_S,
-        )
-        if parse_history(code, text, trees.head_sha):
-            history_head = trees.head_sha
+        # The history is optional context: a bundle over the cap, a fetch
+        # that failed, or a bundle that is not what it claims degrade to
+        # the named no-history gap on the history tools -- the review's
+        # other tools are untouched -- never a failed run.
+        try:
+            upload_history_bundle(session, history_bundle, root)
+            code, text = session.exec(
+                "history fetch",
+                history_fetch_script(root, git, history_base, trees.head_sha),
+                stage="bridge staging",
+                budget_s=UNPACK_BUDGET_S,
+            )
+            if parse_history(code, text, trees.head_sha):
+                history_head = trees.head_sha
+        except BoundaryError as exc:
+            history_note = str(exc)
     return Staged(
         root,
         git,
@@ -783,6 +794,7 @@ def stage(
         shim,
         history_head,
         history_base,
+        history_note,
         trees.head_sha,
         collection_ok,
         collection_note,

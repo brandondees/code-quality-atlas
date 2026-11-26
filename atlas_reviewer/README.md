@@ -939,8 +939,14 @@ introduced context a finding's attribution needs). The history reaches
 the runner as a **git bundle** the staging uploads in parts (one exec's
 stdin caps at 10 MiB) and fetches into the staged repository, verified
 against the pull request's own head SHA; the bundle's cap is
-`HISTORY_BUNDLE_MAX_BYTES`, and a bundle over it is a named no-history
-gap, never a partial history.
+`HISTORY_BUNDLE_MAX_BYTES`. A bundle over the cap, a fetch that fails,
+or a bundle whose head is not the pull request's degrades to the named
+no-history gap -- the run completes and every other tool is untouched,
+never a partial history or a failed run. Because executed code can
+rewrite the staged repository, a re-stage (what every call after a run
+tool does) re-uploads and re-fetches the controller-held bundle; a
+re-fetch that fails there marks the history lost, and the history tools
+report the gap naming the failed re-fetch.
 
 Every history tool is read-only — log, show and blame write nothing —
 and runs in the same runner sandbox as the other tools: deny-all egress,

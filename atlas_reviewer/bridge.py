@@ -66,12 +66,15 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     as_nobody,
     check_sizes,
+    history_fetch_script,
     mutant_commit_steps,
+    parse_history,
     parse_staged,
     quote,
     stage,
     stage_copy_steps,
     stage_script,
+    upload_history_bundle,
 )
 from atlas_reviewer.diffs import split_files
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
@@ -2142,6 +2145,14 @@ class Bridge:
     # with this bridge. The gate is the only path an approved addition
     # takes to the argv builder, and it never grants on its own.
     approvals: RunApprovals | None = None
+    # The history bundle the run staged, retained so a re-stage can
+    # restore the real history it fetched (D80's git-history update): the
+    # restage rebuilds the repository from the tarballs, whose synthesized
+    # commits have no ancestors, and the bundle is the only source of the
+    # real ones.
+    history_bundle: bytes | None = field(default=None, repr=False)
+    history_base: str = ""
+    _history_lost: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         if not self.commits:
@@ -2400,15 +2411,8 @@ class Bridge:
         if call.tool in RUN_TOOLS:
             return self._run_exec(call, limits, started)
         if call.tool in HISTORY_TOOLS:
-            if not self.staged.history_head:
-                return self._failed(
-                    call,
-                    Status.UNAVAILABLE,
-                    "no repository history was staged for this runner; the "
-                    "history tools read the bundle the run's staging "
-                    "carries, and this run staged none",
-                    started,
-                )
+            if not self.staged.history_head or self._history_lost:
+                return self._history_gap(call, started)
             return self._run_history(call, limits, started)
         if call.tool in LOCAL_TOOLS and not (call.tool == "grep" and call.get("regex")):
             return self._run_local(call, limits, started)
@@ -2664,6 +2668,31 @@ class Bridge:
                 f"the re-staged commits differ from the recorded ones "
                 f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
             )
+        if self.history_bundle is not None:
+            # The restage rebuilt the repository from the tarballs: the
+            # real history the bundle brought is gone with it, so the
+            # bundle is re-uploaded and re-fetched here. A re-fetch that
+            # fails marks the history lost -- the history tools then
+            # report the named gap -- rather than failing the caller's
+            # read, which has nothing to do with the bundle.
+            try:
+                upload_history_bundle(
+                    self.session, self.history_bundle, self.staged.root
+                )
+                hcode, htext = self.session.exec(
+                    "history re-fetch",
+                    history_fetch_script(
+                        self.staged.root,
+                        self.staged.git,
+                        self.history_base,
+                        self.staged.history_head,
+                    ),
+                    stage="bridge staging",
+                    budget_s=RESTAGE_BUDGET_S,
+                )
+                parse_history(hcode, htext, self.staged.history_head)
+            except BoundaryError:
+                self._history_lost = True
         if self._mutation is not None:
             blocks = parse_run_blocks(text)
             applied = next((b for b in blocks or () if isinstance(b, _MutBlock)), None)
@@ -2854,6 +2883,28 @@ class Bridge:
             raise _LostOutputError(problem)
         return reply
 
+    def _history_gap(self, call: Call, started: float) -> BridgeResult:
+        """The named no-history gap: the run staged no history (or the
+        staging's bundle flow degraded, `history_note` naming why), or the
+        repository was re-staged after executed code ran and the re-fetch
+        of the controller-held bundle failed. `git_log`, `git_show` and
+        `git_blame` report this instead of running against a repository
+        whose history is gone, where the range's log would be silently
+        empty or the rev guard would reject reads the caller named
+        correctly."""
+        why = (
+            self.staged.history_note
+            or "no repository history was staged for this runner; "
+            "the history tools read the bundle the run's staging "
+            "carries, and this run staged none"
+        )
+        if self._history_lost:
+            why = (
+                "the re-staged repository lost the history bundle's "
+                "fetch and the re-fetch failed: " + why
+            )
+        return self._failed(call, Status.UNAVAILABLE, why, started)
+
     def _run_history(
         self, call: Call, limits: ToolLimits, started: float
     ) -> BridgeResult:
@@ -2863,7 +2914,13 @@ class Bridge:
         refuses a revision outside the pull request's range and base's
         history as a rejected call; the re-stage discipline applies as
         everywhere, because executed PR code may have rewritten the
-        repository the history lives in."""
+        repository the history lives in -- and a re-stage whose re-fetch
+        failed ends the call at the named gap, before the exec could read
+        a repository without the history."""
+        if self._suspect:
+            self._restage()
+        if self._history_lost:
+            return self._history_gap(call, started)
         if self._suspect:
             self._restage()
         try:

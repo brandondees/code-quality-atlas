@@ -3503,12 +3503,153 @@ def test_the_bundle_is_uploaded_in_chunks_and_the_cap_refuses(tmp_path, monkeypa
     (log,) = results
     assert log.status is Status.OK
     assert "the change under review" in log.content.text
+    # A bundle over the cap degrades to the named no-history gap on the
+    # history tools: the run completes and every other tool is untouched.
     over = bundle + b"x" * (staging.HISTORY_BUNDLE_MAX_BYTES)
-    (report2, _sprites, _telemetry) = bridge_run(
-        tmp_path,
-        lambda bridge: "done",
-        source=source,
+    results2 = []
+
+    def body2(bridge):
+        results2.append(bridge.call("git_log", {}))
+        results2.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    report2 = run_bridge(
+        LocalSprites(),
+        MemoryLedger(),
+        source,
+        body2,
+        redactor=Redactor(),
+        changed=frozenset({"calc.py"}),
+        name="cqa-over-cap",
+        deadline_s=300,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge2"),
         history_bundle=over,
     )
-    assert report2.status is RunnerStatus.FAILED
-    assert "exceeds" in report2.note
+    assert report2.status is RunnerStatus.COMPLETED, report2.note
+    no_history, read = results2
+    assert no_history.status is Status.UNAVAILABLE
+    assert "exceeds" in no_history.error.text
+    assert read.status is Status.OK
+
+
+def test_a_refetch_that_fails_after_a_restage_names_the_gap(tmp_path):
+    """The re-stage's re-fetch can fail -- the bundle the controller held
+    no longer fetches into the rebuilt repository. The history tools then
+    report the named gap, saying the re-fetch failed, not a broken git
+    error, and the run's other tools are untouched."""
+    calls = []
+
+    class FlakyHistory:
+        match = "refs/atlas-history/head"
+
+        def handler(self, script, _stdin):
+            calls.append(script)
+            if len(calls) == 1:
+                return "atlas-history:ok", 0
+            return "atlas-history:fetch-failed", 0
+
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        return staged() + framed(0, out)
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            FlakyHistory(),
+            ReplyRule("__ATLAS_RUN__", answer),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {}))
+        results.append(bridge.call("git_log", {}))
+        results.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-refetch-fails",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+        history_bundle=b"fake bundle bytes",
+        history_base="a" * 40,
+    )
+    run_result, log, read = results
+    assert run_result.status is Status.OK
+    assert log.status is Status.UNAVAILABLE
+    assert "re-fetch failed" in log.error.text
+    assert "the history bundle" in log.error.text
+    assert read.status is Status.OK
+    assert len(calls) == 2
+
+
+def test_the_history_survives_a_restage(tmp_path):
+    """A run tool executes PR code and marks the bridge suspect; the next
+    call re-stages from the tarballs. The real history the bundle brought
+    lives in the repository the staging rebuilds, so the bridge keeps the
+    bundle and re-uploads and re-fetches it as part of that re-stage: a
+    history call after a run tool still reads, and one whose re-fetch
+    fails reports the named gap instead of a broken git error."""
+    _repo, base, head, bundle = _seed_history(tmp_path)
+    source = SourceTrees(
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        source_tarball(
+            {
+                "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+                "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+            }
+        ),
+        base,
+        head,
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {}))
+        results.append(bridge.call("git_log", {}))
+        results.append(bridge.call("git_blame", {"path": "calc.py", "line": 2}))
+        return "done"
+
+    report, *_ = bridge_run(
+        tmp_path,
+        body,
+        source=source,
+        history_bundle=bundle,
+        history_base=base,
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    run_result, log, blame = results
+    assert run_result.status is Status.OK and run_result.head_sha == head
+    assert log.status is Status.OK
+    assert "the change under review" in log.content.text
+    assert blame.status is Status.OK
+    assert blame.content.text.count("rounded later") == 1
