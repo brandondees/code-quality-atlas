@@ -2,7 +2,7 @@
   "pr": 661,
   "model": "recorded-fixture",
   "repetition": 3,
-  "head_sha": "674071a91513b4774c82350fb757d9c085f10baf",
+  "head_sha": "28854775e5965eb554b368cc3a543969a635b681",
   "coverage_complete": true,
   "lenses_run": [
     "reviewing-pr-and-process-hygiene",
@@ -17,17 +17,17 @@
     {
       "severity": "minor",
       "path": "pull_request.body",
-      "quote": "`gate` on `674071a9` (run 43510666665)",
+      "quote": "`gate` on `61273b4f` (run 43429340358)",
       "verified": true,
       "lens": "reviewing-pr-and-process-hygiene"
     },
     {
       "severity": "minor",
-      "path": "atlas_reviewer/rounds.py",
-      "quote": "{unreadable} line(s) could not be parsed",
+      "path": "atlas_reviewer/coordinator.py",
+      "quote": "unreadable = 1",
       "verified": true,
       "lens": "hunting-silent-failures",
-      "line": 207
+      "line": 735
     },
     {
       "severity": "minor",
@@ -35,15 +35,15 @@
       "quote": "break",
       "verified": true,
       "lens": "tracing-correctness-and-invariants",
-      "line": 186
+      "line": 182
     },
     {
       "severity": "minor",
       "path": "atlas_reviewer/rounds.py",
-      "quote": "findings_omitted",
+      "quote": "record.findings_omitted and record.head_sha == current_head",
       "verified": true,
       "lens": "reviewing-test-quality",
-      "line": 211
+      "line": 207
     },
     {
       "severity": "nit",

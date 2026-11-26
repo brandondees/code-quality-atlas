@@ -432,6 +432,18 @@ jobs:
         # resolve without any network.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest atlas_settings/tests -q --cov=atlas_settings
+      - name: parity-key liveness (anchor suites)
+        # The parity key's liveness checks (D71's re-anchor update): each
+        # liveness-carrying record is verified against its own anchor
+        # commit -- a mutant splice must survive the anchor's own full test
+        # suite, and a quote or absence must hold in the anchor's files --
+        # so a span that drifts from the anchor tree fails the gate instead
+        # of grading a finding a reviewer cannot honestly raise. The anchor
+        # suites cost minutes each, which is why this runs as its own step
+        # rather than inside the coverage steps; the round-5 anchor is not
+        # on any branch, so the step fetches it by SHA from origin.
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m pytest atlas_reviewer/liveness -q
       - name: reviewer service dry run (offline fixture PR event)
         # The offline provider reviews no file, so the dry run must report
         # incomplete coverage: exit 4 and a non-approving status line (D36).

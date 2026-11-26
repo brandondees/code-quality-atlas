@@ -1,0 +1,62 @@
+<!--
+Reconstructed pull-request body for #661 at the round-5 head
+28854775e5965eb554b368cc3a543969a635b681, the eval input for 661-m1.
+
+Provenance: GitHub does not expose pull-request body edit history, so the
+round-5 body could not be read back verbatim offline. This file is the
+merged body with exactly these deviations, each attested by the Nov 14
+trial's score record:
+
+1. The Tests gate line reads `gate` on `61273b4f` (run 43429340358) -- the
+   round-5-era values the Nov 14 score cites -- instead of the merged
+   body's `gate` on `674071a9` (run 43510666665). This reversion is the
+   defect 661-m1 grades (a stale CI line).
+2. The rebase sentence names the round-5 commit alone; the merged body's
+   ", rewritten on this branch as `fcdb5f1a`" clause describes the later
+   rewrite and postdates round 5.
+3. The three per-suite pytest result bullets under Tests are omitted: the
+   round-5-era counts are not recoverable offline, and a wrong count would
+   be fabricated.
+4. The summary bullet's fitting rules are stated as the round-5 code
+   behaves (a record that does not fit stops the scan; a round whose
+   findings were not stored raises the omission regardless of head). The
+   merged body's wording describes 6ff2ed04's fix, which postdates the
+   round-5 head.
+
+The 661-m1 liveness check pins the two citation strings in this file.
+-->
+
+## Summary
+
+Each agentic round reviews the current pull request in full. Prior findings are fenced input to verify, and they do not drop a changed file.
+
+- `conversation.review_context` is the PR description, comments and review threads the one-shot path already builds, plus every omission that build recorded. `review_lens` accepts that context. No shipped caller builds the round-log path yet. The path is chosen when a caller is wired.
+- `rounds.RoundLog` is an append-only JSONL file, mode 0600 on every write, keyed by repository and pull request number. The repository key is compared case-insensitively. A record stores the head SHA, the review event and the verified finding lines. A new head still runs the lens. An older head is labelled as superseded and is not this review's scope. Records for another pull request in the same file are counted on the status line and are not omissions. A line that names this pull request and does not parse is an omission for this pull request, including a future record version. A line that names no pull request blocks no pull request. A file that cannot be read is charged to the unreadable-line count.
+- The changed-file list on the first turn is every file in the current diff. This function has no parameter for a continuation's subset. The lens still reads that diff, and the rest of the repository, through the read-only tools.
+- A round record over 8,192 characters stores no finding text. A record of exactly 8,192 characters is kept. Prior blocks are kept whole, newest first, inside 16,384 characters. A record that does not fit stops the scan, and records behind it are not shown. A round whose findings were not stored raises an omission naming them.
+
+The rebase onto #644's trace split (commit `28854775`) keeps the round log on both the outer and the nested trace path.
+
+D52 records the choice. The plan is `docs/plans/2026-11-12-full-pr-context-rounds.md`. No live model call was made.
+
+## Tests
+
+`gate` on `61273b4f` (run 43429340358). This pull request targets `main` at `d10fc746`, the merge of #660.
+
+`ruff check`, `ruff format --check`, and `mypy` are clean.
+
+A round-2 review receives the round-1 finding text and still lists every changed file. Another pull request's records in the same log do not reach the first turn. A prior finding that contains `</untrusted-data`, `###` or `<!` is quoted in full up to the record cap. An unreadable log file is charged to the unreadable-line count.
+
+## Risk and rollback
+
+A pull request whose conversation does not fit, or whose current-head prior round does not fit, stays at `COMMENT` until that context fits or the omissions are empty. The attestation ledger is unchanged and still keyed by head SHA.
+
+Rollback is passing no round log and no context omissions, or reverting this commit. The log file can be deleted. Nothing is migrated.
+
+## Overlapping open PRs
+
+This pull request targets `main` at `d10fc746`. #660, #639, and #644 are merged.
+
+`git merge-tree` of the pre-rebase head `61273b4f` with #646 (`86634481`) conflicted in `atlas_reviewer/coordinator.py`, and also in `atlas_reviewer/README.md`, `atlas_reviewer/cli.py`, `atlas_reviewer/openrouter.py`, `docs/open-questions.md`, and `docs/session-log.md`. #646's continuations pass a file subset into the turn. This branch's first turn lists every file in the current diff and has no subset parameter. Keep that call listing every file. `test_the_first_turn_lists_every_changed_file_and_a_scope_is_a_continuation` fails if the first turn lists only `calc.py` when the diff also changes `config/keys.py`.
+
+\#640 posts one comment. A new commit is a new head SHA. This log is the coordinator's memory of what it already reported. It is not the webhook queue, and this change does not post to GitHub.

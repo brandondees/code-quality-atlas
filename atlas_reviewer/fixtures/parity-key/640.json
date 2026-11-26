@@ -7,12 +7,13 @@
       "id": "640-m1",
       "severity": "minor",
       "summary": "The begin_post cancel check is unpinned.",
-      "source": "Read at 0fe45e5e. begin_post's cancel check is service_queue.py line 329, `if job.superseded or job.cancel.is_set()`. The method is lines 323-340. still_current is lines 317-321, a different method, so the span is line 329.",
+      "source": "Read at 0fe45e5e. begin_post's cancel check is service_queue.py line 329, `if job.superseded or job.cancel.is_set()`. The method is lines 323-340. still_current is lines 317-321, a different method, so the span is line 329. Dropping the `job.cancel.is_set()` operand survives the anchor's own full test suite (the same failures as the baseline), which is what makes the defect unpinned rather than hypothetical; CI's liveness check runs that mutant against the anchor's worktree.",
       "lenses": ["reviewing-test-quality"],
       "needs": ["mutate"],
       "spans": [{"path": "atlas_reviewer/service_queue.py", "line": 329, "end_line": 329}],
       "encloses": [{"path": "atlas_reviewer/service_queue.py", "line": 323, "end_line": 340}],
-      "citations": []
+      "citations": [],
+      "liveness": [{"kind": "mutant", "file": "atlas_reviewer/service_queue.py", "old": "            if job.superseded or job.cancel.is_set():", "new": "            if job.superseded:"}]
     },
     {
       "id": "640-m2",
@@ -23,7 +24,8 @@
       "needs": ["read"],
       "spans": [{"path": "atlas_reviewer/service_post.py", "line": 229, "end_line": 231}],
       "encloses": [{"path": "atlas_reviewer/service_post.py", "line": 217, "end_line": 236}],
-      "citations": []
+      "citations": [],
+      "liveness": [{"kind": "quote", "file": "atlas_reviewer/service_post.py", "text": "            if check is not None and not check():"}]
     },
     {
       "id": "640-m3",
@@ -42,7 +44,11 @@
         {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15},
         {"path": "docs/open-questions.md", "line": 61, "end_line": 61}
       ],
-      "citations": []
+      "citations": [],
+      "liveness": [
+        {"kind": "absent", "file": "docs/open-questions.md", "text": "amends D48"},
+        {"kind": "absent", "file": "atlas_reviewer/README.md", "text": "amends D48"}
+      ]
     }
   ]
 }
