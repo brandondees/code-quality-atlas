@@ -3713,3 +3713,19 @@ def test_eval_run_refuses_a_repetition_below_one(tmp_path):
     )
     assert code == cli.EXIT_USAGE
     assert "--repetition must be a positive integer" in err.getvalue()
+
+
+def test_the_tool_log_appends_parseable_jsonl_lines(tmp_path):
+    """One tool result per physical line: two appended entries are two
+    lines `json.loads` can each take -- the round-6 review of #848: the
+    appender wrote a literal backslash-n instead of a newline, so the
+    whole file was one physical line and every JSONL reader, this test's
+    own loop included, died with 'Extra data' on the first tool call."""
+    from atlas_reviewer.cli import _append_tool_log
+
+    tool_log = tmp_path / "tool_results.jsonl"
+    _append_tool_log(tool_log, '{"tool": "read_file", "status": "ok", "text": "a"}')
+    _append_tool_log(tool_log, '{"tool": "grep", "status": "ok", "text": "b"}')
+    lines = tool_log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert [json.loads(line)["tool"] for line in lines] == ["read_file", "grep"]

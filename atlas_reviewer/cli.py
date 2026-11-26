@@ -2716,4 +2716,4 @@ def _append_tool_log(path: Path, line: str) -> None:
     opened-and-closed per line, so a killed review leaves the log it
     wrote and concurrent lenses' lines interleave by write order."""
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(line + "\\n")
+        handle.write(line + "\n")
