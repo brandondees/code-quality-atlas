@@ -11,6 +11,7 @@ staged copy."""
 
 import base64
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -49,9 +50,15 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     choose_pytest,
     parse_collection,
+    stage_copy_steps,
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
-from atlas_reviewer.fakes import PYENV_PYTHON, FakeSprites, MemoryLedger
+from atlas_reviewer.fakes import (
+    PYENV_PYTHON,
+    ExecRule,
+    FakeSprites,
+    MemoryLedger,
+)
 from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.local_runner import LocalSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
@@ -2248,3 +2255,115 @@ def test_run_bridge_applies_the_test_clock_override_to_the_scripts(tmp_path):
     # payload, or the lost-output guard fails the call instead.
     assert result.content.text == ""
     assert any("timeout -k 2 240" in script for script in scripts)
+
+
+def test_the_bridge_starts_suspect_when_the_collection_probe_ran(tmp_path):
+    """The collection probe executes the copy's own conftest.py -- PR
+    code, in the runner, with the staged repository reachable -- so the
+    bridge's first runner-side read re-stages from the controller-held
+    tarballs, whatever the probe's verdict was. A conftest that rewrites
+    a loose object during collection must not be served by the first
+    diff read."""
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ExecRule("__ATLAS_BRIDGE__", "__ATLAS_BRIDGE__ 0 0 9 0 0\n", 0),
+        )
+    )
+    uploads = lambda: [
+        c
+        for c in sprites.calls
+        if c[0] == "exec" and "cat >" in c[2] and ".tar.gz" in c[2]
+    ]
+    results = []
+
+    def body(bridge):
+        before = len(uploads())
+        assert bridge._suspect is True
+        results.append(bridge.call("grep", {"pattern": "total", "regex": True}))
+        assert len(uploads()) - before == 2
+        return "done"
+
+    report = run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-collection-suspect",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert results[0].status is Status.OK
+
+
+def test_every_built_copy_is_writable_and_made_when_empty(tmp_path):
+    """The disposable copy is the PR's own writable space: its tests and
+    the collection probe run in it as the no-root guard's user, which on
+    a root runner is not the user that built it -- a test suite that
+    writes into its own checkout (a conftest generating a file, a
+    codegen test) fails on a read-only tree, and a conftest that fails
+    at import disables every execution call. The copy's build ends by
+    creating the work directory and making the tree writable; everything
+    outside the copy keeps the builder's ownership. The creation is the
+    point of the mkdir: `checkout-index` creates the work directory only
+    when the tree has an entry, so an empty head tree must build its
+    (empty) copy instead of failing the chmod on a path never made."""
+    work = tmp_path / "bridge"
+    scratch = work / "scratch" / "work"
+    steps = stage_copy_steps(str(work), "/usr/bin/git", str(scratch), "c" * 40)
+    chmod_steps = [s for s in steps if "chmod" in s]
+    assert chmod_steps == [
+        f"mkdir -p {shlex.quote(str(scratch))} && chmod -R a+rwX {shlex.quote(str(scratch))}"
+    ]
+    # Run the steps against a repository whose head commit has an EMPTY
+    # tree, so checkout-index writes nothing and the work directory
+    # exists only because the build makes it.
+    repo = tmp_path / "repo.git"
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
+    work.mkdir(parents=True, exist_ok=True)
+
+    def git(*argv: str, stdin: str | None = None) -> str:
+        done = subprocess.run(
+            ["git", *argv], cwd=repo, capture_output=True, text=True,
+            env=env, check=True, input=stdin,
+        )  # fmt: skip
+        return done.stdout.strip()
+
+    empty_tree = git("mktree", stdin="")
+    empty_commit = git("commit-tree", empty_tree, "-m", "empty")
+    steps = stage_copy_steps(str(work), "/usr/bin/git", str(scratch), empty_commit)
+    for step in steps:
+        subprocess.run(["/bin/sh", "-c", step], check=False, capture_output=True)
+    assert scratch.is_dir()
+    assert (
+        subprocess.run(
+            ["/bin/sh", "-c", f"test -w {shlex.quote(str(scratch))}"], check=False
+        ).returncode
+        == 0
+    )

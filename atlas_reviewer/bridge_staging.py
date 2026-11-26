@@ -173,6 +173,13 @@ class Staged:
     # verdict could matter).
     collection_ok: bool = True
     collection_note: str = ""
+    # Whether the collection probe ran (it runs whenever a pytest-capable
+    # interpreter was staged): the probe executes the staged copy's own
+    # conftest.py -- PR code, in the runner, with the staged repository
+    # reachable -- so the bridge built on this staging starts suspect and
+    # its first runner-side read or execution copy re-stages from the
+    # controller-held tarballs, whatever the probe's verdict was.
+    collection_ran: bool = False
 
     @property
     def revs(self) -> frozenset[Rev]:
@@ -466,6 +473,19 @@ def stage_copy_steps(root: str, git: str, scratch: str, head: str) -> tuple[str,
         f"mkdir -p {quote(f'{root}/{SCRATCH_DIR}')}",
         f"{index} {g} {work_tree} read-tree {quote(head)}",
         f"{index} {g} {work_tree} checkout-index -a -f --prefix={quote(scratch)}/",
+        # The copy is the PR's own writable space: its tests and the
+        # collection probe run in it as the no-root guard's user, which
+        # on a root runner is not the user that built it -- and a test
+        # suite that writes into its own checkout (a conftest generating
+        # a file, a codegen test) fails on a read-only tree. Everything
+        # outside the copy -- the staged repository, the trees, the
+        # controller's indexes -- keeps the builder's ownership. The
+        # mkdir is the scratch work directory's own creation: the
+        # `mkdir -p` above makes the scratch root, and `checkout-index`
+        # creates the work directory only when the tree has an entry --
+        # an empty head tree must stage and collect nothing, not fail
+        # the copy build on a chmod of a path that was never made.
+        f"mkdir -p {quote(scratch)} && chmod -R a+rwX {quote(scratch)}",
     )
 
 
@@ -647,4 +667,5 @@ def stage(
         trees.head_sha,
         collection_ok,
         collection_note,
+        pytest is not None,
     )

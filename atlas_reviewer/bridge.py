@@ -2441,6 +2441,12 @@ def run_bridge(
                 trees,
                 unpack,
                 approvals=approvals,
+                # The collection probe executed the copy's own conftest.py
+                # -- PR code, in the runner -- so the bridge's first
+                # runner-side read or execution copy re-stages from the
+                # controller-held tarballs, whatever the probe's verdict
+                # was.
+                _suspect=staged.collection_ran,
             )
         )
 
