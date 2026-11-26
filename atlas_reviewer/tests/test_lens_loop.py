@@ -53,6 +53,7 @@ from atlas_reviewer.lens_loop import (
     _quote_repair_nudge,
     _repair,
     _reserve_call,
+    _sweep_evidence,
     _time_up,
     diff_prefix_for,
     finding_contract,
@@ -3311,3 +3312,22 @@ def test_a_lens_outside_the_sweep_set_gets_no_evidence_block(tmp_path):
             the_job=the_job, source=source,
         )  # fmt: skip
     assert "tool-evidence" not in model.requests[0].messages[0].text
+
+
+def test_a_failed_sweep_degrades_to_no_evidence(monkeypatch):
+    """The sweep is evidence gathering, not the lens's work: a sweep that
+    fails -- a session exec failure, a lost reply -- leaves the first
+    turn without the block and the attempt alive, instead of aborting
+    the lens it serves."""
+    from atlas_reviewer.bridge import SweepSpec
+    from atlas_reviewer.ports import BoundaryError
+
+    class ExplodingBridge:
+        def sweep_plan(self, diff):
+            return (SweepSpec("calc.py", 2, "negate-condition"),)
+
+        def sweep(self, specs, *, clock, budget_s=None):
+            raise BoundaryError("the sweep's exec failed")
+
+    monkeypatch.setenv("ATLAS_SWEEP_LENSES", LENS)
+    assert _sweep_evidence(ExplodingBridge(), job(), FakeClock()) == ""

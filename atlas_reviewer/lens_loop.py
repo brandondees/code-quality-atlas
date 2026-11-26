@@ -166,6 +166,7 @@ from atlas_reviewer.ports import (
     ByokRefusedError,
     Clock,
     KeyRefusedError,
+    StreamTimeoutError,
     TransportError,
     TransportTimeoutError,
 )
@@ -1959,13 +1960,21 @@ def _sweep_evidence(bridge: Bridge, job: LensJob, clock: Clock) -> str:
     changed conditions swept through the same machinery a `mutate` call
     uses, the verdicts fenced as one tool-evidence block appended to the
     first turn. Empty when the lens is not in the sweep's set or the diff
-    carries no changed condition to sweep."""
+    carries no changed condition to sweep. `run_attempt` calls this
+    before its wall clock starts, so the sweep's bounded pass never comes
+    out of the lens's own wall; the verdicts are memoized on the bridge,
+    so a retry attempt reads them instead of re-running the mutants; and
+    a failed sweep degrades to no evidence -- evidence gathering never
+    aborts the lens it serves."""
     if job.lens not in sweep_lenses(os.environ):
         return ""
     specs = bridge.sweep_plan(job.diff)
     if not specs:
         return ""
-    verdicts = bridge.sweep(specs, clock=clock)
+    try:
+        verdicts = bridge.sweep(specs, clock=clock)
+    except (BoundaryError, StreamTimeoutError):
+        return ""
     lines = [
         "The controller swept the diff's changed conditions before this",
         "lens started, through the same machinery a mutate call uses:",
@@ -2017,9 +2026,13 @@ def run_attempt(
     )
     if not check_delivery(system, job.lens, job.digest):
         return AttemptOutcome(Attestation.NOT_DELIVERED)
+    # The sweep's bounded, memoized pass runs before the wall clock
+    # starts: its seconds are the controller's evidence gathering, not
+    # this lens's wall.
+    sweep_text = _sweep_evidence(bridge, job, clock)
     attempt_start = clock.monotonic()
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
-    first_turn_text = job.first_turn + _sweep_evidence(bridge, job, clock)
+    first_turn_text = job.first_turn + sweep_text
     messages: list[Message] = [UserText(first_turn_text)]
     tools = tool_schemas()
     reset_events()

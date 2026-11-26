@@ -1966,6 +1966,15 @@ class Bridge:
     # the runner's state re-stages from the controller-held tarballs
     # first. Cleared by a successful re-stage.
     _suspect: bool = field(default=False, repr=False)
+    # The verdicts the sweep already ran for, keyed by the specs tuple
+    # that produced them: the sweep is the controller's evidence
+    # gathering, not the model's spend, so a retry attempt reads the
+    # cached verdicts instead of re-running the mutants (the lenses run
+    # in their own runners, so the cache is per lens session, not per
+    # review).
+    _sweep_cache: dict[tuple[SweepSpec, ...], tuple[SweepVerdict, ...]] = field(
+        default_factory=dict, repr=False
+    )
     # The mutation a `mutate` call applied and committed, if one did: a
     # re-stage re-applies it deterministically, so the recorded mutant id
     # and the tree it names survive the rebuild.
@@ -2035,19 +2044,43 @@ class Bridge:
         uses -- the fixed script, fresh disposable copies, scoped test
         runs -- without spending the attempt's own call or mutant budget,
         because this is the controller's evidence gathering, not the
-        model's. Groups whose baseline does not pass report inconclusive
-        (the named broken-environment shape), and the wall budget is
-        checked between groups: whatever did not run is reported as such,
-        never as a verdict. Every exec runs PR code, so the bridge stays
-        suspect between groups and the next read re-stages."""
+        model's. Memoized on the bridge: a retry attempt reads the cached
+        verdicts instead of re-running the mutants. Specs no test file
+        imports report inconclusive with that reason -- the sweep could
+        not aim a run at them, and a lens must not read their absence as
+        "swept clean". Groups whose baseline does not pass report
+        inconclusive (the named broken-environment shape), the wall
+        budget bounds the whole pass, and each group's exec budget is
+        clamped to what is left of it: a group the remaining budget
+        cannot even start is inconclusive, named, never an unbounded
+        exec. Every exec runs PR code, so the bridge stays suspect
+        between groups and the next read re-stages."""
+        key = tuple(specs)
+        cached = self._sweep_cache.get(key)
+        if cached is not None:
+            return cached
         contents = self._contents.get(Rev.HEAD, {})
         groups = sweep_groups(specs, contents)
+        grouped: set[SweepSpec] = {spec for group in groups for spec in group.specs}
+        out: list[SweepVerdict] = [
+            SweepVerdict(
+                spec,
+                "inconclusive",
+                note=(
+                    "no test file imports this module; the sweep could "
+                    "not aim a run at it"
+                ),
+            )
+            for spec in specs
+            if spec not in grouped
+        ]
         budget_s = SWEEP_BUDGET_S if budget_s is None else budget_s
         started = clock.monotonic()
-        out: list[SweepVerdict] = []
         limits = ToolLimits(16 * 1024, SWEEP_RUN_BOUND_S)
+        floor = SWEEP_RUN_BOUND_S + KILL_AFTER_S + EXEC_SLACK_S
         for group in groups:
-            if clock.monotonic() - started >= budget_s:
+            remaining = budget_s - (clock.monotonic() - started)
+            if remaining <= 0:
                 out.extend(
                     SweepVerdict(
                         spec,
@@ -2059,20 +2092,41 @@ class Bridge:
                 continue
             if self._suspect:
                 self._restage()
-            budget = (
+            # PR code runs during the exec, whatever its outcome: the
+            # bridge is suspect from the moment the exec starts, so an
+            # exec that raises -- a lost connection, a timed-out group --
+            # still leaves every later read re-staging instead of serving
+            # what the failed exec's mutants left behind.
+            self._suspect = True
+            budget = min(
                 (1 + len(group.specs)) * (SWEEP_RUN_BOUND_S + KILL_AFTER_S + 30)
                 + len(group.specs) * MUTATE_EDIT_TIMEOUT_S
-                + EXEC_SLACK_S
+                + EXEC_SLACK_S,
+                remaining,
             )
+            if budget < floor:
+                out.extend(
+                    SweepVerdict(
+                        spec,
+                        "inconclusive",
+                        note=(
+                            "the sweep's remaining wall budget could not "
+                            "fit this group's runs"
+                        ),
+                    )
+                    for spec in group.specs
+                )
+                continue
             _code, text = self.session.exec(
                 "mutant sweep",
                 sweep_script(self.staged, group, limits),
                 stage="bridge",
                 budget_s=budget,
             )
-            self._suspect = True
             out.extend(parse_sweep(text, group))
-        return tuple(out)
+        verdicts = tuple(out)
+        self._sweep_cache[key] = verdicts
+        return verdicts
 
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters
@@ -2932,7 +2986,11 @@ class SweepGroup:
 
 def added_lines(diff_text: str) -> frozenset[int]:
     """The head-side line numbers the diff adds: from each hunk's `@@`
-    header the new side's start, counting every context and added line."""
+    header the new side's start, counting every context and added line.
+    The text is one file's diff (`split_files` splits it), so the `+++`
+    header line sits before the first `@@` and every `+` line inside a
+    hunk is a genuinely added line -- one whose content itself begins
+    with `++` included."""
     added: set[int] = set()
     head = 0
     in_hunk = False
@@ -2945,7 +3003,7 @@ def added_lines(diff_text: str) -> frozenset[int]:
                 continue
             head = int(new_side[1:].split(",")[0])
             in_hunk = True
-        elif in_hunk and line.startswith("+") and not line.startswith("+++"):
+        elif in_hunk and line.startswith("+"):
             added.add(head)
             head += 1
         elif in_hunk and (line.startswith(" ") or line == ""):
@@ -2967,7 +3025,22 @@ def _imports_module(source: str, module: str) -> bool:
         if isinstance(node, ast.Import):
             if any(alias.name == module for alias in node.names):
                 return True
-        elif isinstance(node, ast.ImportFrom) and node.module == module:
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and (
+                # Both `import a.b.c`-style dotted modules and the
+                # `from a.b import c` form, whose imported name joined to
+                # the from-module is the dotted path -- the common test-file
+                # spelling of `from atlas_reviewer import bridge`.
+                node.module == module
+                or any(
+                    f"{node.module}.{alias.name}" == module
+                    for alias in node.names
+                    if alias.name != "*"
+                )
+            )
+        ):
             return True
     return False
 
@@ -2980,14 +3053,18 @@ def sweep_specs(
     """The changed conditions and break/continue statements the sweep
     will try: every `if`/`while`/conditional expression, `and`/`or`
     operand, `break`/`continue` and comparison that starts on a line the
-    diff adds, in the head tree's own parse. Deduplicated, capped -- a
-    bigger diff sweeps the first `cap` specs in path-and-line order."""
+    diff adds, in the head tree's own parse. Deduplicated, sorted into
+    path-and-line order (`ast.walk` is breadth-first, so the sort is what
+    makes the docstring's promise true), capped -- a bigger diff sweeps
+    the first `cap` specs in that order. Test files name no mutant: the
+    sweep mutates the code the tests import, never the tests themselves,
+    and a test-file mutant would only spend the cap."""
     specs: list[SweepSpec] = []
     seen: set[tuple[str, int, str, int | None]] = set()
     file_diffs = {f.path: f.text for f in split_files(diff)}
     for path in sorted(file_diffs):
-        if len(specs) >= cap:
-            break
+        if _is_test_path(path):
+            continue
         data = contents.get(path)
         if data is None:
             continue
@@ -3026,7 +3103,9 @@ def sweep_specs(
                 continue
             seen.add(key)
             specs.append(spec)
-    return tuple(specs)
+    return tuple(
+        sorted(specs, key=lambda s: (s.path, s.line, s.operator, s.operand or 0))
+    )
 
 
 def sweep_groups(
