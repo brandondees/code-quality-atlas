@@ -1530,6 +1530,11 @@ class LensJob:
     # harness-parity slice). Empty when no description reached this run,
     # which leaves such a finding unverified and unreported.
     pr_body: str = ""
+    # The diagnostic tool-result sink (issue #713's harness-parity
+    # slice): every execution and read result, as the model saw it
+    # (rendered and capped), one JSON line. None logs nothing --
+    # the production reviews keep their telemetry only.
+    tool_log: Callable[[str], None] | None = None
 
 
 @dataclass
@@ -2425,6 +2430,16 @@ def _time_up(
 
 def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
     result = bridge.call(call.tool, call.args)
+    if job.tool_log is not None:
+        job.tool_log(
+            json.dumps(
+                {
+                    "tool": result.tool,
+                    "status": result.status.name,
+                    "text": render(result),
+                }
+            )
+        )
     p.tools.append(ToolUse(result.tool, result.args, result.status.name))
     p.secrets.extend(result.secrets)
     if result.status in GAP_STATUSES:

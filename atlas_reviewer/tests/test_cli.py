@@ -9,15 +9,19 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from atlas_reviewer import cli
 from atlas_reviewer.budget import CallLimits
+from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
+from atlas_reviewer.parity_key import KEY_DIR, load_key, load_runs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
+from atlas_reviewer.rounds import RoundLog, RoundRecord
 from atlas_reviewer.runner import EGRESS_TAG, event_runner_name
 
 from .helpers import FIXTURE, HEAD, SOURCE_TARBALL, FakeClock, fake_token
@@ -1912,7 +1916,6 @@ def test_a_read_token_replaces_the_app_private_key(tmp_path):
     from argparse import Namespace
 
     from atlas_reviewer.clock import SystemClock
-    from atlas_reviewer.domain import PrEvent
     from atlas_reviewer.providers import OfflineProvider
     from atlas_reviewer.telemetry import Telemetry
 
@@ -3245,7 +3248,6 @@ def test_the_context_fit_is_measured_against_the_ranked_first_turn():
     ranking the real first turn carries, so the ranked listing's own
     header -- not the unranked one -- is what the room is sized against.
     Kills the scaffold-measured-unranked mutant."""
-    from types import SimpleNamespace
 
     from atlas_reviewer.cli import _NONCE_PROBE, _input_room_chars
     from atlas_reviewer.coordinator import first_turn
@@ -3359,3 +3361,371 @@ def test_select_provider_refuses_tenant_without_live_inference(tmp_path):
 
 def test_the_tenant_key_is_a_scrubbed_secret():
     assert "ATLAS_TENANT_MODEL_KEY" in cli.SECRET_ENV
+
+
+def test_eval_run_writes_a_draft_and_a_loadable_run_file(tmp_path):
+    """`eval-run` runs the product's own review path over the fixture
+    snapshot, writes the draft and an eval-parity run file (issue #713's
+    harness-parity slice). Offline: the scripted model, the in-memory
+    runner, no credentials."""
+    run_file = tmp_path / "runs" / "sample-1.json"
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+            "--run-file",
+            str(run_file),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    assert run_file.is_file()
+    runs = load_runs(run_file.parent)
+    assert len(runs) == 1
+    (record,) = runs
+    assert record.head_sha != ""
+    # The mapping is what this test pins: the scripted blocker finding
+    # lands in the run file with the fields the grader matches.
+    assert record.lenses_run == ("tracing-correctness-and-invariants",)
+    assert record.lenses_not_run == () and record.lenses_failed == ()
+    (mapped,) = record.findings
+    assert mapped.severity == "blocker"
+    assert mapped.path == "calc.py"
+    assert mapped.line == 4
+    assert mapped.verified is True
+    assert mapped.lens == "tracing-correctness-and-invariants"
+    assert "discount" in mapped.quote
+
+
+def test_eval_run_logs_the_tool_results_it_served(tmp_path):
+    tool_log = tmp_path / "tool_results.jsonl"
+    run_cli(
+        "--state-dir",
+        str(tmp_path / "state"),
+        "eval-run",
+        "--fixture",
+        str(FIXTURE),
+        "--lenses",
+        "tracing-correctness-and-invariants",
+        "--depth",
+        "triage",
+        "--pool-size",
+        "1",
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "blocker.json"),
+        "--out",
+        str(tmp_path / "draft.md"),
+        "--tool-log",
+        str(tool_log),
+    )
+    assert tool_log.is_file()
+    # The shipped scenario's scripted lens makes no tool calls, so the
+    # log is empty here; the per-line shape is pinned where the tools run
+    # (test_lens_loop's tool-log test). What this pins is the sink: the
+    # file exists beside the draft, empty or not.
+    for line in tool_log.read_text(encoding="utf-8").splitlines():
+        entry = json.loads(line)
+        assert set(entry) == {"tool", "status", "text"}
+
+
+def test_eval_lenses_owners_reads_the_parity_key():
+    event = PrEvent("brandondees/code-quality-atlas", 640, "a" * 40)
+    # The owner set is derived from the key, not hardcoded here: the same
+    # first-seen union the key's own records name for this PR.
+    expected: list[str] = []
+    for finding in load_key(KEY_DIR):
+        if finding.pr != event.pr_number:
+            continue
+        for lens in finding.lenses:
+            if lens not in expected:
+                expected.append(lens)
+    assert cli._eval_lenses(SimpleNamespace(lenses="owners"), event) == tuple(expected)
+    assert expected, "the key carries PR 640 records"
+    assert cli._eval_lenses(SimpleNamespace(lenses=" a , b "), event) == ("a", "b")
+    assert cli._eval_lenses(SimpleNamespace(lenses=None), event) is None
+
+
+def test_eval_run_without_lenses_still_runs_the_picker(tmp_path):
+    """Without --lenses the picker runs exactly as agentic-review's does;
+    the draft carries no fixed-set note."""
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
+    assert "the eval fixture's fixed set" not in draft
+
+
+def test_eval_run_reads_prior_rounds_from_the_fixture_snapshot(tmp_path):
+    """Prior rounds at parity (the scope addendum): the fixture's
+    rounds.jsonl snapshot is the earlier rounds as they stood at the
+    anchor, read by the same code a live review reads. The run appends
+    its own record to the state's copy, and the fixture stays
+    byte-identical. A snapshot the reader cannot validate is the named
+    omission in the draft, exactly as a live review names it."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    snapshot = fixture / "rounds.jsonl"
+    RoundLog(snapshot).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            ("L1-F1 minor calc.py:4 the discount rounds twice",),
+            False,
+        )
+    )
+    before = snapshot.read_bytes()
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    # The shared state round log does not exist: the run's log is the
+    # run-scoped copy under eval-runs/, carrying the snapshot's record
+    # plus the run's own.
+    assert not (tmp_path / "state" / "rounds.jsonl").exists()
+    (run_dir,) = (tmp_path / "state" / "eval-runs").iterdir()
+    state_log = run_dir / "rounds.jsonl"
+    assert len(state_log.read_text(encoding="utf-8").splitlines()) == 2
+    assert snapshot.read_bytes() == before
+
+
+def test_eval_run_names_an_unreadable_fixture_rounds_snapshot(tmp_path):
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    (fixture / "rounds.jsonl").write_bytes(b"\x00\xffbinary not json")
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
+    assert "the round log file could not be read" in "\n".join(
+        line for line in draft.splitlines() if line.startswith("- ")
+    )
+
+
+def test_eval_run_never_touches_the_state_dirs_real_round_log(tmp_path):
+    """The round log an eval run reads and appends to is the run-scoped
+    copy the command owns: a real round log the state directory already
+    carries -- what local agentic-review runs accumulate -- is
+    byte-identical after the run, with or without a fixture snapshot, and
+    an explicit --round-log is refused rather than clobbered."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    snapshot = fixture / "rounds.jsonl"
+    RoundLog(snapshot).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            ("L1-F1 minor calc.py:4 the discount rounds twice",),
+            False,
+        )
+    )
+    real_log = tmp_path / "state" / "rounds.jsonl"
+    real_log.parent.mkdir(parents=True)
+    RoundLog(real_log).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "hunting-silent-failures",
+            "COMMENT",
+            ("L1-F1 major calc.py:2 the guard is gone",),
+            False,
+        )
+    )
+    before = real_log.read_bytes()
+    snapshot_before = snapshot.read_bytes()
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    assert real_log.read_bytes() == before
+    assert snapshot.read_bytes() == snapshot_before
+    # A snapshot-less fixture starts the run from an empty log, and a
+    # second run over the same state dir sees no prior round either.
+    (fixture / "rounds.jsonl").unlink()
+    for _round in range(2):
+        code = cli.main(
+            [
+                "--state-dir",
+                str(tmp_path / "state"),
+                "eval-run",
+                "--fixture",
+                str(fixture),
+                "--lenses",
+                "tracing-correctness-and-invariants",
+                "--depth",
+                "triage",
+                "--pool-size",
+                "1",
+                "--lens-script",
+                str(FIXTURE / "scenarios" / "blocker.json"),
+                "--out",
+                str(tmp_path / "draft2.md"),
+            ],
+            env={},
+            out=io.StringIO(),
+            err=io.StringIO(),
+        )
+        assert code == cli.EXIT_CHANGES_REQUESTED
+    assert real_log.read_bytes() == before
+    # The run-scoped logs live under eval-runs/, one directory per run.
+    eval_runs = tmp_path / "state" / "eval-runs"
+    assert eval_runs.is_dir()
+    assert len(list(eval_runs.iterdir())) == 3
+
+
+def test_eval_run_refuses_an_explicit_round_log(tmp_path):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--round-log",
+            str(tmp_path / "rounds.jsonl"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_USAGE
+    assert "--round-log is not an eval-run option" in err.getvalue()
+
+
+def test_eval_run_refuses_a_repetition_below_one(tmp_path):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--repetition",
+            "0",
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_USAGE
+    assert "--repetition must be a positive integer" in err.getvalue()
+
+
+def test_the_tool_log_appends_parseable_jsonl_lines(tmp_path):
+    """One tool result per physical line: two appended entries are two
+    lines `json.loads` can each take -- the round-6 review of #848: the
+    appender wrote a literal backslash-n instead of a newline, so the
+    whole file was one physical line and every JSONL reader, this test's
+    own loop included, died with 'Extra data' on the first tool call."""
+    from atlas_reviewer.cli import _append_tool_log
+
+    tool_log = tmp_path / "tool_results.jsonl"
+    _append_tool_log(tool_log, '{"tool": "read_file", "status": "ok", "text": "a"}')
+    _append_tool_log(tool_log, '{"tool": "grep", "status": "ok", "text": "b"}')
+    lines = tool_log.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2
+    assert [json.loads(line)["tool"] for line in lines] == ["read_file", "grep"]

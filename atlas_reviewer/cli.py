@@ -26,6 +26,7 @@ import math
 import os
 import re
 import secrets
+import shutil
 import sys
 import tempfile
 import time
@@ -73,6 +74,8 @@ from atlas_reviewer.conversation import (
 from atlas_reviewer.coordinator import (
     NONCE_BYTES,
     AgenticReview,
+    LensState,
+    _first_limit_stop,
     endpoint_class,
     first_turn,
     limits_for_lens,
@@ -129,6 +132,7 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
+from atlas_reviewer.lens_contract import LineRange
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     FinalReply,
@@ -144,7 +148,13 @@ from atlas_reviewer.lens_script import (
     LensScriptModel,
     load_lens_script,
 )
-from atlas_reviewer.lenses import LensLibrary, LensPlan, LensStatus
+from atlas_reviewer.lenses import (
+    LensChoice,
+    LensLibrary,
+    LensPlan,
+    LensStatus,
+    plan_agentic_lenses,
+)
 from atlas_reviewer.local_runner import LocalSprites, LocalTasks
 from atlas_reviewer.openrouter import (
     ENV_KEY_CEILING_USD,
@@ -155,6 +165,7 @@ from atlas_reviewer.openrouter import (
 from atlas_reviewer.parity_key import KEY_DIR, load_key, load_runs, score_parity
 from atlas_reviewer.picker import (
     Depth,
+    LensPreferences,
     LensSelection,
     guideline_shapes,
     picker_instructions,
@@ -430,6 +441,9 @@ class _Run:
     err: TextIO
     credentials: _Credentials
     telemetry: Telemetry | None = None
+    # The completed review, for the command variants that post-process it
+    # (`eval-run`'s run file); None for every other command.
+    review: AgenticReview | None = None
 
 
 def _review_lock(
@@ -976,8 +990,11 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         raise UsageError(
             "--lens-script is a dry-run fixture; live mode calls the real model"
         )
+    tool_log_sink = _tool_log_sink(args)
     limits = _agentic_limits(args, env)
     ceiling_max = _ceiling_max(env)
+    if not args.event:
+        raise UsageError("--event is required")
     event = load_event(Path(args.event))
     _check_out_path(args.out)
     with _review_lock(args, env), ExitStack() as claims:
@@ -988,7 +1005,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         lens_model: LensModel
         model_factory: Callable[[], LensModel] | None
         picker_provider: ModelProvider
-        github: FixtureGitHub | GitHubClient
+        github: FixtureGitHub | GitHubClient | GitHubReader
         task_socket = SOCKET_PATH
         bridge_root = BRIDGE_ROOT
         scratch: str | None = None
@@ -1027,7 +1044,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     "agentic-review live mode needs --provider openrouter "
                     "or --provider tenant, with --allow-live-inference"
                 )
-            github = _live_github(args, env, event, run.credentials)
+            github = _review_github(args, env, event, run.credentials)
             sprites = args.sprites_factory(env)
             redactor = run.credentials.redactor
             picker_provider = provider
@@ -1154,15 +1171,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             with opening_trace(None, scrub).review(
                 event.repo, event.pr_number, event.head_sha
             ) as span:
-                selection, plan = select_agentic_lenses(
-                    depth,
-                    None if depth is Depth.TRIAGE else run_picker,
-                    library,
-                    scrub=scrub,
-                    pr_text=pr_text,
-                    preferences=lens_preferences.preferences,
-                    shapes=shapes,
-                )
+                selection, plan = _plan_lenses(
+                    args, depth, run_picker, library, scrub, pr_text,
+                    lens_preferences.preferences, shapes, event,
+                )  # fmt: skip
                 selection = _with_preference_note(
                     selection, config, (*proposal_notes, *setup_notes)
                 )
@@ -1278,6 +1290,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     run_proposals=proposals,
                     setup=setup,
                     pr_body=pr_text,
+                    tool_log=tool_log_sink,
                 )
                 review = replace(
                     review,
@@ -1288,6 +1301,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                         if use.status is LensStatus.NOT_RUN
                     ),
                 )
+                run.review = review
                 span.set("atlas.review_event", review.event.value)
         except KeyRefusedError as exc:
             # The lens picker's call was refused (D92): the review stops
@@ -1338,7 +1352,7 @@ def _emit_agentic_draft(
 
 
 def _delta_input(
-    event: PrEvent, github: FixtureGitHub | GitHubClient, diff: str
+    event: PrEvent, github: GitHubReader, diff: str
 ) -> tuple[str, DeltaScope | None]:
     """The diff to review and the delta review's scope from the event
     (#702, D83); the scope is None on a full review.
@@ -1889,6 +1903,68 @@ _PROBE_SEQUENCES: dict[
 ] = {"protocol": _probe_protocol, "review": _probe_review_sequence}
 
 
+def _add_agentic_review_args(p: argparse.ArgumentParser) -> None:
+    """The arguments `agentic-review` and `eval-run` share: everything
+    about running a review; the command parsers set their own handler and
+    their own extras."""
+    p.add_argument("--event", help="JSON file with repo, pr_number, head_sha")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="fixtures + in-memory runner; no credentials and no model spend",
+    )
+    p.add_argument(
+        "--fixtures",
+        help="fixture directory for --dry-run (default: the event file's directory)",
+    )
+    p.add_argument(
+        "--lens-script",
+        help=(
+            "dry-run only: the JSON lens script the fake model replays "
+            "(default: scenarios/blocker.json in the fixture directory, "
+            "when the fixture ships one)"
+        ),
+    )
+    p.add_argument("--out", help="write the draft here instead of stdout")
+    p.add_argument(
+        "--include-issues",
+        action="store_true",
+        help="opt in to fetching issues the PR closes",
+    )
+    p.add_argument(
+        "--depth",
+        choices=[d.value for d in Depth],
+        default=Depth.REVIEW.value,
+        help="triage runs the critical tier and does not call the picker",
+    )
+    p.add_argument(
+        "--pool-size",
+        dest="pool_size",
+        default=None,
+        help=(
+            "lenses at once, 1 to 16 "
+            f"(env {AGENTIC_ENV['pool_size']}; {AGENTIC_POOL} when unset)"
+        ),
+    )
+    _events_arg(p)
+    _agentic_limit_args(p)
+    _model_args(p)
+    _key_ceiling_arg(p)
+    p.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
+    p.add_argument(
+        "--round-log",
+        help=(
+            "round log path; the caller-chosen location D67 left open "
+            "(default: <state-dir>/rounds.jsonl)"
+        ),
+    )
+    p.add_argument(
+        "--allow-live-inference",
+        action="store_true",
+        help="required with --provider openrouter; spends real money (capped)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="atlas_reviewer",
@@ -1976,65 +2052,50 @@ def build_parser() -> argparse.ArgumentParser:
         "agentic-review",
         help="review one PR with every selected lens and write one draft",
     )
-    ag.add_argument(
-        "--event", required=True, help="JSON file with repo, pr_number, head_sha"
-    )
-    ag.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="fixtures + in-memory runner; no credentials and no model spend",
-    )
-    ag.add_argument(
-        "--fixtures",
-        help="fixture directory for --dry-run (default: the event file's directory)",
-    )
-    ag.add_argument(
-        "--lens-script",
-        help=(
-            "dry-run only: the JSON lens script the fake model replays "
-            "(default: scenarios/blocker.json in the fixture directory, "
-            "when the fixture ships one)"
-        ),
-    )
-    ag.add_argument("--out", help="write the draft here instead of stdout")
-    ag.add_argument(
-        "--include-issues",
-        action="store_true",
-        help="opt in to fetching issues the PR closes",
-    )
-    ag.add_argument(
-        "--depth",
-        choices=[d.value for d in Depth],
-        default=Depth.REVIEW.value,
-        help="triage runs the critical tier and does not call the picker",
-    )
-    ag.add_argument(
-        "--pool-size",
-        dest="pool_size",
-        default=None,
-        help=(
-            "lenses at once, 1 to 16 "
-            f"(env {AGENTIC_ENV['pool_size']}; {AGENTIC_POOL} when unset)"
-        ),
-    )
-    _events_arg(ag)
-    _agentic_limit_args(ag)
-    _model_args(ag)
-    _key_ceiling_arg(ag)
-    ag.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
-    ag.add_argument(
-        "--round-log",
-        help=(
-            "round log path; the caller-chosen location D67 left open "
-            "(default: <state-dir>/rounds.jsonl)"
-        ),
-    )
-    ag.add_argument(
-        "--allow-live-inference",
-        action="store_true",
-        help="required with --provider openrouter; spends real money (capped)",
-    )
+    _add_agentic_review_args(ag)
     ag.set_defaults(handler=_cmd_agentic_review)
+    evr = sub.add_parser(
+        "eval-run",
+        help=(
+            "run the real review path over a recorded fixture: the live "
+            "context builders, the product's own coordinator, one draft "
+            "and an eval-parity run file -- offline against a scripted "
+            "model, live with --allow-live-inference (issue #713's "
+            "harness-parity slice)"
+        ),
+    )
+    _add_agentic_review_args(evr)
+    evr.add_argument(
+        "--fixture",
+        required=True,
+        help=(
+            "the fixture directory: event.json, the PR snapshot at the "
+            "anchor (pull.json, pull.diff, comments, threads, check "
+            "runs), and the source trees"
+        ),
+    )
+    evr.add_argument(
+        "--lenses",
+        help=(
+            "picker (the default selection) | owners (the parity key's "
+            "lenses for this fixture's PR) | a comma-separated lens list"
+        ),
+    )
+    evr.add_argument(
+        "--repetition",
+        type=int,
+        default=1,
+        help="the run file's repetition field (the 2-of-3 gate's rep)",
+    )
+    evr.add_argument(
+        "--run-file",
+        help="write the eval-parity run file here from the review",
+    )
+    evr.add_argument(
+        "--tool-log",
+        help="log every tool result as the model saw it, rendered and capped, to this JSONL file",
+    )
+    evr.set_defaults(handler=_cmd_eval_run)
     swp = sub.add_parser(
         "sweep", help="destroy runners a crashed review left in the ledger"
     )
@@ -2386,3 +2447,273 @@ def main(
         shutdown_shared()
         raise_if_stopped()
     return code
+
+
+def _review_github(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    event: PrEvent,
+    credentials: _Credentials,
+) -> GitHubReader:
+    """The review's GitHub reader: `eval-run` reads the fixture's own
+    snapshot at the anchor (that is the eval's whole point -- the context
+    builders see exactly what the anchor's PR held); a live
+    `agentic-review` reads the live repository."""
+    if getattr(args, "fixture", None):
+        return FixtureGitHub(Path(args.fixtures))
+    return _live_github(args, env, event, credentials)
+
+
+def _tool_log_sink(args: argparse.Namespace) -> Callable[[str], None] | None:
+    """`eval-run --tool-log`'s append-per-line sink, or None when the run
+    asked for none. The file is created eagerly, so a run whose lens made
+    no tool call still leaves its (empty) log beside the draft."""
+    if not getattr(args, "tool_log", None):
+        return None
+    path = Path(args.tool_log)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return lambda line: _append_tool_log(path, line)
+
+
+def _plan_lenses(
+    args: argparse.Namespace,
+    depth: Depth,
+    run_picker: Callable[[], str] | None,
+    library: LensLibrary,
+    scrub: Callable[[str], str],
+    pr_text: str,
+    preferences: LensPreferences | None,
+    shapes: tuple[str, ...],
+    event: PrEvent,
+) -> tuple[LensSelection, LensPlan]:
+    """The review's lens plan: `eval-run --lenses`'s fixed set when the
+    command named one, the picker otherwise."""
+    fixed = _eval_lenses(args, event)
+    if fixed is not None:
+        return _fixed_lens_plan(library, fixed)
+    return select_agentic_lenses(
+        depth,
+        None if depth is Depth.TRIAGE else run_picker,
+        library,
+        scrub=scrub,
+        pr_text=pr_text,
+        preferences=preferences,
+        shapes=shapes,
+    )
+
+
+def _fixed_lens_plan(
+    library: LensLibrary, fixed: Sequence[str]
+) -> tuple[LensSelection, LensPlan]:
+    """The eval driver's fixed lens set: the picker is not called, and
+    the note says so -- the parity sample's shape (issue #713's
+    harness-parity slice)."""
+    choices = tuple(
+        LensChoice(name, "the eval fixture's fixed lens set") for name in fixed
+    )
+    plan = plan_agentic_lenses(library, choices)
+    selection = LensSelection(
+        choices,
+        (
+            "Lens selection: the eval fixture's fixed set ("
+            + ", ".join(fixed)
+            + "); the picker was not called."
+        ),
+        used_call=False,
+    )
+    return selection, plan
+
+
+def _eval_lenses(args: argparse.Namespace, event: PrEvent) -> tuple[str, ...] | None:
+    """`eval-run --lenses`'s fixed set, or None for the picker: `owners`
+    reads the parity key's lenses for the fixture's pull request (the
+    union of its findings' owner lenses, in first-seen order), a
+    comma-separated value is that list. A lens name the library has no
+    body for is dropped by the plan itself."""
+    if getattr(args, "lenses", None) is None:
+        return None
+    raw = args.lenses.strip()
+    if raw == "owners":
+        seen: list[str] = []
+        for finding in load_key(KEY_DIR):
+            if finding.pr != event.pr_number:
+                continue
+            for lens in finding.lenses:
+                if lens not in seen:
+                    seen.append(lens)
+        if not seen:
+            raise UsageError(
+                "--lenses owners: the parity key has no record for pull "
+                f"request {event.pr_number}, so there is no owner set to "
+                "run; name the lenses, or use the picker"
+            )
+        return tuple(seen)
+    return tuple(name.strip() for name in raw.split(",") if name.strip())
+
+
+def _run_file_from(
+    review: AgenticReview,
+    event: PrEvent,
+    model: str,
+    repetition: int,
+) -> dict[str, object]:
+    """The eval-parity run file (the loader's schema) built from the
+    completed review: the lenses' states in the loader's own run/not-run
+    reading, and the verified findings with the locations the grader
+    matches. The comparison fields stay null: this file is one run, not a
+    measurement."""
+    lenses_run, lenses_not_run, lenses_failed = [], [], []
+    for lens in review.lenses:
+        name = lens.lens
+        state = lens.state
+        if state is LensState.CLEAN or state is LensState.PARTIAL:
+            lenses_run.append(name)
+        elif state is LensState.NOT_RUN:
+            lenses_not_run.append(name)
+        else:
+            lenses_failed.append(name)
+    findings = []
+    for minted in review.verified:
+        location = minted.finding.location
+        # The grader matches a span by path and line: a line-range
+        # location maps to its path and range; every other form --
+        # including the body's own fixed path and a design reference --
+        # maps to its rendered string.
+        location_path = (
+            location.path if isinstance(location, LineRange) else str(location)
+        )
+        finding: dict[str, object] = {
+            "severity": minted.finding.severity.value,
+            "path": location_path,
+            "quote": minted.finding.evidence,
+            "verified": True,
+            "lens": minted.lens,
+        }
+        if isinstance(location, LineRange):
+            finding["line"] = location.start
+            finding["end_line"] = location.end
+        findings.append(finding)
+    return {
+        "pr": event.pr_number,
+        "model": model,
+        "repetition": repetition,
+        "head_sha": event.head_sha,
+        "coverage_complete": review.coverage_complete,
+        "lenses_run": lenses_run,
+        "lenses_not_run": lenses_not_run,
+        "lenses_failed": lenses_failed,
+        # The run file's stops: the first limit that stopped a lens, in
+        # the draft's own reading (`_first_limit_stop`), because the gate
+        # reads the section the same way.
+        "limit_stops": _run_file_limit_stops(review),
+        "findings": findings,
+        "false_positive_majors": None,
+        "lenses_clean": None,
+        "lenses_planned": None,
+        "cost_usd": None,
+        "wall_seconds": None,
+        "cache_read_tokens": None,
+        "cache_write_tokens": None,
+        "previous_turn_misses": None,
+    }
+
+
+def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
+    """The parity harness's driver, in the repo: the fixture directory is
+    the snapshot at the anchor (the PR, its conversation and threads, the
+    CI evidence, the trees), and the product's own review path runs over
+    it -- the live context builders, the coordinator, the draft -- with
+    the fixed lens set the parity sample needs and the run file the
+    eval-parity gate scores. Offline by default (the scripted or dry
+    model, the in-memory runner); `--allow-live-inference` runs the real
+    provider and the real Sprites against the same fixture, and that run
+    spends real money and is the operator's to start."""
+    if (
+        not isinstance(args.repetition, int)
+        or isinstance(args.repetition, bool)
+        or args.repetition < 1
+    ):
+        raise UsageError("--repetition must be a positive integer")
+    fixture = Path(args.fixture)
+    if not fixture.is_dir():
+        raise UsageError(f"fixture directory {fixture} does not exist")
+    if not (fixture / "event.json").is_file():
+        raise UsageError(f"the fixture carries no event.json: {fixture}")
+    args.event = str(fixture / "event.json")
+    args.fixtures = str(fixture)
+    # Prior rounds at parity (the scope addendum): the fixture's own
+    # round-log snapshot is the earlier rounds as they stood at the anchor
+    # -- the same file shape, read by the same code a live review reads.
+    # The log the run uses is a RUN-SCOPED file under the state dir's
+    # eval-runs directory -- never the shared <state-dir>/rounds.jsonl a
+    # local agentic-review accumulates its real history in, and never an
+    # explicit --round-log the caller named -- so an eval run cannot
+    # overwrite or feed on anything but its own copy. The file is
+    # initialized here, from the snapshot when the fixture carries one and
+    # empty when it does not, so a repeated eval run starts from the
+    # fixture and never from the previous run's records; the run appends
+    # its own record to this file, and the fixture stays byte-identical.
+    if args.round_log:
+        raise UsageError(
+            "--round-log is not an eval-run option: the run's round log "
+            "is the fixture's snapshot, copied into a run-scoped file the "
+            "command owns"
+        )
+    eval_state = _state_dir(args, run.env) / "eval-runs"
+    eval_state.mkdir(parents=True, exist_ok=True)
+    state_rounds = (
+        Path(tempfile.mkdtemp(dir=eval_state, prefix="run-")) / "rounds.jsonl"
+    )
+    rounds = fixture / "rounds.jsonl"
+    if rounds.is_file():
+        shutil.copyfile(rounds, state_rounds)
+    else:
+        state_rounds.write_bytes(b"")
+    args.round_log = str(state_rounds)
+    if not args.allow_live_inference:
+        args.dry_run = True
+    code = _cmd_agentic_review(args, run)
+    _write_eval_run_file(args, run)
+    return code
+
+
+def _run_file_limit_stops(review: AgenticReview) -> list[str]:
+    """The run file's stops: the first limit that stopped a lens, in the
+    draft's own reading (`_first_limit_stop`), because the gate reads the
+    section the same way."""
+    stop = _first_limit_stop(review)
+    return [] if stop is None else [stop.message()]
+
+
+def _write_eval_run_file(args: argparse.Namespace, run: _Run) -> None:
+    """`eval-run --run-file`'s output: the completed review as the
+    eval-parity loader's run file. Nothing is written when no run file
+    was asked for, or when the review did not complete -- the draft and
+    the exit code carry that, and the command's own exit is the review's,
+    never a usage error about the missing file."""
+    if not args.run_file:
+        return
+    review = run.review
+    if review is None:
+        print(
+            "no run file written: the review did not complete",
+            file=run.err,
+        )
+        return
+    model = args.model or run.env.get("ATLAS_MODEL", "recorded-fixture")
+    payload = _run_file_from(
+        review, load_event(Path(args.event)), model, args.repetition
+    )
+    run_path = Path(args.run_file)
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    print(f"run file written: {args.run_file}", file=run.err)
+
+
+def _append_tool_log(path: Path, line: str) -> None:
+    """One tool result into the eval run's diagnostic JSONL: appended
+    opened-and-closed per line, so a killed review leaves the log it
+    wrote and concurrent lenses' lines interleave by write order."""
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")

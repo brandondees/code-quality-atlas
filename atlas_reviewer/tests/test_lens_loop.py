@@ -3369,3 +3369,31 @@ def test_a_pull_request_body_finding_verifies_and_reaches_the_draft(tmp_path):
     (checked,) = outcome.findings
     assert checked.verified
     assert str(checked.finding.location) == "pull_request.body"
+
+
+def test_the_tool_log_carries_every_result_as_the_model_saw_it(tmp_path):
+    """The eval driver's diagnostic sink (issue #713's harness-parity
+    slice): every tool result the attempt served, one JSON line, in the
+    rendered redacted capped form the model saw -- so a diagnosis reads
+    what happened instead of inferring it from statuses."""
+    import json as _json
+
+    lines: list[str] = []
+    source, the_job = exec_source(CALC_ROUND)
+    the_job = replace(the_job, tool_log=lines.append)
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [
+            tools(("run_tests", {}), ("read_file", {"path": "calc.py"})),
+            final(finding()),
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.test_runs == 1
+    assert len(lines) == 2
+    first = _json.loads(lines[0])
+    assert first["tool"] == "run_tests" and first["status"] == "OK"
+    assert "passed" in first["text"]
+    second = _json.loads(lines[1])
+    assert second["tool"] == "read_file"
+    assert "return sum" in second["text"]

@@ -921,6 +921,33 @@ cannot read as evidence. One test process's wall clock is 180 seconds
 whole-suite baseline under `mutate` — two processes, one call — could
 not fit), overridable with `ATLAS_TEST_TIMEOUT_S` (30 to 600).
 
+## The parity harness's driver: `eval-run` (issue #713's harness-parity slice)
+
+`python -m atlas_reviewer eval-run --fixture <dir>` runs the product's
+own review path over a **recorded fixture**: the directory carries the
+event file and the PR snapshot at the anchor — the pull request, its
+diff, its comments and review threads, its check runs, and the source
+trees — and the review reads everything through the fixture the way a
+live review reads GitHub. The live context builders run (the
+conversation block, the CI block, the guidelines block, the round log),
+so the lenses see what a production review sees, which is the parity the
+Nov 25 analysis found missing.
+
+`--lenses picker` (the default) selects as a production review does;
+`--lenses owners` runs exactly the parity key's owner lenses for the
+fixture's pull request, no picker call; a comma-separated list fixes the
+set by name. `--run-file PATH` writes the eval-parity run file from the
+completed review — the loader's own schema, with the comparison fields
+null — and `--tool-log PATH` logs every tool result, as the model saw it
+(rendered and capped), one JSON line each, so a diagnosis reads
+what happened instead of inferring it from statuses.
+
+Offline by default: a fixture run without `--allow-live-inference` uses
+the scripted or dry model and the in-memory runner, spending nothing.
+With it, the run calls the real provider against real Sprites over the
+same fixture — real money, the operator's to start — and is what the
+parity stage's go/no-go runs on.
+
 ## The BYOK settings page (config slice S10, part B1)
 
 Part B1 is the intake surface: a GitHub App installation's admin signs
