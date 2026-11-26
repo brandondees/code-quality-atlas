@@ -53,14 +53,6 @@ class _Sprite:
     network_rules: list[Json] = field(default_factory=list)
     memory_mb: int | None = None
     destroyed: threading.Event = field(default_factory=threading.Event)
-    # The checkpoint a restore last restored into this sprite (issue
-    # #819, D95). The checkpoints themselves live on the fake, not the
-    # sprite: the fake models the hopeful half of the capability the
-    # document does not settle -- a checkpoint outliving its sprite's
-    # deletion -- because that is the semantics the shared-checkpoint
-    # flow is built on, and the refused half (an unknown id) is the
-    # NotFoundError `restore` raises, tested on its own.
-    restored_from: str | None = None
 
 
 @dataclass
@@ -93,13 +85,6 @@ class FakeSprites:
     # execs can be checked per runner.
     policy_deny_at_exec: list[bool] = field(default_factory=list)
     policy_deny_named: list[tuple[str, bool]] = field(default_factory=list)
-    # Checkpoints across every sprite of this fake, keyed by the sprite
-    # that created them, in create order; the ids are unique across the
-    # fake ("v1", "v2", ...), and a checkpoint outlives its sprite's
-    # deletion -- the modeled semantics named on the field's comment in
-    # `_Sprite`.
-    checkpoint_ids: list[str] = field(default_factory=list)
-    _checkpoints: dict[str, list[Json]] = field(default_factory=dict)
     _sprites: dict[str, _Sprite] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -156,34 +141,6 @@ class FakeSprites:
     def set_memory_limit(self, name: str, limit_mb: int) -> None:
         self._record("set_memory_limit", name)
         self._get(name).memory_mb = limit_mb
-
-    def checkpoint(self, name: str, comment: str) -> str:
-        self._record("checkpoint", name)
-        self._get(name)
-        with self._lock:
-            checkpoint_id = f"v{len(self.checkpoint_ids) + 1}"
-            self.checkpoint_ids.append(checkpoint_id)
-            self._checkpoints.setdefault(name, []).append(
-                {"id": checkpoint_id, "comment": comment}
-            )
-        return checkpoint_id
-
-    def list_checkpoints(self, name: str) -> list[Json]:
-        self._record("list_checkpoints", name)
-        # Newest first, the ordering the document's list example shows.
-        return list(reversed(self._checkpoints.get(name, [])))
-
-    def restore(self, name: str, checkpoint_id: str) -> None:
-        self._record("restore", name)
-        with self._lock:
-            held = any(
-                entry.get("id") == checkpoint_id
-                for entries in self._checkpoints.values()
-                for entry in entries
-            )
-        if not held:
-            raise NotFoundError(f"checkpoint {checkpoint_id} not found")
-        self._get(name).restored_from = checkpoint_id
 
     def exec(
         self,

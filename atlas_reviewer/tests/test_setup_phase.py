@@ -12,6 +12,8 @@ produces."""
 
 from dataclasses import dataclass, field
 
+from atlas_reviewer.bridge import Status, run_bridge
+from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.cli import (
     _SETUP_FETCH_NOTE,
     _SETUP_LOOKUP_NOTE,
@@ -21,10 +23,13 @@ from atlas_reviewer.cli import (
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.ports import BoundaryError, NotFoundError, ResponseTooLargeError
+from atlas_reviewer.redact import Redactor
 from atlas_reviewer.repo_config import parse_setup_commands, read_repo_config
 from atlas_reviewer.runner import SetupSpec, run_session
 
 from .helpers import HEAD, OLD, FakeClock, source_tarball
+from .test_bridge_runs import framed
+from .test_bridge_runs import staged as staged_reply
 
 LINE = "review_setup_commands: {value}"
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
@@ -422,3 +427,98 @@ def test_the_coordinator_carries_the_setup_spec_into_the_lens_runner(tmp_path):
     assert denies[2:] and all(denies[2:])
     (lens,) = result.lenses
     assert lens.index == 1
+
+
+# ------------------------------------------------- the per-lens chain
+
+
+def test_the_per_lens_chain_setup_then_probe_then_a_real_run(tmp_path):
+    """The offline chain the shared checkpoint's retirement left (D95's
+    2026-11-26 update): every lens's own runner runs the repo's declared
+    install with egress still open, the deny-all flip is set and verified,
+    the staging probe finds the pytest-capable interpreter, and
+    `run_tests` returns a real run -- exit 0 with pytest's own summary
+    counts -- never the tool-missing gap."""
+    sprites = FakeSprites(
+        rules=(
+            ExecRule("pip install", "", 0),
+            ExecRule(
+                "atlas-git",
+                (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    "atlas-pytest:/usr/bin/python3:3.12.3\n"
+                    "atlas-shim:/usr/bin/python3:3.12.3\n"
+                ),
+                0,
+            ),
+            ExecRule(
+                "atlas-staged",
+                f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n",
+                0,
+            ),
+            ExecRule("atlas-collect", "atlas-collect:0:", 0),
+            ExecRule(
+                "__ATLAS_RUN__",
+                staged_reply() + framed(0, b"1 passed in 0.01s\n"),
+                0,
+            ),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        assert bridge.staged.pytest is not None, (
+            "the probe must find the interpreter the setup installed"
+        )
+        results.append(bridge.call("run_tests", {}))
+        return "done"
+
+    report = run_bridge(
+        sprites,
+        MemoryLedger(),
+        SourceTrees(
+            source_tarball(
+                {
+                    "calc.py": b"def total(xs):\n    return sum(xs)\n",
+                    "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+                }
+            ),
+            source_tarball(
+                {
+                    "calc.py": b"def total(xs):\n    return sum(xs)\n",
+                    "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+                }
+            ),
+            OLD,
+            HEAD,
+        ),
+        body,
+        redactor=Redactor(),
+        changed=frozenset({"calc.py"}),
+        name=NAME,
+        deadline_s=300.0,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        setup=SetupSpec((("pip", "install", "pytest"),)),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (run_tests,) = results
+    assert run_tests.status is Status.OK
+    (record,) = run_tests.runs
+    assert record.exit == 0
+    assert record.summary.render() == "1 passed"
+    # The order the chain rests on: the setup exec ran while egress was
+    # still allowed; the staging probe's and the test run's execs ran
+    # under verified deny-all, after the setup. No second runner and no
+    # checkpoint: the fake saw one sprite whose execs carry this whole
+    # chain, in this order.
+    scripts = _scripts(sprites)
+    setup_index = next(i for i, script in enumerate(scripts) if "pip install" in script)
+    probe_index = next(i for i, script in enumerate(scripts) if "atlas-git" in script)
+    run_index = next(i for i, script in enumerate(scripts) if "__ATLAS_RUN__" in script)
+    assert setup_index < probe_index < run_index
+    denied = [flagged for _name, flagged in sprites.policy_deny_named]
+    assert denied[setup_index] is False
+    assert denied[probe_index] and denied[run_index]
+    assert all(flagged for flagged in denied[setup_index + 1 :])
+    assert [op for op, *_rest in sprites.calls].count("create") == 1

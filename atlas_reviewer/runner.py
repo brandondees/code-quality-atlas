@@ -19,10 +19,6 @@ cleanup ends at most that plus one call window after it starts:
    first, while egress is still allowed -- still before any PR content
    is uploaded or unpacked -- and proves the flip held with the
    behavioral egress check after the read-back. A runner given a
-   checkpoint to restore (issue #819, D95) sets and verifies deny-all
-   first, restores the shared post-setup checkpoint, and runs the same
-   egress proof after it -- the restored state is the one thing the flip
-   cannot have seen.
 4. cap memory; probe which tool binaries exist (tool check); upload the
    head-SHA tarball over exec stdin to a file, confirming the byte count
    the runner received; unpack it in a second exec; run each available tool
@@ -163,13 +159,6 @@ FIRST_FRAME_BUDGET_S = 30.0
 # budget is the exec's window around it.
 SETUP_BOUND_S = 300
 SETUP_BUDGET_S = SETUP_BOUND_S + 30.0
-# The setup pass's own wall cap (issue #819, D95): the bake runs serially
-# before any lens starts, so it does not get the whole review wall -- it
-# gets the smaller of what is left and this, which covers the bounded
-# setup commands, the interpreter resolution and the checkpoint calls.
-# A repo whose installs need longer than this should trim or split its
-# spec, and the review wall still bounds the bake below it.
-BAKE_WALL_S = 900.0
 # From the first destroy of a runner, shared by the watchdog's and the
 # final one: no control-plane call starts after it, so cleanup ends
 # within this plus one call window (`SpritesClient` timeout_s, 30s).
@@ -203,17 +192,6 @@ class DeadlineExceededError(RuntimeError):
 
 class PolicyNotEnforcedError(BoundaryError):
     pass
-
-
-class RestoreRefusedError(BoundaryError):
-    """The shared post-setup checkpoint could not be restored into this
-    runner (issue #819, D95): an unknown id -- which is also the shape a
-    restore the API will not perform cross-sprite takes -- a refusal, or
-    a restore that did not complete. Propagates out of the run the way a
-    refused create does, after the runner is destroyed: the lens that
-    asked for it retries once on a fresh runner with the setup phase, a
-    new runner whose own provisioning allows egress again -- the denied
-    network is never re-opened on the runner that lost the restore."""
 
 
 class CreateRefusedError(BoundaryError):
@@ -432,29 +410,6 @@ class _Create:
     outcome: CreateOutcome = "not started"
 
 
-@dataclass
-class _SetupFailure:
-    """Whether this runner's setup phase failed **deterministically**
-    (issue #819, D95) -- a declared command that failed, or no trusted
-    interpreter to run the spec's `{python}` commands with -- shared out
-    of the frozen run the way `_Create` shares the create outcome: the
-    bake's classifier reads it instead of matching the failure note's
-    wording, so a transient failure cannot read as a deterministic one."""
-
-    failed: bool = False
-
-
-@dataclass
-class _SetupPython:
-    """The interpreter the setup phase resolved and ran its `{python}`
-    commands with (issue #819, D95), shared out of the frozen run the way
-    `_Create` shares the create outcome: the baked interpreter the
-    checkpoint's consumer hands to the staging probe as its first,
-    preferred candidate."""
-
-    python: TrustedPython | None = None
-
-
 @dataclass(frozen=True)
 class _Run:
     api: SpritesApi
@@ -467,9 +422,6 @@ class _Run:
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_gate: threading.Semaphore | None = None
     setup: SetupSpec | None = None
-    restore: str | None = None
-    setup_failure: _SetupFailure = field(default_factory=_SetupFailure)
-    setup_python: _SetupPython = field(default_factory=_SetupPython)
 
 
 @dataclass(frozen=True)
@@ -811,14 +763,13 @@ def _disposable(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(
         api, name, deadline, telemetry, first_frame_s,
         create_retries=create_retries, create_gate=create_gate,
-        setup=setup, restore=restore,
+        setup=setup,
     )  # fmt: skip
     destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
@@ -832,45 +783,32 @@ def _disposable(
     watchdog.daemon = True
     watchdog.start()
     try:
-        status, note, setup_failed = _guarded(run, body)
+        status, note = _guarded(run, body)
     finally:
         watchdog.cancel()
         with held():
             cleanup = destroyer.destroy("final")
-    return RunnerReport(status, cleanup, name, note, setup_failed=setup_failed)
+    return RunnerReport(status, cleanup, name, note)
 
 
-def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str, bool]:
+def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
     """Steps that are never fatal (diagnostics, the stdin check) swallow
     their own errors, so a body can return normally after the deadline
-    passed; that run is not complete either. The third element is the
-    run's own setup-failure classification (issue #819, D95): whether the
-    setup phase failed deterministically -- a declared command that
-    failed, or no trusted interpreter -- which the bake reads off the
-    report instead of matching the note's wording."""
+    passed; that run is not complete either."""
     try:
         _provision(run)
         note = body(run)
     except DeadlineExceededError as exc:
-        return (*_deadline_reached(run, str(exc)), False)
+        return _deadline_reached(run, str(exc))
     except CreateRefusedError:
-        raise
-    except RestoreRefusedError:
         raise
     except BoundaryError as exc:
         if run.deadline.remaining() <= 0:
-            return (*_deadline_reached(run, f"deadline reached: {exc}"), False)
-        return (
-            RunnerStatus.FAILED,
-            run.telemetry.scrub(str(exc)),
-            (run.setup_failure.failed),
-        )
+            return _deadline_reached(run, f"deadline reached: {exc}")
+        return RunnerStatus.FAILED, run.telemetry.scrub(str(exc))
     if run.deadline.remaining() <= 0:
-        return (
-            *_deadline_reached(run, f"deadline reached by the last step ({note})"),
-            False,
-        )
-    return RunnerStatus.COMPLETED, run.telemetry.scrub(note), False
+        return _deadline_reached(run, f"deadline reached by the last step ({note})")
+    return RunnerStatus.COMPLETED, run.telemetry.scrub(note)
 
 
 def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
@@ -919,7 +857,6 @@ def run_session(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
-    restore: str | None = None,
 ) -> RunnerReport:
     """`body` on a fresh disposable runner with the same lifecycle as a
     review: recorded in the ledger, provisioned deny-all and verified,
@@ -930,20 +867,13 @@ def run_session(
     A `setup` spec (issue #819, D95) runs the repo's declared setup
     commands with egress still allowed, before the deny-all flip and
     before anything of the review -- the body included -- executes; every
-    exec after the flip runs under verified deny-all. A `restore` names
-    the shared post-setup checkpoint this runner starts from instead of
-    running the setup itself: deny-all is set and verified first, then
-    the checkpoint is restored, and the egress proof follows it, since
-    the restored state is the one thing the flip cannot have seen. A
-    restore that does not happen raises `RestoreRefusedError` past this
-    run's report -- the caller retries the lens once on a fresh runner
-    running the setup phase itself."""
+    exec after the flip runs under verified deny-all."""
     return _disposable(
         api, ledger, lambda run: body(Session(run)), name=name,
         deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
         create_retries=create_retries, create_gate=create_gate,
-        setup=setup, restore=restore,
+        setup=setup,
     )  # fmt: skip
 
 
@@ -1306,7 +1236,7 @@ def _provision(run: _Run) -> None:
         ) from exc
     run.create.outcome = "settled"
     spec = run.setup if run.setup is not None and run.setup.commands else None
-    if spec is not None and run.restore is None:
+    if spec is not None:
         # The setup phase (issue #819, D95) runs while egress is still
         # whatever the fresh image's default is, so `pip install` can
         # reach its indexes; every setup exec is still before any PR
@@ -1323,23 +1253,13 @@ def _provision(run: _Run) -> None:
         lambda: _require_deny_all(api.get_network_policy(name)),
         after=lambda _: {"deny_all": True},
     )  # fmt: skip
-    if run.restore is not None:
-        # The shared post-setup checkpoint (issue #819, D95), restored
-        # under deny-all: the restore is a control-plane call, and the
-        # runner's first exec still happens after the verified flip. A
-        # restore the API refuses -- an unknown id, which is also the
-        # shape a restore the API will not perform cross-sprite takes --
-        # fails the run closed, named; the fallback to per-lens setup is
-        # the caller's decision when no checkpoint exists at all, never a
-        # mid-runner switch with the network re-opened.
-        _restore_checkpoint(run)
     run.deadline.check("resource policy")
     t.span(
         "resources", "memory limit",
         lambda: api.set_memory_limit(name, MEMORY_LIMIT_MB),
         {"memory_mb": MEMORY_LIMIT_MB},
     )  # fmt: skip
-    if spec is not None or run.restore is not None:
+    if spec is not None:
         _egress_proof(run)
 
 
@@ -1390,8 +1310,7 @@ def _setup_phase(run: _Run) -> None:
         # The resolution exec itself failed -- a machinery failure this
         # run cannot distinguish from a transient one, not a property of
         # the image: a fresh runner may resolve fine. The run still fails
-        # closed, but the classification stays non-deterministic, so the
-        # bake's caller keeps its per-lens-setup fallback.
+        # closed.
         raise BoundaryError(
             f"the setup phase's interpreter resolution failed: {python.detail}"
         )
@@ -1400,12 +1319,10 @@ def _setup_phase(run: _Run) -> None:
         # exists on this image -- deterministic across the fresh runners
         # every lens gets, so re-running the same resolution per lens
         # would fail identically.
-        run.setup_failure.failed = True
         raise BoundaryError(
             "the setup phase found no trusted interpreter to run the "
             "repo's setup commands with"
         )
-    run.setup_python.python = python
     for n, command in enumerate(spec.commands, start=1):
         purpose = f"setup command {n}"
         run.deadline.check(purpose)
@@ -1424,7 +1341,6 @@ def _setup_phase(run: _Run) -> None:
             ),
         )  # fmt: skip
         if code != 0:
-            run.setup_failure.failed = True
             raise BoundaryError(
                 f"setup command {n} failed (exit {code}): "
                 f"{guest_text(text, GUEST_TAIL_CHARS)}"
@@ -1457,112 +1373,6 @@ def _egress_proof(run: _Run) -> None:
     )
     if verdict.startswith("OPEN"):
         raise PolicyNotEnforcedError(f"the deny-all flip did not hold: {verdict}")
-
-
-def _restore_checkpoint(run: _Run) -> None:
-    """The shared post-setup checkpoint restored into this runner (issue
-    #819, D95). The API's own completion is the verification; a restore
-    that did not happen -- an unknown id, a refusal, an incomplete stream
-    -- raises `RestoreRefusedError`, which propagates past this run's
-    report: the caller retries the lens once on a fresh runner running
-    the setup phase itself, because the network is already denied here
-    and no mid-runner switch can re-open it."""
-    restore = run.restore
-    assert restore is not None
-    try:
-        run.telemetry.span(
-            "checkpoint",
-            "restore",
-            lambda: run.api.restore(run.name, restore),
-            {"checkpoint": restore},
-        )
-    except BoundaryError as exc:
-        raise RestoreRefusedError(
-            f"the checkpoint restore of {restore} failed: {exc}"
-        ) from exc
-
-
-BAKE_COMMENT = "code-quality-atlas post-setup state (issue #819)"
-
-
-@dataclass(frozen=True)
-class Baked:
-    """The setup pass's outcome: the checkpoint id the post-setup state
-    got and the interpreter the setup phase verified (issue #819, D95) --
-    the baked interpreter every lens's staging probe asks about first --
-    or None with the failed attempt's report when the checkpoint could
-    not be made. A failure is classified for the caller: `setup_failed`
-    marks a **deterministic setup-phase failure** -- a command that
-    failed, or no trusted interpreter -- where re-running the same
-    commands per lens with egress open would fail identically, so the
-    caller runs no setup at all, named; any other failure (the checkpoint
-    call, the deadline, a refused create) leaves the caller its
-    per-lens-setup fallback."""
-
-    checkpoint_id: str | None
-    report: RunnerReport | None
-    python: TrustedPython | None = None
-    setup_failed: bool = False
-
-
-def bake_setup(
-    api: SpritesApi,
-    ledger: RunnerLedger,
-    spec: SetupSpec,
-    *,
-    name: str,
-    deadline_s: float,
-    clock: Clock,
-    telemetry: Telemetry | None = None,
-    first_frame_s: float = FIRST_FRAME_BUDGET_S,
-    create_retries: int = DEFAULT_CREATE_RETRIES,
-    create_gate: threading.Semaphore | None = None,
-) -> Baked:
-    """One setup pass (issue #819, D95): a runner that provisions exactly
-    as a setup runner does -- the spec's commands with egress allowed,
-    then the verified deny-all flip and the behavioral egress proof --
-    and then checkpoints the result, the shared post-setup state every
-    lens restores from instead of re-running the setup. The runner is
-    destroyed once the checkpoint is made: whether a checkpoint survives
-    its sprite's deletion is an API capability the document does not
-    settle (D95's live check names it). A create the API refused
-    (`CreateRefusedError`) propagates: nothing was made, and the caller's
-    fallback decides. A checkpoint that could not be made comes back with
-    the attempt's report, classified: a deterministic setup-phase failure
-    (`setup_failed`) tells the caller to run no per-lens setup at all --
-    the same commands would fail identically with egress open again --
-    while any other failure leaves the caller its per-lens fallback. The
-    interpreter the setup phase resolved is carried out with the
-    checkpoint: it is the baked interpreter the lens runners' staging
-    probes ask about first."""
-    telemetry = telemetry or Telemetry(clock)
-    found: list[str] = []
-    pythons: list[TrustedPython | None] = []
-
-    def body(run: _Run) -> str:
-        pythons.append(run.setup_python.python)
-        checkpoint_id = api.checkpoint(name, BAKE_COMMENT)
-        found.append(checkpoint_id)
-        telemetry.record(
-            "checkpoint", "created", {"checkpoint": checkpoint_id, "runner": name}
-        )
-        return f"checkpoint {checkpoint_id}"
-
-    report = _disposable(
-        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
-        telemetry=telemetry, first_frame_s=first_frame_s,
-        create_retries=create_retries, create_gate=create_gate, setup=spec,
-    )  # fmt: skip
-    if report.status is not RunnerStatus.COMPLETED or not found:
-        return Baked(
-            None,
-            replace(report, provisioning=True),
-            next(iter(pythons), None),
-            setup_failed=report.setup_failed,
-        )
-    return Baked(
-        found[0], replace(report, provisioning=True), next(iter(pythons), None)
-    )
 
 
 def _raw_exec(run: _Run, step: _Exec) -> bytes:

@@ -39,7 +39,6 @@ environment, a file, or a connector into a Sprite.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -63,17 +62,6 @@ from atlas_reviewer.ports import (
 API_URL = "https://api.sprites.dev"
 RUNNER_PREFIX = "cqa-rev-"
 EXEC_STDIN_MAX_BYTES = 10 * 1024 * 1024
-# The checkpoint-id shape the controller accepts from the API (issue
-# #819, D95): the document's examples show short version-like ids ("v7");
-# anything outside this charset never reaches a URL path unencoded.
-_CHECKPOINT_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
-# The create stream's completion text names the new id ("Checkpoint v2
-# created successfully", live-verified Nov 25) -- the one reliable source,
-# because the list's first entry is always a synthetic `Current`.
-_CREATED_ID = re.compile(r"Checkpoint ([A-Za-z0-9._-]{1,64}) created")
-# The synthetic first list entry the live API prepends (live-verified Nov
-# 25); it is not a restorable checkpoint.
-_CURRENT_ID = "Current"
 
 
 @dataclass(frozen=True)
@@ -283,55 +271,3 @@ class SpritesClient:
         except NotFoundError:
             return False
         return True
-
-    def checkpoint(self, name: str, comment: str) -> str:
-        """Creates a checkpoint and returns its id, parsed from the
-        create stream's own completion text ("Checkpoint v2 created
-        successfully" -- the live checks of Nov 25). The list read is
-        only the fallback, and its first entry is always a synthetic
-        `Current` the live API prepends, so any entry whose id is
-        `Current` is skipped before the newest real one is taken; the
-        list-first read was the bug the live run caught (the restore
-        then failed `invalid checkpoint ID "Current"`)."""
-        resp = self._call(
-            "POST", f"{self._path(name)}/checkpoint", {"comment": comment}
-        )
-        complete = _ndjson_complete(resp.body, "checkpoint create")
-        match = _CREATED_ID.search(complete)
-        if match is not None:
-            checkpoint_id = match.group(1)
-            if _CHECKPOINT_ID.fullmatch(checkpoint_id):
-                return checkpoint_id
-        for entry in self.list_checkpoints(name):
-            checkpoint_id = entry.get("id")
-            if (
-                isinstance(checkpoint_id, str)
-                and checkpoint_id != _CURRENT_ID
-                and _CHECKPOINT_ID.fullmatch(checkpoint_id)
-            ):
-                return checkpoint_id
-        raise BoundaryError(
-            "the checkpoint create named no usable id in its stream and "
-            f"the sprite's checkpoint list holds none beyond {_CURRENT_ID!r}"
-        )
-
-    def list_checkpoints(self, name: str) -> list[Json]:
-        resp = self._call("GET", f"{self._path(name)}/checkpoints")
-        try:
-            data = json.loads(resp.body)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise BoundaryError("the checkpoint list is not JSON") from exc
-        if not isinstance(data, list):
-            raise BoundaryError("the checkpoint list is not a list")
-        return [entry for entry in data if isinstance(entry, dict)]
-
-    def restore(self, name: str, checkpoint_id: str) -> None:
-        if not _CHECKPOINT_ID.fullmatch(checkpoint_id):
-            raise BoundaryError(
-                "the checkpoint id to restore is not a usable checkpoint id"
-            )
-        resp = self._call(
-            "POST",
-            f"{self._path(name)}/checkpoints/{quote(checkpoint_id, safe='')}/restore",
-        )
-        _ndjson_complete(resp.body, "checkpoint restore")
