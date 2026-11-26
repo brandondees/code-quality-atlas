@@ -1025,9 +1025,6 @@ def review_lenses(
     )
 
 
-SETUP_LENS = "setup"
-
-
 def _review_lenses(
     trace: ReviewTrace,
     event: PrEvent,

@@ -53,7 +53,6 @@ class _Sprite:
     network_rules: list[Json] = field(default_factory=list)
     memory_mb: int | None = None
     destroyed: threading.Event = field(default_factory=threading.Event)
-    restored_from: str | None = None
 
 
 @dataclass
