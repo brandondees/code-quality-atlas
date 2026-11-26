@@ -629,6 +629,12 @@ def _status(tool: str, code: int) -> Status:
 
 # ------------------------------------------------------------ run tools (D80)
 
+# The one refusal MUTATION_SCRIPT can produce for a machinery failure
+# rather than a mis-aim: the temporary write's OSError. The caller maps
+# aim refusals to REJECTED (the model re-aims) and this one to the
+# inconclusive path, where the executed work is charged.
+_WRITE_REFUSAL = "the copy could not be written"
+
 MUTATION_SCRIPT = """\
 import ast, base64, os, sys
 
@@ -643,7 +649,8 @@ def refuse(reason):
 
 try:
     with open(path, "rb") as handle:
-        source = handle.read().decode("utf-8")
+        raw = handle.read()
+    source = raw.decode("utf-8")
 except (OSError, UnicodeDecodeError):
     refuse("the file could not be read as UTF-8 text")
 try:
@@ -672,12 +679,27 @@ if target is None:
 # string quoting and formatting included -- and the mutated run's source
 # is the head source plus one edit. Line offsets are computed over "\\n"
 # only, matching how the parser numbers lines.
+# The AST's column offsets are UTF-8 byte offsets, not character
+# indices: a column past a multi-byte character names a position one or
+# more characters earlier in the decoded text, so every column is
+# converted to its character index against the line's own bytes before
+# it is added to the line's offset.
+byte_lines = raw.split(b"\\n")
+char_lines = source.split("\\n")
+if len(byte_lines) != len(char_lines):
+    refuse("the file's byte and character line counts disagree")
+
 offsets = [0]
-for part in source.split("\\n"):
+for part in char_lines:
     offsets.append(offsets[-1] + len(part) + 1)
 
 def span(lineno, col, end_lineno, end_col):
-    return offsets[lineno - 1] + col, offsets[end_lineno - 1] + end_col
+    line = byte_lines[lineno - 1]
+    end_line = byte_lines[end_lineno - 1]
+    return (
+        offsets[lineno - 1] + len(line[:col].decode("utf-8")),
+        offsets[end_lineno - 1] + len(end_line[:end_col].decode("utf-8")),
+    )
 
 FLIPS = {
     "Eq": ("==", "!="),
@@ -921,19 +943,7 @@ def _splice(
         (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
         key=lambda node: getattr(node, "col_offset", 0),
     )
-    offsets = [0]
-    for part in source.split("\n"):
-        offsets.append(offsets[-1] + len(part) + 1)
-
-    def span(
-        lineno: int, col: int, end_lineno: int | None, end_col: int | None
-    ) -> tuple[int, int]:
-        # end_lineno/end_col_offset are Optional in the ast stubs but set
-        # for every node a parse produces.
-        return (
-            offsets[lineno - 1] + col,
-            offsets[(end_lineno or lineno) - 1] + (end_col or col),
-        )
+    span = _line_span(source, content)
 
     target = _splice_target(at_line, operator)
     if target is None:
@@ -949,6 +959,111 @@ def _splice(
     except SyntaxError:
         return None
     return mutated.encode("utf-8"), before, replacement
+
+
+def _line_span(
+    source: str, raw: bytes | None = None
+) -> Callable[[int, int, int | None, int | None], tuple[int, int]]:
+    """The line/column → offset span over one source text, computed over
+    `"\\n"` only the way the parser numbers lines -- the one builder both
+    the controller's splice and its aim check span with.
+
+    The AST's column offsets are **UTF-8 byte** offsets, not character
+    indices -- a column past a multi-byte character names a position one
+    or more characters earlier in the decoded text -- so every column is
+    converted to its character index before it is added to the line's
+    offset. That needs the line's own bytes, which only the caller that
+    still holds the raw file provides; a span built without them passes
+    columns through unchanged (an ASCII-only file's columns coincide,
+    and the callers that hold the bytes always pass them)."""
+    byte_lines = raw.split(b"\n") if raw is not None else None
+    if byte_lines is not None:
+        # The decoded text and the raw bytes must agree on the line
+        # count: a split that disagrees decodes nothing this file
+        # produced.
+        assert len(byte_lines) == len(source.split("\n"))
+
+    def _char_col(lineno: int, byte_col: int) -> int:
+        if byte_lines is None:
+            return byte_col
+        return len(byte_lines[lineno - 1][:byte_col].decode("utf-8"))
+
+    offsets = [0]
+    for part in source.split("\n"):
+        offsets.append(offsets[-1] + len(part) + 1)
+
+    def span(
+        lineno: int, col: int, end_lineno: int | None, end_col: int | None
+    ) -> tuple[int, int]:
+        # end_lineno/end_col_offset are Optional in the ast stubs but set
+        # for every node a parse produces.
+        return (
+            offsets[lineno - 1] + _char_col(lineno, col),
+            offsets[(end_lineno or lineno) - 1]
+            + _char_col(end_lineno or lineno, end_col or col),
+        )
+
+    return span
+
+
+def _aim_refusal(
+    content: bytes, line: int, operator: str, operand: int | None
+) -> str | None:
+    """The controller-side form of `MUTATION_SCRIPT`'s refusal reasons
+    (D80's 2026-11-26 update, round-2 review of #845): the same checks in
+    the script's own order, with its own reason strings, run against the
+    controller's own copy of the head tree **before any exec** -- a
+    mis-aimed `mutate` is refused before its baseline can run, so the
+    refusal really spends nothing (the execution caps count what ran, and
+    nothing ran), instead of the old post-exec refusal that let a lens
+    burn a full baseline per mis-aim without ever taking a `max_mutants`
+    slot. The script's refusal step stays as the parity backstop for an
+    aim that slips past this check; the reasons' parity with the script
+    is pinned alongside the splice's."""
+    try:
+        source = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return "the file could not be read as UTF-8 text"
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "the file does not parse"
+    kind = _SPLICE_KINDS[operator]
+    at_line = sorted(
+        (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
+        key=lambda node: getattr(node, "col_offset", 0),
+    )
+    target = next((node for node in at_line if isinstance(node, kind)), None)
+    if target is None:
+        return (
+            "the operator does not apply to the statement at that line"
+            if at_line
+            else "no statement starts at that line"
+        )
+    span = _line_span(source, content)
+    if operator == "drop-operand":
+        assert isinstance(target, ast.BoolOp)
+        if operand is None:
+            return "drop-operand names the operand it keeps"
+        if not 1 <= operand <= len(target.values):
+            return "the operand index is out of range"
+    elif operator == "flip-compare":
+        assert isinstance(target, ast.Compare)
+        name = type(target.ops[0]).__name__
+        if name not in _COMPARE_FLIPS:
+            return "that comparison operator has no flip"
+        old_text, _replacement = _COMPARE_FLIPS[name]
+        start, end = span(
+            target.left.end_lineno or target.left.lineno,
+            target.left.end_col_offset or target.left.col_offset,
+            target.comparators[0].lineno,
+            target.comparators[0].col_offset,
+        )
+        if source[start:end].strip() != old_text:
+            return "the comparison's spelling is not the operator the AST named"
+    if _splice(content, line, operator, operand) is None:
+        return "the mutated file does not compile"
+    return None
 
 
 class _MissingPath(ValueError):
@@ -2063,29 +2178,52 @@ class Bridge:
             return self._failed(call, Status.FAILED, str(exc), started)
         return self._result(call, reply, (), self.clock.monotonic() - started)
 
-    def _run_exec(self, call: Call, limits: ToolLimits, started: float) -> BridgeResult:
-        """`run_tests` and `mutate` (D80): one exec per call, its reply
-        parsed into run blocks (and, for `mutate`, the mutation's), the
-        mutant's verdict computed here from the runs' exits and the
-        controller's own parse of their summary lines -- never from text
-        the test processes chose to print. A missing interpreter, a
-        malformed reply and a lost output are gaps, never crashes; the
-        verdicts themselves are in-band evidence, like every status the
-        exec stream carries. A `run_tests` call naming an approved
-        proposed command (S7, D88) runs the proposal's own bridge-built
-        argv instead of the pytest one. Neither ever runs as root
-        (Brandon's Nov 25 decision): both go through the no-root guard,
-        which runs through the interpreter the staging probe resolved --
-        the pytest-capable one when there is one, else any candidate that
-        runs -- so a runner with no interpreter at all refuses both,
-        named. The built-in entry also needs the pytest-capable
-        interpreter itself. A runner whose collection probe failed (the
-        test environment cannot import or collect the repo's tests)
-        refuses both with that named gap -- the run would only produce
-        INCONCLUSIVE mutants and red baselines the lens cannot read as
-        evidence."""
-        command = call.get("command") if call.tool == "run_tests" else ""
-        argv = self._command_argv(call) if command else None
+    def _mutate_aim_refusal(self, call: Call, started: float) -> BridgeResult | None:
+        """The mis-aim gate (round-2 review of #845): the controller's own
+        copy of the head tree answers the aim check with no exec, so a
+        mis-aimed `mutate` is refused before its baseline can run and the
+        refusal really spends nothing -- the execution caps count what
+        ran, and nothing ran -- where the old post-exec refusal let a
+        lens burn a full baseline per mis-aim without ever taking a
+        `max_mutants` slot. The runner script's refusal step stays as the
+        parity backstop for an aim that slips past this check.
+
+        A file the parser cannot even process -- a nesting so deep the
+        parser exhausts its stack, or a resource failure -- is a
+        machinery gap, not a mis-aim: the preflight reports it as the
+        named unavailable result (a tool gap that holds the review at
+        COMMENT, and charges nothing, because nothing ran) instead of
+        letting the exception escape the bridge with no structured
+        result."""
+        try:
+            refusal = _aim_refusal(
+                self._contents.get(Rev.HEAD, {}).get(call.get("path"), b""),
+                call.get("line"),
+                call.get("operator"),
+                call.get("operand"),
+            )
+        except (RecursionError, MemoryError) as exc:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                "the mutant preflight could not parse the head file: "
+                f"{type(exc).__name__}",
+                started,
+            )
+        if refusal is not None:
+            return self._refused(
+                call.tool, Status.REJECTED, f"the mutant was refused: {refusal}"
+            )
+        return None
+
+    def _runner_gates(
+        self, call: Call, argv: str | None, started: float
+    ) -> BridgeResult | None:
+        """The execution tools' runner gates, in the order the slices
+        established: a missing pytest-capable interpreter, then a missing
+        no-root-guard interpreter, then a failed collection probe. The
+        built-in `run_tests` entry needs the pytest-capable interpreter
+        itself; a proposed command (S7, D88) does not."""
         if argv is None and self.staged.pytest is None:
             return self._failed(
                 call,
@@ -2109,6 +2247,38 @@ class Bridge:
                 f"in the staged copy: {self.staged.collection_note}",
                 started,
             )
+        return None
+
+    def _run_exec(self, call: Call, limits: ToolLimits, started: float) -> BridgeResult:
+        """`run_tests` and `mutate` (D80): one exec per call, its reply
+        parsed into run blocks (and, for `mutate`, the mutation's), the
+        mutant's verdict computed here from the runs' exits and the
+        controller's own parse of their summary lines -- never from text
+        the test processes chose to print. A missing interpreter, a
+        malformed reply and a lost output are gaps, never crashes; the
+        verdicts themselves are in-band evidence, like every status the
+        exec stream carries. A `run_tests` call naming an approved
+        proposed command (S7, D88) runs the proposal's own bridge-built
+        argv instead of the pytest one. Neither ever runs as root
+        (Brandon's Nov 25 decision): both go through the no-root guard,
+        which runs through the interpreter the staging probe resolved --
+        the pytest-capable one when there is one, else any candidate that
+        runs -- so a runner with no interpreter at all refuses both,
+        named. The built-in entry also needs the pytest-capable
+        interpreter itself. A runner whose collection probe failed (the
+        test environment cannot import or collect the repo's tests)
+        refuses both with that named gap -- the run would only produce
+        INCONCLUSIVE mutants and red baselines the lens cannot read as
+        evidence."""
+        command = call.get("command") if call.tool == "run_tests" else ""
+        argv = self._command_argv(call) if command else None
+        refused = self._runner_gates(call, argv, started)
+        if refused is not None:
+            return refused
+        if call.tool == "mutate":
+            refused = self._mutate_aim_refusal(call, started)
+            if refused is not None:
+                return refused
         try:
             # Since the last execution could have rewritten anything it
             # could reach, the execution starts from a re-staged,
@@ -2125,6 +2295,12 @@ class Bridge:
                 if call.tool == "mutate"
                 else limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
             )
+            # PR code runs during the exec, whatever its outcome: the
+            # bridge is suspect from the moment the exec starts, so an
+            # exec that raises -- a lost connection mid-run -- still
+            # leaves every later read re-staging instead of serving what
+            # the failed run's code left behind.
+            self._suspect = True
             code, text = self.session.exec(
                 f"bridge {call.tool}",
                 mutate_script(self.staged, call, limits)
@@ -2133,7 +2309,6 @@ class Bridge:
                 stage="bridge",
                 budget_s=budget,
             )
-            self._suspect = True
             blocks = parse_run_blocks(text) if code == 0 else None
             if blocks is None:
                 raise BoundaryError(
@@ -2146,14 +2321,24 @@ class Bridge:
                 mut = next((b for b in blocks if isinstance(b, _MutBlock)), None)
                 if mut is not None:
                     refusal = mutation_refusal(mut.payload, mut.apply_exit)
-                    if refusal is not None:
+                    if refusal is not None and refusal != _WRITE_REFUSAL:
                         # A mis-aimed mutant is the model's error to
                         # re-aim (D80's 2026-11-26 update): a refused
                         # call, not an inconclusive verdict -- an
                         # inconclusive one is an execution gap that holds
                         # the review at COMMENT, and the model's own
                         # wrong line number must not cost the lens its
-                        # clean state.
+                        # clean state. The pre-exec aim check has already
+                        # refused every mis-aim without an exec, so a
+                        # refusal that arrives here is the runner
+                        # script's own backstop -- or a machinery
+                        # failure: the temporary write's OSError reads
+                        # as a copy that could not be written, which is
+                        # not an aim at all, and charging it as the
+                        # model's free mis-aim would hide a broken
+                        # runner behind a clean state. Machinery
+                        # failures stay on the inconclusive path, where
+                        # their executed work is charged.
                         return self._refused(
                             call.tool,
                             Status.REJECTED,
@@ -2161,7 +2346,6 @@ class Bridge:
                         )
             return self._run_result(call, blocks, started)
         except StreamTimeoutError as exc:
-            self._suspect = True
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
         except _LostOutputError as exc:
             return self._failed(call, Status.FAILED, str(exc), started)

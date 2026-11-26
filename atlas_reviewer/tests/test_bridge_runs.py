@@ -26,6 +26,7 @@ from atlas_reviewer.bridge import (
     SessionLimits,
     Status,
     ToolLimits,
+    _aim_refusal,
     _MutBlock,
     _pytest_argv,
     _run_status,
@@ -33,6 +34,7 @@ from atlas_reviewer.bridge import (
     _splice,
     mutant_outcome,
     mutate_script,
+    mutation_refusal,
     parse_mutation,
     parse_run_blocks,
     parse_summary,
@@ -2049,6 +2051,37 @@ def test_the_controller_splice_matches_the_runner_script(tmp_path):
             "break-continue",
             None,
         ),  # not a loop statement: compiles, but not a break/continue at the line
+        ("x = 1\n", 99, "negate-condition", None),  # no statement at the line
+        (
+            "def pick(n):\n    return (n) == 2\n",
+            2,
+            "flip-compare",
+            None,
+        ),  # the spelling between the operands is not the bare operator
+        ("def broken(:\n", 1, "negate-condition", None),  # the file does not parse
+        # A multi-byte identifier earlier in the file shifts every byte
+        # column against its character index: the AST's columns are
+        # UTF-8 byte offsets, so a kept operand on a line whose prefix
+        # carries one slices wrong unless both implementations convert
+        # (the round-4 CodeRabbit finding on #845: `return eady`).
+        (
+            "def f(\u00e9, ready):\n    return \u00e9 or ready\n",
+            2,
+            "drop-operand",
+            2,
+        ),
+        (
+            "def f(\u00e9, ready):\n    return \u00e9 or ready\n",
+            2,
+            "drop-operand",
+            1,
+        ),
+        (
+            "value = f(\u00e9)\nif value == 2:\n    pass\n",
+            2,
+            "negate-condition",
+            None,
+        ),
     )
     for text, line, operator, operand in shapes:
         result, path = edit(tmp_path, text, line, operator, operand)
@@ -2056,11 +2089,25 @@ def test_the_controller_splice_matches_the_runner_script(tmp_path):
         spliced = _splice(text.encode(), line, operator, operand)
         if status == "no":
             assert spliced is None, (text, line, operator)
+            # The aim check refuses with the script's own reason: the
+            # pre-exec refusal says what the runner would have said.
+            assert _aim_refusal(text.encode(), line, operator, operand) == (
+                mutation_refusal(f"no {rest}".encode(), 0)
+            ), (text, line, operator)
             continue
         assert spliced is not None
         before_b64, after_b64 = rest.split(" ")
         mutated, before, after = spliced
         assert path.read_bytes() == mutated, (text, line, operator)
+        # The kept operand's own characters, not a byte-shifted misread
+        # of them: the mutant's replacement text is the operand the
+        # grammar named, byte-converted.
+        if operator == "drop-operand" and status == "ok":
+            after_decoded = base64.b64decode(after_b64).decode()
+            assert "\u00e9" not in after_decoded or operand == 1, (
+                text,
+                after_decoded,
+            )
         assert base64.b64decode(before_b64).decode() == before
         assert base64.b64decode(after_b64).decode() == after
 
@@ -2538,3 +2585,158 @@ def test_the_operand_index_is_bounded(tmp_path):
         )  # fmt: skip
         assert result.status is Status.REJECTED
         assert "operand" in result.error.text
+
+
+def test_a_misaimed_mutant_is_refused_before_anything_runs(tmp_path):
+    """The aim check runs against the controller's own copy of the head
+    tree before any exec (round-2 review of #845): a mis-aimed mutate
+    dispatches no runner exec at all -- no baseline included -- so the
+    refusal spends nothing, the mutant cap never charges it, and a lens
+    cannot spend its session on mis-aims that each ran a full baseline
+    under the old post-exec refusal."""
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            return (
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(0, "a" * 40, ok_payload(b"not xs", b"not (not xs):"))
+                + framed(0, out)
+            )
+        return staged() + framed(0, out)
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ReplyRule("__ATLAS_RUN__", answer),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        for _ in range(5):
+            results.append(
+                bridge.call(
+                    "mutate",
+                    {"path": "calc.py", "line": 1, "operator": "negate-condition"},
+                )
+            )
+        results.append(
+            bridge.call(
+                "mutate", {"path": "calc.py", "line": 2, "operator": "negate-condition"}
+            )
+        )
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-aim-check",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+        session_limits=SessionLimits(max_mutants=1),
+    )
+    misaimed, valid = results[:5], results[5]
+    assert all(r.status is Status.REJECTED for r in misaimed)
+    assert all("the mutant was refused" in r.error.text for r in misaimed)
+    # The refusal charged no slot: the valid mutant runs under a cap of 1.
+    assert valid.status is Status.OK
+    assert valid.outcome is MutantOutcome.SURVIVED
+    # And the mis-aims dispatched no runner exec: one mutate exec total,
+    # the valid call's (the fake records the sprite's name per exec, so
+    # the execs are told apart by the mutation step's own temp-file name
+    # in the script).
+    mutate_execs = [
+        c for c in sprites.calls if c[0] == "exec" and "atlas-mutant" in c[2]
+    ]
+    assert len(mutate_execs) == 1
+
+
+def test_a_machinery_write_refusal_stays_inconclusive_and_charges(tmp_path):
+    """The runner script's temporary-write OSError reads as a refusal --
+    'the copy could not be written' -- but it is a machinery failure, not
+    the model's mis-aim: the aim was valid (the preflight passed it) and
+    the baseline already ran, so charging it as a free REJECTED would
+    hide a broken runner behind the lens's clean state and skip the
+    mutant slot its executed work earned. The write refusal stays on the
+    inconclusive path."""
+    out = b"1 passed in 0.01s\n"
+
+    def answer(script):
+        if "__ATLAS_MUT__" in script:
+            reason = base64.b64encode(b"the copy could not be written").decode()
+            return (
+                staged()
+                + framed(0, out)
+                + staged()
+                + mutation_block(0, "-", b"no " + reason.encode())
+                + framed(0, out)
+            )
+        return staged() + framed(0, out)
+
+    (result,), _ = fake_bridge(tmp_path, answer, (MUTATE_REQUEST,), source=trees(SUITE))
+    # The machinery refusal stays on the inconclusive path: the tool
+    # ran (the baseline executed and is charged), the verdict is the
+    # named inconclusive, and the reason says what failed -- not a
+    # REJECTED the caps would treat as free.
+    assert result.status is Status.OK
+    assert result.outcome is MutantOutcome.INCONCLUSIVE
+    assert "the copy could not be written" in (result.outcome_reason or "")
+
+
+def test_a_parser_resource_failure_in_the_preflight_is_a_named_gap(
+    tmp_path, monkeypatch
+):
+    """A file whose nesting exhausts the parser's stack raises
+    RecursionError from ast.parse -- before any exec, outside every
+    handler the exec path has. The preflight reports it as the named
+    unavailable gap (machinery, not a mis-aim; nothing ran, nothing is
+    charged) instead of letting the exception escape the bridge."""
+    results = []
+
+    def body(bridge):
+        results.append(
+            bridge.call(
+                "mutate",
+                {"path": "calc.py", "line": 2, "operator": "negate-condition"},
+            )
+        )
+        results.append(bridge.call("read_file", {"path": "calc.py"}))
+        return "done"
+
+    from atlas_reviewer import bridge as bridge_module
+
+    def exploding_parse(*args, **kwargs):
+        raise RecursionError("the parser ran out of stack")
+
+    monkeypatch.setattr(bridge_module.ast, "parse", exploding_parse)
+    report, *_ = bridge_run(tmp_path, body)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    mutate, read = results
+    assert mutate.status is Status.UNAVAILABLE
+    assert "the mutant preflight could not parse the head file" in mutate.error.text
+    assert "RecursionError" in mutate.error.text
+    # The read tool is untouched by the preflight's own failure.
+    assert read.status is Status.OK
