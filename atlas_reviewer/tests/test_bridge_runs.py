@@ -3723,3 +3723,103 @@ def test_a_bundle_carrying_a_different_head_is_a_named_staging_failure(
     assert log.status is Status.UNAVAILABLE
     assert "not the pull request's" in log.error.text
     assert read.status is Status.OK
+
+
+# ------------------------------------------------- the sandboxed bash tool
+
+
+def test_a_bash_command_runs_in_the_copy_as_the_non_root_user(tmp_path):
+    """The sandboxed bash tool (D80's bash-tool update): the command runs
+    in the lens's own disposable copy, as the non-root user, and sees the
+    copy's files; nothing it writes reaches the repository or a later
+    call."""
+    (run, check, grep) = calls(
+        tmp_path,
+        (
+            "bash",
+            {"command": "id -u; ls; echo marker-written > bash_wrote_this.txt"},
+        ),
+        ("bash", {"command": "test ! -e bash_wrote_this.txt && echo gone"}),
+        ("grep", {"pattern": "bash_wrote_this"}),
+    )[0]  # fmt: skip
+    assert run.status is Status.OK
+    # The non-root user's id, not root's.
+    assert run.content.text.splitlines()[0] != "0"
+    assert "calc.py" in run.content.text
+    # The file the first command wrote died with its copy.
+    assert check.status is Status.OK
+    assert "gone" in check.content.text
+    assert grep.status is Status.OK
+    assert grep.content.text.strip() in ("", "no match")
+
+
+def test_a_bash_command_reads_the_staged_history_in_the_copy(tmp_path):
+    """Git history over the pull request's range is readable inside the
+    copy: the copy's .git file points at the staged repository, whose
+    real history the bundle brought, so the model's own `git log` works
+    without knowing where anything is staged."""
+    _repo, base, head, bundle = _seed_history(tmp_path)
+    head_content = {
+        "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+        "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+    }
+    source = SourceTrees(
+        source_tarball(head_content), source_tarball(head_content), base, head
+    )
+    (result,) = calls(
+        tmp_path,
+        (
+            "bash",
+            {
+                "command": (
+                    "git log --oneline --no-decorate "
+                    f"{base}..refs/atlas-history/head"
+                )
+            },
+        ),
+        source=source,
+        history_bundle=bundle,
+        history_base=base,
+    )[0]  # fmt: skip
+    assert result.status is Status.OK
+    assert "the change under review" in result.content.text
+
+
+def test_a_bash_command_runs_under_verified_deny_all(tmp_path):
+    """The egress rule the sandbox rests on: the bash exec runs after the
+    verified deny-all flip, like every other exec of the review."""
+    sprites = LocalSprites()
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "echo marker-in-the-bash-script"}),
+        sprites=sprites,
+    )[0]  # fmt: skip
+    assert result.status is Status.OK
+    scripts = [argv[-1] for argv in sprites.argv_seen]
+    bash_index = next(
+        i for i, script in enumerate(scripts) if "marker-in-the-bash-script" in script
+    )
+    denied = [flag for _name, flag in sprites.policy_deny_named]
+    assert denied[bash_index] is True
+
+
+def test_a_bash_command_past_its_clock_times_out(tmp_path):
+    limits = {**DEFAULT_LIMITS, "bash": ToolLimits(16 * 1024, 1)}
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "sleep 5"}),
+        limits=limits,
+    )[0]  # fmt: skip
+    assert result.status is Status.TIMED_OUT
+
+
+def test_a_bash_command_is_refused_without_the_guard_interpreter(tmp_path):
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "echo hi"}),
+        pytest_candidates=(),
+    )[0]  # fmt: skip
+    assert result.status is Status.UNAVAILABLE
+    assert "no interpreter on the runner image runs the no-root guard" in (
+        result.error.text
+    )

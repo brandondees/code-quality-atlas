@@ -151,6 +151,10 @@ _LINE = _int_in(1, 10_000_000)
 # a proposal's canonical name by the same value, pinned equal by a test.
 # A longer name matches nothing and is refused here, before any lookup.
 MAX_COMMAND_CHARS = 600
+# The bash tool's command cap (D80's bash-tool update): one focused debug
+# command -- a ruff run, a mypy check, a git log -- is one or two lines;
+# 2000 bytes is generous headroom over that.
+MAX_BASH_CHARS = 2000
 # The probe file's cap (D80's probe-tool update): a focused probe test is
 # a few dozen lines; 16 KiB is generous headroom over that and matches the
 # run tools' output cap's order.
@@ -219,6 +223,20 @@ def _operand_index(value: Any, _revs: frozenset[Rev]) -> int:
 
 
 _SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def _bash_command(value: Any, _revs: frozenset[Rev]) -> str:
+    """The one shell command the bash tool runs in the disposable copy:
+    UTF-8 text within the size cap, no control characters beyond newline,
+    tab and carriage return. The command is model-written code the guard
+    runs as the non-root user inside the copy -- the same trust level as
+    the PR's own tests -- and nothing it writes survives the copy."""
+    text = _string(value)
+    if len(text.encode("utf-8")) > MAX_BASH_CHARS:
+        raise RejectedError(INVALID, f"is over {MAX_BASH_CHARS} bytes")
+    if any(ord(c) < 0x20 and c not in "\n\t\r" or ord(c) == 0x7F for c in text):
+        raise RejectedError(INVALID, "contains a control character")
+    return text
 
 
 def _sha(value: Any, _revs: frozenset[Rev]) -> str:
@@ -327,6 +345,15 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
             _Arg("line", _LINE),
             _Arg("end_line", _LINE, None),
         ),
+        # The sandboxed bash tool (D80's bash-tool update): one command in
+        # the lens's own disposable copy, run as the non-root user under
+        # deny-all egress with the same clock and output caps as the other
+        # execution tools; the copy dies with the call, so nothing the
+        # command writes reaches the repository, the trees, or any later
+        # call. Git history over the pull request's range is readable
+        # inside the copy through the staged repository the .git file
+        # points at.
+        "bash": (_Arg("command", _bash_command),),
         "mutate": (
             _Arg("path", _path),
             _Arg("line", _LINE),
