@@ -521,6 +521,10 @@ class MutationRecord:
     before: str
     after: str
     commit: str
+    # `drop-operand`'s kept-operand index (D80's 2026-11-26 update),
+    # carried so a re-staged re-apply splices the same operand; None for
+    # every other operator.
+    operand: int | None = None
 
 
 @dataclass(frozen=True)
@@ -629,6 +633,7 @@ MUTATION_SCRIPT = """\
 import ast, base64, os, sys
 
 path, line, operator = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+operand = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else None
 
 
 def refuse(reason):
@@ -648,6 +653,9 @@ except SyntaxError:
 kind = {
     "negate-condition": (ast.If, ast.While, ast.IfExp),
     "remove-guard": (ast.If,),
+    "drop-operand": (ast.BoolOp,),
+    "break-continue": (ast.Break, ast.Continue),
+    "flip-compare": (ast.Compare,),
 }[operator]
 at_line = sorted(
     (node for node in ast.walk(tree) if getattr(node, "lineno", None) == line),
@@ -671,21 +679,74 @@ for part in source.split("\\n"):
 def span(lineno, col, end_lineno, end_col):
     return offsets[lineno - 1] + col, offsets[end_lineno - 1] + end_col
 
+FLIPS = {
+    "Eq": ("==", "!="),
+    "NotEq": ("!=", "=="),
+    "Lt": ("<", ">="),
+    "LtE": ("<=", ">"),
+    "Gt": (">", "<="),
+    "GtE": (">=", "<"),
+    "Is": ("is", "is not"),
+    "IsNot": ("is not", "is"),
+    "In": ("in", "not in"),
+    "NotIn": ("not in", "in"),
+}
+
 if operator == "negate-condition":
     start, end = span(
         target.test.lineno, target.test.col_offset,
         target.test.end_lineno, target.test.end_col_offset,
     )
     replacement = "not (" + source[start:end] + ")"
-else:
+elif operator == "remove-guard":
     start, end = span(
         target.body[0].lineno, target.body[0].col_offset,
         target.body[-1].end_lineno, target.body[-1].end_col_offset,
     )
     replacement = "pass"
+elif operator == "drop-operand":
+    if operand is None:
+        refuse("drop-operand names the operand it keeps")
+    if not 1 <= operand <= len(target.values):
+        refuse("the operand index is out of range")
+    kept = target.values[operand - 1]
+    # The whole `and`/`or` expression is the mutated span; the kept
+    # operand's own source is what replaces it, so the others drop.
+    start, end = span(
+        target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+    )
+    kstart, kend = span(
+        kept.lineno, kept.col_offset, kept.end_lineno, kept.end_col_offset,
+    )
+    replacement = source[kstart:kend]
+elif operator == "break-continue":
+    start, end = span(
+        target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+    )
+    replacement = "continue" if isinstance(target, ast.Break) else "break"
+else:
+    left_end = (
+        target.left.end_lineno, target.left.end_col_offset,
+    )
+    right_start = (
+        target.comparators[0].lineno, target.comparators[0].col_offset,
+    )
+    start, end = span(left_end[0], left_end[1], right_start[0], right_start[1])
+    region = source[start:end]
+    name = type(target.ops[0]).__name__
+    if name not in FLIPS:
+        refuse("that comparison operator has no flip")
+    old_text, new_text = FLIPS[name]
+    if region.strip() != old_text:
+        refuse("the comparison's spelling is not the operator the AST named")
+    lead = region[: len(region) - len(region.lstrip())]
+    replacement = lead + new_text + region[len(lead) + len(old_text):]
 before = source[start:end]
 mutated = source[:start] + replacement + source[end:]
-compile(mutated, path, "exec")
+try:
+    compile(mutated, path, "exec")
+except SyntaxError:
+    refuse("the mutated file does not compile")
 temporary = path + ".atlas-mutant"
 try:
     with open(temporary, "w", encoding="utf-8") as handle:
@@ -747,12 +808,109 @@ def _tree_files(tarball: bytes) -> dict[str, bytes]:
     return files
 
 
-def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] | None:
+# The comparison flip's spelling pairs, keyed by the ast operator class
+# name: negation pairs, longest first when it matters (`is not` before
+# `is`). The runner's MUTATION_SCRIPT carries the same table; the parity
+# test pins the two together.
+_COMPARE_FLIPS = {
+    "Eq": ("==", "!="),
+    "NotEq": ("!=", "=="),
+    "Lt": ("<", ">="),
+    "LtE": ("<=", ">"),
+    "Gt": (">", "<="),
+    "GtE": (">=", "<"),
+    "Is": ("is", "is not"),
+    "IsNot": ("is not", "is"),
+    "In": ("in", "not in"),
+    "NotIn": ("not in", "in"),
+}
+
+
+_SPLICE_KINDS = {
+    "negate-condition": (ast.If, ast.While, ast.IfExp),
+    "remove-guard": (ast.If,),
+    "drop-operand": (ast.BoolOp,),
+    "break-continue": (ast.Break, ast.Continue),
+    "flip-compare": (ast.Compare,),
+}
+
+
+def _splice_target(at_line: list[ast.AST], operator: str) -> ast.AST | None:
+    """The node at the named line the operator applies to: the first node
+    of the operator's kind in source-column order."""
+    kind = _SPLICE_KINDS[operator]
+    return next((node for node in at_line if isinstance(node, kind)), None)
+
+
+def _splice_edit(
+    source: str,
+    span: Callable[[int, int, int | None, int | None], tuple[int, int]],
+    target: ast.AST,
+    operator: str,
+    operand: int | None,
+) -> tuple[int, int, str] | None:
+    """The mutated span and its replacement text, or None when the edit
+    does not apply -- the same per-operator shapes MUTATION_SCRIPT
+    splices, pinned together by the parity test."""
+    if operator == "negate-condition":
+        assert isinstance(target, (ast.If, ast.While, ast.IfExp))
+        start, end = span(
+            target.test.lineno, target.test.col_offset,
+            target.test.end_lineno, target.test.end_col_offset,
+        )  # fmt: skip
+        return start, end, f"not ({source[start:end]})"
+    if operator == "remove-guard":
+        assert isinstance(target, ast.If)
+        start, end = span(
+            target.body[0].lineno, target.body[0].col_offset,
+            target.body[-1].end_lineno, target.body[-1].end_col_offset,
+        )  # fmt: skip
+        return start, end, "pass"
+    if operator == "drop-operand":
+        assert isinstance(target, ast.BoolOp)
+        if operand is None or not 1 <= operand <= len(target.values):
+            return None
+        kept = target.values[operand - 1]
+        # The whole `and`/`or` expression is the mutated span; the kept
+        # operand's own source is what replaces it, so the others drop.
+        start, end = span(
+            target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+        )  # fmt: skip
+        kstart, kend = span(
+            kept.lineno, kept.col_offset, kept.end_lineno, kept.end_col_offset,
+        )  # fmt: skip
+        return start, end, source[kstart:kend]
+    if operator == "break-continue":
+        assert isinstance(target, (ast.Break, ast.Continue))
+        start, end = span(
+            target.lineno, target.col_offset, target.end_lineno, target.end_col_offset,
+        )  # fmt: skip
+        return start, end, "continue" if isinstance(target, ast.Break) else "break"
+    assert isinstance(target, ast.Compare)
+    # end_lineno/end_col_offset are Optional in the ast stubs but set for
+    # every node a parse produces -- the same cast span's body makes.
+    start, end = span(
+        target.left.end_lineno or target.left.lineno,
+        target.left.end_col_offset or target.left.col_offset,
+        target.comparators[0].lineno, target.comparators[0].col_offset,
+    )  # fmt: skip
+    region = source[start:end]
+    pair = _COMPARE_FLIPS.get(type(target.ops[0]).__name__)
+    if pair is None or region.strip() != pair[0]:
+        return None
+    lead = region[: len(region) - len(region.lstrip())]
+    return start, end, lead + pair[1] + region[len(lead) + len(pair[0]) :]
+
+
+def _splice(
+    content: bytes, line: int, operator: str, operand: int | None = None
+) -> tuple[bytes, str, str] | None:
     """The controller-side form of `MUTATION_SCRIPT`'s span splice (D80
     round 2): the same parse, the same mutated span, the same replacement
-    -- `None` when the edit does not apply. One splice semantics for the
-    runner's mutant commit and the controller's mutant map; the parity
-    between this and the script is pinned by
+    -- `None` when the edit does not apply, `operand` naming the operand
+    `drop-operand` keeps. One splice semantics for the runner's mutant
+    commit and the controller's mutant map; the parity between this and
+    the script is pinned by
     `test_the_controller_splice_matches_the_runner_script`."""
     try:
         source = content.decode("utf-8")
@@ -777,31 +935,13 @@ def _splice(content: bytes, line: int, operator: str) -> tuple[bytes, str, str] 
             offsets[(end_lineno or lineno) - 1] + (end_col or col),
         )
 
-    if operator == "negate-condition":
-        target = next(
-            (
-                node
-                for node in at_line
-                if isinstance(node, (ast.If, ast.While, ast.IfExp))
-            ),
-            None,
-        )
-        if target is None:
-            return None
-        start, end = span(
-            target.test.lineno, target.test.col_offset,
-            target.test.end_lineno, target.test.end_col_offset,
-        )  # fmt: skip
-        replacement = f"not ({source[start:end]})"
-    else:
-        target = next((node for node in at_line if isinstance(node, ast.If)), None)
-        if target is None:
-            return None
-        start, end = span(
-            target.body[0].lineno, target.body[0].col_offset,
-            target.body[-1].end_lineno, target.body[-1].end_col_offset,
-        )  # fmt: skip
-        replacement = "pass"
+    target = _splice_target(at_line, operator)
+    if target is None:
+        return None
+    located = _splice_edit(source, span, target, operator, operand)
+    if located is None:
+        return None
+    start, end, replacement = located
     before = source[start:end]
     mutated = f"{source[:start]}{replacement}{source[end:]}"
     try:
@@ -1028,12 +1168,14 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
     )
+    operand = call.get("operand")
+    operand_arg = "" if operand is None else f" {operand}"
     edit = (
         f"( cd {scratch}; exec timeout -k {KILL_AFTER_S} "
         f"{MUTATE_EDIT_TIMEOUT_S} "
         f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
         f"{quote(call.get('path'))} {call.get('line')} "
-        f"{quote(call.get('operator'))} ) > mut 2> mut_err"
+        f"{quote(call.get('operator'))}{operand_arg} ) > mut 2> mut_err"
     )
     commit = "; ".join(
         mutant_commit_steps(
@@ -1161,7 +1303,9 @@ def restage_script(
                 f"{MUTATE_EDIT_TIMEOUT_S} "
                 f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
                 f"{quote(mutation.path)} {mutation.line} "
-                f"{quote(mutation.operator)} ) > mut 2> mut_err"
+                f"{quote(mutation.operator)}"
+                f"{'' if mutation.operand is None else f' {mutation.operand}'}"
+                " ) > mut 2> mut_err"
             ),
             "  m=$?",
             "  payload=$(head -n 1 mut)",
@@ -1348,6 +1492,25 @@ def parse_mutation(payload: bytes, apply_exit: int) -> tuple[bool, str, str, str
             return False, "", "", "the mutation step refused without a reason"
         return False, "", "", reason
     return False, "", "", "the mutation step did not report its edit"
+
+
+def mutation_refusal(payload: bytes, apply_exit: int) -> str | None:
+    """The fixed script's own refusal reason -- why the mutation did not
+    apply -- or None when the step did not refuse. Only the script's
+    `no <reason>` answer at exit 0 is a refusal: a step that failed
+    outright (a nonzero exit) is not, and stays the inconclusive path
+    mutant_outcome already names, because a machinery failure is not the
+    model's error to re-aim."""
+    if apply_exit != 0:
+        return None
+    text = payload.decode("utf-8", errors="replace").rstrip("\n")
+    status, _, rest = text.partition(" ")
+    if status != "no":
+        return None
+    try:
+        return base64.b64decode(rest, validate=True).decode("utf-8", errors="replace")
+    except ValueError:
+        return "the mutation step refused without a reason"
 
 
 def mutant_outcome(
@@ -1719,7 +1882,9 @@ class Bridge:
         head = dict(self._contents[Rev.HEAD])
         mutation = self._mutation
         assert mutation is not None
-        spliced = _splice(head[mutation.path], mutation.line, mutation.operator)
+        spliced = _splice(
+            head[mutation.path], mutation.line, mutation.operator, mutation.operand
+        )
         if spliced is None:
             raise BoundaryError(
                 "the recorded mutation does not re-apply to the controller's copy"
@@ -1977,6 +2142,23 @@ class Bridge:
             for block in blocks:
                 if isinstance(block, _RunBlock) and (problem := block.problem()):
                     raise _LostOutputError(problem)
+            if call.tool == "mutate":
+                mut = next((b for b in blocks if isinstance(b, _MutBlock)), None)
+                if mut is not None:
+                    refusal = mutation_refusal(mut.payload, mut.apply_exit)
+                    if refusal is not None:
+                        # A mis-aimed mutant is the model's error to
+                        # re-aim (D80's 2026-11-26 update): a refused
+                        # call, not an inconclusive verdict -- an
+                        # inconclusive one is an execution gap that holds
+                        # the review at COMMENT, and the model's own
+                        # wrong line number must not cost the lens its
+                        # clean state.
+                        return self._refused(
+                            call.tool,
+                            Status.REJECTED,
+                            f"the mutant was refused: {refusal}",
+                        )
             return self._run_result(call, blocks, started)
         except StreamTimeoutError as exc:
             self._suspect = True
@@ -2121,6 +2303,7 @@ class Bridge:
             before,
             after,
             "" if applied.commit in ("-", "") else applied.commit,
+            call.get("operand"),
         )
         if record.commit:
             # A re-stage re-applies this mutation deterministically (D80

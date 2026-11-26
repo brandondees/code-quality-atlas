@@ -165,10 +165,38 @@ def _command(value: Any, _revs: frozenset[Rev]) -> str:
 # named statement, one operator. `negate-condition` wraps the condition of
 # the `if`, `while` or conditional expression at the named line in `not
 # (...)`; `remove-guard` replaces the body of the `if` at the named line
-# with `pass`, so the guarded action no longer happens. Anything else is a
-# rejected call, and an operator that does not apply to the named line is
-# an inconclusive mutant at run time, never a survived one.
-MUTANT_OPERATORS = ("negate-condition", "remove-guard")
+# with `pass`, so the guarded action no longer happens. The 2026-11-26
+# operator slice (D80's update) adds the three the real defects need:
+# `drop-operand` keeps one operand of the `and`/`or` at the named line and
+# drops the rest -- the shape of an unpinned guard conjunct, which neither
+# older operator expresses (negating or removing the whole guard is killed
+# by tests the conjunct drop survives) -- so it takes the 1-based
+# `operand` argument naming the operand to keep; `break-continue` swaps a
+# `break` for a `continue` or the other way round, the shape of a loop
+# that stops scanning where it should keep going; `flip-compare` negates
+# the first comparison operator of the comparison at the named line
+# (`==`/`!=`, `<`/`>=`, `>`/`<=`, `<=`/`>`, `>=`/`<`, `in`/`not in`,
+# `is`/`is not`). Anything else is a rejected call, and an operator that
+# does not apply to the named line is a refused call at run time (D80's
+# update: a mis-aimed mutant is the model's error to re-aim, never an
+# inconclusive verdict and never a survived one).
+MUTANT_OPERATORS = (
+    "negate-condition",
+    "remove-guard",
+    "drop-operand",
+    "break-continue",
+    "flip-compare",
+)
+
+
+def _operand_index(value: Any, _revs: frozenset[Rev]) -> int:
+    """`drop-operand`'s 1-based operand to keep. Only `drop-operand` takes
+    it; `validate` enforces the pairing, so this checks the shape alone."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RejectedError(INVALID, "must be an integer")
+    if not 1 <= value <= 64:
+        raise RejectedError(INVALID, "is an operand index out of range")
+    return value
 
 
 def _operator(value: Any, _revs: frozenset[Rev]) -> str:
@@ -213,6 +241,7 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
             _Arg("path", _path),
             _Arg("line", _LINE),
             _Arg("operator", _operator),
+            _Arg("operand", _operand_index, None),
             _Arg("tests", _prefix, ""),
         ),
     }
@@ -246,7 +275,25 @@ def validate(tool: Any, args: Any, revs: frozenset[Rev]) -> Call:
     call = (
         _read_range(Call(tool, values)) if tool == "read_file" else Call(tool, values)
     )
-    return _run_tools_shape(call)
+    return _mutate_operand_shape(_run_tools_shape(call))
+
+
+def _mutate_operand_shape(call: Call) -> Call:
+    """`drop-operand` names the operand it keeps; no other operator takes
+    one (D80's 2026-11-26 update). A missing index is a rejected call
+    before anything runs, and so is an index on an operator that has no
+    operands to drop."""
+    if call.tool != "mutate":
+        return call
+    operator = call.get("operator")
+    operand = call.get("operand")
+    if operator == "drop-operand":
+        if operand is None:
+            raise RejectedError(INVALID, "drop-operand names the operand it keeps")
+        return call
+    if operand is not None:
+        raise RejectedError(INVALID, "only drop-operand takes an operand index")
+    return call
 
 
 def _run_tools_shape(call: Call) -> Call:

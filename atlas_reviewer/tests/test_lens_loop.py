@@ -3026,13 +3026,52 @@ def test_a_survived_mutant_counts_and_is_not_a_gap(tmp_path):
     assert Cause.TOOL_GAP not in outcome.causes
 
 
-def test_an_inconclusive_mutant_is_a_tool_gap_and_never_a_survivor(tmp_path):
+def test_a_refused_mutant_is_not_a_gap_and_the_model_can_reaim(tmp_path):
+    """A mis-aimed mutant is the model's error to re-aim (D80's 2026-11-26
+    update): the refusal is a rejected call -- the reason goes back, the
+    re-aimed mutant runs -- not an inconclusive verdict, whose execution
+    gap would hold the review at COMMENT over the model's own wrong line
+    number."""
     source, the_job = exec_source(CALC_GUARDED)
     outcome, _model, _ = attempt(
         tmp_path,
         [
             tools(
                 ("mutate", {"path": "calc.py", "line": 1, "operator": "remove-guard"}),
+                ("mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}),
+            ),
+            final(finding(evidence="return sum(round(x, 2) for x in xs)", location="calc.py:4")),
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.mutants_survived == 1
+    assert Cause.TOOL_GAP not in outcome.causes
+
+
+def test_an_inconclusive_mutant_is_a_tool_gap_and_never_a_survivor(tmp_path):
+    """A machinery inconclusive -- here a baseline that already fails --
+    stays an execution gap: the run proved nothing either way, so a review
+    with one open cannot approve (D80)."""
+    failing = b"from calc import total\n\ndef test_total():\n    assert total([1, 2]) == 999\n"
+    head = {
+        "calc.py": CALC_GUARDED,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_calc.py": failing,
+    }
+    base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, DIFF, CHANGED), NONCE,
+        head_tree=head_tarball, diff=DIFF,
+    )  # fmt: skip
+    source = SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD)
+    outcome, _model, _ = attempt(
+        tmp_path,
+        [
+            tools(
+                ("mutate", {"path": "calc.py", "line": 2, "operator": "remove-guard"}),
             ),
             final(finding(evidence="return sum(round(x, 2) for x in xs)", location="calc.py:4")),
         ],
