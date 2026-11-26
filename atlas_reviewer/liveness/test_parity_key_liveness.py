@@ -38,18 +38,28 @@ _BASELINES: dict[str, frozenset[str]] = {}
 _WORKTREES: dict[str, Path] = {}
 
 
-def _git(*args: str, cwd: Path = _REPO) -> str:
+def _git(*args: str, cwd: Path | None = None) -> str:
     done = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
+        ["git", *args],
+        cwd=_REPO if cwd is None else cwd,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if done.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
     return done.stdout
 
 
-def _worktree(commit: str) -> Path:
-    if commit in _WORKTREES:
-        return _WORKTREES[commit]
+def _ensure_commit(commit: str) -> None:
+    """The anchor commit's objects are in the local object store: CI's
+    checkout is shallow (`fetch-depth: 2`), so a commit the store lacks
+    is fetched from origin by SHA before anything reads against it. The
+    mutant specs did this inside `_worktree`; the quote and absent specs
+    read the commit directly through `_anchored_text`, and a quote that
+    ran before the first mutant spec had fetched its anchor died on the
+    shallow checkout's missing object (round-4 CI on #846, the two
+    661-m2 quote specs) -- so every reader goes through here."""
     missing = subprocess.run(
         ["git", "cat-file", "-e", f"{commit}^{{commit}}"],
         cwd=_REPO,
@@ -58,11 +68,20 @@ def _worktree(commit: str) -> Path:
     )
     if missing.returncode != 0:
         _git("fetch", "origin", commit)
+
+
+def _worktree(commit: str) -> Path:
+    if commit in _WORKTREES:
+        return _WORKTREES[commit]
+    _ensure_commit(commit)
     target = _REPO / ".git" / "liveness-worktrees" / commit[:12]
     target.parent.mkdir(parents=True, exist_ok=True)
     _git("worktree", "add", "--quiet", str(target), commit, "--detach")
     _WORKTREES[commit] = target
     return target
+
+
+_SUMMARY_RAN = re.compile(r"\b\d+ (?:passed|failed)\b.*\bin \d")
 
 
 def _suite(worktree: Path) -> frozenset[str]:
@@ -75,7 +94,21 @@ def _suite(worktree: Path) -> frozenset[str]:
         timeout=_SUITE_TIMEOUT_S,
         env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
-    return frozenset(_FAILURE.findall(done.stdout + done.stderr))
+    output = done.stdout + done.stderr
+    if not _SUMMARY_RAN.search(output):
+        # A suite that never reached a summary -- a crash, a collection
+        # error, an empty run -- reports no failures and would make the
+        # mutant comparison vacuous: the mutant would "introduce" nothing
+        # because nothing ran. The baseline-failure subtraction handles a
+        # suite whose environment fails some tests; it must not also
+        # forgive a suite that did not run at all.
+        raise AssertionError(
+            f"the anchor suite in {worktree} produced no pytest summary "
+            f"(exit {done.returncode}); a run that never reported "
+            "passed/failed counts makes the mutant check vacuous: "
+            f"{output[-400:]}"
+        )
+    return frozenset(_FAILURE.findall(output))
 
 
 def _baseline(commit: str) -> frozenset[str]:
@@ -85,6 +118,7 @@ def _baseline(commit: str) -> frozenset[str]:
 
 
 def _anchored_text(commit: str, path: str) -> str:
+    _ensure_commit(commit)
     return _git("show", f"{commit}:{path}")
 
 

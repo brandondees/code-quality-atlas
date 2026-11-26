@@ -667,3 +667,153 @@ def _write_key(directory: Path, finding: dict[str, object]) -> Path:
         encoding="utf-8",
     )
     return key_dir
+
+
+def test_a_shallow_checkout_fetches_a_missing_anchor_before_reading_it(
+    tmp_path, monkeypatch
+):
+    """The liveness checks' anchor reads work on CI's shallow checkout
+    (round-4 CI on #846): `actions/checkout` fetches depth 2, so the
+    anchor commits the key names are not in the object store, and `git
+    show <anchor>:<file>` there answers with the misleading 'exists on
+    disk, but not in <commit>' -- exactly what #846's first green-bound
+    run died on, in the two 661-m2 quote specs that ran before any
+    mutant spec had fetched their anchor. Every reader goes through
+    `_ensure_commit`, which fetches a missing commit from origin first.
+
+    The fixture is self-contained (the round-5 review's Major on #842):
+    a small origin built in tmp_path whose anchor commit is reachable
+    from no ref, a shallow clone of it as the checkout, and the helpers
+    pointed at that clone -- so the test depends on no runner's clone
+    depth and on no real anchor object. The fetch is served by the
+    fixture origin's own `uploadpack.allowAnySHA1InWant`, the same
+    setting that lets CI fetch the real anchors."""
+    import importlib.util
+    import os
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    origin = tmp_path / "origin"
+    (origin / "atlas_reviewer").mkdir(parents=True)
+    identity = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def git(*argv: str) -> str:
+        done = subprocess.run(
+            ["git", *argv],
+            cwd=origin,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=identity,
+        )
+        return done.stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    (origin / "atlas_reviewer" / "coordinator.py").write_text(
+        '# SPDX-License-Identifier: MIT\n"""The agentic coordinator: run the'
+        ' selected lens under the attestation ledger."""\n'
+    )
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    (origin / "atlas_reviewer" / "coordinator.py").write_text(
+        '# SPDX-License-Identifier: MIT\n"""The agentic coordinator: run the'
+        " selected lens under the attestation ledger, verify its output and"
+        ' synthesize the draft."""\n'
+    )
+    git("add", "-A")
+    git("commit", "-qm", "anchor")
+    anchor = git("rev-parse", "HEAD")
+    base = git("rev-parse", "HEAD~1")
+    # The anchor is reachable from no ref, the way the real round-5
+    # anchor is not on any branch.
+    git("checkout", "-q", "--detach", anchor)
+    git("branch", "-f", "main", base)
+    git("checkout", "-q", "main")
+    git("config", "uploadpack.allowAnySHA1InWant", "true")
+
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(shallow)],
+        check=True,
+    )
+    missing = subprocess.run(
+        ["git", "cat-file", "-e", f"{anchor}^{{commit}}"],
+        cwd=shallow,
+        capture_output=True,
+        check=False,
+    )
+    assert missing.returncode != 0, "the fixture clone holds the anchor already"
+    monkeypatch.setattr(liveness, "_REPO", shallow)
+    content = liveness._anchored_text(anchor, "atlas_reviewer/coordinator.py")
+    assert "verify its output and synthesize the draft" in content
+
+
+def test_the_liveness_suite_refuses_a_run_that_never_reported_counts(
+    tmp_path, monkeypatch
+):
+    """A crashed or empty anchor-suite run reports no failures, and the
+    mutant comparison would then read as vacuously live (the round-1
+    Minor: nothing asserted the suite actually ran). `_suite` refuses a
+    run whose output carries no pytest summary with passed/failed
+    counts, so the check fails loudly instead."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    ran = tmp_path / "ran"
+    ran.mkdir()
+    (ran / "test_one.py").write_text("def test_one():\n    assert True\n")
+    assert liveness._suite(ran) == frozenset()
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    try:
+        liveness._suite(empty)
+    except AssertionError as exc:
+        assert "no pytest summary" in str(exc)
+    else:
+        raise AssertionError("an empty run was accepted as a baseline")
+
+
+def test_the_liveness_suite_reports_the_failures_it_saw(tmp_path):
+    """The guard keeps the failure extraction honest: a suite whose test
+    fails yields exactly that test's id."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    failing = tmp_path / "failing"
+    failing.mkdir()
+    (failing / "test_one.py").write_text("def test_one():\n    assert False\n")
+    failures = liveness._suite(failing)
+    assert failures == frozenset({"test_one.py::test_one"}) or any(
+        "test_one" in f for f in failures
+    )
