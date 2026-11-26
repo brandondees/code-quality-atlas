@@ -1532,7 +1532,7 @@ class LensJob:
     pr_body: str = ""
     # The diagnostic tool-result sink (issue #713's harness-parity
     # slice): every execution and read result, as the model saw it
-    # (rendered, redacted, capped), one JSON line. None logs nothing --
+    # (rendered and capped), one JSON line. None logs nothing --
     # the production reviews keep their telemetry only.
     tool_log: Callable[[str], None] | None = None
 

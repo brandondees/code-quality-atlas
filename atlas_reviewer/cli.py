@@ -132,7 +132,7 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.lens_contract import LineRange
+from atlas_reviewer.lens_contract import DesignRef, LineRange
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     FinalReply,
@@ -2093,7 +2093,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evr.add_argument(
         "--tool-log",
-        help="log every tool result, redacted and capped, to this JSONL file",
+        help="log every tool result as the model saw it, rendered and capped, to this JSONL file",
     )
     evr.set_defaults(handler=_cmd_eval_run)
     swp = sub.add_parser(
@@ -2542,6 +2542,12 @@ def _eval_lenses(args: argparse.Namespace, event: PrEvent) -> tuple[str, ...] | 
             for lens in finding.lenses:
                 if lens not in seen:
                     seen.append(lens)
+        if not seen:
+            raise UsageError(
+                "--lenses owners: the parity key has no record for pull "
+                f"request {event.pr_number}, so there is no owner set to "
+                "run; name the lenses, or use the picker"
+            )
         return tuple(seen)
     return tuple(name.strip() for name in raw.split(",") if name.strip())
 
@@ -2570,9 +2576,18 @@ def _run_file_from(
     findings = []
     for minted in review.verified:
         location = minted.finding.location
+        # The grader matches a span by path and line: a line-range
+        # location maps to its path and range, the body location to the
+        # body's own path, and the other forms to their rendered string.
+        if isinstance(location, LineRange):
+            location_path = location.path
+        elif isinstance(location, DesignRef):
+            location_path = str(location)
+        else:
+            location_path = str(location)
         finding: dict[str, object] = {
             "severity": minted.finding.severity.value,
-            "path": str(location),
+            "path": location_path,
             "quote": minted.finding.evidence,
             "verified": True,
             "lens": minted.lens,
@@ -2626,16 +2641,19 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
     # Prior rounds at parity (the scope addendum): the fixture's own
     # round-log snapshot is the earlier rounds as they stood at the anchor
     # -- the same file shape, read by the same code a live review reads.
-    # The snapshot is copied into the run's own state first, so the
-    # fixture stays byte-identical while the run appends its own record to
-    # the copy. When the fixture carries no snapshot, the run starts from
-    # an empty log, the way the anchor's first round did.
+    # The log the run uses is ALWAYS initialized here, from the snapshot
+    # when the fixture carries one and empty when it does not, so a
+    # repeated eval run in one state directory starts from the fixture and
+    # never from the previous run's accumulated records; the run appends
+    # its own record to this copy, and the fixture stays byte-identical.
+    state_rounds = _state_dir(args, run.env) / "rounds.jsonl"
+    state_rounds.parent.mkdir(parents=True, exist_ok=True)
     rounds = fixture / "rounds.jsonl"
     if rounds.is_file():
-        state_rounds = _state_dir(args, run.env) / "rounds.jsonl"
-        state_rounds.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(rounds, state_rounds)
-        args.round_log = str(state_rounds)
+    else:
+        state_rounds.write_bytes(b"")
+    args.round_log = str(state_rounds)
     if not args.allow_live_inference:
         args.dry_run = True
     code = _cmd_agentic_review(args, run)
@@ -2655,14 +2673,20 @@ def _write_eval_run_file(args: argparse.Namespace, run: _Run) -> None:
     """`eval-run --run-file`'s output: the completed review as the
     eval-parity loader's run file. Nothing is written when no run file
     was asked for, or when the review did not complete -- the draft and
-    the exit code carry that."""
+    the exit code carry that, and the command's own exit is the review's,
+    never a usage error about the missing file."""
     if not args.run_file:
         return
-    if run.review is None:
-        raise UsageError("the review did not complete, so no run file was written")
+    review = run.review
+    if review is None:
+        print(
+            "no run file written: the review did not complete",
+            file=run.err,
+        )
+        return
     model = args.model or run.env.get("ATLAS_MODEL", "recorded-fixture")
     payload = _run_file_from(
-        run.review, load_event(Path(args.event)), model, args.repetition
+        review, load_event(Path(args.event)), model, args.repetition
     )
     run_path = Path(args.run_file)
     run_path.parent.mkdir(parents=True, exist_ok=True)

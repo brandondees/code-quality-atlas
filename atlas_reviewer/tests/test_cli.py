@@ -19,7 +19,7 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
-from atlas_reviewer.parity_key import load_runs
+from atlas_reviewer.parity_key import KEY_DIR, load_key, load_runs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
 from atlas_reviewer.rounds import RoundLog, RoundRecord
 from atlas_reviewer.runner import EGRESS_TAG, event_runner_name
@@ -3400,7 +3400,17 @@ def test_eval_run_writes_a_draft_and_a_loadable_run_file(tmp_path):
     assert len(runs) == 1
     (record,) = runs
     assert record.head_sha != ""
-    assert record.findings or record.lenses_run
+    # The mapping is what this test pins: the scripted blocker finding
+    # lands in the run file with the fields the grader matches.
+    assert record.lenses_run == ("tracing-correctness-and-invariants",)
+    assert record.lenses_not_run == () and record.lenses_failed == ()
+    (mapped,) = record.findings
+    assert mapped.severity == "blocker"
+    assert mapped.path == "calc.py"
+    assert mapped.line == 4
+    assert mapped.verified is True
+    assert mapped.lens == "tracing-correctness-and-invariants"
+    assert "discount" in mapped.quote
 
 
 def test_eval_run_logs_the_tool_results_it_served(tmp_path):
@@ -3436,11 +3446,17 @@ def test_eval_run_logs_the_tool_results_it_served(tmp_path):
 
 def test_eval_lenses_owners_reads_the_parity_key():
     event = PrEvent("brandondees/code-quality-atlas", 640, "a" * 40)
-    assert cli._eval_lenses(SimpleNamespace(lenses="owners"), event) == (
-        "reviewing-test-quality",
-        "hunting-silent-failures",
-        "reviewing-decision-lifecycle",
-    )
+    # The owner set is derived from the key, not hardcoded here: the same
+    # first-seen union the key's own records name for this PR.
+    expected: list[str] = []
+    for finding in load_key(KEY_DIR):
+        if finding.pr != event.pr_number:
+            continue
+        for lens in finding.lenses:
+            if lens not in expected:
+                expected.append(lens)
+    assert cli._eval_lenses(SimpleNamespace(lenses="owners"), event) == tuple(expected)
+    assert expected, "the key carries PR 640 records"
     assert cli._eval_lenses(SimpleNamespace(lenses=" a , b "), event) == ("a", "b")
     assert cli._eval_lenses(SimpleNamespace(lenses=None), event) is None
 

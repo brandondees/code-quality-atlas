@@ -939,7 +939,7 @@ fixture's pull request, no picker call; a comma-separated list fixes the
 set by name. `--run-file PATH` writes the eval-parity run file from the
 completed review — the loader's own schema, with the comparison fields
 null — and `--tool-log PATH` logs every tool result, as the model saw it
-(rendered, redacted, capped), one JSON line each, so a diagnosis reads
+(rendered and capped), one JSON line each, so a diagnosis reads
 what happened instead of inferring it from statuses.
 
 Offline by default: a fixture run without `--allow-live-inference` uses
