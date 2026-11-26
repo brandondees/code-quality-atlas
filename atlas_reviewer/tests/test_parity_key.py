@@ -105,9 +105,11 @@ def test_the_checked_in_key_grades_every_recorded_finding():
     assert [span.path for span in decision.spans] == [
         "docs/open-questions.md",
         "atlas_reviewer/README.md",
+        "docs/open-questions.md",
     ]
     assert decision.spans[0] == Span("docs/open-questions.md", 62, 62)
     assert decision.spans[1] == Span("atlas_reviewer/README.md", 13, 15)
+    assert decision.spans[2] == Span("docs/open-questions.md", 61, 61)
     assert "amends D48" in decision.source
     assert decision.lenses == ("reviewing-decision-lifecycle",)
     body = by_id["661-m1"]
@@ -468,7 +470,7 @@ def test_the_missing_hook_is_found_on_the_check_that_skips_it():
     )
 
 
-def test_either_line_that_omits_the_d48_amendment_is_found():
+def test_each_line_that_omits_the_d48_amendment_is_found():
     finding = _key("640-m3")
     assert grade_findings([finding], [_cite("docs/open-questions.md", 62)]).grades == (
         FOUND,
@@ -477,6 +479,9 @@ def test_either_line_that_omits_the_d48_amendment_is_found():
         [finding], [_cite("atlas_reviewer/README.md", 14)]
     ).grades == (FOUND,)
     assert grade_findings([finding], [_cite("docs/open-questions.md", 61)]).grades == (
+        FOUND,
+    )
+    assert grade_findings([finding], [_cite("docs/open-questions.md", 60)]).grades == (
         LOST,
     )
     assert grade_findings(
