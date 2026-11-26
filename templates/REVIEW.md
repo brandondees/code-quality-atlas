@@ -271,10 +271,18 @@ before anything of the review runs. The line is read from the repo's
 could carry its own setup commands would name installs into its own
 review's runner while the network is open), and it is the same
 fail-open-with-a-named-note read the other keys use. Without a line the
-runner stays deny-all from the start, exactly as before.
+runner stays deny-all from the start, exactly as before. A
+`review_setup_files:` line names the **default-branch files the setup
+commands read** — a comma-separated list of repo-root-relative paths,
+each fetched from the same default branch (never the PR head) and
+uploaded into the runner's setup directory under its own name before
+the first command runs, so a relative `-r requirements.txt` resolves; a
+named file the default branch does not hold, or one over the read
+bound, leaves no setup phase with the note that says so.
 
 ```text
 # review_setup_commands: {python} -m pip install --no-user -r requirements.txt   # example — uncomment and set your repo's own value, or delete to run no setup phase
+# review_setup_files: requirements.txt   # example — the default-branch files the setup commands read; uncomment with the commands line, or delete to run no setup phase
 ```
 
 ## Scope discipline

@@ -10,6 +10,7 @@ model: the fakes record the policy each exec ran under, and the local
 runner answers the egress check with the outcome the deny-all policy
 produces."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from atlas_reviewer.bridge import Status, run_bridge
@@ -128,7 +129,7 @@ def test_setup_commands_are_bounded():
 
 def test_the_setup_key_draws_no_unsupported_note_in_the_merge_base_read():
     tarball = source_tarball(
-        {b"REVIEW.md": b"# policy\n\nreview_setup_commands: make deps\n"},
+        {"REVIEW.md": b"# policy\n\nreview_setup_commands: make deps\n"},
         top="example-app",
     )
     assert read_repo_config(tarball).unsupported_notes == ()
@@ -140,12 +141,14 @@ def test_the_setup_key_draws_no_unsupported_note_in_the_merge_base_read():
 @dataclass
 class FakeFetchGitHub:
     """The shape `_setup_commands` needs: one repository answer, one file
-    answer or error."""
+    answer or error -- or, when `files` is set, a per-path answer map the
+    setup-spec's declared files read from."""
 
     repository: object = None
     repository_error: Exception | None = None
     file: bytes | None = None
     file_error: Exception | None = None
+    files: Mapping[str, object] | None = None
     calls: list = field(default_factory=list)
 
     def get_repository(self, repo):
@@ -156,6 +159,11 @@ class FakeFetchGitHub:
 
     def get_file(self, repo, ref, path, max_bytes):
         self.calls.append(("get_file", repo, ref, path))
+        if self.files is not None and path in self.files:
+            answer = self.files[path]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         if self.file_error is not None:
             raise self.file_error
         if self.file is None:
@@ -522,3 +530,164 @@ def test_the_per_lens_chain_setup_then_probe_then_a_real_run(tmp_path):
     assert denied[probe_index] and denied[run_index]
     assert all(flagged for flagged in denied[setup_index + 1 :])
     assert [op for op, *_rest in sprites.calls].count("create") == 1
+
+
+# ------------------------------------------------- the setup files
+
+
+def test_a_files_line_parses_beside_the_commands_line():
+    read = parse_setup_commands(
+        "review_setup_commands: {python} -m pip install --no-user -r requirements.txt\n"
+        "review_setup_files: requirements.txt\n"
+    )
+    assert read.commands == (
+        ("{python}", "-m", "pip", "install", "--no-user", "-r", "requirements.txt"),
+    )
+    assert read.files == ("requirements.txt",)
+    assert read.notes == ()
+
+
+def test_a_files_line_alone_is_unusable_and_names_its_key():
+    read = parse_setup_commands("review_setup_files: requirements.txt\n")
+    assert read.commands == ()
+    assert read.files == ()
+    assert len(read.notes) == 1
+    assert "review_setup_files:" in read.notes[0]
+
+
+def test_an_unusable_files_line_fails_the_whole_spec_open():
+    commands = "review_setup_commands: {python} -m pip install pytest\n"
+    for files in (
+        "review_setup_files:\n",
+        "review_setup_files: /etc/passwd\n",
+        "review_setup_files: ../secrets.txt\n",
+        "review_setup_files: a.txt, a.txt\n",
+        "review_setup_files: a\\\\b.txt\n",
+        "review_setup_files: requirements.txt\nreview_setup_files: requirements.txt\n",
+    ):
+        raw = commands + files
+        read = parse_setup_commands(raw)
+        assert read.commands == (), raw
+        assert read.files == (), raw
+        assert read.notes and "review_setup_files:" in read.notes[0], raw
+
+
+def test_the_setup_files_key_draws_no_unsupported_note_in_the_merge_base_read():
+    """The merge-base read's unsupported scan matches every unfenced
+    `review_*:` line, so a known key missing from `_KNOWN_KEYS` draws a
+    false 'unsupported key' note on this repo's own REVIEW.md on every
+    read. Goes through `read_repo_config`, the scan's own path -- the
+    round-4 review of #843: the first version of this test called
+    `parse_setup_commands`, which never produces unsupported notes, and
+    so passed whatever `_KNOWN_KEYS` held."""
+    tarball = source_tarball(
+        {
+            "REVIEW.md": (
+                b"# policy\n\nreview_setup_commands: make deps\n"
+                b"review_setup_files: requirements.txt\n"
+            )
+        },
+        top="example-app",
+    )
+    assert read_repo_config(tarball).unsupported_notes == ()
+
+
+def test_the_cli_glue_fetches_the_declared_files_from_the_same_branch():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"},
+        files={
+            "REVIEW.md": (
+                b"# policy\n\n"
+                b"review_setup_commands: {python} -m pip install --no-user -r requirements.txt\n"
+                b"review_setup_files: requirements.txt\n"
+            ),
+            "requirements.txt": b"pytest==8.0.0\n",
+        },
+    )
+    spec, notes = _setup_commands(github, EVENT)
+    assert spec is not None
+    assert spec.files["requirements.txt"] == b"pytest==8.0.0\n"
+    assert notes == ()
+    assert github.calls == [
+        ("get_repository", EVENT.repo),
+        ("get_file", EVENT.repo, "main", "REVIEW.md"),
+        ("get_file", EVENT.repo, "main", "requirements.txt"),
+    ]
+
+
+def test_a_declared_file_the_branch_lacks_leaves_no_setup_with_its_note():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"},
+        files={
+            "REVIEW.md": (
+                b"review_setup_commands: {python} -m pip install --no-user -r requirements.txt\n"
+                b"review_setup_files: requirements.txt\n"
+            ),
+        },
+    )
+    spec, notes = _setup_commands(github, EVENT)
+    assert spec is None
+    assert len(notes) == 1
+    assert "requirements.txt" in notes[0]
+    assert "no setup phase runs" in notes[0]
+
+
+def test_a_declared_file_over_its_bound_leaves_no_setup_with_its_note():
+    github = FakeFetchGitHub(
+        repository={"default_branch": "main"},
+        files={
+            "REVIEW.md": (
+                b"review_setup_commands: {python} -m pip install --no-user -r requirements.txt\n"
+                b"review_setup_files: requirements.txt\n"
+            ),
+            "requirements.txt": ResponseTooLargeError("over"),
+        },
+    )
+    spec, notes = _setup_commands(github, EVENT)
+    assert spec is None
+    assert notes and "no setup phase runs" in notes[0]
+
+
+def test_the_setup_phase_uploads_the_declared_files_before_the_commands():
+    """The files the spec declares are in the setup directory under their
+    own names before the first command execs: a relative
+    `-r requirements.txt` resolves against them, and the bytes are the
+    default branch's, uploaded before the deny-all flip like the
+    commands themselves."""
+    api = FakeSprites(rules=DENY_EGRESS)
+    report = run_setup(
+        api,
+        SetupSpec((SETUP_ECHO,), {"requirements.txt": b"pytest==8.0.0\n"}),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    uploads = [c for c in api.calls if c[0] == "exec" and "requirements.txt" in c[2]]
+    assert len(uploads) == 1
+    script = uploads[0][2]
+    assert "cat > /tmp/atlas-neutral/requirements.txt" in script
+    command_execs = [c for c in api.calls if c[0] == "exec" and SETUP_ECHO[-1] in c[2]]
+    assert len(command_execs) == 1
+    # The upload exec sits between the interpreter resolution and the
+    # setup command, all before the flip.
+    assert api.calls.index(uploads[0]) < api.calls.index(command_execs[0])
+    sequence = ops(api)
+    flip = sequence.index("set_network_policy")
+    execs_before = [i for i, c in enumerate(sequence) if c == "exec" and i < flip]
+    assert len(execs_before) == 3
+
+
+def test_a_nested_setup_file_gets_its_parent_directory_created():
+    """The file-name grammar admits a nested path (`requirements/dev.txt`);
+    the upload's own script creates the parent directory first, so a
+    nested declared file lands where the command's relative path expects
+    it instead of failing the setup phase on a missing directory."""
+    api = FakeSprites(rules=DENY_EGRESS)
+    report = run_setup(
+        api,
+        SetupSpec((SETUP_ECHO,), {"requirements/dev.txt": b"pytest==8.0.0\n"}),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    uploads = [
+        c for c in api.calls if c[0] == "exec" and "requirements/dev.txt" in c[2]
+    ]
+    assert len(uploads) == 1
+    assert "mkdir -p /tmp/atlas-neutral/requirements" in uploads[0][2], uploads[0][2]

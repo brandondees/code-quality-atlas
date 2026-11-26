@@ -857,7 +857,12 @@ token may be the `{python}` placeholder, substituted with the interpreter
 the controller resolved by absolute path — `review_setup_commands: {python} -m pip install pytest`. The same fail-open rules apply: an
 unusable value or a repeated key runs no setup phase and is named with a
 note that never echoes the rejected text; a command that fails, times out,
-or outlives its budget fails the run.
+or outlives its budget fails the run. A `review_setup_files:` line names
+the **default-branch files the setup commands read** — repo-root-relative
+paths, each fetched from the same default branch and uploaded into the
+runner's setup directory under its own name before the first command, so
+`-r requirements.txt` resolves; a file the branch does not hold, or one
+over the read bound, leaves no setup phase with the note that says so.
 
 **The shared checkpoint is retired; every lens runs the setup.** The
 direction's "pre-baked image with dev dependencies per repo" was first
