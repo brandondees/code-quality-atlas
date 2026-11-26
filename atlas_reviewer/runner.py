@@ -74,8 +74,9 @@ import shlex
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
@@ -156,8 +157,13 @@ FIRST_FRAME_BUDGET_S = 30.0
 # (issue #819, D95): a `pip install` against a real index can take
 # minutes, and the review's wall deadline bounds the phase as a whole
 # besides. The bound is what the command runs under (`timeout -k`), the
-# budget is the exec's window around it.
-SETUP_BOUND_S = 300
+# budget is the exec's window around it. The 2026-11-26 environment
+# slice (D80's update) raises it from 300s to 900s, because the setup
+# spec this repo itself sets now installs the repo's full requirements
+# (`pip install -r requirements.txt`, hash-pinned, about fifty
+# packages): a cold resolve-and-install can outlive the old bound, and
+# the review wall still bounds the phase as a whole.
+SETUP_BOUND_S = 900
 SETUP_BUDGET_S = SETUP_BOUND_S + 30.0
 # From the first destroy of a runner, shared by the watchdog's and the
 # final one: no control-plane call starts after it, so cleanup ends
@@ -254,11 +260,20 @@ class SetupSpec:
     `REVIEW.md` text (`repo_config.parse_setup_commands`), controller
     tokens -- the model never names one -- and a command may carry the
     `{python}` placeholder, which the controller substitutes with the
-    interpreter it resolved by absolute path before the phase ran. Empty
-    (or absent) is the ordinary runner: deny-all from the start, nothing
-    installed."""
+    interpreter it resolved by absolute path before the phase ran.
+    `files` are the default-branch files the commands read (the spec's
+    `review_setup_files:` line): the controller fetched each from the
+    same branch the spec was read from -- never the PR head -- and the
+    phase uploads them into the runner's setup directory under their own
+    names before the first command runs, so a relative
+    `-r requirements.txt` resolves. Empty (or absent) is the ordinary
+    runner: deny-all from the start, nothing installed."""
 
     commands: tuple[tuple[str, ...], ...] = ()
+    files: Mapping[str, bytes] = MappingProxyType({})
+
+
+SETUP_FILE_MAX_BYTES = 8 * 1024 * 1024
 
 
 DEFAULT_TOOLS = (
@@ -1273,11 +1288,13 @@ def _require_deny_all(policy: Json) -> None:
 
 def setup_command_script(command: Sequence[str], python: TrustedPython) -> str:
     """One setup command as the runner runs it (issue #819, D95): from the
-    neutral directory -- empty, and empty of the PR, which is not uploaded
-    yet -- each token quoted, the `{python}` placeholder already
-    substituted with the resolved interpreter's quoted absolute path, the
-    whole argv under its own `timeout -k` bound. The tokens are the
-    repo's default-branch `REVIEW.md` grammar's output, so quoting is
+    neutral directory -- empty of the PR, which is not uploaded yet, and
+    otherwise holding only the setup spec's own declared default-branch
+    files, uploaded there under their names before the first command --
+    each token quoted, the `{python}` placeholder already substituted
+    with the resolved interpreter's quoted absolute path, the whole argv
+    under its own `timeout -k` bound. The tokens are the repo's
+    default-branch `REVIEW.md` grammar's output, so quoting is
     belt-and-braces, not the containment guarantee."""
     argv = [
         python.quoted if token == PYTHON_PLACEHOLDER else shlex.quote(token)
@@ -1322,6 +1339,24 @@ def _setup_phase(run: _Run) -> None:
         raise BoundaryError(
             "the setup phase found no trusted interpreter to run the "
             "repo's setup commands with"
+        )
+    for name, data in spec.files.items():
+        # The spec's declared default-branch files, into the neutral
+        # directory under their own names before the first command: a
+        # relative `-r requirements.txt` has to resolve there. The names
+        # are grammar-validated (plain repo-root-relative paths), and
+        # the content is the default branch's -- the same read source
+        # the spec itself came from, never the PR head. A nested name
+        # gets its parent directory created in the upload's own script.
+        purpose = f"setup file {name}"
+        run.deadline.check(purpose)
+        parents = name.rsplit("/", 1)[0] if "/" in name else None
+        _upload(
+            run,
+            data,
+            f"{NEUTRAL_DIR}/{name}",
+            purpose,
+            parents=f"{NEUTRAL_DIR}/{parents}" if parents else None,
         )
     for n, command in enumerate(spec.commands, start=1):
         purpose = f"setup command {n}"
@@ -1560,13 +1595,19 @@ def _upload(
     tarball: bytes,
     path: str = SOURCE_ARCHIVE,
     purpose: str = "source upload",
+    *,
+    parents: str | None = None,
 ) -> None:
     """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
     upload does not depend on the exec channel delivering a stdin EOF; the
     runner reports back how many bytes it wrote. `path` is controller-chosen
-    and inserted as is."""
+    and inserted as is. `parents`, when given, is a directory the script
+    creates first -- the setup spec's declared files may name a nested
+    path, and `cat >` creates no directories."""
     size = len(tarball)
-    script = f"cat > {path} && wc -c < {path}"
+    script = (
+        f"mkdir -p {shlex.quote(parents)} && " if parents is not None else ""
+    ) + f"cat > {path} && wc -c < {path}"
     run.telemetry.span(
         "upload",
         f"{size}-byte tarball",

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from atlas_reviewer.bridge_staging import COLLECT_TAG
 from atlas_reviewer.delta import DECISION_TARGET_PREFIX
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.lens_loop import FinalReply, ModelTurn, TurnRequest, UserText
@@ -182,6 +183,12 @@ class FakeSprites:
         for rule in self.rules:
             if rule.match in script:
                 return rule.handler(script, stdin)
+        if COLLECT_TAG + ":" in script:
+            # The collection probe the staging runs (D80's 2026-11-26
+            # update): a fake whose scripted rules did not name a verdict
+            # models a working environment -- the tests collect -- which
+            # is what the scripted replies around it were written against.
+            return "atlas-collect:0:", 0
         return "sh: command not found", EXIT_NOT_FOUND
 
     def _probe(self, script: str) -> str:

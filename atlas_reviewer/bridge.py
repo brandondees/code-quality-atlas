@@ -34,6 +34,7 @@ import codecs
 import hashlib
 import io
 import json
+import os
 import re
 import tarfile
 import threading
@@ -62,6 +63,7 @@ from atlas_reviewer.bridge_staging import (
     SCRATCH_DIR,
     SourceTrees,
     Staged,
+    as_nobody,
     check_sizes,
     mutant_commit_steps,
     parse_staged,
@@ -248,10 +250,60 @@ DEFAULT_LIMITS: Mapping[str, ToolLimits] = MappingProxyType(
         # output, shown from its end where pytest's summary and its
         # failures sit. Provisional defaults pending the owner (D39's
         # standing rule), bounded by the same session limits as reads.
-        "run_tests": ToolLimits(16 * 1024, 60),
-        "mutate": ToolLimits(16 * 1024, 60),
+        # The 2026-11-26 environment-parity slice (D80's update) raises
+        # the two execution tools' per-process clock from 60s to 180s,
+        # because the repo's own full suite takes about 74s on the box --
+        # a whole-suite baseline under `mutate` (two processes, one call)
+        # could not fit under the old cap, and every whole-suite run
+        # timed out into an INCONCLUSIVE. `ATLAS_TEST_TIMEOUT_S`
+        # overrides it between 30s and 600s (`run_tool_limits`); the
+        # review's wall clocks still bound everything above this.
+        "run_tests": ToolLimits(16 * 1024, 180),
+        "mutate": ToolLimits(16 * 1024, 180),
     }
 )
+
+# The operator's override for one test process's wall clock
+# (`run_tool_limits`): a setting, not a credential, so the service child
+# is allowed to receive it (service_run._CHILD_ALLOWED).
+TEST_TIMEOUT_ENV = "ATLAS_TEST_TIMEOUT_S"
+_TEST_TIMEOUT_MIN_S = 30
+_TEST_TIMEOUT_MAX_S = 600
+
+
+def run_tool_limits(
+    env: Mapping[str, str],
+    limits: Mapping[str, ToolLimits] = DEFAULT_LIMITS,
+) -> Mapping[str, ToolLimits]:
+    """The execution tools' effective limits: `limits` with
+    `ATLAS_TEST_TIMEOUT_S`'s per-process test clock applied to
+    `run_tests` and `mutate` when the variable names one. An unset or
+    empty variable is the defaults unchanged. A value that is not an
+    integer, or outside the 30-600s bounds -- below 30s cannot run a
+    real suite, above 600s can eat a lens wall by itself -- raises
+    `BoundaryError` naming the variable, which `run_bridge` turns into
+    the run's named FAILED report."""
+    raw = env.get(TEST_TIMEOUT_ENV, "")
+    if raw == "":
+        return limits
+    try:
+        seconds = int(raw)
+    except ValueError:
+        raise BoundaryError(
+            f"{TEST_TIMEOUT_ENV} must be an integer number of seconds, not {raw!r}"
+        ) from None
+    if not _TEST_TIMEOUT_MIN_S <= seconds <= _TEST_TIMEOUT_MAX_S:
+        raise BoundaryError(
+            f"{TEST_TIMEOUT_ENV} must be between {_TEST_TIMEOUT_MIN_S} "
+            f"and {_TEST_TIMEOUT_MAX_S} seconds, not {seconds}"
+        )
+    return MappingProxyType(
+        {
+            **limits,
+            "run_tests": replace(limits["run_tests"], timeout_s=seconds),
+            "mutate": replace(limits["mutate"], timeout_s=seconds),
+        }
+    )
 
 
 # -------------------------------------------------------------------- tools
@@ -916,13 +968,17 @@ def run_test_script(
     scratch = quote(staged.scratch)
     root = quote(staged.root)
     if argv is None:
-        # The built-in entry needs the interpreter the staging resolved;
-        # an approved command does not, and the caller refuses only the
-        # calls that need it.
+        # The built-in entry needs the pytest-capable interpreter the
+        # staging resolved; an approved command does not name pytest, but
+        # neither ever runs as root -- both go through the no-root guard,
+        # which runs through the resolved interpreter -- the caller
+        # refuses each before this.
         assert staged.pytest is not None  # the caller refuses the call before this
-        run_argv = _pytest_argv(staged, call.get("path"))
+        assert staged.shim_python is not None  # the refusals above guarantee it
+        run_argv = as_nobody(staged.shim_python, _pytest_argv(staged, call.get("path")))
     else:
-        run_argv = argv
+        assert staged.shim_python is not None  # the refusals above guarantee it
+        run_argv = as_nobody(staged.shim_python, argv)
     return "\n".join(
         (
             f"cd {root}",
@@ -964,13 +1020,14 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     survived mutant."""
     scratch = quote(staged.scratch)
     root = quote(staged.root)
+    assert staged.pytest is not None  # the caller refuses the call before this
+    assert staged.shim_python is not None  # the caller refuses the call before this
     run = (
         f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
-        f"{_pytest_argv(staged, call.get('tests'))} )"
+        f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
     )
-    assert staged.pytest is not None  # the caller refuses the call before this
     edit = (
         f"( cd {scratch}; exec timeout -k {KILL_AFTER_S} "
         f"{MUTATE_EDIT_TIMEOUT_S} "
@@ -1851,7 +1908,17 @@ class Bridge:
         verdicts themselves are in-band evidence, like every status the
         exec stream carries. A `run_tests` call naming an approved
         proposed command (S7, D88) runs the proposal's own bridge-built
-        argv instead of the pytest one and needs no interpreter."""
+        argv instead of the pytest one. Neither ever runs as root
+        (Brandon's Nov 25 decision): both go through the no-root guard,
+        which runs through the interpreter the staging probe resolved --
+        the pytest-capable one when there is one, else any candidate that
+        runs -- so a runner with no interpreter at all refuses both,
+        named. The built-in entry also needs the pytest-capable
+        interpreter itself. A runner whose collection probe failed (the
+        test environment cannot import or collect the repo's tests)
+        refuses both with that named gap -- the run would only produce
+        INCONCLUSIVE mutants and red baselines the lens cannot read as
+        evidence."""
         command = call.get("command") if call.tool == "run_tests" else ""
         argv = self._command_argv(call) if command else None
         if argv is None and self.staged.pytest is None:
@@ -1859,6 +1926,22 @@ class Bridge:
                 call,
                 Status.UNAVAILABLE,
                 "no pytest-capable interpreter was staged for the runner",
+                started,
+            )
+        if self.staged.shim_python is None:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                "no interpreter on the runner image runs the no-root "
+                "guard, so the execution tools cannot start",
+                started,
+            )
+        if not self.staged.collection_ok:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                "the test environment is broken: pytest collection failed "
+                f"in the staged copy: {self.staged.collection_note}",
                 started,
             )
         try:
@@ -2302,6 +2385,7 @@ def run_bridge(
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
     approvals: RunApprovals | None = None,
     setup: SetupSpec | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
     bridge; the runner is always destroyed. Trees over the upload cap or
@@ -2319,6 +2403,13 @@ def run_bridge(
     egress still allowed, before the deny-all flip and before staging
     uploads anything, so its installs can reach their indexes."""
     telemetry = telemetry or Telemetry(clock)
+    try:
+        limits = run_tool_limits(env if env is not None else os.environ, limits)
+    except BoundaryError as exc:
+        telemetry.record("tool limits", "refused", status=ERROR, error=str(exc))
+        return RunnerReport(
+            RunnerStatus.FAILED, CleanupStatus.NOT_CREATED, name, str(exc)
+        )
     try:
         check_sizes(trees, unpack=unpack)
     except BoundaryError as exc:
@@ -2350,6 +2441,12 @@ def run_bridge(
                 trees,
                 unpack,
                 approvals=approvals,
+                # The collection probe executed the copy's own conftest.py
+                # -- PR code, in the runner -- so the bridge's first
+                # runner-side read or execution copy re-stages from the
+                # controller-held tarballs, whatever the probe's verdict
+                # was.
+                _suspect=staged.collection_ran,
             )
         )
 

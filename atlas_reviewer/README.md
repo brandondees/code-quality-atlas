@@ -857,7 +857,12 @@ token may be the `{python}` placeholder, substituted with the interpreter
 the controller resolved by absolute path — `review_setup_commands: {python} -m pip install pytest`. The same fail-open rules apply: an
 unusable value or a repeated key runs no setup phase and is named with a
 note that never echoes the rejected text; a command that fails, times out,
-or outlives its budget fails the run.
+or outlives its budget fails the run. A `review_setup_files:` line names
+the **default-branch files the setup commands read** — repo-root-relative
+paths, each fetched from the same default branch and uploaded into the
+runner's setup directory under its own name before the first command, so
+`-r requirements.txt` resolves; a file the branch does not hold, or one
+over the read bound, leaves no setup phase with the note that says so.
 
 **The shared checkpoint is retired; every lens runs the setup.** The
 direction's "pre-baked image with dev dependencies per repo" was first
@@ -888,6 +893,33 @@ import found `/tmp/.local/.../pytest`. Write the spec's installs with
 `--no-user` — `review_setup_commands: {python} -m pip install --no-user
 pytest` — which lands in the interpreter's own site-packages, imports
 under `-I`, and is what this repo's own `REVIEW.md` sets.
+
+**The execution environment (D80's 2026-11-26 update).** The setup spec
+this repo sets installs the repo's **full requirements**
+(`{python} -m pip install --no-user -r requirements.txt`, hash-pinned),
+not a curated trio: the test files that exercise the webhook and round
+paths import PyJWT, PyYAML and the OTLP exporter, and a spec that
+installs only pytest left every test file that needs them failing at
+import — red baselines, and every mutant on those files INCONCLUSIVE.
+The per-command setup bound rises with it (900 seconds; the review wall
+still bounds the phase as a whole), and the per-lens setup cost is now
+pip's install time for the whole tree, not a few seconds. The test
+processes `run_tests` and `mutate` launch never run as root: a
+controller-built shim, run by the trusted interpreter staging resolved,
+drops a root caller to the standard `nobody` user before the tests
+start (a caller that is already not root execs directly), so the access
+controls the repo's own tests exercise actually bind — the round log's
+locked-file test failed its baseline under a root test process. The
+shim adds no binary to the image; a drop that cannot happen exits 126
+with the reason named, never a root run. Staging also probes the
+environment once per review: `pytest --co -q` runs in a disposable copy
+of HEAD as that same user, and a failed collection becomes the named
+`the test environment is broken` gap on the execution tools instead of
+surfacing as silent INCONCLUSIVE mutants and red baselines the lens
+cannot read as evidence. One test process's wall clock is 180 seconds
+(was 60: the repo's own full suite takes about 74 seconds, so a
+whole-suite baseline under `mutate` — two processes, one call — could
+not fit), overridable with `ATLAS_TEST_TIMEOUT_S` (30 to 600).
 
 ## The BYOK settings page (config slice S10, part B1)
 
@@ -1396,6 +1428,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement and still refuses a tag the ZDR list marks Safety Retention unless the opt-in is on. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
 | `ATLAS_CALL_RETRIES` | agentic lens entry | Times a failed model call is sent again within a turn, 0 to 3. Unset is 1 |
+| `ATLAS_TEST_TIMEOUT_S` | `agentic-review` | One test process's wall clock for `run_tests` and `mutate` (D80's 2026-11-26 environment update), 30 to 600 seconds. Unset is 180 — the repo's own full suite takes about 74 seconds on the box, so a whole-suite baseline under `mutate` (two processes, one call) cannot fit under the old 60-second cap; the review's wall clocks still bound everything above this. A value that is not an integer in those bounds fails the lens's run with the variable named |
 | `ATLAS_MIN_OUTPUT_TOKENS` | agentic lens entry | Smallest output cap a call is fitted to when the reservation cannot cover its full cap. Unset is 16,000 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 | `ATLAS_HEAD_CHANGE_POLICY` | webhook service | The keep-or-cancel policy for a push that lands mid-review (#702, D79): `keep` (the default) decides per push and queues a kept head as the settled review's follow-up; `cancel` restores the blanket supersede. An unknown value refuses to start |

@@ -191,6 +191,7 @@ from atlas_reviewer.rounds import PRIOR_ROUND_CHARS, RoundLog
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
+    SETUP_FILE_MAX_BYTES,
     TRIVIAL_TOOL,
     Diagnostic,
     RunnerJob,
@@ -1475,8 +1476,44 @@ def _setup_commands(
     except BoundaryError:
         return None, (_SETUP_FETCH_NOTE,)
     read = parse_setup_commands(data.decode("utf-8", errors="replace"))
-    spec = SetupSpec(read.commands) if read.commands else None
+    if not read.commands:
+        # No commands line (or an unusable one, whose note read.notes
+        # carries): a files line alone is dropped by the parser -- the
+        # files exist to be read by commands.
+        return None, read.notes
+    files: dict[str, bytes] = {}
+    for name in read.files:
+        try:
+            files[name] = github.get_file(
+                event.repo, branch, name, SETUP_FILE_MAX_BYTES
+            )
+        except NotFoundError:
+            return None, (
+                _setup_file_note(name, "does not exist on the default branch"),
+            )
+        except ResponseTooLargeError:
+            return None, (
+                _setup_file_note(
+                    name,
+                    f"is over the {SETUP_FILE_MAX_BYTES}-byte read bound",
+                ),
+            )
+        except BoundaryError:
+            return None, (_setup_file_note(name, "could not be fetched"),)
+    spec = SetupSpec(read.commands, files)
     return spec, read.notes
+
+
+def _setup_file_note(name: str, condition: str) -> str:
+    """The fixed-shape note for a declared setup file the default branch
+    cannot serve: the file's own name (accepted config, not rejected
+    input), the condition, and the default that stands -- no setup phase,
+    the runner stays deny-all from the start."""
+    return (
+        f"the reviewed repo's default-branch setup spec declares the setup "
+        f"file {name}, and that file {condition}; no setup phase runs and "
+        "the runner stays deny-all from the start"
+    )
 
 
 def _with_preference_note(

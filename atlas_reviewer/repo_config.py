@@ -112,6 +112,16 @@ Today's keys:
   open to no setup phase, with a named note that counts and never
   echoes the rejected text.
 
+- `review_setup_files:` (issue #819, D95's setup-spec update) -- the
+  default-branch files the setup commands read, one comma-separated
+  line, fetched from the same default branch and uploaded into the
+  runner's setup directory under their own names before the first
+  command runs, so a relative `-r requirements.txt` resolves. Same
+  read source and same fail-open rule as the commands line: a file the
+  default branch does not hold, or one over the read bound, leaves no
+  setup phase with the note that says so -- never a PR-named file, and
+  nothing of the PR ever reaches the setup phase.
+
 The admission-class keys (`review_base_include:` /
 `review_base_exclude:` / `review_skip_events:`, #756 and #761) are
 `service_admit.py`'s -- read from the repo's default branch, a different
@@ -435,8 +445,44 @@ def parse_run_proposals(text: str | None) -> RunProposalsRead:
 SETUP_COMMANDS_LINE = re.compile(
     r"^review_setup_commands:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$"
 )
+SETUP_FILES_LINE = re.compile(r"^review_setup_files:(?:[ \t]*([^#]*?))?[ \t]*(?:#.*)?$")
 _SETUP_PLACEHOLDER = "{python}"
 _MAX_SETUP_COMMANDS = 4
+_MAX_SETUP_FILES = 4
+# A declared file's name: repo-root-relative, plain path characters, no
+# traversal, no backslash, no absolute path -- it is fetched from the
+# default branch and uploaded into the runner's setup directory under
+# its own name.
+_SETUP_FILE_NAME = re.compile(r"[A-Za-z0-9._/-]{1,200}")
+
+
+def _setup_files(raw: str | None) -> tuple[str, ...] | None:
+    """The comma-separated declared file names of one `review_setup_files:`
+    line's value, or None when the value is unusable: empty, a name with
+    no plain path characters, an absolute or traversal-shaped path (`..`,
+    a leading `/`, a backslash), or the same file twice. The names are
+    relative to the repo root on the default branch -- the same read
+    source the commands line takes -- and each file is fetched by the
+    controller and uploaded into the runner's setup directory under its
+    own name before the first setup command runs."""
+    if raw is None or not raw.strip():
+        return None
+    files: list[str] = []
+    for piece in raw.split(","):
+        name = piece.strip()
+        if (
+            not name
+            or name.startswith("/")
+            or "\\" in name
+            or not _SETUP_FILE_NAME.fullmatch(name)
+            or any(part == ".." for part in name.split("/"))
+            or name in files
+        ):
+            return None
+        files.append(name)
+    if len(files) > _MAX_SETUP_FILES:
+        return None
+    return tuple(files)
 
 
 def _setup_commands(raw: str | None) -> tuple[tuple[str, ...], ...] | None:
@@ -501,6 +547,29 @@ def _unusable_setup_note(lines: int) -> str:
     )
 
 
+def _unusable_setup_files_note(lines: int) -> str:
+    """The note for the offending `review_setup_files:` lines: the key,
+    the condition, the count, and the default that stands -- no setup
+    phase -- and never any rejected value."""
+    if lines == 1:
+        return (
+            f"the reviewed repo's default-branch {REVIEW_MD} carries a "
+            "review_setup_files: line it cannot use as the run's setup "
+            "files (a comma-separated list of default-branch file names "
+            "the setup commands read, one line per key); it is ignored "
+            "and the runner runs no setup phase -- the execution tools "
+            "stay as unavailable as they were without one"
+        )
+    return (
+        f"the reviewed repo's default-branch {REVIEW_MD} carries "
+        f"{lines} review_setup_files: lines it cannot use as the run's "
+        "setup files (a comma-separated list of default-branch file "
+        "names the setup commands read, one line per key); they are "
+        "ignored and the runner runs no setup phase -- the execution "
+        "tools stay as unavailable as they were without one"
+    )
+
+
 @dataclass(frozen=True)
 class SetupRead:
     """What the reviewed repo's **default-branch** `REVIEW.md` declared
@@ -508,52 +577,74 @@ class SetupRead:
     parsed, validated argv tuples, each run with egress still allowed
     before the deny-all flip and before any PR content is uploaded; the
     `{python}` placeholder is substituted with the interpreter the
-    controller resolved by absolute path. `notes` is controller text,
-    non-empty only when a line was seen and ignored, so "line present but
-    unusable" can be told apart from "no line"; the note names the key,
-    the condition and the default that stands, and never echoes the
-    rejected text."""
+    controller resolved by absolute path. `files` are the default-branch
+    files the commands read (a `review_setup_files:` line): each is
+    fetched from the same branch and uploaded into the runner's setup
+    directory under its own name before the first command runs, so a
+    relative `-r requirements.txt` resolves without naming PR content.
+    `notes` is controller text, non-empty only when a line was seen and
+    ignored, so "line present but unusable" can be told apart from "no
+    line"; the note names the key, the condition and the default that
+    stands, and never echoes the rejected text."""
 
     commands: tuple[tuple[str, ...], ...]
-    notes: tuple[str, ...]
+    files: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
-DEFAULT_SETUP = SetupRead((), ())
+DEFAULT_SETUP = SetupRead((), (), ())
 
 
 def parse_setup_commands(text: str | None) -> SetupRead:
-    """The `review_setup_commands:` line, parsed from one `REVIEW.md`
-    **text** -- the default-branch file the service fetches, never the
-    merge-base tarball and never the PR head (the same read source the
-    S7 proposals take: a PR that could carry its own setup commands
-    would name installs into its own review's runner while egress is
-    allowed). No file, or no line for the key, reads as no setup phase,
-    silently, exactly as no request at all. A line that is present but
-    unusable -- an empty or out-of-grammar value, or the key more than
-    once -- fails open to no setup: the whole line is dropped and the
-    note names the key, the condition and the default, never the
-    rejected text. Fence-blind by design, exactly as the other known
-    keys' parsers are."""
+    """The `review_setup_commands:` and `review_setup_files:` lines,
+    parsed from one `REVIEW.md` **text** -- the default-branch file the
+    service fetches, never the merge-base tarball and never the PR head
+    (the same read source the S7 proposals take: a PR that could carry
+    its own setup commands would name installs into its own review's
+    runner while egress is allowed). No file, or no line for either key,
+    reads as no setup phase, silently, exactly as no request at all. A
+    line that is present but unusable -- an empty or out-of-grammar
+    value, the key more than once, a declared files line with no commands
+    line to read them -- fails open to no setup: the whole spec is
+    dropped and the note names the key, the condition and the default,
+    never the rejected text. Fence-blind by design, exactly as the other
+    known keys' parsers are."""
     if text is None:
         return DEFAULT_SETUP
     commands: tuple[tuple[str, ...], ...] | None = None
-    unusable = False
-    matched = 0
+    files: tuple[str, ...] | None = None
+    commands_unusable = False
+    files_unusable = False
+    commands_lines = 0
+    files_lines = 0
     for line in text.splitlines():
         match = SETUP_COMMANDS_LINE.match(line)
-        if match is None:
+        if match is not None:
+            commands_lines += 1
+            parsed_commands = _setup_commands(match.group(1))
+            if parsed_commands is None or commands is not None:
+                commands_unusable = True
+            else:
+                commands = parsed_commands
             continue
-        matched += 1
-        parsed = _setup_commands(match.group(1))
-        if parsed is None or commands is not None:
-            unusable = True
-            continue
-        commands = parsed
-    if unusable:
-        return SetupRead((), (_unusable_setup_note(matched),))
-    if commands is None:
+        match = SETUP_FILES_LINE.match(line)
+        if match is not None:
+            files_lines += 1
+            parsed_files = _setup_files(match.group(1))
+            if parsed_files is None or files is not None:
+                files_unusable = True
+            else:
+                files = parsed_files
+    notes: list[str] = []
+    if commands_unusable:
+        notes.append(_unusable_setup_note(commands_lines))
+    if files_unusable or (files is not None and commands is None):
+        notes.append(_unusable_setup_files_note(files_lines))
+    if notes:
+        return SetupRead((), (), tuple(notes))
+    if commands is None and files is None:
         return DEFAULT_SETUP
-    return SetupRead(commands, ())
+    return SetupRead(commands or (), files or ())
 
 
 def parse_post_config(text: str | None) -> PostConfigRead:
@@ -900,6 +991,7 @@ _KNOWN_KEYS = frozenset(
         "review_skip_events",
         "review_test_commands",
         "review_setup_commands",
+        "review_setup_files",
     }
 )
 # How many distinct unsupported keys one note names; the remainder is
