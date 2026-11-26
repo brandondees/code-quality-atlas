@@ -256,7 +256,7 @@ class ReviewTrace:
         blocking the review's exit."""
         processor = self._processor
         if processor is not None and hasattr(processor, "force_flush"):
-            _bounded(lambda: processor.force_flush())
+            _bounded(processor.force_flush)
 
     def with_scrub(self, scrub: Scrub, *, bodies: bool | None = None) -> ReviewTrace:
         """A view with this scrubber. It does not own the provider, so
