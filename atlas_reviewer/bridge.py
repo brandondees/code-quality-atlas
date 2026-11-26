@@ -2921,8 +2921,6 @@ class Bridge:
             self._restage()
         if self._history_lost:
             return self._history_gap(call, started)
-        if self._suspect:
-            self._restage()
         try:
             code, text = self.session.exec(
                 f"bridge {call.tool}",
@@ -3189,6 +3187,8 @@ def run_bridge(
                 trees,
                 unpack,
                 approvals=approvals,
+                history_bundle=history_bundle,
+                history_base=history_base,
                 # The collection probe executed the copy's own conftest.py
                 # -- PR code, in the runner -- so the bridge's first
                 # runner-side read or execution copy re-stages from the
