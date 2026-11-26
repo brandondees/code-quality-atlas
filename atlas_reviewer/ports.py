@@ -217,24 +217,6 @@ class SpritesApi(Protocol):
 
     def exists(self, name: str) -> bool: ...
 
-    def checkpoint(self, name: str, comment: str) -> str:
-        """Creates a checkpoint of the sprite's current state and returns
-        its id (issue #819, D95). Raises `BoundaryError` when the create's
-        stream reports an error or carries no completion, and when the
-        post-create checkpoint list is empty or carries no usable id."""
-        ...
-
-    def list_checkpoints(self, name: str) -> list[Json]: ...
-
-    def restore(self, name: str, checkpoint_id: str) -> None:
-        """Restores the named checkpoint into the named sprite. Raises
-        `NotFoundError` when the checkpoint is unknown to the API -- which
-        is also the shape a restore the API will not perform cross-sprite
-        takes, the capability the document does not settle (D95's live
-        check) -- and `BoundaryError` when the restore's stream reports an
-        error or carries no completion."""
-        ...
-
 
 class RunnerLedger(Protocol):
     """Durable record of runners that may still exist, written *before*

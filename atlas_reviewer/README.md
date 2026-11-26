@@ -848,12 +848,8 @@ content is uploaded or unpacked), **then** set deny-all, read it back
 exactly, cap memory, and run the behavioral egress check — whose
 `CONNECTED` answer fails the run closed. Every exec of the review — the
 staging probe, the tool runs, `run_tests` and `mutate` — happens after
-that read-back. A runner **restoring** the shared checkpoint provisions
-in its own order: create, set deny-all, read it back exactly, **then**
-restore the checkpoint, cap memory, and run the same behavioral egress
-check — the proof follows the restore, because the restored state is the
-one thing the flip cannot have seen (a checkpoint can carry services or
-proxy state a fresh image does not have). Without a setup spec the
+that read-back. Every lens runs this same provisioning on its own
+runner. Without a setup spec the
 lifecycle is unchanged: deny-all
 from the start, and the existing order tests still pin it. The value's
 grammar is the S7 proposals' token grammar with one addition: the program
@@ -863,28 +859,30 @@ unusable value or a repeated key runs no setup phase and is named with a
 note that never echoes the rejected text; a command that fails, times out,
 or outlives its budget fails the run.
 
-**The shared-bake design is retained, pending an image path.** The
-setup phase's result is the "pre-baked image with dev dependencies per
-repo" the direction asked for, and the bake/checkpoint machinery that
-builds it stays in the code. The live Sprite checks of Nov 25 found what
-the design needs and does not have yet: checkpoint ids are scoped to one
-sprite (a restore on another sprite fails `SBD checkpoint not found`),
-checkpoints do not survive their sprite's deletion, and the checkpoint
-list's first entry is a synthetic `Current` the adapter's id selection
-had to learn to skip (the id now comes from the create stream's own
-completion text). Same-sprite restore works — it reverted a marker and
-brought back a pip install in the pyenv tree, keeping deny-all — but the
-lenses run on separate sprites, so until an image-build path exists
-(the current API has no create-from-image parameter; under evaluation),
-each lens runs the setup itself: the same provisioning order as above,
-a few seconds of pip time per lens, measured live.
+**The shared checkpoint is retired; every lens runs the setup.** The
+direction's "pre-baked image with dev dependencies per repo" was first
+built as a shared bake: one setup runner per review checkpoints its
+post-setup state and every lens runner restores from it. The live Sprite
+checks of Nov 25 found the design cannot work on today's API, and the
+Nov 25 model-mix rerun showed it failing live — every lens's restore
+returned `SBD checkpoint not found` and fell back to the per-lens setup
+it was meant to replace: checkpoint ids are scoped to one sprite (a
+restore on another sprite fails), checkpoints do not survive their
+sprite's deletion, and the API has no create-from-image parameter at all
+(OpenAPI 0.1.12, re-fetched Nov 25 — `CreateSpriteRequest` carries `name`
+and `url_settings` only). The bake/checkpoint machinery is removed; each
+lens runs the setup phase itself on its own runner, the same provisioning
+order as above, a few seconds of pip time per lens, measured live. The
+design comes back when an image-bearing create parameter or a
+create-from-checkpoint path exists; the setup spec needs no change
+either way.
 
 **Install where `-I` can see it.** The setup commands run under the
 runner's minimal environment with `HOME=/tmp`, and the Sprite's
 interpreter tree is not writable by the exec user in the way pip's
 writability check expects: a bare `pip install` falls back to a **user
 install** into `/tmp/.local`, which `-I` (isolated mode — no user site)
-cannot import and no checkpoint captured. The live checks showed the
+cannot import. The live checks showed the
 symptom exactly: staging reported `pytest: none` while a non-isolated
 import found `/tmp/.local/.../pytest`. Write the spec's installs with
 `--no-user` — `review_setup_commands: {python} -m pip install --no-user
