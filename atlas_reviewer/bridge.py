@@ -43,6 +43,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
+from uuid import uuid4
 
 from atlas_reviewer.approval import RunApprovals
 from atlas_reviewer.bridge_args import (
@@ -144,7 +145,7 @@ _CONTINUATION = bytes(range(0x80, 0xC0))
 # test process runs at a time: the lens loop runs a turn's calls in order,
 # and each call's script runs its processes to completion before it
 # returns.
-RUN_TOOLS = frozenset({"run_tests", "mutate"})
+RUN_TOOLS = frozenset({"run_tests", "mutate", "run_probe"})
 
 # The file-content tools answered from the controller's own copy of the
 # trees and the deterministic splice (D80 round 2): executed code can
@@ -261,6 +262,10 @@ DEFAULT_LIMITS: Mapping[str, ToolLimits] = MappingProxyType(
         # review's wall clocks still bound everything above this.
         "run_tests": ToolLimits(16 * 1024, 180),
         "mutate": ToolLimits(16 * 1024, 180),
+        # The probe runs one bounded pytest process like run_tests does
+        # (D80's probe-tool update), so it shares the clock and the output
+        # cap; the override applies to it with the run tools.
+        "run_probe": ToolLimits(16 * 1024, 180),
     }
 )
 
@@ -303,6 +308,7 @@ def run_tool_limits(
             **limits,
             "run_tests": replace(limits["run_tests"], timeout_s=seconds),
             "mutate": replace(limits["mutate"], timeout_s=seconds),
+            "run_probe": replace(limits["run_probe"], timeout_s=seconds),
         }
     )
 
@@ -1244,6 +1250,56 @@ def run_test_script(
             "stage=$?",
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
+            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            "  export PYTHONDONTWRITEBYTECODE=1;",
+            (
+                f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
+                f"{run_argv} ) > out 2> err"
+            ),
+            "  s=$?",
+            f"  tail -c {limits.max_bytes} out > shown",
+            f'  echo "{RUN_HEADER} $s $(wc -c < out) $(wc -l < out) $(wc -c < shown)"',
+            "  base64 -w0 < shown; echo",
+            f"  head -c {STDERR_BYTES} err | base64 -w0; echo",
+            "fi",
+            f"rm -rf {root}/{SCRATCH_DIR} out err shown",
+        )
+    )
+
+
+# The probe file's name: one throwaway test module per call, at the
+# copy's root (the same import context the repo's own root tests have),
+# with a controller-chosen suffix so it cannot shadow a real test file.
+PROBE_NAME_PREFIX = "test_atlas_probe_"
+
+
+def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+    """One exec for `run_probe` (D80's 2026-11-26 update): the same
+    disposable copy of the head tree `run_tests` builds, with the model's
+    one throwaway test file written into it under a fixed probe directory
+    (base64-decoded, so the content cannot bend the script), then the same
+    bounded guarded pytest run -- the selector names what runs, the probe
+    file itself when none was given -- and the copy removed again. The
+    file never reaches the repository, the trees, or any later call: it
+    dies with the copy, exactly like the test-run writes it may make."""
+    scratch = quote(staged.scratch)
+    root = quote(staged.root)
+    assert staged.pytest is not None  # the caller refuses the call before this
+    assert staged.shim_python is not None  # the caller refuses the call before this
+    content = base64.b64encode(call.get("content").encode("utf-8")).decode()
+    probe_path = f"{PROBE_NAME_PREFIX}{uuid4().hex[:8]}.py"
+    selector = call.get("selector") or probe_path
+    run_argv = as_nobody(staged.shim_python, _pytest_argv(staged, selector))
+    return "\n".join(
+        (
+            f"cd {root}",
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            "stage=$?",
+            f'echo "{STAGE_HEADER} $stage"',
+            'if [ "$stage" = 0 ]; then',
+            f"  printf %s {quote(content)} | base64 -d > {scratch}/{quote(probe_path)}",
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
@@ -2227,7 +2283,7 @@ class Bridge:
             return None
         made, cap, kind = (
             (self._attempt_runs, limits.max_test_runs, "run_tests")
-            if tool == "run_tests"
+            if tool in ("run_tests", "run_probe")
             else (self._attempt_mutants, limits.max_mutants, "mutate")
         )
         if made >= cap:
@@ -2425,6 +2481,8 @@ class Bridge:
                 f"bridge {call.tool}",
                 mutate_script(self.staged, call, limits)
                 if call.tool == "mutate"
+                else run_probe_script(self.staged, call, limits)
+                if call.tool == "run_probe"
                 else run_test_script(self.staged, call, limits, argv),
                 stage="bridge",
                 budget_s=budget,
@@ -2528,7 +2586,7 @@ class Bridge:
         started: float,
     ) -> BridgeResult:
         seconds = self.clock.monotonic() - started
-        if call.tool == "run_tests":
+        if call.tool in ("run_tests", "run_probe"):
             stage, run = _single_run(blocks)
             if stage.code != 0:
                 # F4: a copy that could not be staged is a staging
@@ -2781,7 +2839,7 @@ class Bridge:
         # execution resource, so it takes no slot; a run that timed out
         # did run, and keeps its slot.
         spent_nothing = result.status in (Status.REJECTED, Status.OVER_SESSION_LIMIT)
-        if result.tool == "run_tests" and not spent_nothing:
+        if result.tool in ("run_tests", "run_probe") and not spent_nothing:
             self._attempt_runs += 1
         elif result.tool == "mutate" and not spent_nothing:
             self._attempt_mutants += 1

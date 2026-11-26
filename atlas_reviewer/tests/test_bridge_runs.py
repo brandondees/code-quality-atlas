@@ -48,6 +48,7 @@ from atlas_reviewer.bridge import (
     parse_sweep,
     render,
     run_bridge,
+    run_probe_script,
     run_test_script,
     run_tool_limits,
     sweep_groups,
@@ -3224,3 +3225,78 @@ def test_a_failed_run_exec_still_marks_the_bridge_suspect(tmp_path):
     )
     assert report.status is RunnerStatus.COMPLETED, report.note
     assert results[0].status is Status.OK
+
+
+# ------------------------------------------------- the probe tool
+
+
+def test_a_probe_runs_the_written_file_and_leaves_nothing_behind(tmp_path):
+    probe = (
+        b"from calc import total\n\n"
+        b"def test_probe_sees_the_real_total():\n"
+        b"    assert total([1, 2, 3]) == 6\n"
+    )
+    (probe_result, grep_result), _bridge = calls(
+        tmp_path,
+        ("run_probe", {"content": probe.decode()}),
+        ("grep", {"pattern": "test_atlas_probe"}),
+    )
+    assert probe_result.status is Status.OK
+    assert "1 passed" in probe_result.content.text
+    # The probe file never reaches the repository or the trees: the grep
+    # over the head tree finds nothing, and the run's result is the only
+    # trace.
+    assert grep_result.status is Status.OK
+    assert grep_result.content.text.strip() in ("", "no match")
+
+
+def test_the_probe_script_writes_base64_and_guards_the_run(tmp_path):
+    call = validate(
+        "run_probe", {"content": "def test_x():\n    assert 1\n"}, frozenset(Rev)
+    )
+    staged = Staged(
+        str(tmp_path / "root"),
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    script = run_probe_script(staged, call, ToolLimits(16 * 1024, 180))
+    assert "test_atlas_probe_" in script and "base64 -d" in script
+    assert "atlas-privilege-drop failed" in script  # the guard wraps the run
+    assert "timeout -k 2 180" in script  # the same clock run_tests uses
+    # The default selector is the probe file itself, at the copy's root.
+    assert "test_atlas_probe_" in script.split("base64 -d")[1]
+    # The named selector replaces it.
+    named = validate(
+        "run_probe",
+        {
+            "content": "def test_x():\n    assert 1\n",
+            "selector": "test_probe_file.py::test_x",
+        },
+        frozenset(Rev),
+    )
+    named_script = run_probe_script(staged, named, ToolLimits(16 * 1024, 180))
+    assert named_script.count("test_probe_file.py::test_x") == 1
+
+
+def test_the_probe_content_is_capped_and_control_character_free(tmp_path):
+    too_big = one(tmp_path, "run_probe", {"content": "x = 1\n" * (16 * 1024 // 6 + 1)})
+    assert too_big.status is Status.REJECTED
+    assert "over" in too_big.error.text
+    control = one(tmp_path, "run_probe", {"content": "x = 1\x00\n"})
+    assert control.status is Status.REJECTED
+    assert "control character" in control.error.text
+
+
+def test_the_probe_shares_the_test_run_cap(tmp_path):
+    probe = {"content": "def test_x():\n    assert True\n"}
+    first, second = calls(
+        tmp_path,
+        ("run_probe", dict(probe)),
+        ("run_probe", dict(probe)),
+        session_limits=SessionLimits(max_test_runs=1),
+    )[0]  # fmt: skip
+    assert first.status is Status.OK
+    assert second.status is Status.OVER_SESSION_LIMIT
+    assert "all 1 run_tests calls" in second.error.text

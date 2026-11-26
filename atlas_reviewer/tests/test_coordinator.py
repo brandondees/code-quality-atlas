@@ -495,7 +495,7 @@ def test_a_retry_gets_a_full_bridge_budget_and_a_spent_one_finalizes(tmp_path):
     # its refused batch, and the finalize turn -- which carries the tool
     # schemas next to the tool history.
     assert len(model.requests) == 6
-    assert len(model.requests[5].tools) == 7
+    assert len(model.requests[5].tools) == 8
 
 
 def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
