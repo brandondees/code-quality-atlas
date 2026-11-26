@@ -194,6 +194,7 @@ def test_the_child_receives_the_route_settings_and_the_agentic_limits():
         "ATLAS_PER_LENS_USD": "5",
         "ATLAS_REVIEW_CEILING_USD": "10",
         "ATLAS_TEST_TIMEOUT_S": "240",
+        "ATLAS_SWEEP_LENSES": "reviewing-test-quality",
         "ATLAS_NOT_A_CHILD_SETTING": "dropped",
         "FLY_API_TOKEN": "fly-token-value",
         APP_KEY_ENV: "pem-secret-value",
@@ -219,6 +220,8 @@ def test_the_child_receives_the_route_settings_and_the_agentic_limits():
     # The execution tools' per-process test clock rides along (D80's
     # 2026-11-26 environment update): a setting, not a credential.
     assert env["ATLAS_TEST_TIMEOUT_S"] == "240"
+    # The mutant pre-pass's lens set rides along too (D80's sweep).
+    assert env["ATLAS_SWEEP_LENSES"] == "reviewing-test-quality"
     assert "ATLAS_NOT_A_CHILD_SETTING" not in env
     assert "FLY_API_TOKEN" not in env
     assert APP_KEY_ENV not in env

@@ -25,6 +25,8 @@ from atlas_reviewer.bridge import (
     MutantOutcome,
     SessionLimits,
     Status,
+    SweepGroup,
+    SweepSpec,
     ToolLimits,
     _aim_refusal,
     _MutBlock,
@@ -32,16 +34,21 @@ from atlas_reviewer.bridge import (
     _run_status,
     _RunBlock,
     _splice,
+    added_lines,
     mutant_outcome,
     mutate_script,
     mutation_refusal,
     parse_mutation,
     parse_run_blocks,
     parse_summary,
+    parse_sweep,
     render,
     run_bridge,
     run_test_script,
     run_tool_limits,
+    sweep_groups,
+    sweep_script,
+    sweep_specs,
 )
 from atlas_reviewer.bridge_args import Rev, validate
 from atlas_reviewer.bridge_staging import (
@@ -2740,3 +2747,143 @@ def test_a_parser_resource_failure_in_the_preflight_is_a_named_gap(
     assert "RecursionError" in mutate.error.text
     # The read tool is untouched by the preflight's own failure.
     assert read.status is Status.OK
+
+
+# ------------------------------------------------- the controller sweep
+
+
+SWEEP_MODULE = (
+    b"def clamp(n):\n    if n < 0 or n > 9:\n        return 0\n    return n\n"
+)
+SWEEP_TEST = (
+    b"from clamp import clamp\n\ndef test_middle():\n    assert clamp(5) == 5\n"
+)
+SWEEP_DIFF = """diff --git a/clamp.py b/clamp.py
+--- a/clamp.py
++++ b/clamp.py
+@@ -1,2 +1,4 @@
+ def clamp(n):
++    if n < 0 or n > 9:
++        return 0
+     return n
+"""
+
+
+def test_added_lines_reads_the_head_side_of_each_hunk():
+    diff = (
+        "--- a/m.py\n+++ b/m.py\n@@ -1,3 +1,5 @@\n ctx\n"
+        "+added one\n ctx\n+added two\n-old\n ctx\n@@ -10 +12,2 @@\n+x\n y\n"
+    )
+    assert added_lines(diff) == frozenset({2, 4, 12})
+
+
+def test_sweep_specs_names_the_changed_conditions():
+    specs = sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE})
+    assert specs == (
+        SweepSpec("clamp.py", 2, "negate-condition"),
+        SweepSpec("clamp.py", 2, "drop-operand", 1),
+        SweepSpec("clamp.py", 2, "drop-operand", 2),
+        # The comparisons share one line, so one flip spec covers the
+        # line's first comparison (the sweep's dedupe is per line and
+        # operator).
+        SweepSpec("clamp.py", 2, "flip-compare"),
+    )
+
+
+def test_sweep_specs_dedupes_and_caps():
+    doubled = SWEEP_DIFF + SWEEP_DIFF.replace("clamp.py", "other.py").replace(
+        "a/clamp.py", "a/other.py"
+    )
+    specs = sweep_specs(doubled, {"clamp.py": SWEEP_MODULE, "other.py": SWEEP_MODULE})
+    assert len(specs) == 8  # four per file, both files present
+    assert len(sweep_specs(doubled, {"clamp.py": SWEEP_MODULE}, cap=2)) == 2
+    # A file the controller's copy does not hold is not swept.
+    assert sweep_specs(SWEEP_DIFF, {}) == ()
+
+
+def test_sweep_groups_group_by_module_and_require_an_importer():
+    specs = sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE})
+    groups = sweep_groups(
+        specs, {"clamp.py": SWEEP_MODULE, "test_clamp.py": SWEEP_TEST}
+    )
+    assert len(groups) == 1
+    assert groups[0].module == "clamp.py"
+    assert groups[0].selectors == ("test_clamp.py",)
+    # A module whose importer is not staged forms no group.
+    groups = sweep_groups(
+        sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE}), {"clamp.py": SWEEP_MODULE}
+    )
+    assert groups == ()  # the test file that imports it is not staged
+
+
+def test_parse_sweep_maps_the_verdicts():
+    group = SweepGroup(
+        "clamp.py",
+        ("test_clamp.py",),
+        (
+            SweepSpec("clamp.py", 2, "drop-operand", 1),
+            SweepSpec("clamp.py", 2, "drop-operand", 2),
+            SweepSpec("clamp.py", 3, "negate-condition"),
+            SweepSpec("clamp.py", 3, "flip-compare"),
+        ),
+    )
+    text = (
+        "atlas-baseline:clamp.py:0:\n"
+        "atlas-sweep:0:0:\n"
+        "atlas-sweep:1:1:\n"
+        "atlas-sweep:2:124:\n"
+        "atlas-sweep:3:5:\n"
+    )
+    survived, killed, timed, empty = parse_sweep(text, group)
+    assert survived.outcome == "survived" and survived.exit == 0
+    assert killed.outcome == "killed" and killed.exit == 1
+    assert timed.outcome == "inconclusive" and "wall clock" in timed.note
+    assert empty.outcome == "inconclusive" and "no test" in empty.note
+
+
+def test_parse_sweep_reports_the_baseline_and_the_refusal():
+    group = SweepGroup(
+        "clamp.py", ("test_clamp.py",), (SweepSpec("clamp.py", 2, "negate-condition"),)
+    )
+    text = (
+        "atlas-baseline:clamp.py:1:"
+        + base64.b64encode(b"1 failed").decode()
+        + "\natlas-sweep:0:R:-:"
+        + base64.b64encode(b"the operator does not apply").decode()
+        + "\n"
+    )
+    (verdict,) = parse_sweep(text, group)
+    assert verdict.outcome == "refused"
+    assert "the operator does not apply" in verdict.note
+    no_baseline = parse_sweep("atlas-sweep:0:0:\n", group)
+    assert no_baseline[0].outcome == "inconclusive"
+    failed_baseline = parse_sweep(
+        "atlas-baseline:clamp.py:1:\natlas-sweep:0:2:\n", group
+    )
+    assert failed_baseline[0].outcome == "inconclusive"
+    assert "baseline" in failed_baseline[0].note
+    missing = parse_sweep("atlas-baseline:clamp.py:0:\n", group)
+    assert missing[0].outcome == "inconclusive"
+    assert "no verdict" in missing[0].note
+
+
+def test_the_sweep_script_stages_copy_edit_run_and_cleans_up(tmp_path):
+    staged = Staged(
+        str(tmp_path / "root"),
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    group = SweepGroup(
+        "clamp.py", ("test_clamp.py",),
+        (SweepSpec("clamp.py", 2, "negate-condition"), SweepSpec("clamp.py", 2, "drop-operand", 2)),
+    )  # fmt: skip
+    script = sweep_script(staged, group, ToolLimits(16 * 1024, 60))
+    assert "atlas-baseline:clamp.py:" in script
+    assert "atlas-sweep:0:" in script and "atlas-sweep:1:" in script
+    assert script.count("timeout -k 2 60") == 3  # baseline plus two runs
+    assert script.count("atlas-privilege-drop failed") == 3  # every run is guarded
+    assert script.count(MUTATION_SCRIPT[:40]) == 2  # one edit per spec
+    assert "drop-operand 2" in script  # the operand rides the edit argv
+    assert script.count("rm -rf") >= 3  # the copies die after their runs

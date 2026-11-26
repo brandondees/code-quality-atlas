@@ -19,7 +19,12 @@ from atlas_reviewer.attestation import (
     ToolUse,
     body_digest,
 )
-from atlas_reviewer.bridge import BridgeResult, SessionLimits, Status, run_bridge
+from atlas_reviewer.bridge import (
+    BridgeResult,
+    SessionLimits,
+    Status,
+    run_bridge,
+)
 from atlas_reviewer.bridge_args import TOOLS, RejectedError, Rev, validate
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import BudgetRefusedError
@@ -32,6 +37,7 @@ from atlas_reviewer.lens_loop import (
     HALTED_CALL,
     INSTRUCTIONS,
     PREFIX_INSTRUCTIONS,
+    SWEEP_LENSES_ENV,
     SYNTHESIS,
     AgenticLimits,
     AssistantCalls,
@@ -94,6 +100,16 @@ from .helpers import HEAD, OLD, FakeClock, LocalSprites, source_tarball
 
 NONCE = "f00dfeedf00dfeed"
 CONTRACT = finding_contract()
+
+
+class _NoSweepBridge:
+    """The bridge surface `run_attempt` touches before the first turn:
+    these tests exercise the model-call mechanics with a stub whose sweep
+    plan is empty, so the controller's mutant pre-pass adds no evidence
+    block."""
+
+    def sweep_plan(self, diff):
+        return ()
 
 
 def job(body=BODY, digest=DIGEST):
@@ -160,7 +176,7 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
     spend = Spend(LIMITS.resolve())
     with pytest.raises(ByokRefusedError, match="byok"):
         run_attempt(
-            job(), object(), Model(), spend, clock,
+            job(), _NoSweepBridge(), Model(), spend, clock,
             review_deadline=clock.monotonic() + 600,
             review_started=clock.monotonic(),
         )  # fmt: skip
@@ -193,7 +209,7 @@ def test_a_refused_key_stops_the_review_and_never_retries():
     clock = FakeClock()
     spend = Spend(LIMITS.resolve())
     outcome = run_attempt(
-        job(), object(), Refused(), spend, clock,
+        job(), _NoSweepBridge(), Refused(), spend, clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -286,7 +302,7 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
         spend = Spend(LIMITS.resolve())
         clock = FakeClock()
         outcome = run_attempt(
-            job(), object(), model, spend, clock,
+            job(), _NoSweepBridge(), model, spend, clock,
             review_deadline=clock.monotonic() + 600,
             review_started=clock.monotonic(),
         )  # fmt: skip
@@ -302,7 +318,7 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), ModelFails(), spend, clock,
+        job(), _NoSweepBridge(), ModelFails(), spend, clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
         sleep=clock.advance,
@@ -316,7 +332,7 @@ def test_every_exception_path_after_a_reservation_settles_it_as_spent():
     spend = Spend(LIMITS.resolve())
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), TimedOut(), spend, clock,
+        job(), _NoSweepBridge(), TimedOut(), spend, clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -334,7 +350,7 @@ def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():
     spend.halt()
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), model, spend, clock,
+        job(), _NoSweepBridge(), model, spend, clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -356,7 +372,7 @@ def test_a_halt_while_the_call_is_priced_stops_the_call():
     model = Model([final()])
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), model, spend, clock,
+        job(), _NoSweepBridge(), model, spend, clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -385,7 +401,7 @@ def test_a_zdr_refusal_while_pricing_is_its_own_cause_and_not_retried():
 
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), Model(), Spend(LIMITS.resolve()), clock,
+        job(), _NoSweepBridge(), Model(), Spend(LIMITS.resolve()), clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -408,7 +424,7 @@ def test_a_pricing_refusal_on_the_turn_is_its_own_cause():
 
     clock = FakeClock()
     outcome = run_attempt(
-        job(), object(), Model(), Spend(LIMITS.resolve()), clock,
+        job(), _NoSweepBridge(), Model(), Spend(LIMITS.resolve()), clock,
         review_deadline=clock.monotonic() + 600,
         review_started=clock.monotonic(),
     )  # fmt: skip
@@ -1693,6 +1709,9 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     clock = FakeClock()
 
     class DeadBridge:
+        def sweep_plan(self, diff):
+            return ()
+
         def call(self, tool, args):
             clock.advance(12.5)
             raise DeadlineExceededError(
@@ -2479,7 +2498,8 @@ def test_the_prefix_instructions_and_the_paged_ones_agree_where_they_share():
         ),
         "Two tools execute, on a disposable copy of the head tree",
         "run_tests runs the copy's pytest suite or the selector",
-        "a mutant that survived means the guard it stands for is not pinned",
+        "a surviving mutant at a line you are citing is exactly",
+        "counts the same way",
         "an inconclusive run is a gap, not evidence",
     ):
         assert shared in flat(INSTRUCTIONS)
@@ -3216,3 +3236,78 @@ def test_a_byok_refusal_carries_the_executions_already_made(tmp_path):
     assert exc.test_runs == 1
     assert exc.mutants_survived == 0
     assert exc.turns == 1
+
+
+# ------------------------------------------------- the controller's sweep
+
+
+def test_the_sweep_feeds_its_evidence_block_to_the_first_turn(tmp_path):
+    """The controller's mutant pre-pass (D80's 2026-11-26 update): for the
+    sweep lenses, the changed conditions are swept before the first turn
+    and the verdicts ride one fenced tool-evidence block -- a surviving
+    operand drop is exactly the evidence an unpinned-guard finding
+    wants."""
+    clamp = b"def clamp(n):\n    if n < 0 or n > 9:\n        return 0\n    return n\n"
+    test_file = (
+        b"from clamp import clamp\n\ndef test_middle():\n    assert clamp(5) == 5\n"
+    )
+    head = {
+        "clamp.py": clamp,
+        "config/keys.py": EXEC_TOKEN_LINE,
+        "test_clamp.py": test_file,
+    }
+    base = {"clamp.py": b"def clamp(n):\n    return n\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_diff = (
+        "diff --git a/clamp.py b/clamp.py\n--- a/clamp.py\n+++ b/clamp.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        " def clamp(n):\n"
+        "+    if n < 0 or n > 9:\n"
+        "+        return 0\n"
+        "     return n\n"
+    )
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, the_diff, CHANGED), NONCE,
+        head_tree=head_tarball, diff=the_diff,
+    )  # fmt: skip
+    source = SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD)
+    outcome, model, _ = attempt(
+        tmp_path, [tools(("run_tests", {})), final(finding())],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    first = model.requests[0].messages[0]
+    assert "tool-evidence" in first.text
+    assert "clamp.py:2 drop-operand keep 1: survived" in first.text
+    assert "clamp.py:2 negate-condition: killed" in first.text
+    assert outcome.mutants_survived == 0  # the sweep's verdicts are not the model's
+
+
+def test_a_lens_outside_the_sweep_set_gets_no_evidence_block(tmp_path):
+    clamp = b"def clamp(n):\n    if n < 0 or n > 9:\n        return 0\n    return n\n"
+    head = {"clamp.py": clamp, "config/keys.py": EXEC_TOKEN_LINE}
+    base = {"clamp.py": b"def clamp(n):\n    return n\n"}
+    head_tarball = source_tarball(head, TOP)
+    the_diff = (
+        "diff --git a/clamp.py b/clamp.py\n--- a/clamp.py\n+++ b/clamp.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        " def clamp(n):\n"
+        "+    if n < 0 or n > 9:\n"
+        "+        return 0\n"
+        "     return n\n"
+    )
+    the_job = LensJob(
+        LENS, BODY, DIGEST, CONTRACT,
+        "Review target (from the operator): example-org/example-app#7",
+        CHANGED, read_sources(head_tarball, the_diff, CHANGED), NONCE,
+        head_tree=head_tarball, diff=the_diff,
+    )  # fmt: skip
+    source = SourceTrees(source_tarball(base, TOP), head_tarball, OLD, HEAD)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(SWEEP_LENSES_ENV, "reviewing-test-quality")
+        _outcome, model, _ = attempt(
+            tmp_path, [final(finding())],
+            the_job=the_job, source=source,
+        )  # fmt: skip
+    assert "tool-evidence" not in model.requests[0].messages[0].text

@@ -151,6 +151,9 @@ _CHILD_ALLOWED = frozenset(
         # environment update): a setting, not a credential; the child's
         # run_bridge applies it to `run_tests` and `mutate`.
         "ATLAS_TEST_TIMEOUT_S",
+        # Which lenses the controller's mutant pre-pass runs for (D80's
+        # 2026-11-26 sweep): a setting, not a credential; empty disables.
+        "ATLAS_SWEEP_LENSES",
     }
     # The agentic limits (D68's per-lens knobs and the per-review dollar
     # ceiling included) ride along in both modes: the agentic child reads

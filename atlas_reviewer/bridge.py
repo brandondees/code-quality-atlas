@@ -72,6 +72,7 @@ from atlas_reviewer.bridge_staging import (
     stage_copy_steps,
     stage_script,
 )
+from atlas_reviewer.diffs import split_files
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import KILL_AFTER_S
 from atlas_reviewer.notes import quote_untrusted
@@ -1921,6 +1922,13 @@ def _secrets(scan: SecretScan, places: Sequence[_Where]) -> tuple[BridgeSecret, 
     )
 
 
+SWEEP_CAP = 24
+SWEEP_RUN_BOUND_S = 60
+SWEEP_BUDGET_S = 300.0
+SWEEP_TAG = "atlas-sweep"
+_BASELINE_TAG = "atlas-baseline"
+
+
 @dataclass
 class Bridge:
     """The tools over one staged runner. `changed` are the paths the PR
@@ -2007,6 +2015,64 @@ class Bridge:
         mutated, _before, _after = spliced
         head[mutation.path] = mutated
         return head
+
+    def sweep_plan(self, diff: str, cap: int = SWEEP_CAP) -> tuple[SweepSpec, ...]:
+        """The mutant specs the controller's pre-pass would sweep for this
+        runner: the diff's changed conditions over the head tree's own
+        parse (`sweep_specs`), against the controller's own copy of the
+        staged head tree."""
+        return sweep_specs(diff, self._contents.get(Rev.HEAD, {}), cap)
+
+    def sweep(
+        self,
+        specs: Sequence[SweepSpec],
+        *,
+        clock: Clock,
+        budget_s: float | None = None,
+    ) -> tuple[SweepVerdict, ...]:
+        """The controller's mutant pre-pass (D80's 2026-11-26 update):
+        runs the caller's specs through the same machinery a `mutate` call
+        uses -- the fixed script, fresh disposable copies, scoped test
+        runs -- without spending the attempt's own call or mutant budget,
+        because this is the controller's evidence gathering, not the
+        model's. Groups whose baseline does not pass report inconclusive
+        (the named broken-environment shape), and the wall budget is
+        checked between groups: whatever did not run is reported as such,
+        never as a verdict. Every exec runs PR code, so the bridge stays
+        suspect between groups and the next read re-stages."""
+        contents = self._contents.get(Rev.HEAD, {})
+        groups = sweep_groups(specs, contents)
+        budget_s = SWEEP_BUDGET_S if budget_s is None else budget_s
+        started = clock.monotonic()
+        out: list[SweepVerdict] = []
+        limits = ToolLimits(16 * 1024, SWEEP_RUN_BOUND_S)
+        for group in groups:
+            if clock.monotonic() - started >= budget_s:
+                out.extend(
+                    SweepVerdict(
+                        spec,
+                        "inconclusive",
+                        note="the sweep's wall budget was spent before this mutant ran",
+                    )
+                    for spec in group.specs
+                )
+                continue
+            if self._suspect:
+                self._restage()
+            budget = (
+                (1 + len(group.specs)) * (SWEEP_RUN_BOUND_S + KILL_AFTER_S + 30)
+                + len(group.specs) * MUTATE_EDIT_TIMEOUT_S
+                + EXEC_SLACK_S
+            )
+            _code, text = self.session.exec(
+                "mutant sweep",
+                sweep_script(self.staged, group, limits),
+                stage="bridge",
+                budget_s=budget,
+            )
+            self._suspect = True
+            out.extend(parse_sweep(text, group))
+        return tuple(out)
 
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters
@@ -2822,3 +2888,346 @@ def run_bridge(
         telemetry=telemetry, first_frame_s=first_frame_s,
         create_retries=create_retries, create_gate=create_gate, setup=setup,
     )  # fmt: skip
+
+
+# ------------------------------------------------- the controller sweep
+
+
+@dataclass(frozen=True)
+class SweepSpec:
+    """One mutant the controller's pre-pass sweeps (D80's 2026-11-26
+    update): a file, the line the condition or the break/continue starts
+    on, the operator, and `drop-operand`'s kept operand. Built from the
+    diff's added lines over the head tree's own AST, deduplicated, and
+    capped by the caller."""
+
+    path: str
+    line: int
+    operator: str
+    operand: int | None = None
+
+
+@dataclass(frozen=True)
+class SweepVerdict:
+    """One swept mutant's outcome and its scoped run's exit. `note`
+    carries the controller's own why for an inconclusive or refused
+    mutant."""
+
+    spec: SweepSpec
+    outcome: str
+    exit: int | None = None
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class SweepGroup:
+    """The mutants one sweep exec serves: the module they mutate and the
+    test files that import it -- the scoped selector each run executes,
+    in place of the whole suite."""
+
+    module: str
+    selectors: tuple[str, ...]
+    specs: tuple[SweepSpec, ...]
+
+
+def added_lines(diff_text: str) -> frozenset[int]:
+    """The head-side line numbers the diff adds: from each hunk's `@@`
+    header the new side's start, counting every context and added line."""
+    added: set[int] = set()
+    head = 0
+    in_hunk = False
+    for line in diff_text.split("\n"):
+        if line.startswith("@@"):
+            parts = line.split()
+            new_side = next((p for p in parts if p.startswith("+")), None)
+            if new_side is None:
+                in_hunk = False
+                continue
+            head = int(new_side[1:].split(",")[0])
+            in_hunk = True
+        elif in_hunk and line.startswith("+") and not line.startswith("+++"):
+            added.add(head)
+            head += 1
+        elif in_hunk and (line.startswith(" ") or line == ""):
+            head += 1
+    return frozenset(added)
+
+
+def _is_test_path(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py")
+
+
+def _imports_module(source: str, module: str) -> bool:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name == module for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.module == module:
+            return True
+    return False
+
+
+def sweep_specs(
+    diff: str,
+    contents: Mapping[str, bytes],
+    cap: int = SWEEP_CAP,
+) -> tuple[SweepSpec, ...]:
+    """The changed conditions and break/continue statements the sweep
+    will try: every `if`/`while`/conditional expression, `and`/`or`
+    operand, `break`/`continue` and comparison that starts on a line the
+    diff adds, in the head tree's own parse. Deduplicated, capped -- a
+    bigger diff sweeps the first `cap` specs in path-and-line order."""
+    specs: list[SweepSpec] = []
+    seen: set[tuple[str, int, str, int | None]] = set()
+    file_diffs = {f.path: f.text for f in split_files(diff)}
+    for path in sorted(file_diffs):
+        if len(specs) >= cap:
+            break
+        data = contents.get(path)
+        if data is None:
+            continue
+        try:
+            tree = ast.parse(data.decode("utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        added = added_lines(file_diffs[path])
+        for node in ast.walk(tree):
+            if len(specs) >= cap:
+                break
+            line = getattr(node, "lineno", None)
+            if line is None or line not in added:
+                continue
+            if isinstance(node, (ast.If, ast.While, ast.IfExp)):
+                spec = SweepSpec(path, line, "negate-condition")
+            elif isinstance(node, ast.BoolOp):
+                spec = None
+                for operand in range(1, len(node.values) + 1):
+                    key: tuple[str, int, str, int | None] = (
+                        path, line, "drop-operand", operand,
+                    )  # fmt: skip
+                    if key not in seen and len(specs) < cap:
+                        seen.add(key)
+                        specs.append(SweepSpec(path, line, "drop-operand", operand))
+                continue
+            elif isinstance(node, (ast.Break, ast.Continue)):
+                spec = SweepSpec(path, line, "break-continue")
+            elif isinstance(node, ast.Compare):
+                spec = SweepSpec(path, line, "flip-compare")
+            else:
+                continue
+            assert spec is not None
+            key = (spec.path, spec.line, spec.operator, spec.operand)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append(spec)
+    return tuple(specs)
+
+
+def sweep_groups(
+    specs: Sequence[SweepSpec], contents: Mapping[str, bytes]
+) -> tuple[SweepGroup, ...]:
+    """Groups the specs by the module they mutate, with the test files
+    that import it as each group's scoped selector. A module no test file
+    imports forms no group: its mutants would run nothing, and the report
+    says so instead of running exit-5 suites."""
+    groups: list[SweepGroup] = []
+    by_module: dict[str, list[SweepSpec]] = {}
+    for spec in specs:
+        by_module.setdefault(spec.path, []).append(spec)
+    tests = sorted(path for path in contents if _is_test_path(path))
+    for module in sorted(by_module):
+        dotted = module.removesuffix(".py").replace("/", ".")
+        importers = [
+            path
+            for path in tests
+            if _imports_module(contents[path].decode("utf-8", errors="replace"), dotted)
+        ]
+        if importers:
+            groups.append(
+                SweepGroup(module, tuple(importers), tuple(by_module[module]))
+            )
+    return tuple(groups)
+
+
+def sweep_script(
+    staged: Staged,
+    group: SweepGroup,
+    run_limit: ToolLimits,
+) -> str:
+    """One sweep exec (D80's 2026-11-26 update): for the group's module,
+    one baseline run of its importing test files on a fresh copy, then --
+    per mutant spec -- a fresh copy, the fixed mutation script applied in
+    place, and the same scoped run on the mutated tree. Every copy is
+    built from the repository's objects and thrown away after its run, so
+    nothing a mutant's tests write reaches the next mutant or any later
+    call; each run is bounded on its own and each reply is one
+    `atlas-baseline` or `atlas-sweep` tag line, so the controller reads
+    verdicts, never test output it would have to trust."""
+    root = quote(staged.root)
+    scratch = quote(staged.scratch)
+    assert staged.pytest is not None
+    assert staged.shim_python is not None
+    flags = " ".join(PYTEST_FLAGS)
+    selectors = " ".join(quote(s) for s in group.selectors)
+    argv = f"{staged.pytest.quoted} -I -B -m pytest {flags} {selectors}"
+    guarded = as_nobody(staged.shim_python, argv)
+
+    def run_line(name: str) -> str:
+        return (
+            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+            "export PYTHONDONTWRITEBYTECODE=1; "
+            f"exec timeout -k {KILL_AFTER_S} {run_limit.timeout_s} {guarded} ) "
+            f"> {name}_out 2> {name}_err"
+        )
+
+    def tag(name: str, tag_name: str, index: str) -> str:
+        return (
+            f'  echo "{tag_name}:{index}:$?:'
+            f"$(cat {name}_out {name}_err 2>/dev/null "
+            '| tail -c 200 | base64 -w0)"'
+        )
+
+    lines = [
+        f"cd {root}",
+        f"export {' '.join(GIT_ENV)} PYTHONDONTWRITEBYTECODE=1",
+        *stage_copy_steps(
+            staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+        ),
+        "stage=$?",
+        'if [ "$stage" = 0 ]; then',
+        run_line("base"),
+        tag("base", _BASELINE_TAG, group.module.replace("/", "%")),
+        "fi",
+        f"rm -rf {root}/{SCRATCH_DIR} base_out base_err",
+    ]
+    for index, spec in enumerate(group.specs):
+        operand = "" if spec.operand is None else f" {spec.operand}"
+        edit = (
+            f"( cd {scratch}; exec timeout -k {KILL_AFTER_S} "
+            f"{MUTATE_EDIT_TIMEOUT_S} "
+            f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
+            f"{quote(spec.path)} {spec.line} "
+            f"{quote(spec.operator)}{operand} ) > mut_out 2> mut_err"
+        )
+        lines += [
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            "stage=$?",
+            'if [ "$stage" = 0 ]; then',
+            f"  {edit}",
+            "  case $(head -n 1 mut_out) in",
+            '  "no "*)',
+            '    echo "'
+            + SWEEP_TAG
+            + f':{index}:R:-:$(tail -c 200 mut_out | base64 -w0)";;',
+            "  esac",
+            '  if [ $(head -n 1 mut_out | cut -d" " -f1) = "ok" ]; then',
+            run_line("mut"),
+            tag("mut", SWEEP_TAG, str(index)),
+            "  fi",
+            "fi",
+            f"rm -rf {root}/{SCRATCH_DIR} mut_out mut_err",
+        ]
+    lines.append(f"rm -rf {root}/out err 2>/dev/null")
+    return "\n".join(lines)
+
+
+def parse_sweep(text: str, group: SweepGroup) -> tuple[SweepVerdict, ...]:
+    """One sweep exec's reply as verdicts: the group's baseline exit rules
+    the mutants' readings (a baseline that did not pass makes every
+    mutant inconclusive -- the environment or the tests are broken, which
+    is the named gap, not evidence either way), and each mutant's exit
+    maps to survived (0), inconclusive (the wall clock, or no test
+    collected), killed (any other exit), or the edit's own refusal."""
+    baseline_re = re.compile(
+        re.escape(_BASELINE_TAG) + r":([^:]*):(\d+):([A-Za-z0-9+/=]*)$", re.MULTILINE
+    )
+    baselines = {
+        name.replace("%", "/"): int(exit)
+        for name, exit, _tail in baseline_re.findall(text)
+    }
+    # The run tags carry the exit (the verdict maps from it, against the
+    # group's baseline); the edit's own refusal carries `R:-` instead.
+    sweep_re = re.compile(
+        re.escape(SWEEP_TAG) + r":(\d+):(\d+):([A-Za-z0-9+/=]*)$", re.MULTILINE
+    )
+    refused_re = re.compile(
+        re.escape(SWEEP_TAG) + r":(\d+):R:-:([A-Za-z0-9+/=]*)$", re.MULTILINE
+    )
+    tagged = {
+        int(index): ("X", exit, tail) for index, exit, tail in sweep_re.findall(text)
+    }
+    for index, tail in refused_re.findall(text):
+        tagged[int(index)] = ("R", "-", tail)
+    verdicts: list[SweepVerdict] = []
+    for index, spec in enumerate(group.specs):
+        found = tagged.get(index)
+        if found is None:
+            verdicts.append(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    note="the sweep exec gave no verdict for this mutant",
+                )
+            )
+            continue
+        kind, exit, tail = found
+        if kind == "R":
+            reason = "refused"
+            try:
+                reason = (
+                    base64.b64decode(tail).decode("utf-8", errors="replace").strip()
+                )
+            except ValueError:
+                pass
+            verdicts.append(SweepVerdict(spec, "refused", note=reason))
+            continue
+        exit_value = int(exit)
+        baseline = baselines.get(group.module)
+        if baseline is None:
+            verdicts.append(
+                SweepVerdict(
+                    spec, "inconclusive", note="no baseline ran for this group"
+                )
+            )
+            continue
+        if baseline not in (0, 5):
+            verdicts.append(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    exit=baseline,
+                    note=f"the baseline run did not pass (exit {baseline})",
+                )
+            )
+            continue
+        if exit_value in (_TIMED_OUT, _KILLED):
+            verdicts.append(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    exit=exit_value,
+                    note="the scoped run hit its wall clock",
+                )
+            )
+        elif exit_value == 5:
+            verdicts.append(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    exit=exit_value,
+                    note="no test was collected (exit 5)",
+                )
+            )
+        elif exit_value == 0:
+            verdicts.append(SweepVerdict(spec, "survived", exit=exit_value))
+        else:
+            verdicts.append(SweepVerdict(spec, "killed", exit=exit_value))
+    return tuple(verdicts)
