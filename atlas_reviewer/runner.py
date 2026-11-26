@@ -156,8 +156,13 @@ FIRST_FRAME_BUDGET_S = 30.0
 # (issue #819, D95): a `pip install` against a real index can take
 # minutes, and the review's wall deadline bounds the phase as a whole
 # besides. The bound is what the command runs under (`timeout -k`), the
-# budget is the exec's window around it.
-SETUP_BOUND_S = 300
+# budget is the exec's window around it. The 2026-11-26 environment
+# slice (D80's update) raises it from 300s to 900s, because the setup
+# spec this repo itself sets now installs the repo's full requirements
+# (`pip install -r requirements.txt`, hash-pinned, about fifty
+# packages): a cold resolve-and-install can outlive the old bound, and
+# the review wall still bounds the phase as a whole.
+SETUP_BOUND_S = 900
 SETUP_BUDGET_S = SETUP_BOUND_S + 30.0
 # From the first destroy of a runner, shared by the watchdog's and the
 # final one: no control-plane call starts after it, so cleanup ends

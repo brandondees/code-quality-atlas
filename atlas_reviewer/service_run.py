@@ -147,6 +147,10 @@ _CHILD_ALLOWED = frozenset(
         # the key itself arrives in the operator key variable above.
         ENV_FUNDING_SOURCE,
         ENV_FUNDING_BYOK,
+        # The execution tools' per-process test clock (D80's 2026-11-26
+        # environment update): a setting, not a credential; the child's
+        # run_bridge applies it to `run_tests` and `mutate`.
+        "ATLAS_TEST_TIMEOUT_S",
     }
     # The agentic limits (D68's per-lens knobs and the per-review dollar
     # ceiling included) ride along in both modes: the agentic child reads

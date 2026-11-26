@@ -18,6 +18,7 @@ executed.
 
 from __future__ import annotations
 
+import base64
 import re
 import shlex
 from collections.abc import Mapping, Sequence
@@ -26,6 +27,7 @@ from types import MappingProxyType
 
 from atlas_reviewer.bridge_args import Rev
 from atlas_reviewer.guest_unpack import (
+    KILL_AFTER_S,
     unpack_refusal,
     unpack_script,
 )
@@ -57,6 +59,7 @@ MUTANT_REF = "refs/tags/atlas-mutant"
 MUTANT_TAG = "atlas-mutant"
 SCRATCH_DIR = "scratch"
 SCRATCH_WORK = "work"
+COLLECT_TAG = "atlas-collect"
 _SHA = re.compile(r"[0-9a-f]{40}")
 # The pythons the pytest probe asks about, in pick order: the pyenv
 # versions (the guest shell expands the glob), then the system one. The
@@ -64,10 +67,15 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 # literal candidates (the tests point it at this machine's venv).
 PYTEST_CANDIDATES = (f"{PYENV_VERSIONS}/*/bin/python3", SYSTEM_PYTHON)
 PYTEST_TAG = "atlas-pytest"
+SHIM_TAG = "atlas-shim"
 _PYTEST_RE = re.compile(
     re.escape(PYTEST_TAG)
     + r":(/[A-Za-z0-9._/+-]{1,200}):"
     + r"(\d+)\.(\d+)\.(\d+)\s*$",
+    re.MULTILINE,
+)
+_SHIM_RE = re.compile(
+    re.escape(SHIM_TAG) + r":(/[A-Za-z0-9._/+-]{1,200}):" + r"(\d+)\.(\d+)\.(\d+)\s*$",
     re.MULTILINE,
 )
 
@@ -141,10 +149,30 @@ class Staged:
     # PR content is unpacked. None when no candidate has pytest, which
     # makes `run_tests` and `mutate` unavailable, not broken.
     pytest: TrustedPython | None = None
+    # The interpreter the no-root guard runs through (D80's 2026-11-26
+    # update): the pytest-capable one when there is one, else the first
+    # candidate that runs at all -- the guard only needs to execute, the
+    # approved proposed commands only need the guard, and decoupling the
+    # two keeps an approved command available on a runner whose
+    # interpreter has no pytest. None when no candidate even runs, which
+    # refuses the execution tools (there is nothing to execute tests
+    # with, guard or not).
+    shim_python: TrustedPython | None = None
     # The GitHub head SHA the head tree was fetched at (provenance, D80):
     # a test or mutant result is tagged with it, so a lens can cite the
     # evidence at the head it belongs to (D73).
     head_sha: str = ""
+    # The collection probe's verdict (the 2026-11-26 environment-parity
+    # slice, D80's update): whether `pytest --co -q` collects the staged
+    # copy's tests, run as the same non-root user the execution tools
+    # run as. False when collection failed, with `collection_note`
+    # carrying the output tail that says why -- the named gap the
+    # execution tools report instead of silent INCONCLUSIVE mutants and
+    # red baselines. True-with-no-note also when no pytest was staged at
+    # all (the tools are refused on the missing interpreter before the
+    # verdict could matter).
+    collection_ok: bool = True
+    collection_note: str = ""
 
     @property
     def revs(self) -> frozenset[Rev]:
@@ -219,18 +247,24 @@ def git_resolve_script(
 ) -> str:
     """Finds git at one of `GIT_PATHS` without consulting PATH, before any
     PR content is in the runner, creates the bridge root, and probes each
-    candidate interpreter for a pytest it can run isolated (D80). Each
-    candidate is bounded on its own, so one hung interpreter cannot stop
-    the rest being found, and the script still exits nonzero when git is
-    missing."""
+    candidate interpreter twice, each bounded on its own so one hung
+    interpreter cannot stop the rest being found: once for a pytest it can
+    run isolated (D80), and once for running at all -- the no-root guard
+    (`as_nobody`) runs through an interpreter, and the execution tools'
+    guard needs one even where pytest is absent. The script still exits
+    nonzero when git is missing."""
     candidates = " ".join(GIT_PATHS)
     words = " ".join(pytest_candidates)
     query = "import sys, pytest; print('%d.%d.%d' % sys.version_info[:3])"
+    plain = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
     probe = bounded(f'"$p" -I -c "{query}"', CANDIDATE_BOUND_S)
+    shim_probe = bounded(f'"$p" -I -c "{plain}"', CANDIDATE_BOUND_S)
     pytest_loop = (
         f"for p in {words}; do "
-        f'if [ -x "$p" ] && v=$({probe} 2>/dev/null); then '
-        f'echo "{PYTEST_TAG}:$p:$v"; fi; done'
+        f'if [ -x "$p" ]; then '
+        f'v=$({probe} 2>/dev/null) && echo "{PYTEST_TAG}:$p:$v"; '
+        f'v=$({shim_probe} 2>/dev/null) && echo "{SHIM_TAG}:$p:$v"; '
+        "fi; done"
     )
     return (
         f"mkdir -p {quote(root)}/trees && g=''; for p in {candidates}; do "
@@ -261,8 +295,148 @@ def choose_pytest(
     return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
 
 
+def choose_shim(
+    text: str,
+    candidates: Sequence[str] = PYTEST_CANDIDATES,
+    pytest: TrustedPython | None = None,
+) -> TrustedPython | None:
+    """The interpreter the no-root guard runs through: the pytest-capable
+    one when the probe found it (the guard then shares the tests' own
+    environment), else the first candidate that ran at all, in probe
+    order. The same trusted shapes apply; unreported candidates count as
+    absent."""
+    if pytest is not None:
+        return pytest
+    found = [
+        (path, (int(a), int(b), int(c)))
+        for path, a, b, c in _SHIM_RE.findall(text)
+        if trusted_path(path) or path in candidates
+    ]
+    chosen = sorted(found, key=_newest)[:1] if found else []
+    return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
+
+
 def _newest(candidate: tuple[str, tuple[int, int, int]]) -> tuple[int, ...]:
     return tuple(-n for n in candidate[1])
+
+
+# The execution tools' test processes never run as root (Brandon's Nov 25
+# decision, D80's 2026-11-26 update): the Sprite's exec user is root, and
+# a root test process defeats the access controls some of the repo's own
+# tests exercise -- the round log's locked-file test fails its baseline
+# because a `chmod(0)` read does not stop root. The guard is a
+# controller-built shim run by the trusted interpreter the staging probe
+# resolved: a root caller drops to the standard `nobody` uid and gid
+# (65534, supplementary groups cleared, `setgroups` first while still
+# root) before `execvp`ing the rest of the argv (PATH searched, the way
+# the shell's exec resolved a bare program name); a caller that is already
+# not root execs directly, because the decision's condition -- the tests
+# do not run as root -- already holds there. Every element after the shim
+# stays a separate shell argument exactly as it was: the model's selector
+# keeps its shlex-quoting, and no untrusted text is ever embedded in
+# Python source. A drop that cannot happen despite a root caller exits
+# 126 with the reason on stderr: a named failure, never a root run.
+NOBODY_UID = 65534
+DROP_SHIM = (
+    "import os, sys\n"
+    "if os.geteuid() == 0:\n"
+    "    try:\n"
+    f"        os.setgroups([])\n        os.setgid({NOBODY_UID})\n"
+    f"        os.setuid({NOBODY_UID})\n"
+    "    except OSError as exc:\n"
+    "        sys.stderr.write(f'atlas-privilege-drop failed: {exc}\\n')\n"
+    "        sys.exit(126)\n"
+    "os.execvp(sys.argv[1], sys.argv[1:])\n"
+)
+
+
+def as_nobody(python: TrustedPython, argv: str) -> str:
+    """`argv` prefixed with the no-root guard shim run by the trusted
+    `python`: the process `argv` names never executes as root."""
+    return f"{python.quoted} -I -c {shlex.quote(DROP_SHIM)} {argv}"
+
+
+# The collection probe's own bound (D80's 2026-11-26 update): collecting
+# the staged copy's tests imports every test module once; a repo of this
+# size collects in tens of seconds, and the bound exists so a module that
+# hangs at import cannot eat the staging budget. The exec's window is the
+# bound plus the kill slack and the copy's staging.
+COLLECTION_BOUND_S = 300
+COLLECTION_BUDGET_S = COLLECTION_BOUND_S + KILL_AFTER_S + 60.0
+
+
+def collection_script(
+    root: str,
+    git: str,
+    scratch: str,
+    head: str,
+    python: TrustedPython,
+) -> str:
+    """One staging exec (D80's 2026-11-26 update): a fresh disposable copy
+    of the HEAD tree (`stage_copy_steps` -- its exit is framed as its own
+    STAGE block, so a copy that could not be built is a staging failure,
+    never a verdict), then `pytest --co -q` in it, run as the same
+    non-root user the execution tools run as, bounded on its own. The
+    verdict is one `atlas-collect` line -- the exit status and a tail of
+    the combined output base64-encoded -- so a collection or import
+    failure reaches the controller as the named `test environment is
+    broken` gap instead of surfacing later as silent INCONCLUSIVE
+    mutants."""
+    quoted_root = shlex.quote(root)
+    quoted_scratch = shlex.quote(scratch)
+    collect = (
+        f"( cd {quoted_scratch}; ulimit -f 16384; "
+        "export PYTHONDONTWRITEBYTECODE=1; "
+        f"exec timeout -k {KILL_AFTER_S} {COLLECTION_BOUND_S} "
+        f"{as_nobody(python, python.quoted + ' -I -B -m pytest --co -q')} "
+        ") > collect_out 2> collect_err"
+    )
+    return "\n".join(
+        (
+            f"cd {quoted_root}",
+            *stage_copy_steps(root, git, scratch, head),
+            "stage=$?",
+            'if [ "$stage" = 0 ]; then',
+            collect,
+            "  s=$?",
+            "  cat collect_out collect_err > collect_both 2>/dev/null",
+            f'  echo "{COLLECT_TAG}:$s:$(tail -c 1024 collect_both | base64 -w0)"',
+            "else",
+            f'  echo "{COLLECT_TAG}:-1:"',
+            "fi",
+            f"rm -rf {quoted_root}/{SCRATCH_DIR} collect_out collect_err collect_both",
+        )
+    )
+
+
+def parse_collection(code: int | None, text: str) -> tuple[bool, str]:
+    """The collection probe's verdict from its `atlas-collect` line: exit
+    0 is a working environment; any other exit is a broken one whose note
+    is the decoded output tail. A missing line, a non-zero exec, or a
+    `-1` (the copy could not be built) raises `BoundaryError` -- those
+    are staging failures, not verdicts."""
+    found = re.findall(
+        rf"^{COLLECT_TAG}:(-?\d+):([A-Za-z0-9+/=]*)$", text, re.MULTILINE
+    )
+    if code != 0 or not found:
+        raise BoundaryError(
+            "the collection probe gave no verdict "
+            f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+        )
+    exit_status, tail = found[-1]
+    if exit_status == "-1":
+        raise BoundaryError(
+            "the head copy for the collection probe could not be built: "
+            f"{guest_text(text, GUEST_TAIL_CHARS)}"
+        )
+    if exit_status in ("0", "5"):
+        # 0 collects; 5 is pytest's "no tests collected" -- a diff whose
+        # copy carries no test files is not a broken environment, and the
+        # execution tools still work on it (a selector or an approved
+        # command can name what to run). Any other exit is collection or
+        # import failure: the named broken-environment gap.
+        return True, ""
+    return False, guest_text(base64.b64decode(tail).decode("utf-8", "replace"), 512)
 
 
 def stage_copy_steps(root: str, git: str, scratch: str, head: str) -> tuple[str, ...]:
@@ -438,6 +612,7 @@ def stage(
     )
     git, version = choose_git(code, text)
     pytest = choose_pytest(text, pytest_candidates)
+    shim = choose_shim(text, pytest_candidates, pytest)
     revs = tuple(rev for rev, _ in trees.staged())
     for rev, data in trees.staged():
         session.upload(
@@ -452,4 +627,24 @@ def stage(
         budget_s=UNPACK_BUDGET_S,
     )
     commits = parse_staged(code, text, revs, unpack)
-    return Staged(root, git, MappingProxyType(commits), version, pytest, trees.head_sha)
+    collection_ok, collection_note = True, ""
+    if pytest is not None:
+        scratch = f"{root}/{SCRATCH_DIR}/{SCRATCH_WORK}"
+        code, text = session.exec(
+            "collection probe",
+            collection_script(root, git, scratch, commits[Rev.HEAD], pytest),
+            stage="bridge staging",
+            budget_s=COLLECTION_BUDGET_S,
+        )
+        collection_ok, collection_note = parse_collection(code, text)
+    return Staged(
+        root,
+        git,
+        MappingProxyType(commits),
+        version,
+        pytest,
+        shim,
+        trees.head_sha,
+        collection_ok,
+        collection_note,
+    )

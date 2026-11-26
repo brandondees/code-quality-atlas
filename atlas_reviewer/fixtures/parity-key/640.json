@@ -31,18 +31,16 @@
       "id": "640-m3",
       "severity": "minor",
       "summary": "D46 does not say it amends D48, and the README sentence does not either.",
-      "source": "Read at 0fe45e5e. D46 is docs/open-questions.md line 62. The heading amends D24 and D25 and does not say amends D48. D48 is line 61. It still says the process publishes nothing to GitHub and does not say D46 amends it. The README sentence is lines 13-15. It names the webhook receiver (D48) and a COMMENT post, and it does not say D46 amends D48. Any of the three spans counts. Line 61 was added on Nov 24, when Brandon accepted the D48 side of the same defect. The later merged head names the amendment on both lines.",
+      "source": "Read at 0fe45e5e. D46 is docs/open-questions.md line 62. The heading amends D24 and D25 and does not say amends D48. The README sentence is lines 13-15. It names the webhook receiver (D48) and a COMMENT post, and it does not say D46 amends D48. Either span counts. The later merged head names the amendment on both lines.",
       "lenses": ["reviewing-decision-lifecycle"],
       "needs": ["read"],
       "spans": [
         {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
-        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15},
-        {"path": "docs/open-questions.md", "line": 61, "end_line": 61}
+        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15}
       ],
       "encloses": [
         {"path": "docs/open-questions.md", "line": 62, "end_line": 62},
-        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15},
-        {"path": "docs/open-questions.md", "line": 61, "end_line": 61}
+        {"path": "atlas_reviewer/README.md", "line": 13, "end_line": 15}
       ],
       "citations": [],
       "liveness": [

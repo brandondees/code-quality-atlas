@@ -27,7 +27,7 @@ from atlas_reviewer.approval import (
 from atlas_reviewer.attestation import Cause
 from atlas_reviewer.bridge import Status, ToolLimits, render, run_test_script
 from atlas_reviewer.bridge_args import MAX_COMMAND_CHARS, RejectedError, validate
-from atlas_reviewer.bridge_staging import SourceTrees, Staged
+from atlas_reviewer.bridge_staging import SYSTEM_PYTHON, SourceTrees, Staged
 from atlas_reviewer.domain import PrEvent, RunnerStatus
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.interpreter import TrustedPython
@@ -583,7 +583,34 @@ def test_an_approved_command_runs_the_proposals_own_argv(tmp_path):
     assert first.runs[0].summary is None
 
 
-def test_an_approved_command_runs_without_a_pytest_interpreter(tmp_path):
+def test_an_approved_command_runs_without_a_pytest_capable_interpreter(tmp_path):
+    """The approved command is not coupled to pytest: the no-root guard it
+    runs through needs an interpreter that runs, not one with pytest, so
+    a candidate without pytest still serves it (D80's 2026-11-26
+    update)."""
+    channel = ScriptedChannel(outcomes=[ApprovalOutcome.APPROVED])
+    approvals, _ = gate("sh run.sh", channel)
+    results = []
+
+    def body(bridge):
+        results.append(bridge.call("run_tests", {"command": "sh run.sh"}))
+        return "done"
+
+    bridge_run(
+        tmp_path,
+        body,
+        source=trees(SUITE),
+        approvals=approvals,
+        pytest_candidates=(SYSTEM_PYTHON,),
+    )
+    result = results[0]
+    assert result.status is Status.OK
+    assert "declared-command-marker" in result.content.text
+
+
+def test_an_approved_command_is_refused_when_no_interpreter_runs(tmp_path):
+    """With no interpreter at all the guard cannot run, so the approved
+    command is refused with the named gap (D80's 2026-11-26 update)."""
     channel = ScriptedChannel(outcomes=[ApprovalOutcome.APPROVED])
     approvals, _ = gate("sh run.sh", channel)
     results = []
@@ -600,8 +627,10 @@ def test_an_approved_command_runs_without_a_pytest_interpreter(tmp_path):
         pytest_candidates=(),
     )
     result = results[0]
-    assert result.status is Status.OK
-    assert "declared-command-marker" in result.content.text
+    assert result.status is Status.UNAVAILABLE
+    assert "no interpreter on the runner image runs the no-root guard" in (
+        result.error.text
+    )
 
 
 def test_an_unapproved_command_is_refused_before_the_interpreter_matters(tmp_path):
@@ -645,12 +674,13 @@ def test_the_built_in_entry_still_runs_when_a_proposal_is_configured(tmp_path):
     assert result.approved == ""
 
 
-def _fake_staged(tmp_path, pytest=None):
+def _fake_staged(tmp_path, pytest=None, shim=None):
     return Staged(
         str(tmp_path / "root"),
         "/usr/bin/git",
         {"BASE": "b" * 40, "HEAD": "c" * 40, "DEFAULT": "d" * 40},
         pytest=pytest,
+        shim_python=shim if shim is not None else pytest,
         head_sha=HEAD,
     )
 
@@ -658,12 +688,17 @@ def _fake_staged(tmp_path, pytest=None):
 def test_the_approved_command_script_quotes_the_proposals_tokens(tmp_path):
     call = validate("run_tests", {"command": "sh run.sh"}, frozenset())
     script = run_test_script(
-        _fake_staged(tmp_path),
+        _fake_staged(tmp_path, shim=TrustedPython(SYSTEM_PYTHON, "3.12.3")),
         call,
         ToolLimits(16 * 1024, 60),
         argv="'sh' 'run.sh'",
     )
-    assert "exec timeout -k 2 60 'sh' 'run.sh' ) > out 2> err" in script
+    # The approved argv runs behind the no-root guard (D80's 2026-11-26
+    # update): the guard's shim is in the script, and the proposal's own
+    # tokens stay separate shell arguments after it.
+    assert "atlas-privilege-drop failed" in script
+    assert "exec timeout -k 2 60 " in script
+    assert "'sh' 'run.sh' ) > out 2> err" in script
     assert "-m pytest" not in script
     assert "export PYTHONDONTWRITEBYTECODE=1" in script
     assert "ulimit -f" in script

@@ -31,21 +31,28 @@ from atlas_reviewer.bridge import (
     _RunBlock,
     _splice,
     mutant_outcome,
+    mutate_script,
     parse_mutation,
     parse_run_blocks,
     parse_summary,
     render,
     run_bridge,
+    run_test_script,
+    run_tool_limits,
 )
 from atlas_reviewer.bridge_args import Rev, validate
 from atlas_reviewer.bridge_staging import (
+    DROP_SHIM,
+    NOBODY_UID,
     SYSTEM_PYTHON,
     SourceTrees,
     Staged,
     choose_pytest,
+    parse_collection,
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, FakeSprites, MemoryLedger
+from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.local_runner import LocalSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
@@ -777,6 +784,7 @@ def fake_bridge(tmp_path, answer, requests, source=None, **kw):
                 lambda _script: (
                     f"atlas-git:/usr/bin/git\ngit version 2.43.0\n"
                     f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
                 ),
             ),
             ReplyRule(
@@ -785,6 +793,7 @@ def fake_bridge(tmp_path, answer, requests, source=None, **kw):
                     f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
                 ),
             ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
             ReplyRule("__ATLAS_RUN__", answer),
         )
     )
@@ -1072,6 +1081,7 @@ def test_a_run_stopped_by_its_exec_budget_is_a_timeout(tmp_path):
                 lambda _script: (
                     f"atlas-git:/usr/bin/git\ngit version 2.43.0\n"
                     f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
                 ),
             ),
             ReplyRule(
@@ -1080,6 +1090,7 @@ def test_a_run_stopped_by_its_exec_budget_is_a_timeout(tmp_path):
                     f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
                 ),
             ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
         )
     )
     results = []
@@ -2063,3 +2074,177 @@ def test_a_run_that_writes_into_the_repos_objects_does_not_reach_the_reads(tmp_p
     # The next run executes the re-staged real tree.
     (run2,) = collected["run2"].runs
     assert run2.exit == 0
+
+
+# ------------------------------------------------- the execution environment
+
+
+def test_the_no_root_guard_runs_the_argv_when_the_caller_is_not_root():
+    """The guard is a no-op wrapper for a caller that is already not root
+    and a drop to `nobody` for a root caller; this machine runs it both
+    ways it can (D80's 2026-11-26 update)."""
+    import os
+
+    done = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            DROP_SHIM,
+            sys.executable,
+            "-I",
+            "-c",
+            "import os; print(os.geteuid())",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    expected = NOBODY_UID if os.geteuid() == 0 else os.geteuid()
+    assert int(done.stdout.strip()) == expected
+
+
+def test_the_no_root_guard_is_the_first_thing_the_run_scripts_name(tmp_path):
+    call = validate("run_tests", {"path": "test_calc.py"}, frozenset(Rev))
+    staged = Staged(
+        str(tmp_path / "root"),
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    script = run_test_script(staged, call, ToolLimits(16 * 1024, 60))
+    guard = f"{SYSTEM_PYTHON} -I -c"
+    assert guard in script
+    assert "atlas-privilege-drop failed" in script
+    # The pytest argv follows the guard as separate shell arguments (the
+    # shim payload's own newlines are inside its quoted argument).
+    assert script.index(guard) < script.index("-m pytest")
+    mutant = validate(
+        "mutate",
+        {"path": "calc.py", "line": 2, "operator": "remove-guard"},
+        frozenset(Rev),
+    )
+    mscript = mutate_script(staged, mutant, ToolLimits(16 * 1024, 60))
+    # Both test processes (the baseline and the mutated run) carry the
+    # guard; the mutation edit does not -- it writes the mutated file and
+    # stays a root exec.
+    assert mscript.count("atlas-privilege-drop failed") == 2
+
+
+def test_the_collection_probe_parses_its_verdicts():
+    assert parse_collection(0, "atlas-collect:0:\n") == (True, "")
+    ok_no_tests = parse_collection(0, "atlas-collect:5:\n")
+    assert ok_no_tests == (True, "")
+    broken = parse_collection(
+        0,
+        "atlas-collect:2:" + base64.b64encode(b"No module named 'jwt'").decode() + "\n",
+    )
+    assert broken == (False, "No module named 'jwt'")
+    with pytest.raises(BoundaryError):
+        parse_collection(0, "atlas-collect:-1:\n")
+    with pytest.raises(BoundaryError):
+        parse_collection(0, "no verdict line\n")
+    with pytest.raises(BoundaryError):
+        parse_collection(1, "atlas-collect:0:\n")
+
+
+def test_a_broken_collection_is_a_named_gap_not_a_run(tmp_path):
+    collected = []
+
+    def answer(script):
+        if "atlas-collect" in script and "__ATLAS_RUN__" not in script:
+            tail = base64.b64encode(
+                b"ModuleNotFoundError: No module named 'jwt'"
+            ).decode()
+            return f"atlas-collect:2:{tail}\n"
+        collected.append(script)
+        return "__ATLAS_RUN__ 0 5 1 5\n\n\n"
+
+    (result,) = fake_bridge_collect(tmp_path, answer, (("run_tests", {}),))
+    assert result.status is Status.UNAVAILABLE
+    assert "the test environment is broken" in result.error.text
+    assert "No module named 'jwt'" in result.error.text
+    assert collected == []  # the refusal happens before any run script
+
+
+def fake_bridge_collect(tmp_path, answer, requests, **kw):
+    """fake_bridge with a scripted collection verdict."""
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    f"atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", answer),
+            ReplyRule("__ATLAS_RUN__", answer),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.extend(bridge.call(tool, args) for tool, args in requests)
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset({"calc.py"}),
+        name="cqa-collect-test",
+        deadline_s=300,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        **kw,
+    )
+    return results
+
+
+def test_the_test_clock_default_and_override(tmp_path):
+    assert DEFAULT_LIMITS["run_tests"].timeout_s == 180
+    assert DEFAULT_LIMITS["mutate"].timeout_s == 180
+    override = run_tool_limits({"ATLAS_TEST_TIMEOUT_S": "240"})
+    assert override["run_tests"].timeout_s == 240
+    assert override["mutate"].timeout_s == 240
+    assert override["diff_file"] == DEFAULT_LIMITS["diff_file"]
+    empty = run_tool_limits({"ATLAS_TEST_TIMEOUT_S": ""})
+    assert empty["run_tests"].timeout_s == 180
+    for bad in ("none", "29", "601", "-5"):
+        with pytest.raises(BoundaryError) as exc:
+            run_tool_limits({"ATLAS_TEST_TIMEOUT_S": bad})
+        assert "ATLAS_TEST_TIMEOUT_S" in str(exc.value)
+
+
+def test_run_bridge_applies_the_test_clock_override_to_the_scripts(tmp_path):
+    scripts = []
+
+    def answer(script):
+        scripts.append(script)
+        return staged() + framed(0, b"")
+
+    (result,) = fake_bridge_collect(
+        tmp_path,
+        lambda s: answer(s) if "__ATLAS_RUN__" in s else "atlas-collect:0:\n",
+        (("run_tests", {}),),
+        env={"ATLAS_TEST_TIMEOUT_S": "240"},
+    )
+    assert result.status is Status.OK
+    # An empty successful run: the reply's byte counts must match its
+    # payload, or the lost-output guard fails the call instead.
+    assert result.content.text == ""
+    assert any("timeout -k 2 240" in script for script in scripts)
