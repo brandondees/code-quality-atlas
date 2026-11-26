@@ -62,14 +62,6 @@ from atlas_reviewer.ports import (
 API_URL = "https://api.sprites.dev"
 RUNNER_PREFIX = "cqa-rev-"
 EXEC_STDIN_MAX_BYTES = 10 * 1024 * 1024
-# The checkpoint-id shape the controller accepts from the API (issue
-# #819, D95): the document's examples show short version-like ids ("v7");
-# anything outside this charset never reaches a URL path unencoded.
-# The create stream's completion text names the new id ("Checkpoint v2
-# created successfully", live-verified Nov 25) -- the one reliable source,
-# because the list's first entry is always a synthetic `Current`.
-# The synthetic first list entry the live API prepends (live-verified Nov
-# 25); it is not a restorable checkpoint.
 
 
 @dataclass(frozen=True)
