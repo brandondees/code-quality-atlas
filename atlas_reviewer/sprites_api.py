@@ -9,7 +9,6 @@ fetched 2026-11-07), and matches the 2026-11-06 live validation:
   /v1/sprites/{name}`
 - `POST|GET /v1/sprites/{name}/policy/network` `{"rules": [...]}`
 - `POST /v1/sprites/{name}/policy/resources` `{"memory": {"limit_mb"}}`
-- `POST /v1/sprites/{name}/checkpoint` `{"comment"}`, `GET /v1/sprites/{name}/checkpoints`, and `POST /v1/sprites/{name}/checkpoints/{checkpoint_id}/restore` (issue #819, D95). Each of the three answers a streaming NDJSON progress whose documented event types are `info`, `error`, `complete` and `keepalive`; an `error` event is the named failure and a `complete` event ends it. The document gives the id no field of its own in the stream -- the completion text carries it ("Checkpoint v3 created successfully") -- so the controller reads the id from the checkpoint list it fetches after the create, whose example shows the newest entry first; whether that ordering, a restore that crosses sprites, and a checkpoint's survival of its sprite's deletion hold live is the live check D95 names.
 - `POST /v1/sprites/{name}/exec` (https://docs.fly.io/sprites/api/exec/execute-command):
   argv as repeated `cmd` query parameters, always with `stdin=true` and a
   raw `application/octet-stream` body (empty when there is no input), at
@@ -121,43 +120,6 @@ def parse_retry_after(value: str | None) -> float | None:
         return max((when - datetime.now(UTC)).total_seconds(), 0.0)
     except (ValueError, TypeError, OverflowError):
         return None
-
-
-def _one_line(text: str, cap: int = 200) -> str:
-    flat = " ".join(text.split())
-    return flat[:cap]
-
-
-def _ndjson_complete(raw: bytes, what: str) -> str:
-    """The `complete` event's data text from one NDJSON progress stream
-    (the shape the document gives the checkpoint create and restore
-    responses), or a `BoundaryError` naming `what`: an `error` event is
-    the named failure, and a stream with no `complete` event is an
-    incomplete one. Unparseable lines are skipped -- a keepalive or a
-    future event shape must not fail a stream that completes."""
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise BoundaryError(f"the {what} stream is not UTF-8") from exc
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        kind = event.get("type")
-        if kind == "error":
-            raise BoundaryError(
-                f"the {what} failed: {_one_line(str(event.get('error') or 'unspecified'))}"
-            )
-        if kind == "complete":
-            data = event.get("data")
-            return data if isinstance(data, str) else ""
-    raise BoundaryError(f"the {what} stream carried no complete event")
 
 
 def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
