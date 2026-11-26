@@ -502,3 +502,149 @@ def test_the_overrun_rides_the_drafts_cost_line():
         [], spend=Spend(replace(LIMITS, reservation_usd=Decimal("1.00")).resolve())
     )
     assert "settle(s)" not in render_draft(clean, Redactor())
+
+
+def test_the_fit_walks_up_to_the_true_whole_payload_boundary():
+    """The cap sits inside the request payload, whose byte count moves
+    with the cap's own digits, so the linear solve can sit a token below
+    the true whole-payload boundary. The walk-up climbs while the exact
+    whole-payload arithmetic still fits: across a sweep of budgets, the
+    returned cap is the true boundary -- its own worst case within the
+    budget, and one more token's whole-payload worst case over it (or the
+    resolved cap, when everything fits). Without the walk-up some budget
+    in the sweep returns a cap one token under its boundary, so this pins
+    the climb, not just safety."""
+    lens, _fake = model(
+        reply(completion("ok")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    full = lens.worst_case_usd(request())
+    under = []
+    for step in range(1, 25):
+        budget = full * step / 25
+        cap = lens.output_tokens_within(request(), budget)
+        assert 0 < cap <= FULL
+        assert (
+            lens.worst_case_usd(replace(request(), max_output_tokens=cap)) <= budget
+        ), (
+            step,
+            cap,
+        )
+        boundary = (
+            cap == FULL
+            or lens.worst_case_usd(replace(request(), max_output_tokens=cap + 1))
+            > budget
+        )
+        if not boundary:
+            under.append((step, cap))
+    assert under == [], under
+
+
+def test_the_fit_walkup_checks_are_logarithmic(monkeypatch):
+    """The climb gallops -- the step doubles each fitting check, then the
+    bracket is refined -- so a pathological rate table cannot walk the
+    whole cap range one linear step at a time. The whole-payload checks
+    the fitter makes for one request are bounded logarithmically in the
+    cap range, not linearly."""
+    lens, _fake = model(
+        reply(completion("ok")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    calls = []
+    original = lens._fits_within
+
+    def counting(request, cap, terms, selected, budget_usd):
+        calls.append(cap)
+        return original(request, cap, terms, selected, budget_usd)
+
+    monkeypatch.setattr(lens, "_fits_within", counting)
+    cap = lens.output_tokens_within(request(), Decimal("0.05"))
+    assert 0 < cap <= FULL
+    # 64k tokens of headroom: a linear climb would check tens of
+    # thousands of candidates; the gallop-and-refine is tens.
+    assert len(calls) <= 40, len(calls)
+
+
+def test_the_fit_walkup_gallops_when_the_start_sits_far_below_the_boundary(
+    monkeypatch,
+):
+    """The linear solve's gap is digit-count effects -- a token or a few
+    -- so a climb from the solved cap exercises the gallop only if the
+    start sits far below the boundary. This fixture widens the gap by
+    the reviewer's own lever: the payload's size shrinks materially as
+    the cap shrinks (the uncapped payload the linear solve prices is the
+    largest), so the true boundary sits thousands of tokens above the
+    linear solve's cap. A linear climb would make thousands of
+    whole-payload checks; the gallop-and-refine must stay within the
+    same logarithmic bound while returning a cap at the true boundary
+    (safety, and one more token over it)."""
+    import atlas_reviewer.tool_model as tool_model_module
+
+    lens, _fake = model(
+        reply(completion("ok")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
+    )
+    original_payload = tool_model_module._payload
+    # 40 bytes of padding per token of headroom below the resolved cap,
+    # and the most on the uncapped payload the linear solve prices: the
+    # uncapped request carries ~2.5 MB the near-cap candidates drop, so
+    # the linear solve's fixed input cost is enormous and its cap lands
+    # thousands of tokens below where the whole-payload arithmetic stops
+    # fitting -- and each climbed token's payload shrinks faster (10
+    # input tokens' worth) than the output token costs, so the fitted
+    # candidates keep fitting all the way to the resolved cap.
+
+    def shrinking_payload(provider, request, terms, limits, selected):
+        payload = original_payload(provider, request, terms, limits, selected)
+        headroom = FULL - (request.max_output_tokens or 0)
+        if headroom:
+            padded = []
+            for message in payload["messages"]:
+                content = message.get("content")
+                if isinstance(content, str):
+                    message = dict(message, content=content + "x" * (headroom * 40))
+                padded.append(message)
+            payload["messages"] = padded
+        return payload
+
+    monkeypatch.setattr(tool_model_module, "_payload", shrinking_payload)
+    calls = []
+    original_fits = lens._fits_within
+
+    def counting(request, cap, terms, selected, budget_usd):
+        calls.append(cap)
+        return original_fits(request, cap, terms, selected, budget_usd)
+
+    monkeypatch.setattr(lens, "_fits_within", counting)
+
+    # A budget just over the uncapped payload's own input cost: the
+    # linear solve can afford only a few hundred output tokens on top of
+    # it, while every climbed candidate's shrinking payload leaves the
+    # whole headroom affordable.
+    import json
+
+    uncapped = replace(request(), max_output_tokens=None)
+    terms, _, selected = lens._ready()
+    bounds = tool_model_module._bounds(lens.per_call, terms, uncapped)
+    payload = tool_model_module._payload(
+        lens.provider, uncapped, terms, bounds, selected
+    )
+    fixed = tool_model_module.input_token_bound(json.dumps(payload)) * terms.input_rate
+    budget = fixed + terms.request_fee + Decimal("0.001")
+    cap = lens.output_tokens_within(request(), budget)
+    assert 0 < cap <= FULL
+    # The boundary is asserted in the patched arithmetic -- the same fits
+    # predicate the climb verified with (the real-world safety pin is the
+    # sweep test's, which runs unpatched): the returned cap fits, and one
+    # more token does not.
+    terms, _, selected = lens._ready()
+    assert lens._fits_within(request(), cap, terms, selected, budget)
+    assert cap == FULL or not lens._fits_within(
+        request(), cap + 1, terms, selected, budget
+    )
+    # The climb stayed logarithmic: the first check names the linear
+    # solve's start (cap_linear + 1), and the gap it closed is wide --
+    # a linear climb over it would check thousands of candidates, the
+    # gallop-and-refine stays within the bound.
+    assert cap - calls[0] > 1000, (cap, calls[0])
+    assert len(calls) <= 40, len(calls)
