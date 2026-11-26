@@ -278,7 +278,66 @@ class OpenRouterLensModel:
         # rates is positive -- no zero-division and no free-output branch
         # to reach here.
         rate = max(terms.completion_rate, terms.reasoning_rate)
-        return min(bounds.max_output_tokens, math.floor(left / rate))
+        cap = min(bounds.max_output_tokens, math.floor(left / rate))
+        # The cap sits inside the request payload (`max_output_tokens`,
+        # and the reasoning hint `_bounds` derives from it), so the
+        # payload's byte count -- the input bound the worst case prices --
+        # moves with the cap's own digits, and the linear solve can sit a
+        # token below the true whole-payload boundary. Walk up while the
+        # exact whole-payload arithmetic still fits, and never past the
+        # resolved cap. The climb gallops -- the step doubles each fitting
+        # check, then the bracket is refined by binary search -- so a
+        # pathological rate table cannot walk the whole cap range one
+        # linear step at a time: the check count is logarithmic in the
+        # gap, and every candidate is verified before it is returned, so
+        # the safety contract holds whatever the rate table does.
+        step = 1
+        while cap < bounds.max_output_tokens and self._fits_within(
+            request, min(cap + step, bounds.max_output_tokens),
+            terms, selected, budget_usd,
+        ):  # fmt: skip
+            cap = min(cap + step, bounds.max_output_tokens)
+            step *= 2
+        if step > 1 and cap < bounds.max_output_tokens:
+            # The last check failed inside (cap, cap+step): refine the
+            # bracket, taking the largest verified-fitting cap in it. The
+            # whole-payload cost is monotone within a reasoning-hint
+            # regime and the bracket is small, so this converges; under a
+            # non-monotone table the binary search still only ever
+            # returns a verified-fitting cap -- safety first.
+            lo, hi = cap, min(cap + step, bounds.max_output_tokens)
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if self._fits_within(request, mid, terms, selected, budget_usd):
+                    lo = mid
+                else:
+                    hi = mid
+            cap = lo
+        return cap
+
+    def _fits_within(
+        self,
+        request: TurnRequest,
+        cap: int,
+        terms: ModelTerms,
+        selected: SelectedEndpoints,
+        budget_usd: Decimal,
+    ) -> bool:
+        """Whether an output `cap`'s whole-payload worst case stays within
+        `budget_usd`: the input bound of the payload with the cap embedded
+        -- the bounds resolved from the capped request itself, because the
+        reasoning hint `_bounds` derives shrinks with the cap -- then the
+        same per-token maximum `worst_case_usd` prices."""
+        capped = replace(request, max_output_tokens=cap)
+        capped_bounds = _bounds(self.per_call, terms, capped)
+        payload = _payload(self.provider, capped, terms, capped_bounds, selected)
+        input_tokens = input_token_bound(json.dumps(payload))
+        price = (
+            input_tokens * terms.input_rate
+            + cap * max(terms.completion_rate, terms.reasoning_rate)
+            + terms.request_fee
+        )
+        return price <= budget_usd
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         """One request, no retry. A read timeout raises
