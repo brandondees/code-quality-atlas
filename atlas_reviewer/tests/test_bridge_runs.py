@@ -56,7 +56,7 @@ from atlas_reviewer.bridge import (
     sweep_script,
     sweep_specs,
 )
-from atlas_reviewer.bridge_args import Rev, validate
+from atlas_reviewer.bridge_args import MAX_BASH_CHARS, Rev, validate
 from atlas_reviewer.bridge_staging import (
     DROP_SHIM,
     NOBODY_UID,
@@ -3823,3 +3823,39 @@ def test_a_bash_command_is_refused_without_the_guard_interpreter(tmp_path):
     assert "no interpreter on the runner image runs the no-root guard" in (
         result.error.text
     )
+
+
+def test_a_bash_write_into_the_staged_repository_does_not_survive(tmp_path):
+    """The copy's .git file points at the staged repository itself, so the
+    model's command can write into repo.git -- a ref, a loose object, a
+    config edit -- as the non-root user. The re-stage discipline that
+    guards every other exec tool guards bash too: the next call's copy is
+    built from the controller-held tarballs' repository, so nothing an
+    earlier command left in repo.git reaches a later call."""
+    (make, read) = calls(
+        tmp_path,
+        (
+            "bash",
+            {"command": 'echo tampered > "$(git rev-parse --git-dir)/marker"'},
+        ),
+        (
+            "bash",
+            {
+                "command": (
+                    'test ! -e "$(git rev-parse --git-dir)/marker" '
+                    "&& echo wiped || echo survived"
+                )
+            },
+        ),
+    )[0]  # fmt: skip
+    assert make.status is Status.OK
+    # The file the first command wrote into repo.git is gone: the second
+    # call's repository was rebuilt from the tarballs.
+    assert read.status is Status.OK
+    assert "wiped" in read.content.text
+
+
+def test_a_bash_command_over_its_cap_is_refused(tmp_path):
+    refused = one(tmp_path, "bash", {"command": "x" * (MAX_BASH_CHARS + 1)})
+    assert refused.status is Status.REJECTED
+    assert "over" in refused.error.text

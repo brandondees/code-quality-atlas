@@ -433,8 +433,10 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     history tools read it -- then the model's one command run as the
     non-root user through the same guard, under the same clock and
     output caps and the runner's verified deny-all policy. The copy is
-    removed again: nothing the command writes reaches the repository,
-    the trees, or any later call."""
+    removed again: nothing the command writes reaches the repository's
+    trees, and anything it writes into the staged repository itself is
+    discarded by the next call's re-stage -- later calls never read what
+    an earlier command left behind."""
     scratch = quote(staged.scratch)
     root = quote(staged.root)
     assert staged.shim_python is not None  # the caller refuses the call before this
@@ -2958,12 +2960,13 @@ class Bridge:
         return self._failed(call, Status.UNAVAILABLE, why, started)
 
     def _test_tool_refusal(self, call: Call, started: float) -> BridgeResult | None:
-        """The test tools' shared gates: the no-root guard's interpreter
-        and the collection probe's verdict. A runner with neither
-        interpreter refuses the tools named; a runner whose collection
+        """The test tools' collection gate: a runner whose collection
         probe failed refuses them with that named gap -- the run would
         only produce INCONCLUSIVE mutants and red baselines the lens
-        cannot read as evidence."""
+        cannot read as evidence. The interpreter gates stay in
+        `_run_exec` ahead of it, in the order the slices before the bash
+        tool established: a missing pytest first, then a missing
+        no-root-guard interpreter, then this."""
         if not self.staged.collection_ok:
             return self._failed(
                 call,
@@ -2997,8 +3000,18 @@ class Bridge:
         tools use; the reply parses as one run block, and the exit maps
         through the same statuses. No run slot is spent: the bash call is
         bounded by the attempt's call budget and the lens's wall clocks,
-        not by the test-run cap."""
+        not by the test-run cap. The re-stage discipline applies as
+        everywhere: the copy's `.git` file points at the staged
+        repository itself, so the command can write into `repo.git` -- a
+        later call's copy and git reads are built from the re-staged
+        repository, never from what an earlier command left there."""
         try:
+            # Since the last execution could have rewritten anything it
+            # could reach -- the staged repository included, which the
+            # copy's git points at -- the copy is built from a re-staged,
+            # digest-checked repository.
+            if self._suspect:
+                self._restage()
             code, text = self.session.exec(
                 "bridge bash",
                 bash_script(self.staged, call, limits),
