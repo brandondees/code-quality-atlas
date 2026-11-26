@@ -3536,8 +3536,12 @@ def test_eval_run_reads_prior_rounds_from_the_fixture_snapshot(tmp_path):
         err=err,
     )
     assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
-    state_log = tmp_path / "state" / "rounds.jsonl"
-    assert state_log.is_file()
+    # The shared state round log does not exist: the run's log is the
+    # run-scoped copy under eval-runs/, carrying the snapshot's record
+    # plus the run's own.
+    assert not (tmp_path / "state" / "rounds.jsonl").exists()
+    (run_dir,) = (tmp_path / "state" / "eval-runs").iterdir()
+    state_log = run_dir / "rounds.jsonl"
     assert len(state_log.read_text(encoding="utf-8").splitlines()) == 2
     assert snapshot.read_bytes() == before
 
@@ -3574,3 +3578,138 @@ def test_eval_run_names_an_unreadable_fixture_rounds_snapshot(tmp_path):
     assert "the round log file could not be read" in "\n".join(
         line for line in draft.splitlines() if line.startswith("- ")
     )
+
+
+def test_eval_run_never_touches_the_state_dirs_real_round_log(tmp_path):
+    """The round log an eval run reads and appends to is the run-scoped
+    copy the command owns: a real round log the state directory already
+    carries -- what local agentic-review runs accumulate -- is
+    byte-identical after the run, with or without a fixture snapshot, and
+    an explicit --round-log is refused rather than clobbered."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    snapshot = fixture / "rounds.jsonl"
+    RoundLog(snapshot).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            ("L1-F1 minor calc.py:4 the discount rounds twice",),
+            False,
+        )
+    )
+    real_log = tmp_path / "state" / "rounds.jsonl"
+    real_log.parent.mkdir(parents=True)
+    RoundLog(real_log).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "hunting-silent-failures",
+            "COMMENT",
+            ("L1-F1 major calc.py:2 the guard is gone",),
+            False,
+        )
+    )
+    before = real_log.read_bytes()
+    snapshot_before = snapshot.read_bytes()
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    assert real_log.read_bytes() == before
+    assert snapshot.read_bytes() == snapshot_before
+    # A snapshot-less fixture starts the run from an empty log, and a
+    # second run over the same state dir sees no prior round either.
+    (fixture / "rounds.jsonl").unlink()
+    for _round in range(2):
+        code = cli.main(
+            [
+                "--state-dir",
+                str(tmp_path / "state"),
+                "eval-run",
+                "--fixture",
+                str(fixture),
+                "--lenses",
+                "tracing-correctness-and-invariants",
+                "--depth",
+                "triage",
+                "--pool-size",
+                "1",
+                "--lens-script",
+                str(FIXTURE / "scenarios" / "blocker.json"),
+                "--out",
+                str(tmp_path / "draft2.md"),
+            ],
+            env={},
+            out=io.StringIO(),
+            err=io.StringIO(),
+        )
+        assert code == cli.EXIT_CHANGES_REQUESTED
+    assert real_log.read_bytes() == before
+    # The run-scoped logs live under eval-runs/, one directory per run.
+    eval_runs = tmp_path / "state" / "eval-runs"
+    assert eval_runs.is_dir()
+    assert len(list(eval_runs.iterdir())) == 3
+
+
+def test_eval_run_refuses_an_explicit_round_log(tmp_path):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--round-log",
+            str(tmp_path / "rounds.jsonl"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_USAGE
+    assert "--round-log is not an eval-run option" in err.getvalue()
+
+
+def test_eval_run_refuses_a_repetition_below_one(tmp_path):
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(FIXTURE),
+            "--repetition",
+            "0",
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_USAGE
+    assert "--repetition must be a positive integer" in err.getvalue()

@@ -132,7 +132,7 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.lens_contract import DesignRef, LineRange
+from atlas_reviewer.lens_contract import LineRange
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     FinalReply,
@@ -2577,14 +2577,12 @@ def _run_file_from(
     for minted in review.verified:
         location = minted.finding.location
         # The grader matches a span by path and line: a line-range
-        # location maps to its path and range, the body location to the
-        # body's own path, and the other forms to their rendered string.
-        if isinstance(location, LineRange):
-            location_path = location.path
-        elif isinstance(location, DesignRef):
-            location_path = str(location)
-        else:
-            location_path = str(location)
+        # location maps to its path and range; every other form --
+        # including the body's own fixed path and a design reference --
+        # maps to its rendered string.
+        location_path = (
+            location.path if isinstance(location, LineRange) else str(location)
+        )
         finding: dict[str, object] = {
             "severity": minted.finding.severity.value,
             "path": location_path,
@@ -2631,6 +2629,12 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
     model, the in-memory runner); `--allow-live-inference` runs the real
     provider and the real Sprites against the same fixture, and that run
     spends real money and is the operator's to start."""
+    if (
+        not isinstance(args.repetition, int)
+        or isinstance(args.repetition, bool)
+        or args.repetition < 1
+    ):
+        raise UsageError("--repetition must be a positive integer")
     fixture = Path(args.fixture)
     if not fixture.is_dir():
         raise UsageError(f"fixture directory {fixture} does not exist")
@@ -2641,13 +2645,26 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
     # Prior rounds at parity (the scope addendum): the fixture's own
     # round-log snapshot is the earlier rounds as they stood at the anchor
     # -- the same file shape, read by the same code a live review reads.
-    # The log the run uses is ALWAYS initialized here, from the snapshot
-    # when the fixture carries one and empty when it does not, so a
-    # repeated eval run in one state directory starts from the fixture and
-    # never from the previous run's accumulated records; the run appends
-    # its own record to this copy, and the fixture stays byte-identical.
-    state_rounds = _state_dir(args, run.env) / "rounds.jsonl"
-    state_rounds.parent.mkdir(parents=True, exist_ok=True)
+    # The log the run uses is a RUN-SCOPED file under the state dir's
+    # eval-runs directory -- never the shared <state-dir>/rounds.jsonl a
+    # local agentic-review accumulates its real history in, and never an
+    # explicit --round-log the caller named -- so an eval run cannot
+    # overwrite or feed on anything but its own copy. The file is
+    # initialized here, from the snapshot when the fixture carries one and
+    # empty when it does not, so a repeated eval run starts from the
+    # fixture and never from the previous run's records; the run appends
+    # its own record to this file, and the fixture stays byte-identical.
+    if args.round_log:
+        raise UsageError(
+            "--round-log is not an eval-run option: the run's round log "
+            "is the fixture's snapshot, copied into a run-scoped file the "
+            "command owns"
+        )
+    eval_state = _state_dir(args, run.env) / "eval-runs"
+    eval_state.mkdir(parents=True, exist_ok=True)
+    state_rounds = (
+        Path(tempfile.mkdtemp(dir=eval_state, prefix="run-")) / "rounds.jsonl"
+    )
     rounds = fixture / "rounds.jsonl"
     if rounds.is_file():
         shutil.copyfile(rounds, state_rounds)
