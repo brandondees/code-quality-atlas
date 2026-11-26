@@ -1276,8 +1276,10 @@ PROBE_NAME_PREFIX = "test_atlas_probe_"
 def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     """One exec for `run_probe` (D80's 2026-11-26 update): the same
     disposable copy of the head tree `run_tests` builds, with the model's
-    one throwaway test file written into it under a fixed probe directory
-    (base64-decoded, so the content cannot bend the script), then the same
+    one throwaway test file written into it at the copy's root under a
+    controller-chosen `test_atlas_probe_<hex>.py` name no repo file can
+    shadow (base64-decoded, so the content cannot bend the script), then
+    the same
     bounded guarded pytest run -- the selector names what runs, the probe
     file itself when none was given -- and the copy removed again. The
     file never reaches the repository, the trees, or any later call: it
@@ -1288,7 +1290,10 @@ def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     assert staged.shim_python is not None  # the caller refuses the call before this
     content = base64.b64encode(call.get("content").encode("utf-8")).decode()
     probe_path = f"{PROBE_NAME_PREFIX}{uuid4().hex[:8]}.py"
-    selector = call.get("selector") or probe_path
+    # The model never names the probe file -- its name is the controller's
+    # -- so the optional selector is a `::node-id` suffix appended to the
+    # path (`::test_x`), or empty for the whole file.
+    selector = probe_path + call.get("selector")
     run_argv = as_nobody(staged.shim_python, _pytest_argv(staged, selector))
     return "\n".join(
         (

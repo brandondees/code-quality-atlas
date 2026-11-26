@@ -845,8 +845,8 @@ _ARG_SCHEMA: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         "operand": {"type": "integer", "minimum": 1, "description": "drop-operand only: the 1-based operand of the and/or at the named line to keep, the rest dropped"},
         "tests": {"type": "string", "description": "test selector for both runs: a file, a directory or file.py::node_id, empty for the whole suite"},
         "command": {"type": "string", "description": "name one proposed test command (the reviewed repo's default-branch REVIEW.md proposes them); it runs only if the run's allow-list carries it pre-approved (installation admins pre-approve on the S10 settings page), takes no selector, and an unapproved one is a named gap"},
-        "content": {"type": "string", "description": "run_probe only: the probe test file's full source, written into the disposable copy under tests/_atlas_probe/test_probe.py and run there; never written back"},
-        "selector": {"type": "string", "description": "run_probe only: pytest's positional (a node id inside the probe file, say); empty runs the probe file itself"},
+        "content": {"type": "string", "description": "run_probe only: the probe test file's full source, written into the disposable copy at its root and run there under a controller-chosen name; never written back"},
+        "selector": {"type": "string", "description": "run_probe only: a ::node-id suffix selecting part of the probe file (::test_x); empty runs the whole probe file"},
     }
 )  # fmt: skip
 _DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
@@ -918,8 +918,9 @@ _EXECUTION = """\
 Three tools execute, on a disposable copy of the head tree the bridge
 makes and throws away: run_tests runs the copy's pytest suite or the
 selector you name; run_probe writes one throwaway test file you supply
-into the copy -- under tests/_atlas_probe/, never written back, dying
-with the copy -- and runs it under the same sandbox; and mutate applies
+into the copy -- at its root under a name the controller chooses, never
+written back, dying with the copy -- and runs it under the same sandbox,
+optionally just the ::node-id you name; and mutate applies
 one operator at one line of one file and reports whether the copy's
 tests still pass after it. A test or mutant
 result is evidence at the head SHA its result line names, and it counts

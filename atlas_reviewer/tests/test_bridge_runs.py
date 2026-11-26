@@ -3267,17 +3267,28 @@ def test_the_probe_script_writes_base64_and_guards_the_run(tmp_path):
     assert "timeout -k 2 180" in script  # the same clock run_tests uses
     # The default selector is the probe file itself, at the copy's root.
     assert "test_atlas_probe_" in script.split("base64 -d")[1]
-    # The named selector replaces it.
+    # The named selector is a ::node-id suffix appended to the probe
+    # file's own path -- the model never names the file, whose name is
+    # the controller's.
     named = validate(
         "run_probe",
-        {
-            "content": "def test_x():\n    assert 1\n",
-            "selector": "test_probe_file.py::test_x",
-        },
+        {"content": "def test_x():\n    assert 1\n", "selector": "::TestX::test_x"},
         frozenset(Rev),
     )
     named_script = run_probe_script(staged, named, ToolLimits(16 * 1024, 180))
-    assert named_script.count("test_probe_file.py::test_x") == 1
+    # The shim's payload is multi-line, so the argv spans lines: assert the
+    # suffix sits directly against the probe path's `.py` in the script.
+    assert ".py::TestX::test_x" in named_script
+    # Anything but a ::node-id suffix is refused: the model cannot name a
+    # file (it does not know the probe file's name) and cannot smuggle a
+    # second positional.
+    for bad in ("test_probe_file.py::test_x", "::test x", "x", "::"):
+        refused = one(
+            tmp_path,
+            "run_probe",
+            {"content": "def test_x():\n    assert 1\n", "selector": bad},
+        )  # fmt: skip
+        assert refused.status is Status.REJECTED, bad
 
 
 def test_the_probe_content_is_capped_and_control_character_free(tmp_path):

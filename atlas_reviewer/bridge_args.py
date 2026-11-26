@@ -15,6 +15,7 @@ sent.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -221,6 +222,23 @@ def _probe_content(value: Any, _revs: frozenset[Rev]) -> str:
     return text
 
 
+_PROBE_SELECTOR = re.compile(r"::[A-Za-z0-9_.:\[\]/-]{1,200}")
+
+
+def _probe_selector(value: Any, _revs: frozenset[Rev]) -> str:
+    """`run_probe`'s optional selection: a `::node-id` suffix appended to
+    the probe file's own path -- the model never names the file, whose
+    name is the controller's. Empty runs the whole probe file."""
+    text = _string(value)
+    if text == "":
+        return ""
+    if not _PROBE_SELECTOR.fullmatch(text):
+        raise RejectedError(
+            INVALID, "must be a ::node-id suffix (for example ::test_x)"
+        )
+    return text
+
+
 def _operator(value: Any, _revs: frozenset[Rev]) -> str:
     if not isinstance(value, str) or value not in MUTANT_OPERATORS:
         names = ", ".join(MUTANT_OPERATORS)
@@ -263,10 +281,12 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
         # model writes one throwaway test file into the disposable copy and
         # the bridge runs it under the same sandbox as run_tests -- the
         # no-root guard, the same clock, output caps and deny-all egress.
-        # The file is never written back and dies with the copy. `selector`
-        # is pytest's positional (a node id inside the probe file, say);
-        # empty runs the probe file itself.
-        "run_probe": (_Arg("content", _probe_content), _Arg("selector", _prefix, "")),
+        # The file is never written back and dies with the copy; its name
+        # is the controller's (a fixed `test_atlas_probe_` prefix the model
+        # never needs), so `selector` is only a `::node-id` suffix appended
+        # to that path -- `::test_x`, or `::TestX::test_y` -- and empty runs
+        # the whole probe file.
+        "run_probe": (_Arg("content", _probe_content), _Arg("selector", _probe_selector, "")),
         "mutate": (
             _Arg("path", _path),
             _Arg("line", _LINE),
