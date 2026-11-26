@@ -21,6 +21,7 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.parity_key import load_runs
 from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
+from atlas_reviewer.rounds import RoundLog, RoundRecord
 from atlas_reviewer.runner import EGRESS_TAG, event_runner_name
 
 from .helpers import FIXTURE, HEAD, SOURCE_TARBALL, FakeClock, fake_token
@@ -3471,3 +3472,89 @@ def test_eval_run_without_lenses_still_runs_the_picker(tmp_path):
     assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
     draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
     assert "the eval fixture's fixed set" not in draft
+
+
+def test_eval_run_reads_prior_rounds_from_the_fixture_snapshot(tmp_path):
+    """Prior rounds at parity (the scope addendum): the fixture's
+    rounds.jsonl snapshot is the earlier rounds as they stood at the
+    anchor, read by the same code a live review reads. The run appends
+    its own record to the state's copy, and the fixture stays
+    byte-identical. A snapshot the reader cannot validate is the named
+    omission in the draft, exactly as a live review names it."""
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    snapshot = fixture / "rounds.jsonl"
+    RoundLog(snapshot).append(
+        RoundRecord(
+            "example-org/example-app",
+            42,
+            "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+            "tracing-correctness-and-invariants",
+            "REQUEST_CHANGES",
+            ("L1-F1 minor calc.py:4 the discount rounds twice",),
+            False,
+        )
+    )
+    before = snapshot.read_bytes()
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_CHANGES_REQUESTED, err.getvalue()
+    state_log = tmp_path / "state" / "rounds.jsonl"
+    assert state_log.is_file()
+    assert len(state_log.read_text(encoding="utf-8").splitlines()) == 2
+    assert snapshot.read_bytes() == before
+
+
+def test_eval_run_names_an_unreadable_fixture_rounds_snapshot(tmp_path):
+    fixture = tmp_path / "fixture"
+    shutil.copytree(FIXTURE, fixture)
+    (fixture / "rounds.jsonl").write_bytes(b"\x00\xffbinary not json")
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path / "state"),
+            "eval-run",
+            "--fixture",
+            str(fixture),
+            "--lenses",
+            "tracing-correctness-and-invariants",
+            "--depth",
+            "triage",
+            "--pool-size",
+            "1",
+            "--lens-script",
+            str(FIXTURE / "scenarios" / "blocker.json"),
+            "--out",
+            str(tmp_path / "draft.md"),
+        ],
+        env={},
+        out=out,
+        err=err,
+    )
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    draft = (tmp_path / "draft.md").read_text(encoding="utf-8")
+    assert "the round log file could not be read" in "\n".join(
+        line for line in draft.splitlines() if line.startswith("- ")
+    )

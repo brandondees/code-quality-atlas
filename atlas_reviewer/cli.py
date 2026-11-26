@@ -26,6 +26,7 @@ import math
 import os
 import re
 import secrets
+import shutil
 import sys
 import tempfile
 import time
@@ -2622,6 +2623,19 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
         raise UsageError(f"the fixture carries no event.json: {fixture}")
     args.event = str(fixture / "event.json")
     args.fixtures = str(fixture)
+    # Prior rounds at parity (the scope addendum): the fixture's own
+    # round-log snapshot is the earlier rounds as they stood at the anchor
+    # -- the same file shape, read by the same code a live review reads.
+    # The snapshot is copied into the run's own state first, so the
+    # fixture stays byte-identical while the run appends its own record to
+    # the copy. When the fixture carries no snapshot, the run starts from
+    # an empty log, the way the anchor's first round did.
+    rounds = fixture / "rounds.jsonl"
+    if rounds.is_file():
+        state_rounds = _state_dir(args, run.env) / "rounds.jsonl"
+        state_rounds.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(rounds, state_rounds)
+        args.round_log = str(state_rounds)
     if not args.allow_live_inference:
         args.dry_run = True
     code = _cmd_agentic_review(args, run)
