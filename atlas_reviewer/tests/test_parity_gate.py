@@ -18,7 +18,7 @@ from atlas_reviewer.parity_key import (
     score_parity,
 )
 
-_SHA = "674071a91513b4774c82350fb757d9c085f10baf"
+_SHA = "28854775e5965eb554b368cc3a543969a635b681"
 
 
 def _hit(finding: KeyFinding) -> CitedFinding:

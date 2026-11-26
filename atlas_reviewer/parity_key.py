@@ -42,9 +42,12 @@ _FINDING_KEYS = frozenset(
         "spans",
         "encloses",
         "citations",
+        "liveness",
     }
 )
 _SPAN_KEYS = frozenset({"path", "line", "end_line"})
+_LIVENESS_KEYS = frozenset({"kind", "file", "old", "new", "text"})
+_LIVENESS_KINDS = frozenset({"mutant", "quote", "absent"})
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -56,6 +59,22 @@ class Span:
     path: str
     line_start: int | None = None
     line_end: int | None = None
+
+
+@dataclass(frozen=True)
+class Liveness:
+    """One checked-in check that the finding is still live at the anchor
+    (issue #713's key, D71's re-anchor update): a ``mutant`` splice that
+    must survive the anchor's own test suite, a ``quote`` text that must
+    be present in the file at the anchor, or an ``absent`` text that must
+    not be in the file at the anchor. ``file`` is repo-root-relative,
+    except for a body record's fixture, which lives beside the key."""
+
+    kind: str
+    file: str
+    old: str = ""
+    new: str = ""
+    text: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,6 +92,7 @@ class KeyFinding:
     citations: tuple[str, ...]
     lenses: tuple[str, ...]
     needs: tuple[str, ...]
+    liveness: tuple[Liveness, ...] = ()
 
 
 # The candidate may extend this many lines past the defect and still be a
@@ -157,6 +177,43 @@ def _load_file(path: Path) -> tuple[KeyFinding, ...]:
     )
 
 
+def _liveness(value: object, name: str) -> tuple[Liveness, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not value:
+        raise EvalFormatError(f"{name} liveness must be a non-empty list")
+    specs: list[Liveness] = []
+    for index, item in enumerate(value):
+        label = f"{name} liveness[{index}]"
+        body = _object(item, label)
+        _unknown(body, _LIVENESS_KEYS, label)
+        kind = body.get("kind")
+        if not isinstance(kind, str) or kind not in _LIVENESS_KINDS:
+            raise EvalFormatError(f"{label} kind must be mutant, quote or absent")
+        file = _text(body.get("file"), f"{label} file")
+        old = body.get("old", "")
+        new = body.get("new", "")
+        text = body.get("text", "")
+        if (
+            not isinstance(old, str)
+            or not isinstance(new, str)
+            or not isinstance(text, str)
+        ):
+            raise EvalFormatError(f"{label} old, new and text must be strings")
+        if kind == "mutant":
+            if not old or old == new:
+                raise EvalFormatError(f"{label} mutant needs distinct old and new")
+            if text:
+                raise EvalFormatError(f"{label} mutant takes no text")
+        else:
+            if not text:
+                raise EvalFormatError(f"{label} {kind} needs text")
+            if old or new:
+                raise EvalFormatError(f"{label} {kind} takes no old or new")
+        specs.append(Liveness(kind=kind, file=file, old=old, new=new, text=text))
+    return tuple(specs)
+
+
 def _finding(value: object, name: str, pr: int, commit: str) -> KeyFinding:
     body = _object(value, name)
     _unknown(body, _FINDING_KEYS, name)
@@ -166,6 +223,7 @@ def _finding(value: object, name: str, pr: int, commit: str) -> KeyFinding:
     spans = _spans(body.get("spans"), f"{name} spans", allow_body=True)
     encloses = _spans(body.get("encloses"), f"{name} encloses", allow_body=False)
     citations = _strings(body.get("citations"), f"{name} citations")
+    liveness = _liveness(body.get("liveness"), name)
     _spans_cover(name, spans, encloses, citations)
     return KeyFinding(
         id=_ident(body.get("id"), name),
@@ -179,6 +237,7 @@ def _finding(value: object, name: str, pr: int, commit: str) -> KeyFinding:
         citations=citations,
         lenses=_lens_names(body.get("lenses"), name),
         needs=_needs(body.get("needs"), name),
+        liveness=liveness,
     )
 
 

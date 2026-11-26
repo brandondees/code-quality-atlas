@@ -1,54 +1,100 @@
 {
   "pr": 661,
-  "reviewed_commit": "674071a91513b4774c82350fb757d9c085f10baf",
-  "source": "Checked again at 674071a91513b4774c82350fb757d9c085f10baf. That commit is the pull request head from 2026-11-13, the night before the Nov 14 trial, and the four defects are live there: the break is line 186, the unreadable count is line 207, and the omitted-findings gate is line 211. Each finding's source records the span chosen at that commit.",
+  "reviewed_commit": "28854775e5965eb554b368cc3a543969a635b681",
+  "source": "Re-anchored on 2026-11-26 to 28854775e5965eb554b368cc3a543969a635b681, the round-5 head the protocol review and the Nov 13-14 trials scored, per Brandon's Nov 25 decision. The commits after it on the branch (7793d1e4, 6ff2ed04, and the head 674071a9 the key previously named) fix m2, m3 and m4, so a finding of any of the three at the later head is a false positive, and 661-m1's accepted citations are not in the body the merged head carries. Each finding's spans were re-read at the re-anchored tree; the liveness entries are checked in CI against the anchor's own worktree.",
   "findings": [
     {
       "id": "661-m1",
       "severity": "minor",
       "summary": "The pull request body's CI and stack lines are stale.",
-      "source": "The location is pull_request.body. At this head the body quotes `gate` on `674071a9` (run 43510666665) and the stack line pre-rebase head `61273b4f`. The Nov 14 score says an earlier body cited run 43429340358 on 61273b4f; that run id is not in the body now. A citation counts when the quote contains one of the two lines that are.",
+      "source": "The location is pull_request.body. At the round-5 head the body's gate line still cited the pre-rebase head's run (`gate` on `61273b4f` (run 43429340358)), which is the stale-CI defect the Nov 14 trial recorded; the merged body later updated that line to `674071a9` (run 43510666665). The pre-rebase stack sentence (`pre-rebase head `61273b4f`) predates the round-5 review. The eval input is the round-5 body, shipped as 661-round5-body.md beside this key: GitHub does not expose pull-request body edit history, so that file is reconstructed from the merged body with the gate line reverted to the round-5 values and the sentences that describe post-round-5 commits removed; the provenance note in the file lists each deviation. A citation counts when the quote contains one of the two lines.",
       "lenses": ["reviewing-pr-and-process-hygiene"],
       "needs": ["ci"],
       "spans": [{"path": "pull_request.body"}],
       "encloses": [],
       "citations": [
-        "`gate` on `674071a9` (run 43510666665)",
+        "`gate` on `61273b4f` (run 43429340358)",
         "pre-rebase head `61273b4f`"
+      ],
+      "liveness": [
+        {
+          "kind": "quote",
+          "file": "atlas_reviewer/fixtures/parity-key/661-round5-body.md",
+          "text": "`gate` on `61273b4f` (run 43429340358)"
+        },
+        {
+          "kind": "quote",
+          "file": "atlas_reviewer/fixtures/parity-key/661-round5-body.md",
+          "text": "pre-rebase head `61273b4f`"
+        }
       ]
     },
     {
       "id": "661-m2",
       "severity": "minor",
-      "summary": "unreadable shown as \"1 line\"",
-      "source": "The omission text is rounds.py lines 202-209, and line 207 is `{unreadable} line(s) could not be parsed`. The trial range coordinator.py 725-740 is `_result` and does not format that count, so it is not a span. The enclosing function is prior_blocks, lines 162-223.",
+      "summary": "An unreadable log file is reported as \"1 line\" could not be parsed.",
+      "source": "At this head `unreadable = 1` (coordinator.py 734-735, inside `_review_context`, 712-752) charges a wholly unreadable log file to the unreadable-line count, so the omission reads \"1 line(s) could not be parsed\" (rounds.py 202-203) instead of naming the file, and no file-level omission exists. 6ff2ed04 later made an unreadable file its own omission (\"the round log file could not be read\"), which is why the key's previous anchor 674071a9 had no live m2. prior_blocks is rounds.py 162-220.",
       "lenses": ["hunting-silent-failures"],
       "needs": ["read"],
-      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 202, "end_line": 209}],
-      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
-      "citations": []
+      "spans": [
+        {"path": "atlas_reviewer/coordinator.py", "line": 734, "end_line": 735},
+        {"path": "atlas_reviewer/rounds.py", "line": 202, "end_line": 203}
+      ],
+      "encloses": [
+        {"path": "atlas_reviewer/coordinator.py", "line": 712, "end_line": 752},
+        {"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 220}
+      ],
+      "citations": [],
+      "liveness": [
+        {
+          "kind": "quote",
+          "file": "atlas_reviewer/coordinator.py",
+          "text": "            unreadable = 1"
+        },
+        {
+          "kind": "quote",
+          "file": "atlas_reviewer/rounds.py",
+          "text": "                f\"{unreadable} line(s) could not be parsed\","
+        }
+      ]
     },
     {
       "id": "661-m3",
       "severity": "minor",
       "summary": "break instead of continue hides a current-head round.",
-      "source": "The defect is the break at rounds.py line 186 after continue for a superseded record, lines 184-186. prior_blocks is lines 162-223. The trial range 170-190 includes the function prologue, so the span is the continue and the break.",
+      "source": "The budget loop (rounds.py 180-182) walks newest-first and `break`s at the first record that does not fit, so a current-head record behind a superseded one that does not fit is hidden; `continue` would keep scanning. 6ff2ed04 later split the loop by head (\"Skip a superseded round that does not fit\"), which is why the key's previous anchor 674071a9 had no live m3. prior_blocks is rounds.py 162-220.",
       "lenses": ["tracing-correctness-and-invariants"],
       "needs": ["run_tests", "mutate"],
-      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 184, "end_line": 186}],
-      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
-      "citations": []
+      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 180, "end_line": 182}],
+      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 220}],
+      "citations": [],
+      "liveness": [
+        {
+          "kind": "mutant",
+          "file": "atlas_reviewer/rounds.py",
+          "old": "        if used + len(text) + (2 if kept else 0) > budget:\n            break\n",
+          "new": "        if used + len(text) + (2 if kept else 0) > budget:\n            continue\n"
+        }
+      ]
     },
     {
       "id": "661-m4",
       "severity": "minor",
-      "summary": "The superseded findings_omitted gate is unpinned.",
-      "source": "The gate is rounds.py lines 210-219, `if record.findings_omitted and record.head_sha == current_head`. The trial range 200-212 also covers the unreadable omission, which is 661-m2, so this span starts at 210. prior_blocks is lines 162-223.",
+      "summary": "The findings_omitted gate is unpinned.",
+      "source": "The gate is rounds.py 207-215, `if record.findings_omitted and record.head_sha == current_head`, and the `and record.head_sha == current_head` conjunct is unpinned at this head: dropping it survives the anchor's own full test suite (the same failures as the baseline). 6ff2ed04 later added `test_a_superseded_truncated_record_does_not_block_a_new_head`, which kills the drop, which is why the key's previous anchor 674071a9 had no live m4. prior_blocks is rounds.py 162-220.",
       "lenses": ["reviewing-test-quality"],
       "needs": ["mutate"],
-      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 210, "end_line": 219}],
-      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 223}],
-      "citations": []
+      "spans": [{"path": "atlas_reviewer/rounds.py", "line": 207, "end_line": 215}],
+      "encloses": [{"path": "atlas_reviewer/rounds.py", "line": 162, "end_line": 220}],
+      "citations": [],
+      "liveness": [
+        {
+          "kind": "mutant",
+          "file": "atlas_reviewer/rounds.py",
+          "old": "        if record.findings_omitted and record.head_sha == current_head:",
+          "new": "        if record.findings_omitted:"
+        }
+      ]
     }
   ]
 }

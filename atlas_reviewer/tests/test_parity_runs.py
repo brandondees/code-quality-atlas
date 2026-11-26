@@ -14,7 +14,7 @@ from atlas_reviewer import cli
 from atlas_reviewer.eval_harness import EvalFormatError
 from atlas_reviewer.parity_key import load_key, load_runs
 
-_SHA = "674071a91513b4774c82350fb757d9c085f10baf"
+_SHA = "28854775e5965eb554b368cc3a543969a635b681"
 _OFFLINE = Path(__file__).resolve().parents[1] / "fixtures" / "parity-offline"
 
 

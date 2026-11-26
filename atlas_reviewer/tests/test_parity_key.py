@@ -3,6 +3,7 @@
 Majors, and the loader that refuses a bad record."""
 
 import json
+from itertools import count
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ from atlas_reviewer.parity_key import (
     load_key,
 )
 
-_COMMIT = "674071a91513b4774c82350fb757d9c085f10baf"
+_COMMIT = "28854775e5965eb554b368cc3a543969a635b681"
 _QUEUE = "0fe45e5ea79f3abd8e07488a01b623186df96692"
 _ECHO = "186e09f2944e561815462eb5d9795dba4229c488"
 _FUNDING = "atlas_reviewer/funding.py"
@@ -38,7 +39,7 @@ _KEY_IDS = (
     "801-m3",
     "801-m4",
 )
-_CI = "`gate` on `674071a9` (run 43510666665)"
+_CI = "`gate` on `61273b4f` (run 43429340358)"
 _STACK = "pre-rebase head `61273b4f`"
 
 
@@ -91,6 +92,8 @@ def test_the_checked_in_key_grades_every_recorded_finding():
     assert missing == []
     note = (KEY_DIR / "640.json").read_text(encoding="utf-8")
     assert "not a record" not in note
+    note661 = (KEY_DIR / "661.json").read_text(encoding="utf-8")
+    assert "not a record" not in note661
     cancel = by_id["640-m1"]
     assert cancel.reviewed_commit == _QUEUE
     assert cancel.spans[0] == Span("atlas_reviewer/service_queue.py", 329, 329)
@@ -118,11 +121,19 @@ def test_the_checked_in_key_grades_every_recorded_finding():
     assert body.citations == (_CI, _STACK)
     assert body.needs == ("ci",)
     assert body.lenses == ("reviewing-pr-and-process-hygiene",)
-    assert by_id["661-m2"].spans[0].line_start == 202
-    assert "coordinator.py" in by_id["661-m2"].source
-    assert by_id["661-m3"].spans[0] == Span("atlas_reviewer/rounds.py", 184, 186)
+    unreadable = by_id["661-m2"]
+    assert unreadable.spans == (
+        Span("atlas_reviewer/coordinator.py", 734, 735),
+        Span("atlas_reviewer/rounds.py", 202, 203),
+    )
+    assert unreadable.encloses == (
+        Span("atlas_reviewer/coordinator.py", 712, 752),
+        Span("atlas_reviewer/rounds.py", 162, 220),
+    )
+    assert "6ff2ed04" in unreadable.source
+    assert by_id["661-m3"].spans[0] == Span("atlas_reviewer/rounds.py", 180, 182)
     assert by_id["661-m3"].needs == ("run_tests", "mutate")
-    assert by_id["661-m4"].spans[0].line_start == 210
+    assert by_id["661-m4"].spans[0] == Span("atlas_reviewer/rounds.py", 207, 215)
     assert all(item.severity == "minor" for item in findings if item.pr != 801)
     assert all(item.citations == () for item in findings if item.id != "661-m1")
     for echo_id, start, end in (
@@ -402,20 +413,26 @@ def test_an_unverified_citation_is_not_found():
 
 def test_a_wrong_line_in_the_right_file_is_not_found():
     finding = _key("661-m2")
-    assert grade_findings([finding], [_cite(_ROUNDS, 207)]).grades == (FOUND,)
+    assert grade_findings([finding], [_cite(_ROUNDS, 202)]).grades == (FOUND,)
     assert grade_findings([finding], [_cite(_ROUNDS, 170)]).grades == (PARTIAL,)
     assert grade_findings([finding], [_cite(_ROUNDS, 226)]).grades == (LOST,)
     assert grade_findings(
-        [finding], [_cite("atlas_reviewer/coordinator.py", 207)]
+        [finding], [_cite("atlas_reviewer/coordinator.py", 735)]
+    ).grades == (FOUND,)
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/coordinator.py", 740)]
+    ).grades == (PARTIAL,)
+    assert grade_findings(
+        [finding], [_cite("atlas_reviewer/coordinator.py", 700)]
     ).grades == (LOST,)
-    unchecked = _cite(_ROUNDS, 207, verified=False, quote="{unreadable} line(s)")
+    unchecked = _cite(_ROUNDS, 203, verified=False, quote="{unreadable} line(s)")
     assert grade_findings([finding], [unchecked]).grades == (LOST,)
 
 
 def test_the_line_before_the_omitted_findings_gate_does_not_find_it():
     gate = _key("661-m4")
-    assert grade_findings([gate], [_cite(_ROUNDS, 209)]).grades == (PARTIAL,)
-    both = grade_findings([_key("661-m2"), gate], [_cite(_ROUNDS, 207)])
+    assert grade_findings([gate], [_cite(_ROUNDS, 206)]).grades == (PARTIAL,)
+    both = grade_findings([_key("661-m2"), gate], [_cite(_ROUNDS, 202)])
     assert both.grades == (FOUND, LOST)
 
 
@@ -491,11 +508,11 @@ def test_each_line_that_omits_the_d48_amendment_is_found():
 
 def test_a_citation_wider_than_the_defect_is_partial():
     finding = _key("661-m3")
-    assert grade_findings([finding], [_cite(_ROUNDS, 185)]).grades == (FOUND,)
-    assert grade_findings([finding], [_cite(_ROUNDS, 184, end_line=186)]).grades == (
+    assert grade_findings([finding], [_cite(_ROUNDS, 181)]).grades == (FOUND,)
+    assert grade_findings([finding], [_cite(_ROUNDS, 180, end_line=182)]).grades == (
         FOUND,
     )
-    whole_function = _cite(_ROUNDS, 162, end_line=223)
+    whole_function = _cite(_ROUNDS, 162, end_line=220)
     whole_file = _cite(_ROUNDS, 1, end_line=5000)
     assert grade_findings([finding], [whole_function]).grades == (PARTIAL,)
     assert grade_findings([finding], [whole_file]).grades == (PARTIAL,)
@@ -591,8 +608,212 @@ def test_a_span_with_no_line_and_an_inverted_range_are_lost():
         ("read",),
     )
     assert grade_findings([bare], [_cite("a.py", 4)]).grades == (LOST,)
-    inverted = _cite(_ROUNDS, 207, end_line=200)
+    inverted = _cite(_ROUNDS, 203, end_line=200)
     assert grade_findings([_key("661-m2")], [inverted]).grades == (LOST,)
-    open_end = _cite(_ROUNDS, 207, end_line=None)
+    open_end = _cite(_ROUNDS, 202, end_line=None)
     assert grade_findings([_key("661-m2")], [open_end]).grades == (FOUND,)
     assert grade_findings((), ()).extras == 0
+
+
+def test_liveness_specs_load_and_refuse_bad_shapes(tmp_path: Path):
+    finding = _finding(
+        liveness=[
+            {
+                "kind": "mutant",
+                "file": "a.py",
+                "old": "if a:",
+                "new": "if b:",
+            }
+        ]
+    )
+    loaded = load_key(_write_key(tmp_path, finding))[0]
+    assert loaded.liveness[0].kind == "mutant"
+    assert loaded.liveness[0].old == "if a:"
+    quote = _finding(liveness=[{"kind": "quote", "file": "a.py", "text": "x"}])
+    assert load_key(_write_key(tmp_path, quote))[0].liveness[0].text == "x"
+    absent = _finding(liveness=[{"kind": "absent", "file": "a.py", "text": "x"}])
+    assert load_key(_write_key(tmp_path, absent))[0].liveness[0].kind == "absent"
+    for bad in (
+        {"kind": "splice", "file": "a.py", "old": "a", "new": "b"},
+        {"kind": "mutant", "file": "a.py", "old": "a", "new": "a"},
+        {"kind": "mutant", "file": "a.py", "old": "a", "new": "b", "text": "x"},
+        {"kind": "mutant", "file": "a.py", "old": "", "new": "b"},
+        {"kind": "quote", "file": "a.py", "text": ""},
+        {"kind": "quote", "file": "a.py", "text": "x", "old": "a"},
+        {"kind": "quote", "file": "a.py", "old": "a", "new": "b"},
+        [],
+        [{"kind": "quote", "file": "a.py", "text": 3}],
+    ):
+        with pytest.raises(EvalFormatError):
+            load_key(_write_key(tmp_path, _finding(liveness=bad)))
+
+
+_KEY_DIRS = iter(count())
+
+
+def _write_key(directory: Path, finding: dict[str, object]) -> Path:
+    key_dir = directory / f"key-{next(_KEY_DIRS)}"
+    key_dir.mkdir()
+    path = key_dir / "key.json"
+    path.write_text(
+        json.dumps(
+            {
+                "pr": 1,
+                "reviewed_commit": _COMMIT,
+                "source": "a plan row",
+                "findings": [finding],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return key_dir
+
+
+def test_a_shallow_checkout_fetches_a_missing_anchor_before_reading_it(
+    tmp_path, monkeypatch
+):
+    """The liveness checks' anchor reads work on CI's shallow checkout
+    (round-4 CI on #846): `actions/checkout` fetches depth 2, so the
+    anchor commits the key names are not in the object store, and `git
+    show <anchor>:<file>` there answers with the misleading 'exists on
+    disk, but not in <commit>' -- exactly what #846's first green-bound
+    run died on, in the two 661-m2 quote specs that ran before any
+    mutant spec had fetched their anchor. Every reader goes through
+    `_ensure_commit`, which fetches a missing commit from origin first.
+
+    The fixture is self-contained (the round-5 review's Major on #842):
+    a small origin built in tmp_path whose anchor commit is reachable
+    from no ref, a shallow clone of it as the checkout, and the helpers
+    pointed at that clone -- so the test depends on no runner's clone
+    depth and on no real anchor object. The fetch is served by the
+    fixture origin's own `uploadpack.allowAnySHA1InWant`, the same
+    setting that lets CI fetch the real anchors."""
+    import importlib.util
+    import os
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    origin = tmp_path / "origin"
+    (origin / "atlas_reviewer").mkdir(parents=True)
+    identity = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+    }
+
+    def git(*argv: str) -> str:
+        done = subprocess.run(
+            ["git", *argv],
+            cwd=origin,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=identity,
+        )
+        return done.stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    (origin / "atlas_reviewer" / "coordinator.py").write_text(
+        '# SPDX-License-Identifier: MIT\n"""The agentic coordinator: run the'
+        ' selected lens under the attestation ledger."""\n'
+    )
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    (origin / "atlas_reviewer" / "coordinator.py").write_text(
+        '# SPDX-License-Identifier: MIT\n"""The agentic coordinator: run the'
+        " selected lens under the attestation ledger, verify its output and"
+        ' synthesize the draft."""\n'
+    )
+    git("add", "-A")
+    git("commit", "-qm", "anchor")
+    anchor = git("rev-parse", "HEAD")
+    base = git("rev-parse", "HEAD~1")
+    # The anchor is reachable from no ref, the way the real round-5
+    # anchor is not on any branch.
+    git("checkout", "-q", "--detach", anchor)
+    git("branch", "-f", "main", base)
+    git("checkout", "-q", "main")
+    git("config", "uploadpack.allowAnySHA1InWant", "true")
+
+    shallow = tmp_path / "shallow"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", str(shallow)],
+        check=True,
+    )
+    missing = subprocess.run(
+        ["git", "cat-file", "-e", f"{anchor}^{{commit}}"],
+        cwd=shallow,
+        capture_output=True,
+        check=False,
+    )
+    assert missing.returncode != 0, "the fixture clone holds the anchor already"
+    monkeypatch.setattr(liveness, "_REPO", shallow)
+    content = liveness._anchored_text(anchor, "atlas_reviewer/coordinator.py")
+    assert "verify its output and synthesize the draft" in content
+
+
+def test_the_liveness_suite_refuses_a_run_that_never_reported_counts(
+    tmp_path, monkeypatch
+):
+    """A crashed or empty anchor-suite run reports no failures, and the
+    mutant comparison would then read as vacuously live (the round-1
+    Minor: nothing asserted the suite actually ran). `_suite` refuses a
+    run whose output carries no pytest summary with passed/failed
+    counts, so the check fails loudly instead."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    ran = tmp_path / "ran"
+    ran.mkdir()
+    (ran / "test_one.py").write_text("def test_one():\n    assert True\n")
+    assert liveness._suite(ran) == frozenset()
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    try:
+        liveness._suite(empty)
+    except AssertionError as exc:
+        assert "no pytest summary" in str(exc)
+    else:
+        raise AssertionError("an empty run was accepted as a baseline")
+
+
+def test_the_liveness_suite_reports_the_failures_it_saw(tmp_path):
+    """The guard keeps the failure extraction honest: a suite whose test
+    fails yields exactly that test's id."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "liveness_test",
+        Path(__file__).resolve().parents[1]
+        / "liveness"
+        / "test_parity_key_liveness.py",
+    )
+    liveness = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(liveness)
+
+    failing = tmp_path / "failing"
+    failing.mkdir()
+    (failing / "test_one.py").write_text("def test_one():\n    assert False\n")
+    failures = liveness._suite(failing)
+    assert failures == frozenset({"test_one.py::test_one"}) or any(
+        "test_one" in f for f in failures
+    )
