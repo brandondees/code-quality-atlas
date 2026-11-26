@@ -37,6 +37,16 @@ from .test_openrouter import catalog, completion, reply, zdr_payload
 from .test_tool_model import model, request, sent
 
 
+class _NoSweepBridge:
+    """The bridge surface `run_attempt` touches before the first turn:
+    these tests exercise the model-call mechanics with a stub whose sweep
+    plan is empty, so the controller's mutant pre-pass adds no evidence
+    block."""
+
+    def sweep_plan(self, diff):
+        return ()
+
+
 def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():
     limits = load_agentic_limits({})
     resolved = limits.resolve()
@@ -162,7 +172,7 @@ def test_the_loop_records_an_input_cap_as_its_own_cause():
 
     outcome = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -190,7 +200,7 @@ def test_a_limit_hit_round_trips_through_the_ledger(tmp_path):
 
     outcome = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -445,7 +455,7 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
 
     outcome = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -504,7 +514,7 @@ def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
 
     outcome = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -536,7 +546,7 @@ def test_a_length_stop_is_the_output_cap_and_not_a_model_error():
     lens, _fake = model(reply(completion("cut off", finish="length")))
     outcome = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         lens,
         Spend(replace(LIMITS, reservation_usd=Decimal(5)).resolve()),
         FakeClock(),
@@ -566,7 +576,7 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
 
     output = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Refuses(hit("max_output_tokens", 128_000, 64_000)),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -575,7 +585,7 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
     )
     reasoning = run_attempt(
         job(),
-        object(),
+        _NoSweepBridge(),
         Refuses(hit("reasoning_max_tokens", 0, "1..63")),
         Spend(LIMITS.resolve()),
         FakeClock(),
@@ -786,7 +796,7 @@ def test_the_diff_prefix_note_round_trips_through_the_ledger(tmp_path):
 
     outcome = run_attempt(
         prefixed_job(),
-        object(),
+        _NoSweepBridge(),
         RoomModel([final()]),
         Spend(LIMITS.resolve()),
         FakeClock(),

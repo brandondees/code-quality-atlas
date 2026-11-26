@@ -21,27 +21,38 @@ import pytest
 
 from atlas_reviewer.bridge import (
     DEFAULT_LIMITS,
+    EXEC_SLACK_S,
+    KILL_AFTER_S,
     MUTATION_SCRIPT,
+    SWEEP_RUN_BOUND_S,
     MutantOutcome,
     SessionLimits,
     Status,
+    SweepGroup,
+    SweepSpec,
     ToolLimits,
     _aim_refusal,
+    _imports_module,
     _MutBlock,
     _pytest_argv,
     _run_status,
     _RunBlock,
     _splice,
+    added_lines,
     mutant_outcome,
     mutate_script,
     mutation_refusal,
     parse_mutation,
     parse_run_blocks,
     parse_summary,
+    parse_sweep,
     render,
     run_bridge,
     run_test_script,
     run_tool_limits,
+    sweep_groups,
+    sweep_script,
+    sweep_specs,
 )
 from atlas_reviewer.bridge_args import Rev, validate
 from atlas_reviewer.bridge_staging import (
@@ -2740,3 +2751,476 @@ def test_a_parser_resource_failure_in_the_preflight_is_a_named_gap(
     assert "RecursionError" in mutate.error.text
     # The read tool is untouched by the preflight's own failure.
     assert read.status is Status.OK
+
+
+# ------------------------------------------------- the controller sweep
+
+
+SWEEP_MODULE = (
+    b"def clamp(n):\n    if n < 0 or n > 9:\n        return 0\n    return n\n"
+)
+SWEEP_TEST = (
+    b"from clamp import clamp\n\ndef test_middle():\n    assert clamp(5) == 5\n"
+)
+SWEEP_DIFF = """diff --git a/clamp.py b/clamp.py
+--- a/clamp.py
++++ b/clamp.py
+@@ -1,2 +1,4 @@
+ def clamp(n):
++    if n < 0 or n > 9:
++        return 0
+     return n
+"""
+
+
+def test_added_lines_reads_the_head_side_of_each_hunk():
+    diff = (
+        "--- a/m.py\n+++ b/m.py\n@@ -1,3 +1,5 @@\n ctx\n"
+        "+added one\n ctx\n+added two\n-old\n ctx\n@@ -10 +12,2 @@\n+x\n y\n"
+    )
+    assert added_lines(diff) == frozenset({2, 4, 12})
+
+
+def test_sweep_specs_names_the_changed_conditions():
+    specs = sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE})
+    # Path-and-line order, the walk's picks sorted deterministic: within
+    # one line the operator name orders (drop-operand < flip-compare <
+    # negate-condition).
+    assert specs == (
+        SweepSpec("clamp.py", 2, "drop-operand", 1),
+        SweepSpec("clamp.py", 2, "drop-operand", 2),
+        SweepSpec("clamp.py", 2, "flip-compare"),
+        SweepSpec("clamp.py", 2, "negate-condition"),
+    )
+
+
+def test_sweep_specs_skips_test_files():
+    diff = SWEEP_DIFF.replace("clamp.py", "test_clamp.py").replace(
+        "a/clamp.py", "a/test_clamp.py"
+    )
+    assert sweep_specs(diff, {"test_clamp.py": SWEEP_MODULE}) == ()
+
+
+def test_sweep_specs_dedupes_and_caps():
+    doubled = SWEEP_DIFF + SWEEP_DIFF.replace("clamp.py", "other.py").replace(
+        "a/clamp.py", "a/other.py"
+    )
+    specs = sweep_specs(doubled, {"clamp.py": SWEEP_MODULE, "other.py": SWEEP_MODULE})
+    assert len(specs) == 8  # four per file, both files present
+    assert len(sweep_specs(doubled, {"clamp.py": SWEEP_MODULE}, cap=2)) == 2
+    # A file the controller's copy does not hold is not swept.
+    assert sweep_specs(SWEEP_DIFF, {}) == ()
+
+
+def test_sweep_groups_group_by_module_and_require_an_importer():
+    specs = sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE})
+    groups = sweep_groups(
+        specs, {"clamp.py": SWEEP_MODULE, "test_clamp.py": SWEEP_TEST}
+    )
+    assert len(groups) == 1
+    assert groups[0].module == "clamp.py"
+    assert groups[0].selectors == ("test_clamp.py",)
+    # A module whose importer is not staged forms no group.
+    groups = sweep_groups(
+        sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE}), {"clamp.py": SWEEP_MODULE}
+    )
+    assert groups == ()  # the test file that imports it is not staged
+
+
+def test_parse_sweep_maps_the_verdicts():
+    group = SweepGroup(
+        "clamp.py",
+        ("test_clamp.py",),
+        (
+            SweepSpec("clamp.py", 2, "drop-operand", 1),
+            SweepSpec("clamp.py", 2, "drop-operand", 2),
+            SweepSpec("clamp.py", 3, "negate-condition"),
+            SweepSpec("clamp.py", 3, "flip-compare"),
+        ),
+    )
+    text = (
+        "atlas-baseline:clamp.py:0:\n"
+        "atlas-sweep:0:0:\n"
+        "atlas-sweep:1:1:\n"
+        "atlas-sweep:2:124:\n"
+        "atlas-sweep:3:5:\n"
+    )
+    survived, killed, timed, empty = parse_sweep(text, group)
+    assert survived.outcome == "survived" and survived.exit == 0
+    assert killed.outcome == "killed" and killed.exit == 1
+    assert timed.outcome == "inconclusive" and "wall clock" in timed.note
+    assert empty.outcome == "inconclusive" and "no test" in empty.note
+
+
+def test_parse_sweep_reports_the_baseline_and_the_refusal():
+    group = SweepGroup(
+        "clamp.py", ("test_clamp.py",), (SweepSpec("clamp.py", 2, "negate-condition"),)
+    )
+    text = (
+        "atlas-baseline:clamp.py:1:"
+        + base64.b64encode(b"1 failed").decode()
+        + "\natlas-sweep:0:R:-:"
+        + base64.b64encode(b"the operator does not apply").decode()
+        + "\n"
+    )
+    (verdict,) = parse_sweep(text, group)
+    assert verdict.outcome == "refused"
+    assert "the operator does not apply" in verdict.note
+    no_baseline = parse_sweep("atlas-sweep:0:0:\n", group)
+    assert no_baseline[0].outcome == "inconclusive"
+    failed_baseline = parse_sweep(
+        "atlas-baseline:clamp.py:1:\natlas-sweep:0:2:\n", group
+    )
+    assert failed_baseline[0].outcome == "inconclusive"
+    assert "baseline" in failed_baseline[0].note
+    missing = parse_sweep("atlas-baseline:clamp.py:0:\n", group)
+    assert missing[0].outcome == "inconclusive"
+    assert "no verdict" in missing[0].note
+
+
+def test_the_sweep_script_stages_copy_edit_run_and_cleans_up(tmp_path):
+    staged = Staged(
+        str(tmp_path / "root"),
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    group = SweepGroup(
+        "clamp.py", ("test_clamp.py",),
+        (SweepSpec("clamp.py", 2, "negate-condition"), SweepSpec("clamp.py", 2, "drop-operand", 2)),
+    )  # fmt: skip
+    script = sweep_script(staged, group, ToolLimits(16 * 1024, 60))
+    assert "atlas-baseline:clamp.py:" in script
+    assert "atlas-sweep:0:" in script and "atlas-sweep:1:" in script
+    assert script.count("timeout -k 2 60") == 3  # baseline plus two runs
+    assert script.count("atlas-privilege-drop failed") == 3  # every run is guarded
+    assert script.count(MUTATION_SCRIPT[:40]) == 2  # one edit per spec
+    assert "drop-operand 2" in script  # the operand rides the edit argv
+    assert script.count("rm -rf") >= 3  # the copies die after their runs
+
+
+def test_added_lines_counts_a_line_whose_content_starts_with_plus():
+    # The old `not startswith("+++")` guard dropped a genuinely added
+    # line whose content begins with `++` (here `++counter`) and shifted
+    # every later number in the hunk by one.
+    diff = "--- a/m.py\n+++ b/m.py\n@@ -1,2 +1,3 @@\n ctx\n+++counter\n+x\n"
+    assert added_lines(diff) == frozenset({2, 3})
+
+
+def test_imports_module_matches_the_from_package_form():
+    assert _imports_module(
+        "from atlas_reviewer import bridge\n", "atlas_reviewer.bridge"
+    )
+    assert _imports_module(
+        "from atlas_reviewer.bridge import run_bridge\n", "atlas_reviewer.bridge"
+    )
+    assert not _imports_module(
+        "from atlas_reviewer import other\n", "atlas_reviewer.bridge"
+    )
+
+
+CALC_SWEEP_DIFF = """diff --git a/calc.py b/calc.py
+--- a/calc.py
++++ b/calc.py
+@@ -1,2 +1,4 @@
+ def total(xs):
++    if not xs:
++        return 0
+     return sum(xs)
+"""
+
+
+def test_the_sweep_reports_what_no_test_imports(tmp_path):
+    """A changed condition in a module no staged test file imports forms
+    no group -- and the sweep now says so, an inconclusive verdict with
+    the reason for every such spec, instead of dropping it silently so a
+    lens could read the block as 'swept clean'. No runner exec is spent:
+    the ungrouped specs never reach the script."""
+    source = SourceTrees(
+        source_tarball({**SUITE, "orphan.py": SWEEP_MODULE}),
+        source_tarball({**SUITE, "orphan.py": SWEEP_MODULE}),
+        OLD,
+        HEAD,
+    )
+    orphan_diff = SWEEP_DIFF.replace("clamp.py", "orphan.py").replace(
+        "a/clamp.py", "a/orphan.py"
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.sweep(bridge.sweep_plan(orphan_diff), clock=FakeClock()))
+        return "done"
+
+    report, *_ = bridge_run(tmp_path, body, source=source)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    (verdicts,) = results
+    assert verdicts
+    assert all(v.outcome == "inconclusive" for v in verdicts)
+    assert all("no test file imports this module" in v.note for v in verdicts)
+
+
+def _sweep_sprites(answer):
+    return FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            # Before __ATLAS_RUN__: the sweep script frames runs too, and
+            # its own baseline/sweep tags identify it.
+            ReplyRule("atlas-baseline", lambda _script: answer),
+            ReplyRule(
+                "__ATLAS_RUN__",
+                lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"),
+            ),
+        )
+    )
+
+
+def test_the_sweep_group_budget_is_clamped_to_what_is_left(tmp_path):
+    """The between-groups check bounded the whole pass but not one group's
+    own exec: a 24-spec group's budget could run ~40 minutes against a
+    300-second sweep. Each group's exec budget is now clamped to the wall
+    the pass has left, and a group the remainder cannot even start is
+    reported inconclusive -- named -- instead of exec'd into its own
+    clock."""
+    sprites = _sweep_sprites("atlas-baseline:calc.py:0:\natlas-sweep:0:0:\n")
+    results = []
+
+    def body(bridge):
+        floor = SWEEP_RUN_BOUND_S + KILL_AFTER_S + EXEC_SLACK_S
+        results.append(
+            bridge.sweep(
+                bridge.sweep_plan(CALC_SWEEP_DIFF),
+                clock=FakeClock(),
+                budget_s=floor - 1,
+            )
+        )
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-sweep-clamp",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    (verdicts,) = results
+    assert verdicts
+    assert all(v.outcome == "inconclusive" for v in verdicts)
+    assert all("could not fit this group's runs" in v.note for v in verdicts)
+    assert not any(c[0] == "exec" and "atlas-sweep" in c[2] for c in sprites.calls)
+
+
+def test_the_sweep_runs_when_the_budget_fits_and_is_memoized(tmp_path):
+    """A group the budget fits runs and reports its verdict; a second
+    sweep of the same specs -- the retry attempt's -- reads the cached
+    verdicts and dispatches no new exec."""
+    sprites = _sweep_sprites("atlas-baseline:calc.py:0:\natlas-sweep:0:0:\n")
+    results = []
+
+    def body(bridge):
+        results.append(
+            bridge.sweep(bridge.sweep_plan(CALC_SWEEP_DIFF), clock=FakeClock())
+        )
+        results.append(
+            bridge.sweep(bridge.sweep_plan(CALC_SWEEP_DIFF), clock=FakeClock())
+        )
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-sweep-memo",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    first, second = results
+    assert first[0].outcome == "survived"
+    assert second == first
+    sweep_execs = [
+        c for c in sprites.calls if c[0] == "exec" and "atlas-baseline" in c[2]
+    ]
+    assert len(sweep_execs) == 1
+
+
+def test_a_failed_sweep_exec_still_marks_the_bridge_suspect(tmp_path):
+    """PR code runs during the sweep's exec, whatever the exec's outcome:
+    the suspect flag is set before the exec, so an exec that raises -- a
+    lost connection mid-exec -- still leaves the bridge suspect, and the
+    next runner-side read re-stages from the controller-held tarballs
+    instead of serving what the failed exec's mutants left behind. Before
+    this fix the flag was set only after the exec returned, and the
+    lens-loop's degradation then carried the lens on a possibly rewritten
+    tree."""
+    import atlas_reviewer.bridge as bridge_module
+
+    class ExplodingRule:
+        match = "atlas-baseline"
+
+        def handler(self, script, _stdin):
+            raise bridge_module.BoundaryError("the sweep's exec died mid-run")
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ExplodingRule(),
+            ExecRule(
+                "__ATLAS_BRIDGE__",
+                "__ATLAS_BRIDGE__ 0 0 9 0 0\n",
+                0,
+            ),
+        )
+    )
+    uploads = lambda: [
+        c
+        for c in sprites.calls
+        if c[0] == "exec" and "cat >" in c[2] and ".tar.gz" in c[2]
+    ]
+    results = []
+
+    def body(bridge):
+        try:
+            bridge.sweep(bridge.sweep_plan(CALC_SWEEP_DIFF), clock=FakeClock())
+        except BoundaryError:
+            pass
+        assert bridge._suspect is True
+        # The count starts at the read: the bridge may legitimately have
+        # re-staged before the exec too, since the staging's collection
+        # probe runs PR code and starts the bridge suspect.
+        before = len(uploads())
+        results.append(bridge.call("grep", {"pattern": "total", "regex": True}))
+        # The runner-side read re-staged: both trees re-uploaded.
+        assert len(uploads()) - before == 2
+        return "done"
+
+    report = run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-sweep-suspect",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert results[0].status is Status.OK
+
+
+def test_a_failed_run_exec_still_marks_the_bridge_suspect(tmp_path):
+    """The same invariant for the run tools' own exec: an exec that raises
+    after the baseline's code ran -- here the machinery lost the reply --
+    leaves the bridge suspect, and the next runner-side read re-stages.
+    The old code set the flag only in the timeout handler and after a
+    successful exec; a BoundaryError from the exec itself slipped
+    through."""
+    import atlas_reviewer.bridge as bridge_module
+
+    class ExplodingRunRule:
+        match = "__ATLAS_RUN__"
+
+        def handler(self, script, _stdin):
+            raise bridge_module.BoundaryError("the run exec died mid-run")
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ExplodingRunRule(),
+            ExecRule(
+                "__ATLAS_BRIDGE__",
+                "__ATLAS_BRIDGE__ 0 0 9 0 0\n",
+                0,
+            ),
+        )
+    )
+    uploads = lambda: [
+        c
+        for c in sprites.calls
+        if c[0] == "exec" and "cat >" in c[2] and ".tar.gz" in c[2]
+    ]
+    results = []
+
+    def body(bridge):
+        try:
+            bridge.call("run_tests", {})
+        except BoundaryError:
+            pass
+        assert bridge._suspect is True
+        # The count starts at the read, for the same collection-probe
+        # reason the sweep test names.
+        before = len(uploads())
+        results.append(bridge.call("grep", {"pattern": "total", "regex": True}))
+        assert len(uploads()) - before == 2
+        return "done"
+
+    report = run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-run-suspect",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert results[0].status is Status.OK
