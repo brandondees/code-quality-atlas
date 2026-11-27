@@ -454,7 +454,7 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
-            guarded_env_exports(scratch),
+            guarded_env_exports(staged.scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1389,7 +1389,7 @@ def run_test_script(
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
-            guarded_env_exports(scratch),
+            guarded_env_exports(staged.scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1445,7 +1445,7 @@ def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f"  printf %s {quote(content)} | base64 -d > {scratch}/{quote(probe_path)}",
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
-            guarded_env_exports(scratch),
+            guarded_env_exports(staged.scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1481,7 +1481,7 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     assert staged.shim_python is not None  # the caller refuses the call before this
     run = (
         f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
-        f"{guarded_env_exports(scratch)}"
+        f"{guarded_env_exports(staged.scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
@@ -3561,7 +3561,7 @@ def sweep_script(
     def run_line(name: str) -> str:
         return (
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
-            f"{guarded_env_exports(scratch)}"
+            f"{guarded_env_exports(staged.scratch)}"
             "export PYTHONDONTWRITEBYTECODE=1; "
             f"exec timeout -k {KILL_AFTER_S} {run_limit.timeout_s} {guarded} ) "
             f"> {name}_out 2> {name}_err"

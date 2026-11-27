@@ -232,7 +232,7 @@ def _bash_command(value: Any, _revs: frozenset[Rev]) -> str:
     runs as the non-root user inside the copy -- the same trust level as
     the PR's own tests -- and nothing it writes survives the copy."""
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_BASH_CHARS:
+    if _utf8_byte_length(text) > MAX_BASH_CHARS:
         raise RejectedError(INVALID, f"is over {MAX_BASH_CHARS} bytes")
     if any(ord(c) < 0x20 and c not in "\n\t\r" or ord(c) == 0x7F for c in text):
         raise RejectedError(INVALID, "contains a control character")
