@@ -7,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from contextlib import ExitStack
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from atlas_reviewer import cli
+from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.fakes import FakeSprites
@@ -649,6 +651,91 @@ def test_sweep_needs_the_sprites_token(tmp_path):
     code, _, err = run_cli("--state-dir", str(tmp_path), "sweep")
     assert code == cli.EXIT_USAGE
     assert cli.ENV_SPRITES_TOKEN in err
+
+
+def _history_args(tmp_path, *, dry_run=False):
+    return SimpleNamespace(
+        dry_run=dry_run,
+        fixtures=str(tmp_path),
+        event=str(tmp_path / "event.json"),
+        include_issues=False,
+    )
+
+
+def test_dry_run_wiring_loads_the_fixture_history(tmp_path):
+    """The eval path's history is the fixture's own: `history.bundle` and
+    `history-base.txt` from the fixture directory become the review's
+    bundle, and no live source exists (round 1 of #860's coverage
+    advisory)."""
+    from atlas_reviewer.history_source import HistoryBundle
+
+    (tmp_path / "history.bundle").write_bytes(b"bundle bytes")
+    (tmp_path / "history-base.txt").write_text("a" * 40 + "\n")
+    bundle, source = cli._history_wiring(
+        _history_args(tmp_path, dry_run=True), {}, SourceTrees(b"", b"", "b" * 40, "c" * 40),
+        ExitStack(), lambda reason: None,
+    )  # fmt: skip
+    assert source is None
+    assert bundle == HistoryBundle(bundle=b"bundle bytes", base_sha="a" * 40)
+
+
+def test_live_wiring_fetches_the_pr_head_and_notes_every_failure(tmp_path, monkeypatch):
+    """The live source fetches the pull request's own head ref from the
+    repo's HTTPS URL, with the trees' merge-base as the range's base --
+    and every failure notes one coarse reason into the run's events
+    surface, so a permanently broken acquisition is visible instead of
+    reading as an ordinary no-history run (round 1 of #860)."""
+    event = cli.load_event(Path(EVENT))
+
+    seen = {}
+
+    def capture(url, head_ref, head_sha, merge_base_sha, workdir, **kw):
+        seen.update(
+            url=url,
+            head_ref=head_ref,
+            head_sha=head_sha,
+            merge_base_sha=merge_base_sha,
+            **kw,
+        )
+
+    monkeypatch.setattr(cli, "bundle_from_repository", capture)
+    reasons = []
+    _bundle, source = cli._history_wiring(
+        _history_args(tmp_path),
+        {cli.ENV_INSTALLATION_TOKEN: "installation-token"},
+        SourceTrees(b"", b"", "b" * 40, event.head_sha),
+        ExitStack(), reasons.append,
+    )  # fmt: skip
+    assert _bundle is None and source is not None
+    assert source(event) is None
+    assert seen["url"] == f"https://github.com/{event.repo}.git"
+    assert seen["head_ref"] == f"refs/pull/{event.pr_number}/head"
+    assert seen["head_sha"] == event.head_sha
+    assert seen["merge_base_sha"] == "b" * 40
+    assert seen["token"] == "installation-token"
+    assert reasons == [], "a successful acquisition must not note anything"
+
+    def raises(*_a, **_kw):
+        raise RuntimeError("the acquisition exploded")
+
+    monkeypatch.setattr(cli, "bundle_from_repository", raises)
+    assert source(event) is None
+    assert reasons[-1] == "acquisition_failed"
+
+
+def test_live_wiring_mint_failure_also_notes(tmp_path, monkeypatch):
+    """A credential mint that fails is the acquisition's failure too: the
+    broad contract catch notes it, and nothing raises out of the
+    review's path (round 1 of #860, silent failure)."""
+    event = cli.load_event(Path(EVENT))
+    reasons = []
+    _bundle, source = cli._history_wiring(
+        _history_args(tmp_path), {},  # no credentials at all
+        SourceTrees(b"", b"", "b" * 40, event.head_sha),
+        ExitStack(), reasons.append,
+    )  # fmt: skip
+    assert source(event) is None
+    assert reasons == ["acquisition_failed"]
 
 
 def test_live_wiring_mints_scoped_read_only_tokens_and_scrubs_credentials(

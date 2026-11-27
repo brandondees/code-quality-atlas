@@ -41,7 +41,11 @@ from typing import TextIO, cast
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
 from atlas_reviewer.approval import CommandProposal
 from atlas_reviewer.attestation import AttemptLedger
-from atlas_reviewer.bridge_staging import BRIDGE_ROOT, fetch_sources
+from atlas_reviewer.bridge_staging import (
+    BRIDGE_ROOT,
+    SourceTrees,
+    fetch_sources,
+)
 from atlas_reviewer.budget import (
     BUDGET_CEILING_USD,
     MAX_CALLS_CEILING,
@@ -117,6 +121,12 @@ from atlas_reviewer.github_auth import (
 )
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
+from atlas_reviewer.history_source import (
+    HISTORY_PHASE,
+    HistoryBundle,
+    bundle_from_repository,
+    fixture_history,
+)
 from atlas_reviewer.http import (
     DEFAULT_MAX_BYTES,
     UrllibStreamingTransport,
@@ -219,7 +229,7 @@ from atlas_reviewer.runner import (
 )
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
-from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.telemetry import ERROR, JsonlSink, Telemetry
 from atlas_reviewer.tenant_provider import (
     ENV_TENANT_BASE_URL,
     ENV_TENANT_MODEL,
@@ -979,6 +989,71 @@ def _key_refusal_review(
     )
 
 
+def _history_wiring(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    trees: SourceTrees,
+    claims: ExitStack,
+    note: Callable[[str], None],
+) -> tuple[
+    HistoryBundle | None,
+    Callable[[PrEvent], HistoryBundle | None] | None,
+]:
+    """The live acquisition (D80's wiring): one controller-side fetch of
+    the pull request's head ref per review, with the App's credentials in
+    the process environment. A failed fetch, a head that moved past the
+    review's provenance, or an over-cap bundle acquires nothing, and the
+    history tools report the named gap -- never a failed review. The
+    tools' range is based on the merge-base the trees' provenance
+    carries. Every failure path notes one coarse reason through `note`
+    (module constants, never error text: round 1 of #860 -- a permanently
+    broken acquisition, a bad credential or an auth scheme the remote
+    rejects, must be distinguishable from an ordinary no-history run)."""
+    if getattr(args, "dry_run", False):
+        fixture_dir = Path(args.fixtures) if args.fixtures else Path(args.event).parent
+        return fixture_history(fixture_dir), None
+    workdir = Path(
+        claims.enter_context(tempfile.TemporaryDirectory(prefix="atlas-history-"))
+    )
+    transport = UrllibTransport()
+
+    def source(event: PrEvent) -> HistoryBundle | None:
+        # The acquisition's contract is total: every way it can fail --
+        # a fetch, a credential mint, a moved head, an over-cap bundle --
+        # acquires nothing, and the history tools report the named gap.
+        # The broad catch is that contract, not a swallowed error: the
+        # runner's staging treats absent history exactly as it did
+        # before the wiring existed, and the coarse reason lands in the
+        # run's events file through `note`.
+        try:
+            return bundle_from_repository(
+                f"https://github.com/{event.repo}.git",
+                f"refs/pull/{event.pr_number}/head",
+                event.head_sha,
+                trees.base_sha,
+                workdir,
+                token=_review_tokens(env, event, False, transport).token(),
+                note=note,
+            )
+        except Exception:  # noqa: BLE001 -- the acquisition's contract (see above)
+            note("acquisition_failed")
+            return None
+
+    return None, source
+
+
+def _history_note(telemetry: Telemetry) -> Callable[[str], None]:
+    """The sink for the coarse reasons a failed acquisition leaves behind
+    (round 1 of #860): a phase of its own, never the service's progress
+    records, which the keep-or-cancel reader parses as cumulative lens
+    state. The reason is a module constant, never error text."""
+
+    def note(reason: str) -> None:
+        telemetry.record(HISTORY_PHASE, "acquisition", {"reason": reason}, status=ERROR)
+
+    return note
+
+
 def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     """Every selected lens, concurrently up to the pool, then one draft.
 
@@ -1071,6 +1146,13 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         if not isinstance(ref, str) or not ref:
             raise UsageError("the pull request has no base ref")
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
+        # The pull request's real history (D80's wiring): the eval's own
+        # bundle comes from the fixture; a live review's from one
+        # controller-side fetch of the PR head, with the tools' range
+        # based on the merge-base the trees' provenance carries.
+        history, history_source = _history_wiring(
+            args, env, trees, claims, _history_note(telemetry)
+        )
         diff, delta = _delta_input(event, github, diff)
         # S1: the merge-base REVIEW.md is parsed once, against the closed
         # schema -- the ceiling, the lens preference, the path ranking,
@@ -1289,6 +1371,8 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     operator_ceiling_max=ceiling_max,
                     run_proposals=proposals,
                     setup=setup,
+                    history=history,
+                    history_source=history_source,
                     pr_body=pr_text,
                     tool_log=tool_log_sink,
                 )

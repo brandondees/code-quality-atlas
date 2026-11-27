@@ -42,6 +42,7 @@ from atlas_reviewer.coordinator import (
 )
 from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger, ScriptedLensModel
+from atlas_reviewer.history_source import HistoryBundle
 from atlas_reviewer.lens_contract import (
     Attribution,
     Finding,
@@ -5789,3 +5790,108 @@ def test_the_cost_line_still_parses_for_the_service_cost_event():
         "COMMENT",
     )
     assert review_cost(report) == (12, "0.34", "0")
+
+
+def _staged_sprites() -> FakeSprites:
+    """The staging must get past its git resolve and its probe: the same
+    rule set the bridge tests stage with."""
+    from atlas_reviewer.fakes import ExecRule
+
+    return FakeSprites(
+        rules=(
+            ExecRule(
+                "atlas-git",
+                "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                "atlas-pytest:/usr/bin/python3:3.12.3\n"
+                "atlas-shim:/usr/bin/python3:3.12.3\n",
+                0,
+            ),
+            ExecRule(
+                "atlas-staged",
+                f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n",
+                0,
+            ),
+            ExecRule("atlas-collect", "atlas-collect:0:\n", 0),
+            ExecRule("__ATLAS_BRIDGE__", "__ATLAS_BRIDGE__ 0 0 9 0 0\n", 0),
+        )
+    )
+
+
+def test_the_history_bundle_reaches_the_runner_when_the_review_carries_one(
+    tmp_path,
+):
+    """The wiring (D80's git-history update, wired): a review that
+    carries a history bundle hands it to every lens's runner -- the
+    staging uploads it in parts and fetches it, so the history tools and
+    the bash copy's git read the pull request's real commits -- and a
+    review without one stages no bundle at all, exactly as before the
+    wiring existed."""
+    bundle = HistoryBundle(bundle=b"bundle-bytes", base_sha="a" * 40)
+    with_bundle = _staged_sprites()
+    review_lens(
+        EVENT, LENS, DIFF, trees(),
+        library=StubLibrary({LENS: BODY}), model=ScriptedLensModel([READ_DIFF, final()]),
+        limits=LIMITS, ledger=ledger(tmp_path), sprites=with_bundle,
+        runner_ledger=MemoryLedger(), redactor=Redactor(), clock=FakeClock(),
+        bridge_root=str(tmp_path / "bridge"), history=bundle,
+    )  # fmt: skip
+    uploads = [
+        c for c in with_bundle.calls if len(c) > 2 and "history.bundle.part" in c[2]
+    ]
+    assert uploads, "the runner staged no history bundle"
+    without = _staged_sprites()
+    review_lens(
+        EVENT, LENS, DIFF, trees(),
+        library=StubLibrary({LENS: BODY}), model=ScriptedLensModel([READ_DIFF, final()]),
+        limits=LIMITS, ledger=ledger(tmp_path), sprites=without,
+        runner_ledger=MemoryLedger(), redactor=Redactor(), clock=FakeClock(),
+        bridge_root=str(tmp_path / "bridge"),
+    )  # fmt: skip
+    assert not [
+        c for c in without.calls if len(c) > 2 and "history.bundle.part" in c[2]
+    ]
+
+
+def test_review_lenses_acquires_the_history_once_for_the_whole_review(
+    tmp_path,
+):
+    """The acquisition is a controller-side fetch: one call of the
+    review's history source, before the lens fan-out, and every lens's
+    runner gets the same bundle -- not one fetch per lens."""
+    calls = []
+    bundle = HistoryBundle(bundle=b"bundle-bytes", base_sha="a" * 40)
+
+    def source(event):
+        calls.append(event)
+        return bundle
+
+    review_lenses(
+        EVENT, (LENS, LENS), DIFF, trees(),
+        library=StubLibrary({LENS: BODY}),
+        model=ScriptedLensModel([READ_DIFF, final()]),
+        limits=LIMITS, ledger=ledger(tmp_path), sprites=_staged_sprites(),
+        runner_ledger=MemoryLedger(), redactor=Redactor(), clock=FakeClock(),
+        bridge_root=str(tmp_path / "bridge"), history_source=source,
+    )  # fmt: skip
+    assert len(calls) == 1
+
+
+def test_a_directly_passed_bundle_reaches_the_runner_without_a_source(tmp_path):
+    """The eval path hands the fixture's own bundle straight to
+    `review_lenses` with no source configured; the parameter must not be
+    clobbered with None (round 1 of #860, correctness -- the first cut's
+    assignment did exactly that, and the eval run silently staged no
+    history)."""
+    bundle = HistoryBundle(bundle=b"bundle-bytes", base_sha="a" * 40)
+    sprites = _staged_sprites()
+    review_lenses(
+        EVENT, (LENS,), DIFF, trees(),
+        library=StubLibrary({LENS: BODY}),
+        model=ScriptedLensModel([READ_DIFF, final()]),
+        limits=LIMITS, ledger=ledger(tmp_path), sprites=sprites,
+        runner_ledger=MemoryLedger(), redactor=Redactor(), clock=FakeClock(),
+        bridge_root=str(tmp_path / "bridge"), history=bundle,
+    )  # fmt: skip
+    assert [c for c in sprites.calls if len(c) > 2 and "history.bundle.part" in c[2]], (
+        "the directly passed bundle never reached the runner"
+    )
