@@ -206,6 +206,170 @@ def test_failing_jobs_first_across_the_whole_branch(tmp_path):
     assert "the old failure" in log.detail.text
 
 
+def test_multi_workflow_commits_do_not_trip_a_run_count():
+    """The other-commits bound counts COMMITS, never runs: one commit
+    usually carries several runs (one per workflow, push and
+    pull_request duplicates, re-run attempts), so 30 runs over 3 commits
+    -- past any run-count reading of the 20 -- all get their jobs listed,
+    with no other-commits omission (revert-check: the run-count cap
+    skips 10 of them and holds the review at COMMENT for evidence the
+    commit bound was meant to admit)."""
+    commits = [f"{i:02d}{'a' * 38}" for i in range(3)]
+    runs = [
+        {
+            "id": 6000 + i,
+            "name": f"workflow-{i % 3}",
+            "head_sha": commits[i % 3],
+            "status": "completed",
+            "conclusion": "success" if i % 5 else "failure",
+            "event": "pull_request",
+            "run_attempt": 1,
+            "path": ".github/workflows/ci.yml",
+        }
+        for i in range(30)
+    ]
+
+    class MultiWorkflow(FixtureGitHub):
+        def list_pull_commits(self, repo, number):
+            listed = list(super().list_pull_commits(repo, number).items)
+            return Listing(
+                (*listed, *( {"sha": c, "parents": []} for c in commits )),
+                False,
+                1,
+            )  # fmt: skip
+
+        def list_workflow_runs(self, repo, branch):
+            return Listing(tuple(runs), False, 1)
+
+        def list_run_jobs(self, repo, run_id):
+            if run_id in {r["id"] for r in runs}:
+                self.calls.append(("list_run_jobs", repo, str(run_id)))
+                return Listing(
+                    (
+                        {
+                            "id": run_id,
+                            "name": "gate",
+                            "head_sha": next(
+                                r["head_sha"] for r in runs if r["id"] == run_id
+                            ),
+                            "status": "completed",
+                            "conclusion": "success",
+                        },
+                    ),
+                    False,
+                    1,
+                )
+            return super().list_run_jobs(repo, run_id)
+
+        def list_run_artifacts(self, repo, run_id):
+            if run_id in {r["id"] for r in runs}:
+                self.calls.append(("list_run_artifacts", repo, str(run_id)))
+                return Listing((), False, 1)
+            return super().list_run_artifacts(repo, run_id)
+
+        def get_job_logs(self, repo, job_id, max_bytes):
+            self.calls.append(("get_job_logs", repo, str(job_id)))
+            return b"log"
+
+    gh = MultiWorkflow(FIXTURE)
+    out = gather(gh)
+    assert {c[2] for c in calls(gh, "list_run_jobs")} == {
+        "5001",
+        *(str(6000 + i) for i in range(30)),
+    }
+    assert not any(o.source == "other commits' workflow runs" for o in out.omissions)
+    # The other commits' artifact listings are skipped -- the downloads
+    # stay head-only, so a non-head listing would only be discarded.
+    assert {c[2] for c in calls(gh, "list_run_artifacts")} == {"5001"}
+
+
+def test_other_commit_runs_past_the_commit_cap_are_named_unknown():
+    """22 non-head commits: the newest 20 get their runs' jobs listed;
+    the 2 oldest commits' runs are not listed, and each skipped commit is
+    a named UNKNOWN (`(jobs at <sha12>)`), never a silent drop."""
+    commits = [f"{i:02d}{'b' * 38}" for i in range(22)]
+    runs = [
+        {
+            "id": 7000 + i,
+            "name": "ci",
+            "head_sha": commits[i],
+            "status": "completed",
+            "conclusion": "failure",
+            "event": "pull_request",
+            "run_attempt": 1,
+            "path": ".github/workflows/ci.yml",
+        }
+        for i in range(22)
+    ]
+
+    class ManyCommits(FixtureGitHub):
+        def list_pull_commits(self, repo, number):
+            # One self-contained chain, oldest first by committer date, so
+            # the newest-first commit ordering is unambiguous.
+            return Listing(
+                tuple(
+                    {
+                        "sha": commits[i],
+                        "commit": {
+                            "committer": {"date": f"2026-11-{i + 1:02d}T00:00:00Z"}
+                        },
+                        "parents": ([{"sha": commits[i - 1]}] if i else []),
+                    }
+                    for i in range(len(commits))
+                ),
+                False,
+                1,
+            )
+
+        def list_workflow_runs(self, repo, branch):
+            return Listing(tuple(runs), False, 1)
+
+        def list_run_jobs(self, repo, run_id):
+            if run_id in {r["id"] for r in runs}:
+                self.calls.append(("list_run_jobs", repo, str(run_id)))
+                return Listing(
+                    (
+                        {
+                            "id": run_id,
+                            "name": "gate",
+                            "head_sha": next(
+                                r["head_sha"] for r in runs if r["id"] == run_id
+                            ),
+                            "status": "completed",
+                            "conclusion": "failure",
+                        },
+                    ),
+                    False,
+                    1,
+                )
+            return super().list_run_jobs(repo, run_id)
+
+        def get_job_logs(self, repo, job_id, max_bytes):
+            self.calls.append(("get_job_logs", repo, str(job_id)))
+            return b"log"
+
+        def list_run_artifacts(self, repo, run_id):
+            if run_id in {r["id"] for r in runs}:
+                self.calls.append(("list_run_artifacts", repo, str(run_id)))
+                return Listing((), False, 1)
+            return super().list_run_artifacts(repo, run_id)
+
+    gh = ManyCommits(FIXTURE)
+    out = gather(gh)
+    listed = {c[2] for c in calls(gh, "list_run_jobs")}
+    # The head run's own listing plus the newest 20 commits' runs; the two
+    # oldest commits' runs are not listed.
+    assert listed == {"5001", *(str(7000 + i) for i in range(2, 22))}
+    omission = next(
+        o for o in out.omissions if o.source == "other commits' workflow runs"
+    )
+    assert omission.limit == "per-review cap of 20"
+    assert "2 of 22 not ingested" in omission.detail
+    reasons = missing_reasons(out)
+    assert f"(jobs at {commits[1][:12]})" in reasons
+    assert f"(jobs at {commits[0][:12]})" in reasons
+
+
 def test_job_log_cap_counts_action_required_as_failing():
     class ActionRequired(FixtureGitHub):
         def list_run_jobs(self, repo, run_id):

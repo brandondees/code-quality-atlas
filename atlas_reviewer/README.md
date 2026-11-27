@@ -1570,14 +1570,19 @@ same-named branch elsewhere adds nothing; head-SHA runs are listed by SHA
 too. Check runs are listed at the head SHA and at up to 20 other commits
 of the PR, newest first (D38), each item keeping the SHA GitHub reported, so
 a failure at an earlier commit that was never re-run stays visible as
-stale. A list cut off there, a per-review count cap (5 runs, 20 other
-commits, 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
+stale. A list cut off there, a per-review count cap (5 head-SHA runs
+whose jobs are listed, 20 other commits whose runs' jobs are listed --
+the bound counts commits, never runs, because one commit usually carries
+several runs -- 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
 artifact ZIP), or a rejected or partly skipped archive each appear in the
 draft's **Omissions and limits hit** table. Whatever they left unread is
 UNKNOWN. Job logs are fetched for every ingested run's jobs, whatever
-commit they ran at, failing jobs first within the count cap (the
-lifted-context decision, 2026-11-26); artifact ZIPs are fetched only for
-runs at the head SHA. Artifact ZIPs are read in memory with stdlib `zipfile` and never
+commit they ran at, failing jobs first within the count cap -- one
+shared budget spent once against the whole branch, so an earlier
+run's passing jobs cannot crowd a later run's failing job out of it
+(the lifted-context decision, 2026-11-26); artifact ZIPs are fetched only for
+runs at the head SHA, and only the head SHA's runs have their artifacts
+listed. Artifact ZIPs are read in memory with stdlib `zipfile` and never
 extracted to disk. An entry is skipped if it has an unsafe path
 (absolute, drive, `..`), is a symlink or special file, is encrypted, is
 compressed with anything but STORED or DEFLATED, is not on the text-type

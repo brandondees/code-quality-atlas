@@ -17,12 +17,18 @@ this PR's evidence; how many were set aside is noted. Runs at earlier
 commits of the PR stay, labelled by their SHA, and only head-SHA evidence
 can count as a current result (`classify`).
 
-Downloads (job logs, artifact ZIPs) happen for every job of every ingested
-run -- the whole branch, failing jobs first, within per-review count caps,
-each under a byte cap -- and for artifacts at the head SHA. Anything a cap
-or a page limit leaves unread is recorded twice: as an `Omission` (listed
-in the draft) and, where it could have held evidence, as `Missing`
-(UNKNOWN, never a pass).
+Jobs are listed for the head SHA's runs (within the run cap) and for
+every run at up to `max_ci_commits` of the PR's other commits, newest
+first -- the same commit list and cap the other commits' check-run
+listing uses; a commit usually carries several runs, so the bound counts
+commits, never runs.
+
+Downloads (job logs, artifact ZIPs) happen for every job of every
+ingested run -- the whole branch, failing jobs first, within per-review
+count caps, each under a byte cap -- and for artifacts at the head SHA.
+Anything a cap or a page limit leaves unread is recorded twice: as an
+`Omission` (listed in the draft) and, where it could have held evidence,
+as `Missing` (UNKNOWN, never a pass).
 """
 
 from __future__ import annotations
@@ -157,7 +163,10 @@ def gather_ci(
     out.items.extend(r.item for r in runs)
     _other_commit_checks(ctx)
     at_head = [r for r in runs if r.item.head_sha == sha]
-    others = [r for r in runs if r.item.head_sha != sha]
+    others_by_commit: dict[str, list[WorkflowRun]] = {}
+    for run in runs:
+        if run.item.head_sha != sha:
+            others_by_commit.setdefault(run.item.head_sha, []).append(run)
     run_jobs: list[tuple[int, list[Job]]] = []
     for run in _capped(
         ctx,
@@ -172,23 +181,31 @@ def gather_ci(
         run_jobs.append((run.run_id, _gather_run(ctx, run, artifacts)))
     # The branch's earlier commits' runs get their jobs listed too: a
     # failure at an earlier commit that was never re-run has a log the
-    # shared budget can spend on (D38's 20-other-commits bound bounds the
-    # extra listings; the head-run cap above is D38's own).
-    for run in _capped(
+    # shared budget can spend on. The bound is D38's own -- the newest
+    # `max_ci_commits` other COMMITS, the same list `_other_commit_checks`
+    # caps -- applied to commits, never to runs, because one commit
+    # usually carries several runs (one per workflow, push and
+    # pull_request duplicates, re-run attempts). Their artifact listings
+    # are skipped: the artifact downloads stay head-only, so a non-head
+    # listing would only ever be discarded.
+    for commit in _capped(
         ctx,
-        "workflow runs at other commits",
-        others,
-        config.max_ci_commits,
-        config.max_ci_commits,
-        lambda r: SourceKey(
-            SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
-        ),
+        "other commits' workflow runs",
+        [c.sha for c in reversed(ctx.out.commits) if c.sha != sha],
+        ctx.config.max_ci_commits,
+        ctx.config.max_ci_commits,
+        _commit_jobs_key,
     ):
-        run_jobs.append((run.run_id, _gather_run(ctx, run, artifacts)))
+        for run in others_by_commit.get(commit, ()):
+            run_jobs.append((run.run_id, _gather_run(ctx, run, False)))
     # One shared log budget, spent once against the whole branch ordered
     # failing-first: a per-run pass would let an earlier-visited run's
     # passing jobs crowd a later run's failing job out of the cap.
     _gather_job_logs(ctx, _branch_log_order(run_jobs))
+
+
+def _commit_jobs_key(sha: str) -> SourceKey:
+    return SourceKey(SourceKind.LISTING, f"(jobs at {sha[:12]})")
 
 
 def _runs(
