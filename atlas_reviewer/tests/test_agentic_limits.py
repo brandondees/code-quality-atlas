@@ -41,10 +41,16 @@ class _NoSweepBridge:
     """The bridge surface `run_attempt` touches before the first turn:
     these tests exercise the model-call mechanics with a stub whose sweep
     plan is empty, so the controller's mutant pre-pass adds no evidence
-    block."""
+    block, and whose grounding inventory is empty, so the pre-pass runs
+    nothing."""
 
     def sweep_plan(self, diff):
         return ()
+
+    def grounding_plan(self):
+        from atlas_reviewer.grounding import GroundingPlan
+
+        return GroundingPlan((), ())
 
 
 def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():

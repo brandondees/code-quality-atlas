@@ -6667,3 +6667,102 @@ controller's own picker path over a copied fixture. Each call-site
 revert-mutant (the slice restored) kills its own test, verified. The
 helper-level test is reframed as the helper's own contract, complementary
 to the call-site pins. Offline only.
+
+## 2026-11-27 — the grounding pre-pass: the repo's declared CI tooling runs before any lens (the harness gap audit's blocker 4, slice S2)
+
+The protocol's step 4.3 had no counterpart in the agentic path: ruff and
+mypy evidence, and the targeted test results Claude Code feeds every
+lens, depended on each lens choosing to call bash on its own — and the
+Nov 25 runs showed the models making 2–16 calls and stopping. The
+controller now runs the pre-pass itself. The command list is parsed from
+the target repo's CI workflows (Brandon's Nov 26 decision): the
+merge-base tree's `.github/workflows/*.yml`/`*.yaml` run steps, line by
+line, classified into the lint, type and test families by the tool each
+line names — with installing, fetching and state-changing lines never
+classified, and nothing introduced the repo has not adopted. Each
+command runs in its own disposable copy of the head tree behind the same
+no-root guard, verified deny-all egress, clock and framing the bash tool
+uses, without spending the attempt's call budget; the commands run with
+the setup-provisioned tools' own bin directory on PATH, because the
+runner's minimal exec env (`/usr/bin:/bin`) does not carry what a
+setup spec's `pip install` put in the interpreter tree. One command runs
+at most 180s (#843's clock) and the pass's wall budget is 540s; a
+command the remainder cannot start, an unparseable workflow file, and a
+failed pass are all named results, never silent skips. The pass runs
+once per review on the same shared-memo shape the mutant sweep gained in
+the same slice; every lens reads the results as one fenced
+tool-evidence block grouped by family, with each failing command's
+captured output tail; and the draft gains the **Tool coverage (grounding
+pre-pass)** section stating what ran, what did not and why, which
+families carry no configured command, and which changed file types no
+configured tool covers. A repo with no declared commands sends no block;
+the coverage section states the empty inventory. Tests use fixture
+workflows for the parse and classification, `LocalSprites` for the
+execution (a real `ruff` run inside the disposable copy), and the shared
+memo's owner/waiter/failure paths. Offline only: no model call, Sprite,
+Fly or network call.
+
+## 2026-11-27 (same day) — the grounding pre-pass's round-1 fixes (on the stacked #871)
+
+The review's round-1 findings, all fixed on the grounding layer. The
+sweep's bounded wait is recomputed after the grounding pass returns —
+the bound read before the pass could hold a sweep waiter up to a pass's
+budget past the review's real deadline — pinned by a test whose
+grounding advances the clock and asserts the sweep sees the recomputed
+figure. Commands past the 12-command cap are carried in the plan's
+`dropped` and named in the evidence block and the coverage lines (the
+"never silently dropped" promise was written but not implemented), and a
+family whose commands were all dropped reads "configured, none ran" in
+the coverage line, not "no configured command". The owner of the shared
+pass stores a named failure for ANY exception its run raises, so a
+staging or runner failure degrades every lens to the failure block
+instead of crashing the waiters on a missing outcome. The pass's wall
+budget is a real bound: a command the remaining wall cannot fit at its
+full per-command budget is named rather than started into a clamped exec
+whose timeout would read as a tool outcome CI never produced. And the
+run-step parse now reads shell, not lines: backslash and operator
+continuations join, each `&&`/`||`/`;` segment classifies on its own
+tool (so `cd package && pytest` classifies by the check it chains to and
+runs whole), a `cargo test`/`go test` subcommand is the check it names
+(removing the dead `_TOOL_TYPES` entries), and the step's
+`working-directory` and `env` ride into the command text, shell-quoted,
+so the evidence shows the command that actually ran. Offline only: no
+model call, network call or secret read.
+
+## 2026-11-27 (same day) — the grounding pre-pass's round-2 advisory fixes (on the stacked #871)
+
+Round 2 found no new Major or Blocker and resolved round 1's threads;
+its two advisory Minors are fixed anyway. The `make` target and npm/yarn
+script names now match on a word boundary (`re.search(rf"\b{family}\b")`),
+so `make latest` and `npm run attest` name no check the pass runs, while
+a `test:unit` script name still classifies. And a run line whose chain
+mixes a provisioning segment with its check — `pip install x && pytest`
+— is carried as `unreproducible` and named in the evidence block and the
+coverage lines ("the chain provisions or fetches first, not reproducible
+here"), never run: deny-all egress fails the install the chain runs
+first, and that failure must not reach a lens as the test run's own. A
+segment that itself classifies as a check (`python3 -m pytest`, `npm
+test`) is never treated as provisioning, whatever its head, so the
+chained checks that only need `cd` or `export` context still run whole.
+Offline only: no model call, network call or secret read.
+
+## 2026-11-27 (same day) — the grounding pre-pass's round-3 fixes (on the stacked #871)
+
+Round 3's Major was a regression from round 2's own fix: the
+word-boundary match (`\btest\b`) needs a non-word character on both
+sides, so `npm run typecheck`, `make typecheck`, `make tests` and `make
+test_unit` — the most common check names — stopped classifying, the
+declared check vanished silently, the coverage section reported the
+family as unconfigured, and `npm run typecheck` even counted as a
+provisioning segment, sending a chained `npm test` to unreproducible.
+The match is now a delimited stem prefix: some `[:_\-./]`-delimited
+part of the script or target name starts with the family, so those
+names classify again while a family buried inside another word
+(`attest`, `latest`) still does not. Round 3's two Minors are fixed
+with it: the "declare no lint, type or test command" line is gated on
+the unreproducible list being empty, so a block cannot contradict
+itself; and the provisioning set is narrowed to what deny-all egress
+actually fails — installers, fetchers, escalators, and a package
+manager's install-like subcommand — so offline chains (`ruff format
+--check . && git diff --exit-code`, `npm run typecheck && npm test`,
+`python3 scripts/gen.py && pytest`) run whole. Offline only.

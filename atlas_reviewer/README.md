@@ -975,6 +975,50 @@ own history as `history.bundle` (a git bundle whose ref is
 `history-base.txt` (the merge-base SHA the tools' range is built on);
 a fixture that ships neither is the ordinary no-bundle run.
 
+## The grounding pre-pass (the protocol's step 4.3)
+
+Before any lens judges, the controller runs the deterministic tools the
+reviewed repository already gates its merges on and hands every lens the
+hits as evidence. The command list is **parsed from the target repo's CI
+workflows** (Brandon's Nov 26 decision): the merge-base tree's
+`.github/workflows/*.yml`/`*.yaml` files' `run:` steps, read line by
+line and classified into the lint, type and test families by the tool
+each line names (ruff/eslint/shellcheck-style linters, mypy/pyright/tsc
+type checkers, pytest/jest-style runners, and a package manager's or
+`make` target's own `lint`/`type`/`test` entry point). Lines that
+install, fetch or change state are never classified: the pass reproduces
+what CI checks, not what it provisions, and nothing is installed that
+the repo has not adopted. At most 12 commands run per pass.
+
+Each command runs in its own disposable copy of the head tree — the same
+copy, no-root guard, verified deny-all egress, clock and framing the
+`bash` tool uses — without spending the attempt's call budget, because
+the pass is the controller's evidence gathering. One command runs at
+most 180 seconds (the execution tools' clock, #843); the pass's whole
+wall budget is 540 seconds, and a command the remainder cannot start is
+a named result, never a silent skip. The commands run with the
+setup-provisioned tools' own bin directory on PATH, so a repo whose
+setup spec installs its linters resolves them the way CI's environment
+does.
+
+The pass runs once per review: the first lens to reach it runs it on its
+own runner and the others read the same outcome. Every lens gets the
+results as one fenced `tool-evidence` block grouped by family — each
+failing command's captured output tail (where pytest's summary and the
+linters' hit lists sit), each clean run's exit, every gap named: a
+workflow file that did not parse, a command the budget never reached, a
+pass that failed outright. The hits are evidence for the owning lens to
+confirm, contextualize or dismiss; a clean run clears nothing. A repo
+whose workflows declare no lint/type/test command sends no block, and
+the draft's coverage section states the empty inventory.
+
+The draft carries the coverage section (**Tool coverage (grounding
+pre-pass)**): what ran, what did not and why, which families carry no
+configured command, and which changed file types no configured tool
+covers — the four coverage facts this pass can state honestly. The
+Pending-in-CI fact is the CI evidence's own to state and is not produced
+here.
+
 ## The parity harness's driver: `eval-run` (issue #713's harness-parity slice)
 
 `python -m atlas_reviewer eval-run --fixture <dir>` runs the product's

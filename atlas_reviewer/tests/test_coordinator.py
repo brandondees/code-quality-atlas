@@ -6233,3 +6233,58 @@ def test_a_directly_passed_bundle_reaches_the_runner_without_a_source(tmp_path):
     assert [c for c in sprites.calls if len(c) > 2 and "history.bundle.part" in c[2]], (
         "the directly passed bundle never reached the runner"
     )
+
+
+def test_the_draft_carries_the_grounding_pre_pass_coverage_lines():
+    """The grounding pre-pass's coverage facts reach the draft as the
+    report's own tool-coverage section: what ran with its exit, what the
+    wall budget never reached, and the family no configured command
+    covers -- the skill's coverage line, stated for the report."""
+    from atlas_reviewer.grounding import (
+        GroundingCommand,
+        GroundingOutcome,
+        GroundingPlan,
+        GroundingResult,
+    )
+
+    plan = GroundingPlan(
+        (
+            GroundingCommand(
+                "lint", "ruff check .", "ruff", ".github/workflows/ci.yml"
+            ),
+            GroundingCommand("type", "mypy", "mypy", ".github/workflows/ci.yml"),
+        )
+    )
+    outcome = GroundingOutcome(
+        plan,
+        (
+            GroundingResult(plan.commands[0], exit=1, tail="F401 unused import"),
+            GroundingResult(
+                plan.commands[1],
+                note=(
+                    "the grounding pass's wall budget was spent before "
+                    "this command started"
+                ),
+            ),
+        ),
+    )
+    result = synthesize(
+        [LensResult(LENS, 1, DIGEST, None, reason="x")], grounding=outcome
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Tool coverage (grounding pre-pass)" in draft
+    assert "Tools run:" in draft and "exit 1" in draft
+    assert "Not run:" in draft and "mypy" in draft
+    assert (
+        "No deterministic coverage: type (no configured command); test (no configured command)"
+        in draft
+    )
+
+
+def test_a_review_that_never_ran_the_pre_pass_carries_no_coverage_section():
+    """No grounding outcome -- a review whose lenses never started -- has
+    no tool-coverage section to render: the draft cannot imply a pass it
+    did not run."""
+    result = synthesize([LensResult(LENS, 1, DIGEST, None, reason="x")])
+    draft = render_draft(result, Redactor())
+    assert "## Tool coverage (grounding pre-pass)" not in draft

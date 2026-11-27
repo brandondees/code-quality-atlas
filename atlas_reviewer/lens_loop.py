@@ -155,6 +155,11 @@ from atlas_reviewer.call_facts import (
     reset_events,
 )
 from atlas_reviewer.diffs import scope_text, split_files
+from atlas_reviewer.grounding import (
+    GroundingOutcome,
+    GroundingPlan,
+    grounding_evidence,
+)
 from atlas_reviewer.lens_contract import (
     _SEVERITY_ALIASES,
     ContractError,
@@ -2081,6 +2086,106 @@ class SharedSweep:
         return entry.verdicts
 
 
+@dataclass
+class SharedGrounding:
+    """One review's shared grounding pre-pass: the declared CI tooling
+    runs once, on the first lens's runner, and every lens reads the same
+    outcome -- the same evidence block appended to each first turn, and
+    one coverage section in the draft. The waiter's wait is bounded by
+    the review's remaining wall; a waiter whose wait expires runs its own
+    pass, and a failed pass is shared as the review's outcome, named in
+    the evidence block, because every lens would fail it the same way."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _entry: _GroundingEntry | None = None
+
+    def outcome(
+        self,
+        run: Callable[[], GroundingOutcome],
+        wait_s: float,
+    ) -> GroundingOutcome:
+        """The review's grounding outcome, computed once: the first caller
+        owns the run; the rest wait `wait_s` for it, then fall back to
+        running their own."""
+        with self._lock:
+            if self._entry is None:
+                self._entry = _GroundingEntry(threading.Event(), None)
+                owner = True
+            else:
+                owner = False
+                entry = self._entry
+        if owner:
+            entry = self._entry
+            assert entry is not None
+            try:
+                entry.outcome = run()
+            finally:
+                entry.done.set()
+            return entry.outcome
+        assert entry is not None
+        if not entry.done.wait(wait_s):
+            return run()
+        assert entry.outcome is not None
+        return entry.outcome
+
+    def stored(self) -> GroundingOutcome | None:
+        """The outcome once the pass has finished, or None while it has
+        not run -- the coordinator reads this after the lenses settle to
+        build the draft's coverage lines."""
+        with self._lock:
+            if self._entry is None or not self._entry.done.is_set():
+                return None
+            return self._entry.outcome
+
+
+@dataclass
+class _GroundingEntry:
+    """The shared grounding pass in progress: the event the waiting
+    lenses block on and the outcome it finished with."""
+
+    done: threading.Event
+    outcome: GroundingOutcome | None
+
+
+def _grounding_evidence(
+    bridge: Bridge,
+    job: LensJob,
+    clock: Clock,
+    shared: SharedGrounding | None = None,
+    wait_s: float = 0.0,
+) -> str:
+    """The grounding pre-pass, for every lens: the repo's declared CI
+    tooling run in this runner's disposable copy, fenced as one
+    tool-evidence block appended to the first turn. `run_attempt` calls
+    this before its wall clock starts, so the pass's bounded run never
+    comes out of the lens's own wall; the review's shared memo makes it
+    one pass per review, and a failed pass is named in the block rather
+    than vanishing -- evidence gathering never aborts the lens it
+    serves. A repo whose workflows declare nothing to run, whose files
+    all parsed and whose pass did not fail sends no block: there is no
+    evidence to hand the lens, and the draft's coverage section states
+    the empty inventory."""
+
+    def run() -> GroundingOutcome:
+        try:
+            plan = bridge.grounding_plan()
+            results = (
+                bridge.grounding(plan.commands, clock=clock) if plan.configured else ()
+            )
+        except (BoundaryError, StreamTimeoutError) as exc:
+            return GroundingOutcome(GroundingPlan((), ()), (), failure=str(exc))
+        return GroundingOutcome(plan, results)
+
+    outcome = run() if shared is None else shared.outcome(run, wait_s)
+    if (
+        not outcome.plan.configured
+        and not outcome.plan.unparseable
+        and not outcome.failure
+    ):
+        return ""
+    return grounding_evidence(outcome, nonce=job.nonce)
+
+
 def sweep_lenses(env: Mapping[str, str]) -> frozenset[str]:
     """The lens names the controller's mutant pre-pass runs for:
     `ATLAS_SWEEP_LENSES`'s comma-separated list, or the two mutation
@@ -2166,6 +2271,7 @@ def run_attempt(
     system_for: Callable[..., str] = lens_system,
     sleep: Callable[[float], None] = time.sleep,
     shared_sweep: SharedSweep | None = None,
+    shared_grounding: SharedGrounding | None = None,
 ) -> AttemptOutcome:
     """Run one attempt to its end. `review_deadline` and `review_started`
     are on `clock.monotonic`; `attempt` is the attempt's number in its
@@ -2181,20 +2287,25 @@ def run_attempt(
     )
     if not check_delivery(system, job.lens, job.digest):
         return AttemptOutcome(Attestation.NOT_DELIVERED)
-    # The sweep's bounded, memoized pass runs before the wall clock
-    # starts: its seconds are the controller's evidence gathering, not
-    # this lens's wall. The review's shared memo makes it one pass per
-    # review; the wait is bounded by the review's remaining wall.
+    # Both pre-passes run before the wall clock starts: their seconds are
+    # the controller's evidence gathering, not this lens's wall. The
+    # grounding pass runs first (the protocol runs the repo's own tooling
+    # before any lens); the review's shared memos make each one pass per
+    # review; each wait is bounded by the review's remaining wall.
+    remaining_wall = max(review_deadline - clock.monotonic(), 0.0)
+    grounding_text = _grounding_evidence(
+        bridge, job, clock, shared_grounding, remaining_wall
+    )
     sweep_text = _sweep_evidence(
         bridge,
         job,
         clock,
         shared_sweep,
-        max(review_deadline - clock.monotonic(), 0.0),
+        remaining_wall,
     )
     attempt_start = clock.monotonic()
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
-    first_turn_text = job.first_turn + sweep_text
+    first_turn_text = job.first_turn + grounding_text + sweep_text
     messages: list[Message] = [UserText(first_turn_text)]
     tools = tool_schemas()
     reset_events()
