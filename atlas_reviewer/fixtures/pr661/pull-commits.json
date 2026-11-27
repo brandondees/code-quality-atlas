@@ -1,0 +1,72 @@
+[
+ {
+  "sha": "2e31d3bcbc4522db141a0d93f2db80697d4083a8",
+  "commit": {
+   "message": "Review the whole pull request on every agentic round\n\nPrior findings live in a log keyed by pull request, and the current\ndiff's file list is still complete. A round that does not fit, or a\nlog line that does not parse, is an omission and cannot approve.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "committer": {
+    "date": "2026-11-13T19:59:56+00:00"
+   }
+  },
+  "parents": [
+   {
+    "sha": "f82b4bf18b252daf76759f21d2b09ed4f09d39c9"
+   }
+  ]
+ },
+ {
+  "sha": "46bc5044f6e2debafd685d4580d78712cd6ef5e9",
+  "commit": {
+   "message": "Keep pull-request numbers from looking like headings\n\nMarkdownlint reads a line that starts with #646 as an ATX heading\nwith no space after the hash.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "committer": {
+    "date": "2026-11-13T19:59:56+00:00"
+   }
+  },
+  "parents": [
+   {
+    "sha": "2e31d3bcbc4522db141a0d93f2db80697d4083a8"
+   }
+  ]
+ },
+ {
+  "sha": "f5ce3fc3758042856538aab76710da71f380c87f",
+  "commit": {
+   "message": "Pin the round log's isolation, quoting, and caps\n\nAnother pull request's records stay out of this review, finding lines\nare quoted, and a log that cannot be read is an omission. The first\nturn still lists every changed file.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "committer": {
+    "date": "2026-11-13T19:59:56+00:00"
+   }
+  },
+  "parents": [
+   {
+    "sha": "46bc5044f6e2debafd685d4580d78712cd6ef5e9"
+   }
+  ]
+ },
+ {
+  "sha": "eb889b37f4071b661e4513ddb96211e95cd0eb93",
+  "commit": {
+   "message": "Let a later round approve after the prior budget fills\n\nA superseded round and a line that names another pull request no\nlonger block approval. A log write that fails after the model call\nreturns the review that was already paid for.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "committer": {
+    "date": "2026-11-13T19:59:56+00:00"
+   }
+  },
+  "parents": [
+   {
+    "sha": "f5ce3fc3758042856538aab76710da71f380c87f"
+   }
+  ]
+ },
+ {
+  "sha": "28854775e5965eb554b368cc3a543969a635b681",
+  "commit": {
+   "message": "Pass the round log through the trace wrapper\n\nThe rebase split review_lens for spans and dropped the round-log\narguments on the way into the lens. Both paths stay.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "committer": {
+    "date": "2026-11-13T19:59:56+00:00"
+   }
+  },
+  "parents": [
+   {
+    "sha": "eb889b37f4071b661e4513ddb96211e95cd0eb93"
+   }
+  ]
+ }
+]

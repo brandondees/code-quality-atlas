@@ -1,0 +1,27 @@
+[
+  {
+    "id": 8201,
+    "user": {
+      "login": "example-maintainer"
+    },
+    "created_at": "2026-11-06T18:01:00Z",
+    "path": "calc.py",
+    "line": 3,
+    "original_line": 3,
+    "commit_id": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+    "body": "Does `round` here use banker's rounding?"
+  },
+  {
+    "id": 8202,
+    "user": {
+      "login": "example-contributor"
+    },
+    "created_at": "2026-11-06T19:30:00Z",
+    "path": "calc.py",
+    "line": 3,
+    "original_line": 3,
+    "commit_id": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+    "in_reply_to_id": 8201,
+    "body": "Yes, Python's round is half-to-even; the new commit keeps it."
+  }
+]

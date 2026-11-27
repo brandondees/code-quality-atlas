@@ -1,0 +1,65 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 636,
+    "head_sha": "518056107f0e4b090d7e3cb753f809d9dbf6b99f",
+    "round": 1,
+    "reviewed_commit": "46eedea629f7b13b5ef3926dcd5a6f4b3f431a43"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "major",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "This line says it as a standing fact: a `fly machine run` with no `--rm` means \"the flyctl that started it waits in the operator's shell.\" But [Start the review](#start-the-review) (line 331, unchanged) says that same command returns once t",
+        "lenses": [
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 546,
+        "end_line": 548
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "\"That was a stale WireGuard peer\" is written as a diagnosis. The same section (lines 404-407) says the operator also enabled WireGuard-over-WebSockets and \"did not isolate which of those changes cleared the probe timeout.\" If the fix is not",
+        "lenses": [],
+        "line": 385,
+        "end_line": 387
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "The sweep poll only stops on the two success lines. When the sweep fails (exit 3, \"the runner was not verified gone\"), its Machine writes `Main child exited normally with code: 3` and neither success line. The loop then sleeps and polls for",
+        "lenses": [],
+        "line": 642,
+        "end_line": 651
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "`fly machine wait --state destroyed --wait-timeout 1h` timing out means the probe Machine was **not** destroyed after an hour. It may still be running. This branch says to poll logs for another hour and then report that the probe did not sh",
+        "lenses": [
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 792,
+        "end_line": 797
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/636#pullrequestreview-5880213767",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "tracing-correctness-and-invariants",
+      "hunting-silent-failures",
+      "reviewing-observability-and-operability",
+      "reviewing-test-quality",
+      "reviewing-pr-and-process-hygiene",
+      "auditing-documentation-health"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

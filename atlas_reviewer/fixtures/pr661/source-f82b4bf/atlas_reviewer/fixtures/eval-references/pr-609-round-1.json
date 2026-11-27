@@ -1,0 +1,36 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 609,
+    "head_sha": "aaa03820ae69de48fc522da378041b361fd8ceb5",
+    "round": 1,
+    "reviewed_commit": "9c2cf22ddf34721ed18cd52ce96b7421509b9dad"
+  },
+  "output": {
+    "verdict": "APPROVE",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "docs/agentic-reviewer.md",
+        "summary": "\u2014 The three \"research supports\" rules (lines 58-76) state paper findings as fact (SWR-Bench's precision weakness, the Hybrid-Review baseline doing badly, the two-agent debate setup underperforming, Jaoua et al.'s retrieval result). Nothing ",
+        "lenses": [
+          "reviewing-pr-and-process-hygiene",
+          "auditing-documentation-health"
+        ],
+        "line": 71
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/609#pullrequestreview-5817429886",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "reviewing-decision-lifecycle",
+      "auditing-documentation-health",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

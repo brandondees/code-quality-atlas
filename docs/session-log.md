@@ -6714,6 +6714,30 @@ revert-mutant (the slice restored) kills its own test, verified. The
 helper-level test is reframed as the helper's own contract, complementary
 to the call-site pins. Offline only.
 
+## 2026-11-27 — the parity anchors' eval fixtures: a read-only snapshot builder and two committed offline snapshots (D97)
+
+The parity brief's fixtures slice: `atlas_reviewer/snapshot.py` behind a
+read-only `snapshot-build` CLI command builds a fixture at a PR's anchor
+head — the anchor's lineage commits (rebuilt from the commit objects
+when the branch rebased away), the remarks posted strictly before the
+anchor push, the CI at the retained commits with the jobs' logs where
+GitHub still serves them, the head and merge-base trees, the diff, and
+the self-contained `history.bundle` the staging's history fetch reads.
+Two committed fixtures, `atlas_reviewer/fixtures/pr640/` (#640 at
+`0fe45e5e`) and `pr661/` (#661 at the re-anchored round-5 head
+`28854775`, its body the parity key's reconstructed round-5 text), each
+with its own `FIXTURE.md` provenance and rebuild command. Brandon's
+2026-11-26 decisions recorded as D97: the prior Claude Code rounds
+reach the eval only through the PR conversation (no `rounds.jsonl`
+synthesis), and setup reads today's default-branch `REVIEW.md`/
+`AGENTS.md`, which the fixture root carries. The stage-0 check runs
+offline: `eval-run --lenses owners` over each committed fixture with the
+scripted reviewer completes with complete coverage and writes the
+eval-parity run file. Met on the way: `Bridge.sweep` crashed on
+`sweep_script`'s pytest assert for a runner with no pytest-capable
+interpreter; it now returns every spec inconclusive with the named
+environment gap, the same verdict `run_tests`/`mutate` report there.
+
 ## 2026-11-27 — the grounding pre-pass: the repo's declared CI tooling runs before any lens (the harness gap audit's blocker 4, slice S2)
 
 The protocol's step 4.3 had no counterpart in the agentic path: ruff and

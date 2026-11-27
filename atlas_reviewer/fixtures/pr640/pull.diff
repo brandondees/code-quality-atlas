@@ -1,0 +1,2513 @@
+diff --git a/atlas_reviewer/README.md b/atlas_reviewer/README.md
+index 4cb0f51e..5af93760 100644
+--- a/atlas_reviewer/README.md
++++ b/atlas_reviewer/README.md
+@@ -1,15 +1,19 @@
+ # atlas_reviewer — manual Code Quality Atlas review service
+ 
+-An operator-triggered controller. You give it one PR event (repo, PR number,
++An operator-triggered controller, and a webhook receiver that posts one
++advisory review. You give the controller one PR event (repo, PR number,
+ head SHA). It collects CI evidence for that exact SHA, runs extra review tools
+ in a fresh Sprite with no credentials, runs the review through this repo's
+ collapsed `reviewing-a-change` skill bundle, and writes a **review draft** to
+ stdout or a file.
+ 
+-It never writes to GitHub. No reviews, comments, check runs, labels, or
+-issues. The operator CLI has no webhook receiver and no queue, and runs
+-one review at a time. The webhook receiver is a separate process,
+-`python -m atlas_reviewer.service` (D48). Design and decision record:
++The operator CLI (`review`, `sweep`, `probe-runner`) never writes to GitHub:
++no reviews, comments, check runs, labels, or issues. It has no queue of its
++own and runs one review at a time in its state directory.
++`python -m atlas_reviewer.service` is the webhook receiver (D48). It verifies
++the delivery, queues one review per commit, and posts a single pull-request
++review with event COMMENT. It never sends APPROVE or REQUEST_CHANGES.
++Design and decision record:
+ [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
+ (D24-D30, D32, D33, D35 and D36 in
+ [`docs/open-questions.md`](../docs/open-questions.md)).
+@@ -51,6 +55,45 @@ the pinned base image was pulled, the process ran as uid 10001 and exited
+ secrets. A stream started late would have lost the start of the draft,
+ which is why a review now writes it to disk.
+ 
++## Webhook service
++
++`python -m atlas_reviewer.service` listens for GitHub App `pull_request`
++deliveries (`opened`, `synchronize`, `ready_for_review`). A draft is
++ignored. The HMAC is `X-Hub-Signature-256` over the raw body with
++`ATLAS_GITHUB_WEBHOOK_SECRET` (at least 16 characters). The repository
++must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
++A second delivery of the same head SHA does nothing. A newer head SHA
++cancels the review of the previous one, and that cancelled review is not
++posted.
++
++The review itself is the existing `review` command, one at a time unless
++`ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
++so a bad value cannot start an unbounded pool, not a cost cap). The child
++process receives only an allowlist: the OpenRouter key, the Sprites token,
++a read-only installation token, and the process basics. It does not receive
++the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
++reviews and are posted. Any other exit posts nothing; the failure is a
++telemetry event.
++
++The post is one pull-request review whose event is COMMENT. The body says
++the review is advisory and not a substitute for the full Claude Code
++protocol review, then lists the lenses that ran, the lenses that did not,
++the controller's file-coverage note, the limit stops, and the cost. The
++draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
++and is not sent. A retry of the same commit does not post a second time:
++the key `repo#pr#sha` is stored after GitHub accepts the review, and a
++review is reused only when it carries that marker, its `commit_id` is this
++SHA, and its author is this App's bot (`ATLAS_GITHUB_APP_SLUG` plus
++`[bot]`). Another App's bot does not count. The posting token asks
++for `pull_requests: write` and for no other write. The App installation
++has to grant that permission or the post fails and nothing is published.
++
++`ATLAS_SERVICE_PROVIDER` defaults to `openrouter`, and the process refuses
++to start until `ATLAS_ALLOW_LIVE_INFERENCE=1` is set, so a booted service
++does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
++is the explicit no-model setting. The deploy shape for this process is a
++separate Fly app; the one-off `fly.toml` above is unchanged.
++
+ ## Run it offline (no credentials)
+ 
+ From the repo root:
+@@ -234,7 +277,9 @@ error message on stderr.
+ the controller alone). It exchanges the JWT for an installation token that
+ asks for `contents`, `checks`, `actions`, and `pull_requests` read, plus
+ `issues` read only with `--include-issues`, scoped to the event's single
+-repository. A response that grants any non-read permission is refused.
++repository. On the operator CLI path, a response that grants any
++non-read permission is refused. The webhook poster asks for
++`pull_requests` write and refuses every other write permission.
+ The token is cached until five minutes before its `expires_at`.
+ 
+ **CI evidence ingestion** (`gather.py`, `archive.py`). Every GitHub list
+@@ -946,6 +991,11 @@ D41 records the 2026-11-12 probe that did.
+ | `github_api.py`, `github_auth.py`, `sprites_api.py`, `openrouter.py`, `http.py` | live adapters | network |
+ | `github_fixture.py`, `fakes.py`, `ledger.py`, `clock.py` | offline adapters, local state | local files |
+ | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
++| `service_admit.py` | webhook signature, event and allowlist admission | no |
++| `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |
++| `service_run.py` | one queued commit through the existing `review` command | the review child |
++| `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
++| `service.py` | webhook HTTP server and the review worker | network |
+ 
+ ## Trust boundaries
+ 
+diff --git a/atlas_reviewer/github_auth.py b/atlas_reviewer/github_auth.py
+index 99ec884c..54783906 100644
+--- a/atlas_reviewer/github_auth.py
++++ b/atlas_reviewer/github_auth.py
+@@ -4,9 +4,11 @@
+ Flow (https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation):
+ sign an RS256 JWT with the App private key (`iss` = App ID, lifetime <= 10
+ minutes), then `POST /app/installations/{id}/access_tokens`. The request
+-asks for read-only permissions and, when given, a single repository, so the
+-token is narrower than whatever the App itself was granted; a response
+-granting any non-read permission is refused.
++asks for read permissions and, when given, a single repository, so the
++token is narrower than whatever the App itself was granted. A response
++granting a non-read permission is refused, except a ``write`` on a
++permission named in ``writable`` (the service poster passes
++``pull_requests`` so it can create one COMMENT review).
+ 
+ Tokens are cached until `REFRESH_MARGIN_S` before their `expires_at`. The
+ private key and every token stay inside this object: they are exposed only
+@@ -25,9 +27,19 @@ from typing import Any
+ 
+ import jwt
+ 
+-from atlas_reviewer.http import Transport, safe_url
++from atlas_reviewer.http import HttpResponse, Transport, safe_url
+ from atlas_reviewer.ports import BoundaryError, Clock
+ 
++
++class MintError(BoundaryError):
++    """A token mint that GitHub refused. ``response`` is the HTTP result,
++    so the caller can tell a rate limit from an auth failure."""
++
++    def __init__(self, message: str, response: HttpResponse) -> None:
++        super().__init__(message)
++        self.response = response
++
++
+ API_URL = "https://api.github.com"
+ JWT_BACKDATE_S = 60
+ JWT_LIFETIME_S = 540
+@@ -38,6 +50,10 @@ READ_PERMISSIONS: Mapping[str, str] = {
+     "actions": "read",
+     "pull_requests": "read",
+ }
++# Creating a pull-request review requires write. Write on a GitHub App
++# permission includes read on that same permission.
++POST_PERMISSIONS: Mapping[str, str] = {"pull_requests": "write"}
++POST_WRITABLE = frozenset({"pull_requests"})
+ 
+ Encoder = Callable[[Mapping[str, Any], str], str]
+ 
+@@ -65,6 +81,7 @@ class AppInstallationTokens:
+         installation_id: int,
+         permissions: Mapping[str, str] = READ_PERMISSIONS,
+         repositories: Sequence[str] = (),
++        writable: frozenset[str] = frozenset(),
+         api_url: str = API_URL,
+         encode: Encoder = rs256,
+         timeout_s: float = 30.0,
+@@ -73,25 +90,48 @@ class AppInstallationTokens:
+             raise ValueError("GitHub App ID must be numeric")
+         if installation_id < 1:
+             raise ValueError("installation id must be positive")
+-        if any(level != "read" for level in permissions.values()):
++        if any(
++            level != "read" and not (level == "write" and name in writable)
++            for name, level in permissions.items()
++        ):
+             raise ValueError("only read permissions may be requested")
+         self._transport, self._clock = transport, clock
+         self._app_id, self._key = app_id, private_key
+         self._installation_id = installation_id
+         self._permissions = dict(permissions)
++        self._writable = frozenset(writable)
+         self._repositories = tuple(repositories)
+         self._api_url = api_url.rstrip("/")
+         self._encode, self._timeout_s = encode, timeout_s
++        # Per thread. Workers share one token source, and one worker's
++        # deadline must not shorten another's mint.
++        self._timeout_override = threading.local()
+         self._cached: _Cached | None = None
+         self._minted: list[str] = []
+         self._lock = threading.Lock()
+ 
++    def limit_timeout(self, seconds: float) -> None:
++        """The next mint on this thread waits at most ``seconds``. The
++        poster's attempt deadline is what passes this in, so the mint
++        cannot run past it. Another thread keeps its own value."""
++        self._timeout_override.seconds = max(0.0, seconds)
++
++    def _mint_timeout(self) -> float:
++        override = getattr(self._timeout_override, "seconds", None)
++        if override is None:
++            return self._timeout_s
++        return override
++
+     def token(self) -> str:
+         with self._lock:
+-            if self._cached is None or self._stale(self._cached):
+-                self._cached = self._mint()
+-                self._minted.append(self._cached.token)
+-            return self._cached.token
++            try:
++                if self._cached is None or self._stale(self._cached):
++                    self._cached = self._mint()
++                    self._minted.append(self._cached.token)
++                return self._cached.token
++            finally:
++                if hasattr(self._timeout_override, "seconds"):
++                    del self._timeout_override.seconds
+ 
+     def secrets(self) -> tuple[str, ...]:
+         with self._lock:
+@@ -131,11 +171,12 @@ class AppInstallationTokens:
+                 "Content-Type": "application/json",
+             },
+             json.dumps(body).encode(),
+-            self._timeout_s,
++            self._mint_timeout(),
+         )
+         if resp.status != 201:
+-            raise BoundaryError(
+-                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}"
++            raise MintError(
++                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}",
++                resp,
+             )
+         return self._parse(resp.body)
+ 
+@@ -149,16 +190,34 @@ class AppInstallationTokens:
+         token, expires = data.get("token"), data.get("expires_at")
+         if not isinstance(token, str) or not token or not isinstance(expires, str):
+             raise BoundaryError("GitHub App token mint lacks token or expires_at")
+-        _require_read_only(data.get("permissions"))
++        granted = data.get("permissions")
++        _require_read_only(granted, self._writable)
++        missing = sorted(
++            name
++            for name, level in self._permissions.items()
++            if level == "write"
++            and (not isinstance(granted, dict) or granted.get(name) != "write")
++        )
++        if missing:
++            raise BoundaryError(
++                f"minted token did not grant {', '.join(missing)}=write"
++            )
+         return _Cached(token, _expiry(expires, self._clock.now()))
+ 
+ 
+-def _require_read_only(granted: object) -> None:
++def _require_read_only(granted: object, writable: frozenset[str] = frozenset()) -> None:
+     if not isinstance(granted, dict):
+         raise BoundaryError("GitHub App token mint did not report its permissions")
+-    writable = sorted(k for k, v in granted.items() if v != "read")
+-    if writable:
+-        raise BoundaryError(f"minted token is not read-only: {', '.join(writable)}")
++    accepted = {
++        name for name, level in granted.items() if level == "write" and name in writable
++    }
++    extra = sorted(
++        name
++        for name, level in granted.items()
++        if level != "read" and name not in accepted
++    )
++    if extra:
++        raise BoundaryError(f"minted token is not read-only: {', '.join(extra)}")
+ 
+ 
+ def _expiry(raw: str, now: datetime) -> datetime:
+diff --git a/atlas_reviewer/service.py b/atlas_reviewer/service.py
+index c489ae6e..b78574e0 100644
+--- a/atlas_reviewer/service.py
++++ b/atlas_reviewer/service.py
+@@ -3,11 +3,12 @@
+ 
+ ``python -m atlas_reviewer.service`` listens for GitHub App deliveries and
+ answers before it runs a review, so the request does not wait on the
+-controller. Publishing a finished review is a separate step; with no
+-publisher the receiver records the draft and writes nothing to GitHub.
++controller. ``main`` posts a finished review as one COMMENT through
++``publisher_from_env``. A caller that passes no publisher records the
++draft and writes nothing to GitHub.
+ 
+-The webhook secret stays in this process. The review child is started
+-without it.
++The webhook secret and the App private key stay in this process. The
++review child is started without either.
+ """
+ 
+ from __future__ import annotations
+@@ -27,6 +28,7 @@ from pathlib import Path
+ from atlas_reviewer.clock import SystemClock
+ from atlas_reviewer.domain import PrEvent
+ from atlas_reviewer.ledger import make_private_dirs
++from atlas_reviewer.ports import BoundaryError
+ from atlas_reviewer.redact import Redactor
+ from atlas_reviewer.service_admit import (
+     EVENT_HEADER,
+@@ -74,6 +76,10 @@ class PostAuthError(Exception):
+     """GitHub refused the credential. Do not retry."""
+ 
+ 
++class PostRejected(Exception):
++    """GitHub rejected the review. The request will not succeed on retry."""
++
++
+ class RateLimited(Exception):
+     """GitHub asked the caller to wait. ``retry_after`` is seconds."""
+ 
+@@ -316,9 +322,12 @@ class Worker:
+             )
+             return
+         try:
+-            self._board.finish(job, JobState.FAILED)
++            committed = self._settle(job, JobState.FAILED)
+         except Exception as save_exc:  # noqa: BLE001 -- the thread still has to record why
+             note += f"; queue save failed: {type(save_exc).__name__}"
++        else:
++            if committed is JobState.SUPERSEDED:
++                self._note(job, committed, _fields(job.event))
+         self._telemetry.record(
+             "service",
+             "worker error",
+@@ -401,23 +410,24 @@ class Worker:
+         if not self._board.begin_post(job):
+             self._stopped_or_superseded(job, fields)
+             return
++        # stop() can land after the claim moved the job to POSTING and
++        # before this send. begin_post has already returned.
++        if self._stop.is_set() or job.cancel.is_set():
++            self._stopped_or_superseded(job, fields)
++            return
+         try:
+             self._publisher(job.event, report)
+         except PostNotCurrent:
+-            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
++            # begin_post refused. A stop keeps the draft. A moved head
++            # is SUPERSEDED. Settling every refusal as SUPERSEDED deletes
++            # a finished review that a restart should still post.
++            self._stopped_or_superseded(job, fields)
+             return
+         except PostAuthError as exc:
+-            committed = self._settle(job, JobState.FAILED)
+-            if committed is JobState.SUPERSEDED:
+-                self._note(job, committed, fields)
+-                return
+-            self._telemetry.record(
+-                "service",
+-                "review post failed",
+-                fields,
+-                status=ERROR,
+-                error=f"post auth refused: {exc}",
+-            )
++            self._record_post_refusal(job, fields, f"post auth refused: {exc}")
++            return
++        except PostRejected as exc:
++            self._record_post_refusal(job, fields, f"post rejected: {exc}")
+             return
+         except RateLimited as exc:
+             self._defer_post(job, str(exc), retry_after=exc.retry_after)
+@@ -431,6 +441,21 @@ class Worker:
+         )
+         self._telemetry.record("service", step, fields)
+ 
++    def _record_post_refusal(
++        self, job: Job, fields: dict[str, str | int], error: str
++    ) -> None:
++        committed = self._settle(job, JobState.FAILED)
++        if committed is JobState.SUPERSEDED:
++            self._note(job, committed, fields)
++            return
++        self._telemetry.record(
++            "service",
++            "review post failed",
++            fields,
++            status=ERROR,
++            error=error,
++        )
++
+     def _publish_saved(self, job: Job) -> None:
+         """A post that failed after the draft was written. The review is
+         not run again. A missing draft posts nothing."""
+@@ -740,7 +765,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
+     repos = env.get("ATLAS_REVIEW_REPOS", DEFAULT_REPO)
+     allowlist = frozenset(part.strip() for part in repos.split(",") if part.strip())
+     concurrency = int(env.get("ATLAS_REVIEW_CONCURRENCY", "1"))
+-    provider = env.get("ATLAS_SERVICE_PROVIDER", "offline")
++    provider = env.get("ATLAS_SERVICE_PROVIDER", "openrouter")
+     live = env.get("ATLAS_ALLOW_LIVE_INFERENCE", "") == "1"
+     # Local default is the loopback. The Fly app sets
+     # ATLAS_SERVICE_HOST=0.0.0.0 because the proxy is not on loopback.
+@@ -762,6 +787,17 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
+     )
+ 
+ 
++def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str, ...]:
++    """Values the service log must never write. The comment scrubber is
++    separate and also covers the App key and minted tokens."""
++    values = [config.secret]
++    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
++        value = env.get(name, "")
++        if value:
++            values.append(value)
++    return tuple(values)
++
++
+ def _state_is_writable(path: Path) -> bool:
+     try:
+         make_private_dirs(path)
+@@ -811,7 +847,9 @@ def serve(
+         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
+         return 2
+     board = Board(config.state_dir / "queue.json")
+-    redactor = Redactor(known_secrets=(config.secret,), sources=secret_sources)
++    redactor = Redactor(
++        known_secrets=_service_secrets(config, env), sources=secret_sources
++    )
+     sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
+     sink.__enter__()
+     try:
+@@ -867,11 +905,29 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
+     env = os.environ if env is None else env
+     try:
+         config = config_from_env(env)
+-    except (ServiceError, ValueError) as exc:
++        from atlas_reviewer.http import UrllibTransport
++        from atlas_reviewer.service_post import publisher_from_env
++
++        publisher = publisher_from_env(
++            env,
++            config.allowlist,
++            config.state_dir,
++            transport=UrllibTransport(),
++            clock=SystemClock(),
++        )
++    except (ServiceError, ValueError, BoundaryError) as exc:
+         print(f"atlas-reviewer: {exc}", file=sys.stderr)
+         return 2
+     try:
+-        return serve(config, env, secret_sources=(lambda: _child_secrets(env),))
++        return serve(
++            config,
++            env,
++            publisher=publisher.post,
++            secret_sources=(
++                lambda: _child_secrets(env),
++                publisher.credential_secrets,
++            ),
++        )
+     except KeyboardInterrupt:
+         return 0
+     except QueueError as exc:
+@@ -883,4 +939,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
+ 
+ 
+ if __name__ == "__main__":
+-    sys.exit(main())
++    # `python -m` runs this file as __main__. Importing it again under
++    # its package name would be a second module, with its own
++    # before_send and exception classes. Run the package module's main
++    # so the worker and the poster share one set of objects.
++    from atlas_reviewer.service import main as run_service
++
++    sys.exit(run_service())
+diff --git a/atlas_reviewer/service_post.py b/atlas_reviewer/service_post.py
+new file mode 100644
+index 00000000..afa6cd97
+--- /dev/null
++++ b/atlas_reviewer/service_post.py
+@@ -0,0 +1,482 @@
++# SPDX-License-Identifier: MIT
++"""Post one finished review as a GitHub pull-request review.
++
++The request body is built in ``comment_payload``, which has no event
++argument and always sends COMMENT. ``comment_only`` refuses APPROVE and
++REQUEST_CHANGES for any caller that tries to name one. A failed review
++never reaches this module.
++
++The idempotency key is ``repo#pr#sha``. It is stored after GitHub accepts
++the review, and it is also the HTML marker at the end of the body. A retry
++lists reviews first and does not post again when that marker is already
++there, including when the process died after GitHub accepted the review
++and before the local record was written.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import threading
++import time
++from collections.abc import Callable, Mapping
++from email.utils import parsedate_to_datetime
++from pathlib import Path
++from urllib.parse import quote
++
++from atlas_reviewer.domain import PrEvent
++from atlas_reviewer.github_auth import (
++    POST_PERMISSIONS,
++    POST_WRITABLE,
++    AppInstallationTokens,
++)
++from atlas_reviewer.http import HttpResponse, Transport
++from atlas_reviewer.ledger import make_private_dirs
++from atlas_reviewer.notes import quote_untrusted
++from atlas_reviewer.pagination import DEFAULT_MAX_PAGES, next_link
++from atlas_reviewer.ports import BoundaryError, Clock, TokenSource
++from atlas_reviewer.redact import Redactor
++from atlas_reviewer.service import (
++    PostAuthError,
++    PostNotCurrent,
++    PostRejected,
++    RateLimited,
++    before_send,
++)
++from atlas_reviewer.service_run import ReviewReport
++
++API_URL = "https://api.github.com"
++MAX_COMMENT_CHARS = 65_000
++_MARKER = "<!-- atlas-service-post: "
++_BANNER = (
++    "> **Advisory only.** This is one GitHub review posted with event COMMENT. "
++    "It is not an approval and it is not a request for changes. "
++    "It is not a substitute for the full Claude Code protocol review: "
++    "full repository access, the full pull request diff, and per-lens "
++    "subagent fan-out."
++)
++_FILES = (
++    "The controller's coverage note is the record of files a model call "
++    "covered. A path named after it is a file the draft says was not "
++    "reviewed in full."
++)
++_EVENTS = frozenset({"APPROVE", "COMMENT", "REQUEST_CHANGES"})
++# One list-plus-create attempt. Ten pages at the 30-second socket timeout
++# would hold the worker for minutes; this deadline cuts that short.
++_ATTEMPT_DEADLINE_S = 45.0
++# A rate-limit header longer than this is capped so one response cannot
++# stall the machine for hours.
++_MAX_RETRY_AFTER_S = 900.0
++# GitHub's secondary rate limit guidance is at least a minute when the
++# response does not name a shorter wait.
++_SECONDARY_FLOOR_S = 60.0
++
++
++class RefusedReviewEvent(Exception):
++    """A review event other than COMMENT. Nothing is sent."""
++
++    def __init__(self, event: str) -> None:
++        super().__init__(f"refusing review event {event}")
++        self.event = event
++
++
++def comment_only(event: str) -> str:
++    if event != "COMMENT":
++        raise RefusedReviewEvent(event)
++    return "COMMENT"
++
++
++def comment_payload(commit_id: str, body: str) -> dict[str, str]:
++    """The only review-create body this service sends."""
++    return {"commit_id": commit_id, "body": body, "event": comment_only("COMMENT")}
++
++
++def post_key(event: PrEvent) -> str:
++    return f"{event.repo}#{event.pr_number}#{event.head_sha}"
++
++
++def marker_for(key: str) -> str:
++    return f"{_MARKER}{key} -->"
++
++
++def render_comment(report: ReviewReport, key: str, scrub: Callable[[str], str]) -> str:
++    recommended = report.recommended_event
++    if recommended not in _EVENTS:
++        recommended = "unreported"
++    files = (
++        report.files_note,
++        *(f"not reviewed in full: {path}" for path in report.files_not_read),
++    )
++    body = "\n\n".join(
++        (
++            _BANNER,
++            f"The draft recommended `{recommended}`. That event was not sent. This review is COMMENT.",
++            _section("Lenses run", report.lenses_run, scrub),
++            _section("Lenses not run", report.lenses_not_run, scrub),
++            _FILES + "\n\n" + _section("Files read", files, scrub),
++            _section("Limit stops", report.limit_stops, scrub),
++            _section("Cost", report.cost_lines, scrub),
++        )
++    )
++    mark = marker_for(key)
++    ending = f"\n\n[comment cut to fit the post limit]\n\n{mark}"
++    if len(body) + 2 + len(mark) <= MAX_COMMENT_CHARS:
++        return f"{body}\n\n{mark}"
++    keep = MAX_COMMENT_CHARS - len(ending)
++    return body[: max(keep, 0)] + ending
++
++
++def _section(title: str, items: tuple[str, ...], scrub: Callable[[str], str]) -> str:
++    if not items:
++        listed = "None."
++    else:
++        listed = "\n".join(f"- {quote_untrusted(item, scrub=scrub)}" for item in items)
++    return f"## {title}\n\n{listed}"
++
++
++class PostLedger:
++    """Review ids already accepted by GitHub, keyed by ``post_key``."""
++
++    def __init__(self, path: Path) -> None:
++        self._path = path
++        self._lock = threading.Lock()
++        self._ids: dict[str, int] = {}
++        if path.exists():
++            self._ids = _load(path)
++
++    def seen(self, key: str) -> int | None:
++        with self._lock:
++            return self._ids.get(key)
++
++    def record(self, key: str, review_id: int) -> None:
++        with self._lock:
++            self._ids[key] = review_id
++            make_private_dirs(self._path.parent)
++            tmp = self._path.with_name(self._path.name + ".tmp")
++            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
++            with os.fdopen(fd, "w", encoding="utf-8") as handle:
++                json.dump(self._ids, handle)
++                handle.flush()
++                os.fsync(handle.fileno())
++            os.replace(tmp, self._path)
++
++
++def _load(path: Path) -> dict[str, int]:
++    try:
++        raw = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
++        raise BoundaryError(f"cannot read the post ledger {path}") from exc
++    if not isinstance(raw, dict):
++        raise BoundaryError(f"post ledger {path} is not an object")
++    ids: dict[str, int] = {}
++    for key, value in raw.items():
++        if (
++            not isinstance(key, str)
++            or isinstance(value, bool)
++            or not isinstance(value, int)
++        ):
++            raise BoundaryError(f"post ledger {path} holds an unusable record")
++        ids[key] = value
++    return ids
++
++
++class ReviewPoster:
++    def __init__(
++        self,
++        transport: Transport,
++        tokens: TokenSource,
++        ledger: PostLedger,
++        scrub: Callable[[str], str],
++        *,
++        api_url: str = API_URL,
++        timeout_s: float = 30.0,
++        max_pages: int = DEFAULT_MAX_PAGES,
++        now: Callable[[], float] | None = None,
++        secrets: Callable[[], tuple[str, ...]] | None = None,
++        bot_login: str = "",
++    ) -> None:
++        self._transport = transport
++        self._tokens = tokens
++        self._ledger = ledger
++        self._scrub = scrub
++        self._api_url = api_url.rstrip("/")
++        self._timeout_s = timeout_s
++        self._max_pages = max_pages
++        self._now = now or time.monotonic
++        self._secrets = secrets or (lambda: ())
++        self._bot_login = bot_login
++        # One poster is shared by every worker. The attempt deadline is
++        # per thread so one worker finishing cannot clear another's.
++        self._attempt = threading.local()
++
++    def credential_secrets(self) -> tuple[str, ...]:
++        """The App key and every token this poster has minted, for the
++        service log scrubber."""
++        return self._secrets()
++
++    def post(self, event: PrEvent, report: ReviewReport) -> None:
++        key = post_key(event)
++        if self._ledger.seen(key) is not None:
++            return
++        self._attempt.deadline = self._now() + _ATTEMPT_DEADLINE_S
++        try:
++            existing = self._find(event, marker_for(key))
++            if existing is not None:
++                self._ledger.record(key, existing)
++                return
++            # After the list, under the queue lock, and before the create.
++            # A review GitHub has already accepted cannot be recalled.
++            check = before_send.get()
++            if check is not None and not check():
++                raise PostNotCurrent("the head moved before the review was sent")
++            body = render_comment(report, key, self._scrub)
++            review_id = self._create(event, comment_payload(event.head_sha, body))
++            self._ledger.record(key, review_id)
++        finally:
++            self._attempt.deadline = None
++
++    def _create(self, event: PrEvent, payload: Mapping[str, str]) -> int:
++        if payload.get("event") != "COMMENT":
++            raise RefusedReviewEvent(str(payload.get("event")))
++        response = self._request("POST", self._url(event), json.dumps(payload).encode())
++        _raise_for_status(response, "GitHub review post")
++        try:
++            data = json.loads(response.body)
++        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
++            raise BoundaryError("GitHub review post returned non-JSON") from exc
++        review_id = data.get("id") if isinstance(data, dict) else None
++        if isinstance(review_id, bool) or not isinstance(review_id, int):
++            raise BoundaryError("GitHub review post returned no review id")
++        return review_id
++
++    def _find(self, event: PrEvent, marker: str) -> int | None:
++        url: str | None = self._url(event)
++        pages = 0
++        while url is not None and pages < self._max_pages:
++            response = self._request("GET", url, None)
++            _raise_for_status(response, "GitHub review list")
++            try:
++                data = json.loads(response.body)
++            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
++                raise BoundaryError("GitHub review list returned non-JSON") from exc
++            if not isinstance(data, list):
++                raise BoundaryError("GitHub review list returned a non-array")
++            for item in data:
++                found = _marked(item, marker, event.head_sha, self._bot_login)
++                if found is not None:
++                    return found
++            pages += 1
++            url = next_link(response.header("Link"))
++            if url is not None and not url.startswith(f"{self._api_url}/"):
++                raise BoundaryError("refusing a review-list link off the API")
++        if url is not None:
++            raise BoundaryError(
++                "review list was cut off before the idempotency check finished"
++            )
++        return None
++
++    def _url(self, event: PrEvent) -> str:
++        owner, name = event.repo.split("/", 1)
++        owner_q, name_q = quote(owner, safe=""), quote(name, safe="")
++        return (
++            f"{self._api_url}/repos/{owner_q}/{name_q}/pulls/"
++            f"{event.pr_number}/reviews?per_page=100"
++        )
++
++    def _remaining(self) -> float | None:
++        deadline = getattr(self._attempt, "deadline", None)
++        if deadline is None:
++            return None
++        return deadline - self._now()
++
++    def _request(self, method: str, url: str, body: bytes | None) -> HttpResponse:
++        remaining = self._remaining()
++        if remaining is not None and remaining <= 0:
++            raise BoundaryError("post attempt deadline")
++        timeout = (
++            self._timeout_s if remaining is None else min(self._timeout_s, remaining)
++        )
++        limit = getattr(self._tokens, "limit_timeout", None)
++        if limit is not None and remaining is not None:
++            limit(remaining)
++        try:
++            token = self._tokens.token()
++        except BoundaryError as exc:
++            response = getattr(exc, "response", None)
++            if isinstance(response, HttpResponse):
++                _raise_for_status(response, "GitHub App token mint")
++            if "HTTP 401" in str(exc):
++                raise PostAuthError(str(exc)) from None
++            raise
++        remaining = self._remaining()
++        if remaining is not None and remaining <= 0:
++            raise BoundaryError("post attempt deadline")
++        if remaining is not None:
++            timeout = min(self._timeout_s, remaining)
++        return self._transport.request(
++            method,
++            url,
++            {
++                "Authorization": f"Bearer {token}",
++                "Accept": "application/vnd.github+json",
++                "X-GitHub-Api-Version": "2022-11-28",
++                "User-Agent": "code-quality-atlas-reviewer",
++                "Content-Type": "application/json",
++            },
++            body,
++            timeout,
++        )
++
++
++def _raise_for_status(response: HttpResponse, what: str) -> None:
++    if 200 <= response.status < 300:
++        return
++    if response.status == 422:
++        raise PostRejected(f"{what} HTTP 422")
++    wait = _retry_wait(response)
++    if _secondary_limit(response):
++        wait = min(max(wait or 0.0, _SECONDARY_FLOOR_S), _MAX_RETRY_AFTER_S)
++        raise RateLimited(f"{what} HTTP {response.status}", wait)
++    if response.status == 429 or (response.status == 403 and wait is not None):
++        raise RateLimited(f"{what} HTTP {response.status}", wait or 0.0)
++    if response.status in {401, 403}:
++        raise PostAuthError(f"{what} HTTP {response.status}")
++    raise BoundaryError(f"{what} HTTP {response.status}")
++
++
++def _retry_wait(response: HttpResponse) -> float | None:
++    """Seconds until GitHub asked us to try again, or None when the
++    response is not a rate limit. A wait longer than the cap is cut."""
++    header = response.header("Retry-After")
++    if header is not None:
++        try:
++            return min(max(0.0, float(header)), _MAX_RETRY_AFTER_S)
++        except ValueError:
++            try:
++                moment = parsedate_to_datetime(header)
++            except (TypeError, ValueError, OverflowError):
++                moment = None
++            if moment is not None:
++                return min(
++                    max(0.0, moment.timestamp() - time.time()), _MAX_RETRY_AFTER_S
++                )
++    remaining = response.header("x-ratelimit-remaining")
++    reset = response.header("x-ratelimit-reset")
++    # GitHub sends the reset header on ordinary responses. It is a rate
++    # limit only when the remaining budget is zero.
++    if remaining == "0" and reset is not None:
++        try:
++            return min(max(0.0, float(reset) - time.time()), _MAX_RETRY_AFTER_S)
++        except ValueError:
++            return None
++    if response.status == 429:
++        return 0.0
++    return None
++
++
++def _secondary_limit(response: HttpResponse) -> bool:
++    try:
++        text = response.body.decode("utf-8", errors="replace").lower()
++    except (UnicodeError, AttributeError):
++        return False
++    return "secondary rate limit" in text
++
++
++def _marked(item: object, marker: str, sha: str, bot_login: str) -> int | None:
++    """A review already posted for this commit by this App. A review a
++    person wrote, one from another App, or one attached to another commit,
++    does not count, so planting the marker cannot suppress this post."""
++    if not bot_login or not isinstance(item, dict) or item.get("commit_id") != sha:
++        return None
++    user = item.get("user")
++    if not isinstance(user, dict) or user.get("type") != "Bot":
++        return None
++    if user.get("login") != bot_login:
++        return None
++    body, review_id = item.get("body"), item.get("id")
++    if not isinstance(body, str) or marker not in body:
++        return None
++    if isinstance(review_id, bool) or not isinstance(review_id, int):
++        return None
++    return review_id
++
++
++def _repository_names(allowlist: frozenset[str]) -> tuple[str, ...]:
++    """GitHub scopes an installation token by repository name on the
++    installation's account. Two owners would make a shared name grant
++    both, so this refuses that list. An entry without an owner is a
++    configuration error, not a crash."""
++    owners: set[str] = set()
++    names: list[str] = []
++    for repo in allowlist:
++        if "/" not in repo:
++            raise ValueError(f"repository allowlist entry {repo!r} must be owner/name")
++        owner, name = repo.split("/", 1)
++        if not owner or not name:
++            raise ValueError(f"repository allowlist entry {repo!r} must be owner/name")
++        owners.add(owner)
++        names.append(name)
++    if len(owners) > 1:
++        raise ValueError("the posting token covers one GitHub account")
++    return tuple(sorted(set(names)))
++
++
++def publisher_from_env(
++    env: Mapping[str, str],
++    allowlist: frozenset[str],
++    state_dir: Path,
++    *,
++    transport: Transport,
++    clock: Clock,
++) -> ReviewPoster:
++    """The poster for one installation. The private key and the minted
++    token stay in this process and are not given to the review child. The
++    scrubber removes both from the comment."""
++    app_id = _env(env, "ATLAS_GITHUB_APP_ID")
++    private_key = _pem(_env(env, "ATLAS_GITHUB_APP_PRIVATE_KEY"))
++    installation = _env(env, "ATLAS_GITHUB_INSTALLATION_ID")
++    if (
++        not installation.isascii()
++        or not installation.isdigit()
++        or int(installation) < 1
++    ):
++        raise ValueError("ATLAS_GITHUB_INSTALLATION_ID must be a positive integer")
++    slug = _env(env, "ATLAS_GITHUB_APP_SLUG")
++    if not slug.isascii() or not slug.replace("-", "").isalnum():
++        raise ValueError("ATLAS_GITHUB_APP_SLUG must be an App slug")
++    secret = env.get("ATLAS_GITHUB_WEBHOOK_SECRET", "")
++    known = [secret, private_key]
++    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
++        value = env.get(name, "")
++        if value:
++            known.append(value)
++    tokens = AppInstallationTokens(
++        transport,
++        clock,
++        app_id=app_id,
++        private_key=private_key,
++        installation_id=int(installation),
++        permissions=POST_PERMISSIONS,
++        writable=POST_WRITABLE,
++        repositories=_repository_names(allowlist),
++    )
++    redactor = Redactor(known_secrets=tuple(known), sources=(tokens.secrets,))
++    return ReviewPoster(
++        transport,
++        tokens,
++        PostLedger(state_dir / "posted.json"),
++        lambda text: redactor(text).text,
++        secrets=tokens.secrets,
++        bot_login=f"{slug}[bot]",
++    )
++
++
++def _env(env: Mapping[str, str], name: str) -> str:
++    value = env.get(name, "")
++    if not value:
++        raise ValueError(f"posting a review needs the {name} environment variable")
++    return value
++
++
++def _pem(raw: str) -> str:
++    return raw.replace("\\n", "\n") if "\n" not in raw else raw
+diff --git a/atlas_reviewer/service_queue.py b/atlas_reviewer/service_queue.py
+index 95d76e53..bdd87023 100644
+--- a/atlas_reviewer/service_queue.py
++++ b/atlas_reviewer/service_queue.py
+@@ -196,9 +196,10 @@ class Board:
+         if failed_job is not None:
+             self._jobs.remove(failed_job)
+         touched: list[tuple[Job, JobState, bool, bool]] = []
+-        # A queued job is stored SUPERSEDED here and never returns to the
+-        # worker, so the caller has to remove its run directory. A
+-        # running job is only flagged; the worker settles that one.
++        # A queued or pending job is stored SUPERSEDED here and never
++        # returns to the worker, so the caller has to remove its run
++        # directory. A running or posting job is only flagged; the
++        # worker settles that one.
+         settled: list[Job] = []
+         for job in self._jobs:
+             if job.event.repo != event.repo or job.event.pr_number != event.pr_number:
+@@ -208,11 +209,9 @@ class Board:
+             touched.append((job, job.state, job.superseded, job.cancel.is_set()))
+             job.superseded = True
+             job.cancel.set()
+-            if job.state is JobState.QUEUED:
++            if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
+                 settled.append(job)
+                 job.state = JobState.SUPERSEDED
+-            elif job.state is JobState.POST_PENDING:
+-                job.state = JobState.SUPERSEDED
+         self._jobs.append(Job(event, JobState.QUEUED))
+         self._heads[head_key] = (event.head_sha, at)
+         try:
+@@ -386,22 +385,29 @@ class Board:
+ 
+     def pause_post(self, job: Job) -> JobState | None:
+         """Stop landed after the post was claimed and before it was sent.
+-        The draft stays, and a later process can post it."""
++        Returns the state stored, or None when this job was not posting.
++        A pending job keeps its draft. A superseded job is stored as
++        superseded, and the caller removes its run directory. Leaving it
++        pending would hold an active slot that ``claim_post`` never takes."""
+         with self._cv:
+             if job.state is not JobState.POSTING:
+                 return None
++            target = JobState.SUPERSEDED if job.superseded else JobState.POST_PENDING
+             previous = job.state
+-            job.state = JobState.POST_PENDING
++            job.state = target
+             was_set = job.cancel.is_set()
+-            job.cancel.clear()
++            if target is JobState.POST_PENDING:
++                job.cancel.clear()
+             try:
+                 self._save()
+             except Exception:
+                 job.state = previous
+                 if was_set:
+                     job.cancel.set()
++                elif target is JobState.POST_PENDING:
++                    job.cancel.clear()
+                 raise
+-            return JobState.POST_PENDING
++            return target
+ 
+     def wake(self) -> None:
+         with self._cv:
+diff --git a/atlas_reviewer/tests/test_github_auth.py b/atlas_reviewer/tests/test_github_auth.py
+index 37876c57..87f3dce2 100644
+--- a/atlas_reviewer/tests/test_github_auth.py
++++ b/atlas_reviewer/tests/test_github_auth.py
+@@ -182,3 +182,38 @@ def test_minted_tokens_reach_the_redactor_as_they_are_minted():
+ 
+ def test_static_token_is_a_token_source():
+     assert StaticToken("abc").token() == "abc"
++
++
++def test_pull_request_write_is_minted_only_when_the_caller_accepts_it():
++    clock = FakeClock()
++    transport = Minter(clock, permissions={"pull_requests": "write"})
++    source = tokens(
++        transport,
++        clock,
++        permissions={"pull_requests": "write"},
++        writable=frozenset({"pull_requests"}),
++    )
++    assert source.token().startswith("ghs_")
++    assert transport.requests[0][3]["permissions"] == {"pull_requests": "write"}
++    with pytest.raises(ValueError, match="only read"):
++        tokens(
++            Minter(clock),
++            clock,
++            permissions={"pull_requests": "write"},
++        )
++    broader = Minter(clock, permissions={"pull_requests": "write", "contents": "write"})
++    with pytest.raises(BoundaryError, match="not read-only: contents"):
++        tokens(
++            broader,
++            clock,
++            permissions={"pull_requests": "write"},
++            writable=frozenset({"pull_requests"}),
++        ).token()
++    dropped = Minter(clock, permissions={"pull_requests": "read"})
++    with pytest.raises(BoundaryError, match="did not grant pull_requests=write"):
++        tokens(
++            dropped,
++            clock,
++            permissions={"pull_requests": "write"},
++            writable=frozenset({"pull_requests"}),
++        ).token()
+diff --git a/atlas_reviewer/tests/test_service_post.py b/atlas_reviewer/tests/test_service_post.py
+new file mode 100644
+index 00000000..0b28fa12
+--- /dev/null
++++ b/atlas_reviewer/tests/test_service_post.py
+@@ -0,0 +1,1027 @@
++# SPDX-License-Identifier: MIT
++"""COMMENT-only posting: a failure publishes nothing, and a retry does not
++post a second review."""
++
++import inspect
++import json
++import threading
++import time
++from pathlib import Path
++
++import pytest
++
++from atlas_reviewer.clock import SystemClock
++from atlas_reviewer.domain import PrEvent
++from atlas_reviewer.github_auth import (
++    POST_PERMISSIONS,
++    POST_WRITABLE,
++    AppInstallationTokens,
++)
++from atlas_reviewer.http import HttpResponse
++from atlas_reviewer.ports import BoundaryError
++from atlas_reviewer.service import (
++    PostAuthError,
++    PostNotCurrent,
++    PostRejected,
++    RateLimited,
++    ReviewServer,
++    Worker,
++    before_send,
++    config_from_env,
++    main,
++    serve,
++)
++from atlas_reviewer.service_post import (
++    PostLedger,
++    RefusedReviewEvent,
++    ReviewPoster,
++    _repository_names,
++    comment_only,
++    comment_payload,
++    marker_for,
++    post_key,
++    render_comment,
++)
++from atlas_reviewer.service_queue import Board, JobState
++from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir, summarize_draft
++from atlas_reviewer.telemetry import Telemetry
++
++SECRET = "webhook-secret-value"
++SHA = "d" * 40
++REPO = "brandondees/code-quality-atlas"
++EVENT = PrEvent(REPO, 7, SHA)
++REPORT = ReviewReport(
++    lenses_run=("tracing-correctness-and-invariants",),
++    lenses_not_run=("reviewing-concurrency-and-async: over the character budget",),
++    files_note="Diff coverage after the model calls: PARTIAL. 1 of 2 file(s) in full.",
++    files_not_read=("src/a.py",),
++    limit_stops=("pull request diff | too large for one review pass | kept 1",),
++    cost_lines=("reserved $1.00 actual $0.10",),
++    recommended_event="APPROVE",
++)
++
++
++class GitHub:
++    def __init__(self, *, post_status: int = 200) -> None:
++        self.post_status = post_status
++        self.calls: list[tuple[str, str, bytes | None]] = []
++        self.reviews: list[dict[str, object]] = []
++
++    def request(self, method, url, headers, body, timeout_s, max_bytes=None):
++        self.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, json.dumps(self.reviews).encode())
++        payload = json.loads(body)
++        if self.post_status != 200:
++            return HttpResponse(self.post_status, {}, b"")
++        self.reviews.append(
++            {
++                "id": 9,
++                "body": payload["body"],
++                "commit_id": payload["commit_id"],
++                "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
++            }
++        )
++        return HttpResponse(200, {}, b'{"id": 9}')
++
++
++class Tokens:
++    def token(self) -> str:
++        return "ghs_test"
++
++
++def _poster(
++    tmp_path: Path, github: GitHub | None = None
++) -> tuple[ReviewPoster, GitHub]:
++    github = github or GitHub()
++    poster = ReviewPoster(
++        github,
++        Tokens(),
++        PostLedger(tmp_path / "posted.json"),
++        lambda text: text,
++        bot_login="code-quality-atlas[bot]",
++    )
++    return poster, github
++
++
++def _posted_body(github: GitHub) -> dict[str, str]:
++    posts = [call for call in github.calls if call[0] == "POST"]
++    assert len(posts) == 1
++    payload = json.loads(posts[0][2] or b"")
++    assert isinstance(payload, dict)
++    return payload
++
++
++def test_approve_and_request_changes_cannot_be_sent(tmp_path):
++    poster, github = _poster(tmp_path)
++    assert "event" not in inspect.signature(comment_payload).parameters
++    for event in ("APPROVE", "REQUEST_CHANGES"):
++        with pytest.raises(RefusedReviewEvent):
++            comment_only(event)
++        with pytest.raises(RefusedReviewEvent):
++            poster._create(EVENT, {"commit_id": SHA, "body": "x", "event": event})
++    assert github.calls == []
++    payload = comment_payload(SHA, "hello")
++    assert payload["event"] == "COMMENT"
++    assert set(payload) == {"commit_id", "body", "event"}
++
++
++def test_a_finished_review_is_one_comment_with_the_banner_and_the_lists(tmp_path):
++    poster, github = _poster(tmp_path)
++    poster.post(EVENT, REPORT)
++    assert "per_page=100" in github.calls[0][1]
++    payload = _posted_body(github)
++    assert payload["event"] == "COMMENT"
++    assert payload["commit_id"] == SHA
++    body = payload["body"]
++    assert "Advisory only" in body
++    assert "not a substitute for the full Claude Code protocol review" in body
++    assert "The draft recommended `APPROVE`" in body
++    assert "That event was not sent" in body
++    for text in (
++        "tracing-correctness-and-invariants",
++        "reviewing-concurrency-and-async",
++        "PARTIAL",
++        "src/a.py",
++        "too large for one review pass",
++        "actual $0.10",
++        "## Lenses run",
++        "## Lenses not run",
++        "## Files read",
++        "## Limit stops",
++        "## Cost",
++    ):
++        assert text in body, text
++    assert marker_for(post_key(EVENT)) in body
++    poster.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls].count("POST") == 1
++
++
++def test_a_retry_finds_the_marker_when_the_local_record_was_lost(tmp_path):
++    github = GitHub()
++    first, _ = _poster(tmp_path, github)
++    first.post(EVENT, REPORT)
++    second = ReviewPoster(
++        github,
++        Tokens(),
++        PostLedger(tmp_path / "fresh.json"),
++        lambda text: text,
++        bot_login="code-quality-atlas[bot]",
++    )
++    before = len(github.calls)
++    second.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls[before:]] == ["GET"]
++    assert second._ledger.seen(post_key(EVENT)) == 9
++
++
++def test_a_failed_post_records_nothing(tmp_path):
++    poster, github = _poster(tmp_path, GitHub(post_status=500))
++    with pytest.raises(BoundaryError, match="HTTP 500"):
++        poster.post(EVENT, REPORT)
++    assert poster._ledger.seen(post_key(EVENT)) is None
++    assert github.reviews == []
++
++
++def test_a_failed_review_posts_nothing(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    poster, github = _poster(tmp_path)
++
++    def runner(event, cancel):
++        raise RuntimeError("runner blew up")
++
++    worker = Worker(
++        board,
++        runner,
++        Telemetry(SystemClock()),
++        poster.post,
++        state_root=tmp_path,
++    )
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    assert github.calls == []
++    assert board.states() == ((SHA, JobState.FAILED),)
++
++
++def test_a_post_failure_stays_unposted_until_a_later_try(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    github = GitHub(post_status=500)
++    poster, _ = _poster(tmp_path, github)
++    clock = {"t": 1_000.0}
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        poster.post,
++        state_root=tmp_path,
++        now=lambda: clock["t"],
++    )
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    assert board.states() == ((SHA, JobState.POST_PENDING),)
++    assert poster._ledger.seen(post_key(EVENT)) is None
++    github.post_status = 200
++    directory = run_dir(tmp_path, EVENT)
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text(
++        "<!-- atlas-review-status: "
++        '{"review_event": "COMMENT", "proposed_event": "COMMENT",'
++        ' "coverage_complete": true, "changed_files": 1, "unreviewed_files": 0} -->\n'
++        "\n## Model usage\n\n- actual $0.10\n",
++        encoding="utf-8",
++    )
++    clock["t"] += 10_000
++    worker._retry_post()
++    assert board.states() == ((SHA, JobState.DONE),)
++    posts = [call for call in github.calls if call[0] == "POST"]
++    assert json.loads(posts[-1][2] or b"")["event"] == "COMMENT"
++
++
++def test_a_human_review_with_the_marker_does_not_suppress_the_post(tmp_path):
++    github = GitHub()
++    github.reviews.append(
++        {
++            "id": 3,
++            "body": marker_for(post_key(EVENT)),
++            "commit_id": SHA,
++            "user": {"login": "brandondees", "type": "User"},
++        }
++    )
++    poster, _ = _poster(tmp_path, github)
++    poster.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls].count("POST") == 1
++    other = GitHub()
++    other.reviews.append(
++        {
++            "id": 4,
++            "body": marker_for(post_key(EVENT)),
++            "commit_id": "e" * 40,
++            "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
++        }
++    )
++    again, _ = _poster(tmp_path / "other", other)
++    again.post(EVENT, REPORT)
++    assert [call[0] for call in other.calls].count("POST") == 1
++
++
++def test_a_huge_comment_keeps_the_idempotency_marker():
++    report = ReviewReport(
++        tuple(f"item-{i:04d}" for i in range(6000)), (), "note", (), (), (), "COMMENT"
++    )
++    key = post_key(EVENT)
++    text = render_comment(report, key, lambda item: item)
++    assert text.endswith(marker_for(key))
++    assert "comment cut to fit the post limit" in text
++    assert len(text) <= 65_000
++
++
++def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):
++    secret = "super-secret-value"
++    report = ReviewReport(
++        (f"see {secret} <!-- hide -->",),
++        (),
++        "note",
++        (),
++        (),
++        (),
++        "COMMENT",
++    )
++    poster, github = _poster(tmp_path)
++    poster._scrub = lambda text: text.replace(secret, "[REDACTED]")
++    poster.post(EVENT, report)
++    body = _posted_body(github)["body"]
++    assert secret not in body
++    assert "<!-- hide" not in body
++    assert r"\u003c!-- hide" in body
++    assert "[REDACTED]" in body
++
++
++def test_an_off_api_link_is_refused_and_not_followed(tmp_path):
++    class OffApi(GitHub):
++        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
++            self.calls.append((method, url, body))
++            return HttpResponse(
++                200,
++                {"Link": '<https://evil.example/reviews>; rel="next"'},
++                b"[]",
++            )
++
++    poster, github = _poster(tmp_path, OffApi())
++    with pytest.raises(BoundaryError, match="off the API"):
++        poster.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls] == ["GET"]
++
++
++def test_a_rate_limit_is_not_retried_as_a_server_error(tmp_path):
++    github = GitHub(post_status=429)
++    github_headers = {"Retry-After": "12", "x-ratelimit-reset": "1"}
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(429, github_headers, b"")
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(RateLimited) as caught:
++        poster.post(EVENT, REPORT)
++    assert caught.value.retry_after == 12
++
++
++def test_a_403_with_a_reset_header_and_budget_left_is_auth(tmp_path):
++    github = GitHub()
++    reset = str(int(time.time()) + 30)
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(
++            403, {"x-ratelimit-reset": reset, "x-ratelimit-remaining": "12"}, b""
++        )
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(PostAuthError):
++        poster.post(EVENT, REPORT)
++
++
++def test_a_403_with_no_budget_left_waits_for_the_reset(tmp_path):
++    github = GitHub()
++    reset = str(int(time.time()) + 30)
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(
++            403, {"x-ratelimit-reset": reset, "x-ratelimit-remaining": "0"}, b""
++        )
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(RateLimited) as caught:
++        poster.post(EVENT, REPORT)
++    assert 0 < caught.value.retry_after <= 30
++
++
++def test_a_retry_after_above_15_minutes_is_capped_and_a_bare_403_is_auth(tmp_path):
++    github = GitHub()
++
++    def limited(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(429, {"Retry-After": "100000"}, b"")
++
++    github.request = limited
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(RateLimited) as caught:
++        poster.post(EVENT, REPORT)
++    assert caught.value.retry_after == 900
++
++    def bare(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(403, {}, b"")
++
++    github.request = bare
++    poster, _ = _poster(tmp_path / "bare", github)
++    with pytest.raises(PostAuthError):
++        poster.post(EVENT, REPORT)
++
++
++def test_a_secondary_limit_with_no_headers_waits_a_minute(tmp_path):
++    github = GitHub()
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(403, {}, b"You have exceeded a secondary rate limit")
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(RateLimited) as caught:
++        poster.post(EVENT, REPORT)
++    assert caught.value.retry_after == 60
++
++
++def test_a_422_is_not_retried(tmp_path):
++    github = GitHub()
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(422, {}, b"")
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(PostRejected):
++        poster.post(EVENT, REPORT)
++
++
++def test_a_refused_token_mint_is_an_auth_failure(tmp_path):
++    class Refused:
++        def token(self) -> str:
++            raise BoundaryError(
++                "GitHub App token mint: HTTP 401 for https://api.github.com/x"
++            )
++
++    github = GitHub()
++    poster = ReviewPoster(
++        github, Refused(), PostLedger(tmp_path / "posted.json"), lambda text: text
++    )
++    with pytest.raises(PostAuthError):
++        poster.post(EVENT, REPORT)
++    assert github.calls == []
++
++
++def test_an_auth_refusal_is_not_a_retryable_post_error(tmp_path):
++    github = GitHub(post_status=401)
++
++    def request(method, url, headers, body, timeout_s, max_bytes=None):
++        github.calls.append((method, url, body))
++        if method == "GET":
++            return HttpResponse(200, {}, b"[]")
++        return HttpResponse(401, {}, b"")
++
++    github.request = request
++    poster, _ = _poster(tmp_path, github)
++    with pytest.raises(PostAuthError):
++        poster.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls] == ["GET", "POST"]
++
++
++def test_a_moved_head_is_not_created(tmp_path):
++    poster, github = _poster(tmp_path)
++    token = before_send.set(lambda: False)
++    try:
++        with pytest.raises(PostNotCurrent):
++            poster.post(EVENT, REPORT)
++    finally:
++        before_send.reset(token)
++    assert [call[0] for call in github.calls] == ["GET"]
++
++
++def test_a_post_attempt_stops_at_its_deadline(tmp_path):
++    ticks = {"n": 0}
++
++    def now() -> float:
++        ticks["n"] += 1
++        return 0.0 if ticks["n"] == 1 else 100.0
++
++    github = GitHub()
++    poster = ReviewPoster(
++        github,
++        Tokens(),
++        PostLedger(tmp_path / "posted.json"),
++        lambda text: text,
++        now=now,
++    )
++    with pytest.raises(BoundaryError, match="deadline"):
++        poster.post(EVENT, REPORT)
++    assert github.calls == []
++
++
++def test_another_apps_bot_does_not_suppress_the_post(tmp_path):
++    github = GitHub()
++    github.reviews.append(
++        {
++            "id": 4,
++            "body": marker_for(post_key(EVENT)),
++            "commit_id": SHA,
++            "user": {"login": "evil-app[bot]", "type": "Bot"},
++        }
++    )
++    poster, _ = _poster(tmp_path, github)
++    poster.post(EVENT, REPORT)
++    assert [call[0] for call in github.calls].count("POST") == 1
++
++
++def test_sprites_and_openrouter_secrets_do_not_reach_the_comment(tmp_path):
++    sprite = "org/1/sprites-secret-value"
++    model = "sk-or-v1-secret-value"
++    report = ReviewReport(
++        (f"see {sprite} and {model}",), (), "note", (), (), (), "COMMENT"
++    )
++    poster, github = _poster(tmp_path)
++    poster._scrub = lambda text: text.replace(sprite, "[REDACTED]").replace(
++        model, "[REDACTED]"
++    )
++    poster.post(EVENT, report)
++    body = _posted_body(github)["body"]
++    assert sprite not in body
++    assert model not in body
++
++
++def test_a_minted_token_in_the_report_does_not_reach_the_comment(tmp_path, monkeypatch):
++    minted = "ghs_minted_value"
++
++    class Minted:
++        def __init__(self, *args, **kwargs):
++            self._values: list[str] = []
++
++        def token(self) -> str:
++            self._values.append(minted)
++            return minted
++
++        def secrets(self) -> tuple[str, ...]:
++            return tuple(self._values)
++
++        def limit_timeout(self, seconds: float) -> None:
++            return None
++
++    monkeypatch.setattr("atlas_reviewer.service_post.AppInstallationTokens", Minted)
++    from atlas_reviewer.clock import SystemClock
++    from atlas_reviewer.service_post import publisher_from_env
++
++    github = GitHub()
++    poster = publisher_from_env(
++        {
++            "ATLAS_GITHUB_APP_ID": "5648875",
++            "ATLAS_GITHUB_APP_PRIVATE_KEY": "pem-secret-value",
++            "ATLAS_GITHUB_INSTALLATION_ID": "1",
++            "ATLAS_GITHUB_APP_SLUG": "code-quality-atlas",
++            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++            "ATLAS_SPRITES_TOKEN": "org/1/sprites-secret-value",
++            "ATLAS_OPENROUTER_API_KEY": "sk-or-v1-secret-value",
++        },
++        frozenset({REPO}),
++        tmp_path,
++        transport=github,
++        clock=SystemClock(),
++    )
++    report = ReviewReport(
++        (f"leaked {minted} org/1/sprites-secret-value sk-or-v1-secret-value",),
++        (),
++        "note",
++        (),
++        (),
++        (),
++        "COMMENT",
++    )
++    poster.post(EVENT, report)
++    body = _posted_body(github)["body"]
++    assert minted not in body
++    assert "sprites-secret-value" not in body
++    assert "sk-or-v1-secret-value" not in body
++
++
++def test_the_deadline_includes_the_token_mint(tmp_path):
++    clock = {"t": 0.0}
++    seen: list[float] = []
++
++    class Mint:
++        def token(self) -> str:
++            clock["t"] = 100.0
++            return "ghs_test"
++
++        def limit_timeout(self, seconds: float) -> None:
++            seen.append(seconds)
++
++    github = GitHub()
++    poster = ReviewPoster(
++        github,
++        Mint(),
++        PostLedger(tmp_path / "posted.json"),
++        lambda text: text,
++        now=lambda: clock["t"],
++        bot_login="code-quality-atlas[bot]",
++    )
++    with pytest.raises(BoundaryError, match="deadline"):
++        poster.post(EVENT, REPORT)
++    assert github.calls == []
++    assert seen and seen[0] <= 45
++
++
++def test_a_corrupt_post_ledger_exits_2(tmp_path, capsys):
++    (tmp_path / "posted.json").write_text("{", encoding="utf-8")
++    code = main(
++        env={
++            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++            "ATLAS_SERVICE_PROVIDER": "offline",
++            "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
++            "ATLAS_GITHUB_APP_ID": "5648875",
++            "ATLAS_GITHUB_APP_PRIVATE_KEY": "pem-secret-value",
++            "ATLAS_GITHUB_INSTALLATION_ID": "1",
++            "ATLAS_GITHUB_APP_SLUG": "code-quality-atlas",
++        }
++    )
++    assert code == 2
++    assert "post ledger" in capsys.readouterr().err
++
++
++def test_stop_does_not_send_a_deferred_post(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    posted: list[str] = []
++    in_post = threading.Event()
++    release = threading.Event()
++    other = "e" * 40
++
++    def publish(event, report):
++        posted.append(event.head_sha)
++        if event.head_sha == SHA:
++            in_post.set()
++            release.wait(2)
++
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        publish,
++        state_root=tmp_path,
++    )
++    board.enqueue(EVENT)
++    board.enqueue(PrEvent(REPO, 8, other))
++    worker.start()
++    assert in_post.wait(2)
++    for job in board._jobs:
++        if job.event.head_sha == other:
++            job.state = JobState.POST_PENDING
++            job.retry_at = 0
++    from atlas_reviewer.service_run import run_dir
++
++    draft = run_dir(tmp_path, PrEvent(REPO, 8, other))
++    draft.mkdir(parents=True)
++    (draft / "draft.md").write_text("a deferred review\n", encoding="utf-8")
++
++    def release_after_stop_begins():
++        assert worker._stop.wait(2)
++        release.set()
++
++    helper = threading.Thread(target=release_after_stop_begins)
++    helper.start()
++    worker.stop(timeout=2)
++    helper.join(timeout=2)
++    assert posted == [SHA]
++    assert other not in posted
++
++
++def test_stop_after_the_post_is_claimed_does_not_send(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    posted: list[str] = []
++
++    def publish(event, report):
++        posted.append(event.head_sha)
++
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        publish,
++        state_root=tmp_path,
++    )
++    real = board.begin_post
++
++    def begin_post(job):
++        ok = real(job)
++        worker._stop.set()
++        job.cancel.set()
++        return ok
++
++    board.begin_post = begin_post
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    assert posted == []
++    assert board.states() == ((SHA, JobState.POST_PENDING),)
++
++
++def test_limit_timeout_stays_on_the_calling_thread():
++    seen: dict[str, float] = {}
++
++    class Transport:
++        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
++            seen["timeout"] = timeout_s
++            payload = {
++                "token": "ghs_minted_value",
++                "expires_at": "2099-01-01T00:00:00Z",
++                "permissions": {"pull_requests": "write"},
++            }
++            return HttpResponse(201, {}, json.dumps(payload).encode())
++
++    tokens = AppInstallationTokens(
++        Transport(),
++        SystemClock(),
++        app_id="5648875",
++        private_key="not-used",
++        installation_id=1,
++        permissions=POST_PERMISSIONS,
++        writable=POST_WRITABLE,
++        encode=lambda claims, key: "jwt",
++    )
++    tokens.limit_timeout(7.5)
++
++    def other() -> None:
++        tokens.limit_timeout(1.0)
++
++    thread = threading.Thread(target=other)
++    thread.start()
++    thread.join()
++    assert tokens.token() == "ghs_minted_value"
++    assert seen["timeout"] == 7.5
++    tokens._cached = None
++    assert tokens.token() == "ghs_minted_value"
++    assert seen["timeout"] == 30.0
++
++
++def test_one_workers_deadline_does_not_clear_anothers(tmp_path):
++    poster, _github = _poster(tmp_path)
++    blocked = threading.Event()
++    release = threading.Event()
++    gate = threading.Lock()
++    seen: dict[str, float | None] = {}
++
++    class Transport:
++        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
++            if method == "GET":
++                return HttpResponse(200, {}, b"[]")
++            with gate:
++                first = "first" not in seen
++                if first:
++                    seen["first"] = 1.0
++            if first:
++                blocked.set()
++                assert release.wait(2)
++                seen["remaining"] = poster._remaining()
++            review_id = 1 if first else 2
++            return HttpResponse(201, {}, json.dumps({"id": review_id}).encode())
++
++    poster._transport = Transport()
++    other = PrEvent(REPO, 8, "e" * 40)
++    first = threading.Thread(target=lambda: poster.post(EVENT, REPORT))
++    second = threading.Thread(target=lambda: poster.post(other, REPORT))
++    first.start()
++    assert blocked.wait(2)
++    second.start()
++    second.join(2)
++    release.set()
++    first.join(2)
++    assert seen["remaining"] is not None
++    assert seen["remaining"] > 0
++
++
++def test_a_hostile_narrative_is_not_posted():
++    secret = "sprt_secret_shaped_value"
++    mention = "@everyone"
++    image = "https://evil.example/tracker.png"
++    draft = f"""\
++## Review lenses
++
++| Lens | Status | Characters | Chosen as | Why not run |
++| --- | --- | --- | --- | --- |
++| tracing-correctness-and-invariants | run whole | 10 | critical |  |
++
++## Review narrative
++
++{secret} {mention} ![]({image})
++"""
++    body = render_comment(summarize_draft(draft), post_key(EVENT), lambda text: text)
++    payload = comment_payload(SHA, body)
++    assert secret not in body
++    assert mention not in body
++    assert image not in body
++    assert payload["event"] == "COMMENT"
++
++
++def test_claim_post_refuses_a_stopped_worker(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    board.enqueue(EVENT)
++    job = board.claim()
++    assert job is not None
++    board.finish(job, JobState.POST_PENDING)
++    job.retry_at = 0
++    stop = threading.Event()
++    stop.set()
++    assert board.claim_post(time.time(), stop=stop) is None
++    assert board.states() == ((SHA, JobState.POST_PENDING),)
++
++
++def test_the_loop_does_not_retry_a_post_after_stop(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        lambda event, report: None,
++        state_root=tmp_path,
++    )
++    calls: list[str] = []
++
++    def run_one() -> bool:
++        worker._stop.set()
++        return False
++
++    def retry_post() -> None:
++        calls.append("retry")
++
++    worker.run_one = run_one  # type: ignore[method-assign]
++    worker._retry_post = retry_post  # type: ignore[method-assign]
++    worker._loop()
++    assert calls == []
++
++
++def test_retry_post_does_not_claim_after_stop(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    board.enqueue(EVENT)
++    job = board.claim()
++    assert job is not None
++    board.finish(job, JobState.POST_PENDING)
++    job.retry_at = 0
++    claimed: list[str] = []
++
++    def claim_post(*_args, **_kwargs):
++        claimed.append("claim")
++
++    board.claim_post = claim_post  # type: ignore[method-assign]
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        lambda event, report: None,
++        state_root=tmp_path,
++    )
++    worker._stop.set()
++    worker._retry_post()
++    assert claimed == []
++
++
++def test_a_rejected_post_fails_without_a_retry(tmp_path):
++    board = Board(tmp_path / "queue.json")
++    calls: list[int] = []
++
++    def publish(event, report):
++        calls.append(1)
++        raise PostRejected("HTTP 422")
++
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        publish,
++        state_root=tmp_path,
++    )
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    worker._retry_post()
++    assert calls == [1]
++    assert board.states() == ((SHA, JobState.FAILED),)
++    refused = [event for event in worker._telemetry.events if "422" in event.error]
++    assert refused
++    assert refused[0].error.startswith("post rejected:")
++    assert "post auth refused" not in refused[0].error
++
++
++def test_the_service_log_scrubs_the_sprites_and_openrouter_secrets(
++    tmp_path, monkeypatch
++):
++    captured: dict[str, object] = {}
++
++    def fake_init(self, config, board, log):
++        self.config = config
++        self.board = board
++        self.log = log
++        self.worker = None
++
++    monkeypatch.setattr(ReviewServer, "__init__", fake_init)
++    monkeypatch.setattr(ReviewServer, "serve_forever", lambda self: None)
++    monkeypatch.setattr(ReviewServer, "server_close", lambda self: None)
++    monkeypatch.setattr(Worker, "start", lambda self: None)
++    monkeypatch.setattr(Worker, "stop", lambda self, timeout=30: None)
++    real = Telemetry
++
++    def capture(clock, sink=None, scrub=None, max_kept=500):
++        captured["scrub"] = scrub
++        return real(clock, sink=sink, scrub=scrub, max_kept=max_kept)
++
++    monkeypatch.setattr("atlas_reviewer.service.Telemetry", capture)
++    sprite = "org/1/sprites-secret-value"
++    model = "sk-or-v1-secret-value"
++    env = {
++        "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++        "ATLAS_SERVICE_PROVIDER": "offline",
++        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
++        "ATLAS_SPRITES_TOKEN": sprite,
++        "ATLAS_OPENROUTER_API_KEY": model,
++    }
++    assert serve(config_from_env(env), env) == 0
++    scrub = captured["scrub"]
++    assert callable(scrub)
++    text = scrub(f"see {sprite} and {model}")
++    assert sprite not in text
++    assert model not in text
++
++
++def _minting_poster(tmp_path: Path, status: int, body: bytes) -> ReviewPoster:
++    class Transport:
++        def request(self, method, url, headers, body_bytes, timeout_s, max_bytes=None):
++            if str(url).endswith("/access_tokens"):
++                return HttpResponse(status, {}, body)
++            return HttpResponse(200, {}, b"[]")
++
++    tokens = AppInstallationTokens(
++        Transport(),
++        SystemClock(),
++        app_id="5648875",
++        private_key="not-used",
++        installation_id=1,
++        permissions=POST_PERMISSIONS,
++        writable=POST_WRITABLE,
++        encode=lambda claims, key: "jwt",
++    )
++    return ReviewPoster(
++        Transport(),
++        tokens,
++        PostLedger(tmp_path / "posted.json"),
++        lambda text: text,
++        bot_login="code-quality-atlas[bot]",
++    )
++
++
++def test_a_mint_secondary_limit_is_retried(tmp_path):
++    poster = _minting_poster(
++        tmp_path, 403, b'{"message":"You have exceeded a secondary rate limit."}'
++    )
++    board = Board(tmp_path / "queue.json")
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        poster.post,
++        state_root=tmp_path,
++    )
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    assert board.states() == ((SHA, JobState.POST_PENDING),)
++
++
++def test_a_mint_401_is_not_retried(tmp_path):
++    poster = _minting_poster(tmp_path, 401, b"")
++    board = Board(tmp_path / "queue.json")
++    worker = Worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        Telemetry(SystemClock()),
++        poster.post,
++        state_root=tmp_path,
++    )
++    board.enqueue(EVENT)
++    assert worker.run_one() is True
++    assert board.states() == ((SHA, JobState.FAILED),)
++
++
++def test_an_allowlist_entry_without_an_owner_is_refused():
++    with pytest.raises(ValueError, match="owner/name"):
++        _repository_names(frozenset({"noslash"}))
++
++
++def test_the_posting_token_covers_one_account():
++    with pytest.raises(ValueError, match="one GitHub account"):
++        _repository_names(frozenset({"alice/shared", "bob/shared"}))
++    assert _repository_names(frozenset({"alice/shared", "alice/other"})) == (
++        "other",
++        "shared",
++    )
++
++
++def test_limit_timeout_is_the_mint_socket_timeout():
++    seen: dict[str, float] = {}
++
++    class Transport:
++        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
++            seen["timeout"] = timeout_s
++            payload = {
++                "token": "ghs_minted_value",
++                "expires_at": "2099-01-01T00:00:00Z",
++                "permissions": {"pull_requests": "write"},
++            }
++            return HttpResponse(201, {}, json.dumps(payload).encode())
++
++    tokens = AppInstallationTokens(
++        Transport(),
++        SystemClock(),
++        app_id="5648875",
++        private_key="not-used",
++        installation_id=1,
++        permissions=POST_PERMISSIONS,
++        writable=POST_WRITABLE,
++        encode=lambda claims, key: "jwt",
++        timeout_s=30.0,
++    )
++    tokens.limit_timeout(7.5)
++    assert tokens.token() == "ghs_minted_value"
++    assert seen["timeout"] == 7.5
++
++
++def test_main_does_not_listen_without_a_posting_token(tmp_path, capsys):
++    code = main(
++        env={
++            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++            "ATLAS_SERVICE_PROVIDER": "offline",
++            "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
++        }
++    )
++    assert code == 2
++    assert "ATLAS_GITHUB_APP_ID" in capsys.readouterr().err
+diff --git a/atlas_reviewer/tests/test_service_receive.py b/atlas_reviewer/tests/test_service_receive.py
+index 7b746887..db9ff435 100644
+--- a/atlas_reviewer/tests/test_service_receive.py
++++ b/atlas_reviewer/tests/test_service_receive.py
+@@ -536,20 +536,57 @@ def test_a_finished_review_removes_its_run_directory_and_is_logged(tmp_path):
+ 
+ def test_a_post_that_finds_the_head_moved_is_not_retried(tmp_path):
+     board = Board(tmp_path / "queue.json")
++    event = PrEvent(REPO, 7, SHA_A)
++    directory = run_dir(tmp_path, event)
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+     calls = []
+ 
+-    def publish(event, report):
+-        calls.append(event.head_sha)
++    def publish(reviewed, report):
++        calls.append(reviewed.head_sha)
++        for job in board._jobs:
++            if job.event.head_sha == reviewed.head_sha:
++                job.superseded = True
+         raise PostNotCurrent("moved")
+ 
+     worker = _worker(
+         board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+     )
+-    board.enqueue(PrEvent(REPO, 7, SHA_A))
++    board.enqueue(event)
+     assert worker.run_one() is True
+     worker._retry_post()
+     assert calls == [SHA_A]
+     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
++    assert not directory.exists()
++
++
++def test_a_stop_during_the_post_keeps_the_draft(tmp_path):
++    """A stop while the poster is listing is not a moved head.
++
++    The draft stays, and the job goes back to pending so a restart can
++    post it. A supersede in the same window still removes the directory.
++    """
++    board = Board(tmp_path / "queue.json")
++    event = PrEvent(REPO, 7, SHA_A)
++    directory = run_dir(tmp_path, event)
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
++    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
++
++    def publish(_event, _report):
++        for job in board._jobs:
++            if job.event.head_sha == SHA_A:
++                job.cancel.set()
++        raise PostNotCurrent("stopped")
++
++    worker = _worker(
++        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
++    )
++    board.enqueue(event)
++    assert worker.run_one() is True
++    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
++    assert (directory / "draft.md").is_file()
++    assert (directory / "stderr.txt").is_file()
+ 
+ 
+ def test_the_send_rechecks_the_head_before_it_leaves(tmp_path):
+@@ -752,6 +789,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
+         config_from_env(
+             {
+                 "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++                "ATLAS_SERVICE_PROVIDER": "offline",
+                 "ATLAS_SERVICE_PORT": "8081",
+                 "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+             }
+@@ -759,6 +797,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
+     config = config_from_env(
+         {
+             "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
++            "ATLAS_SERVICE_PROVIDER": "offline",
+             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+         }
+     )
+@@ -1372,6 +1411,25 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
+         return 0
+ 
+     monkeypatch.setattr(service_mod, "serve", serve)
++    # On the posting branch, main mints a publisher before serve. That
++    # construction needs App env this test does not set, and it is not
++    # what the assertion checks.
++    try:
++        import atlas_reviewer.service_post as post_mod
++    except ImportError:
++        post_mod = None
++    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
++
++        class _Poster:
++            def post(self, event, report):
++                return None
++
++            def credential_secrets(self):
++                return ("minted-app-credential",)
++
++        monkeypatch.setattr(
++            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
++        )
+     sprite = "sprite-token-value"
+     env = {
+         "ATLAS_GITHUB_WEBHOOK_SECRET": "webhook-secret-value",
+@@ -1383,9 +1441,10 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
+     sources = seen["sources"]
+     assert isinstance(sources, tuple) and sources
+     scrubbed = Redactor(known_secrets=("webhook-secret-value",), sources=sources)(
+-        f"stderr saw {sprite}"
++        f"stderr saw {sprite} and minted-app-credential"
+     )
+     assert sprite not in scrubbed.text
++    assert "minted-app-credential" not in scrubbed.text
+ 
+ 
+ def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
+@@ -1481,6 +1540,70 @@ def test_a_newer_head_removes_a_queued_run_directory(tmp_path):
+     )
+ 
+ 
++def test_a_newer_head_removes_a_pending_post_directory(tmp_path):
++    """A post waiting to retry is stored SUPERSEDED inside enqueue.
++
++    The draft and the child's stderr are on disk, and this job does not
++    go back through the worker.
++    """
++    board = Board(tmp_path / "queue.json")
++    event = PrEvent(REPO, 7, SHA_A)
++    directory = run_dir(tmp_path, event)
++    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
++    job = board.claim()
++    assert job is not None
++    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
++    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
++    worker = _worker(
++        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
++    )
++    delivered = _deliver(
++        _config(tmp_path),
++        board,
++        _body(sha=SHA_B, updated_at="2026-11-12T21:00:00Z"),
++        worker=worker,
++    )
++    assert delivered.status == 202
++    assert job.state is JobState.SUPERSEDED
++    assert not directory.exists()
++    assert any(
++        record.step == "review superseded" for record in worker._telemetry.events
++    )
++
++
++def test_a_bad_status_line_removes_the_run_directory(tmp_path):
++    """``parse_status`` raises on a status wrapper that is not JSON.
++
++    ``_publish_saved`` does not catch that, so ``_fail_closed`` has to
++    settle the job and remove the directory.
++    """
++    from atlas_reviewer.verdict import STATUS_PREFIX
++
++    board = Board(tmp_path / "queue.json")
++    event = PrEvent(REPO, 7, SHA_A)
++    directory = run_dir(tmp_path, event)
++    board.enqueue(event)
++    job = board.claim()
++    assert job is not None
++    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text(
++        f"{STATUS_PREFIX}not-json -->\n", encoding="utf-8"
++    )
++    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
++    worker = _worker(
++        board,
++        lambda event, cancel: ReviewRun(True, REPORT),
++        publisher=lambda event, report: None,
++        root=tmp_path,
++    )
++    worker._retry_post()
++    assert job.state is JobState.FAILED
++    assert not directory.exists()
++
++
+ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
+     """A no-publisher finish that stores SUPERSEDED drops the directory.
+ 
+@@ -1512,6 +1635,118 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
+     assert not directory.exists()
+ 
+ 
++def test_a_supersede_that_wins_the_pause_race_is_not_left_pending(tmp_path):
++    """The worker reads ``superseded`` outside the lock, then parks the post.
++
++    A newer head can set the flag in that window. ``pause_post`` has to
++    store SUPERSEDED under the lock, or the job stays pending and holds
++    an active slot ``claim_post`` will not take.
++    """
++    board = Board(tmp_path / "queue.json")
++    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
++    job = board.claim()
++    assert job is not None
++    assert board.begin_post(job) is True
++    saw_clear = threading.Event()
++    landed = threading.Event()
++
++    def worker() -> None:
++        superseded = job.superseded
++        saw_clear.set()
++        assert landed.wait(2)
++        if superseded:
++            board.finish(job, JobState.SUPERSEDED)
++            return
++        board.pause_post(job)
++
++    thread = threading.Thread(target=worker)
++    thread.start()
++    assert saw_clear.wait(2)
++    assert (
++        board.enqueue(
++            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
++        )
++        is Enqueue.QUEUED
++    )
++    assert job.superseded and job.state is JobState.POSTING
++    landed.set()
++    thread.join(2)
++    assert not thread.is_alive()
++    assert job.state is JobState.SUPERSEDED
++    loaded = Board(tmp_path / "queue.json")
++    assert (SHA_A, JobState.SUPERSEDED) in loaded.states()
++
++
++def test_a_supersede_during_pause_removes_the_run_directory(tmp_path, monkeypatch):
++    """The worker reads ``superseded`` before ``pause_post``.
++
++    A newer head in that window makes the Board store SUPERSEDED. The
++    run directory has to be removed, and the supersede has to be logged.
++    """
++    board = Board(tmp_path / "queue.json")
++    event = PrEvent(REPO, 7, SHA_A)
++    directory = run_dir(tmp_path, event)
++    directory.mkdir(parents=True)
++    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
++    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
++    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
++    job = board.claim()
++    assert job is not None
++    assert board.begin_post(job) is True
++    job.cancel.set()
++    worker = _worker(
++        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
++    )
++    real = board.pause_post
++
++    def pause(claimed):
++        assert (
++            board.enqueue(
++                PrEvent(REPO, 7, SHA_B),
++                at=datetime(2026, 11, 12, 21, tzinfo=UTC),
++            )
++            is Enqueue.QUEUED
++        )
++        return real(claimed)
++
++    monkeypatch.setattr(board, "pause_post", pause)
++    worker._stopped_or_superseded(job, {"pr": 7, "sha12": SHA_A[:12], "repo": REPO})
++    assert job.state is JobState.SUPERSEDED
++    assert not directory.exists()
++    assert any(
++        record.step == "review superseded" for record in worker._telemetry.events
++    )
++
++
++def test_a_failed_pause_save_restores_a_superseded_post(tmp_path, monkeypatch):
++    import atlas_reviewer.service_queue as queue_mod
++
++    board = Board(tmp_path / "queue.json")
++    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
++    job = board.claim()
++    assert job is not None
++    assert board.begin_post(job) is True
++    job.cancel.set()
++    assert (
++        board.enqueue(
++            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
++        )
++        is Enqueue.QUEUED
++    )
++    assert job.state is JobState.POSTING
++    assert job.superseded and job.cancel.is_set()
++
++    def boom(*_args, **_kwargs):
++        raise OSError("disk")
++
++    monkeypatch.setattr(queue_mod, "_store", boom)
++    with pytest.raises(OSError, match="disk"):
++        board.pause_post(job)
++    assert job.state is JobState.POSTING
++    assert job.superseded
++    assert job.cancel.is_set()
++
++
+ def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
+     board = Board(tmp_path / "queue.json")
+     moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+@@ -1537,7 +1772,25 @@ def test_a_superseded_running_job_reloads_as_superseded(tmp_path):
+     assert loaded.states() == ((SHA_A, JobState.SUPERSEDED),)
+ 
+ 
+-def test_a_corrupt_queue_exits_2(tmp_path, capsys):
++def test_a_corrupt_queue_exits_2(tmp_path, capsys, monkeypatch):
++    # Posting builds a publisher before it opens the queue. Stub that so
++    # this test reaches the corrupt file.
++    try:
++        import atlas_reviewer.service_post as post_mod
++    except ImportError:
++        post_mod = None
++    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
++
++        class _Poster:
++            def post(self, event, report):
++                return None
++
++            def credential_secrets(self):
++                return ()
++
++        monkeypatch.setattr(
++            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
++        )
+     (tmp_path / "queue.json").write_text("{", encoding="utf-8")
+     code = main(
+         env={
+@@ -1765,6 +2018,65 @@ def test_a_trickled_body_is_refused_on_the_socket(tmp_path, monkeypatch):
+         server.server_close()
+ 
+ 
++def test_the_module_entry_shares_the_poster_hook():
++    """``python -m atlas_reviewer.service`` must use one module object.
++
++    The worker sets ``before_send`` and catches the poster's exceptions.
++    A second import of this file leaves the poster's hook unset and its
++    exception classes unmatched.
++    """
++    root = Path(__file__).resolve().parents[2]
++    script = """
++import sys
++from runpy import _run_module_as_main
++
++import atlas_reviewer.service as canonical
++
++def wrapped():
++    import atlas_reviewer.service_post as poster
++    token = canonical.before_send.set(lambda: False)
++    try:
++        hook = poster.before_send.get()
++        fired = hook is not None and hook() is False
++        same = (
++            poster.before_send is canonical.before_send
++            and poster.PostNotCurrent is canonical.PostNotCurrent
++            and poster.PostAuthError is canonical.PostAuthError
++            and poster.PostRejected is canonical.PostRejected
++            and poster.RateLimited is canonical.RateLimited
++        )
++    finally:
++        canonical.before_send.reset(token)
++    print(f"fired={fired} same={same}")
++    return 0 if fired and same else 1
++
++canonical.main = wrapped
++
++def capture(code=0):
++    raise SystemExit(code)
++
++sys.exit = capture
++try:
++    _run_module_as_main("atlas_reviewer.service")
++except SystemExit as exc:
++    raise SystemExit(exc.code)
++"""
++    env = {
++        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
++    }
++    env["PYTHONPATH"] = str(root)
++    proc = subprocess.run(
++        [sys.executable, "-c", script],
++        cwd=root,
++        env=env,
++        capture_output=True,
++        text=True,
++        check=False,
++    )
++    assert proc.returncode == 0, proc.stdout + proc.stderr
++    assert "fired=True same=True" in proc.stdout
++
++
+ def test_the_module_refuses_to_start_without_a_secret():
+     env = {
+         key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+@@ -1794,6 +2106,7 @@ def test_config_rejects_a_short_secret_and_reads_the_allowlist(tmp_path):
+             "ATLAS_REVIEW_REPOS": f"{REPO}, {OTHER}",
+             "ATLAS_REVIEW_CONCURRENCY": "2",
+             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
++            "ATLAS_SERVICE_PROVIDER": "offline",
+         }
+     )
+     assert config.allowlist == frozenset({REPO, OTHER})
+diff --git a/docs/open-questions.md b/docs/open-questions.md
+index 569cc4fb..bb62034f 100644
+--- a/docs/open-questions.md
++++ b/docs/open-questions.md
+@@ -59,6 +59,7 @@
+ 
+ - **D43 — The per-review reservation stays $5, and the byte-bound worst-case check stays (2026-11-12).** *(user, 2026-11-12, 11:54 AM CT)* Cross-ref D41 and D42. The figures come from two live agentic reviews on 2026-11-12 (lens `hunting-silent-failures`), which are not the D41 probe (PR #623 at `7f955e4`, $0.90 of caps): PR #621 at `35c655c` (base `27084e9`, $0.45 reservation, 24 calls, 24 turns; `CallLimits` output 4,000, reasoning 1,500) and PR #631 at `5a691ff` (base `ece6e34`, $1.25 reservation). Their transcripts are not in this repo, so the figures rest on the owner's reports of them. With prompt caching warm, the per-turn worst-case reservation ran about 5–44× the settled cost (#621 5–34×, #631 5–44×). `budget.input_token_bound` counts one token per UTF-8 byte plus 64, and `worst_case_usd` prices that bound at `max(prompt, cache_write)` plus the full output cap and the reasoning budget. On #621, turn 9 was refused because $0.113 committed plus a $0.367 worst case passed the $0.45 reservation. The #631 read that #621 projected at about $0.8–1.0 reserved for about $0.2 was then run: 14 of 14 files, APPROVE, $0.2603556 settled, $0.929 peak held of $1.25. **Decision:** keep that strict check unchanged and give the review a bigger per-review reservation, not a cached-prefix estimate and not lower per-call output or reasoning ceilings. **Why:** the safety guarantee stays provable, with no estimate that could undercount a turn the cache misses; and lower per-call output or reasoning ceilings are not a hard bound (#631's reasoning reached 2,270 tokens against a 1,500 request limit). **Cost:** reservations sit at about 5–44× actual, so that headroom must be provisioned. The key's hard-limit preflight (at most $5, credit remaining at the start) and OpenRouter's own limit bound what a review can spend; only the one-shot path also checks each call against the key's remaining credit. A request on the one-shot path is capped at 200,000 prompt-bound tokens (`CallLimits.max_input_tokens`), where one call's worst case is about $0.84. On the #631 slope that 200,000 cap, which then ended the review as `MODEL_ERROR` and incomplete (it cannot approve), was reached at about a 135 KB diff read in full, well before $5 binds. That 200,000 figure is the one-shot cap. The agentic use of it is superseded by the Update below. `DEFAULT_RESERVATION_USD` in `atlas_reviewer/lens_loop.py` is already $5 and stays the per-review reservation. Preflight still requires a hard limit of at most $5 with credit remaining, and the one-shot path refuses a call whose worst case would take committed dollars over that credit (`ReviewBudget.reserve`, `ceiling_usd`). The agentic loop's per-call check is `Spend.reserve` against the $5 reservation. **Revisit when** a live review is stopped by the input cap (`INPUT_CAP` or `CONTEXT`) or ends on the reservation (`Cause.BUDGET`) while its settled spend is well under $5, or when a pool size above 1 is considered, since the plan says the pool serialises below about $5. No code change in this decision. **Update (2026-11-12):** The $5 reservation and the one-token-per-byte bound stay. `worst_case_usd` now prices the whole output cap at the completion rate plus the reasoning rate, so reported reasoning above the hint still fits the reservation. The agentic per-call input cap is the model's context minus the output reserve; hitting it is `INPUT_CAP` or `CONTEXT`, not `MODEL_ERROR`. The one-shot path keeps the 200,000 input cap.
+ - **D48 — A webhook receiver queues reviews for this repository and publishes nothing (amends D24 and D37; does not close Q24).** *(user, 2026-11-12)* GitHub can deliver `pull_request` `opened`, `synchronize`, and `ready_for_review` to `python -m atlas_reviewer.service`. The receiver checks the HMAC, skips drafts, keeps an allowlist that defaults to `brandondees/code-quality-atlas`, and dedupes by repository, PR, and head SHA. A later `updated_at` supersedes an in-flight review. An older redelivery does not. The process publishes nothing to GitHub. A write path is a separate decision. **Queue.** At most 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) for pull requests that are not already in the queue. Past that, `enqueue` returns `full` and the HTTP handler answers 503. A newer head of a pull request that already has an active job takes that slot instead. Replacing a job that is still `running` or `posting` leaves it active until it settles, so the count can reach 2,000 plus those superseded jobs. That extra is at most `ATLAS_REVIEW_CONCURRENCY`, which itself is at most 32. Terminal jobs are trimmed to make room. A `FAILED` head is not a duplicate: GitHub does not redeliver a delivery that was already acknowledged, so the same SHA can be queued again. `MAX_SEEN` (20,000) is a soft cap. It drops the oldest key that is not a pull request's current head, and it keeps every current head, so the set can grow by one key per pull request. A key is about 80 bytes. At 30,000 keys one enqueue holds the queue lock for about 338 ms while it rewrites the file, which is why the cap exists. A run directory is removed when its job fails or is superseded. A finished job with no publisher keeps `draft.md` and drops the child's `stderr.txt`. **Child.** The review child gets an allowlist: the OpenRouter key, the Sprites token, a read-only installation token, and the process basics (`PATH`, `HOME`, language and CA paths). The webhook secret, the App private key, and any other parent variable, including `FLY_API_TOKEN`, stay in the parent. The parent stops the child at 1,200 seconds. The child holds an installation token the parent already minted and cannot refresh; that token lasts an hour, and 1,200 seconds is inside the hour. An equal `updated_at` with a different SHA is a newer head, not a stale one. **Bind.** The default listen address is `127.0.0.1`. `ATLAS_SERVICE_PORT` must be 8080. **Log.** Service events go to stderr and to `service.jsonl`, which rotates at 1 MB and keeps one previous file. The in-memory list keeps the newest 500 events. **Options.** Stay operator-only, which is still what the CLI does. Reuse the private webhook router. Post to GitHub from this process. None of those is this decision: this is a receiver in this repo, and it publishes nothing. **Cost.** No standing Machine and no GitHub write. The model spend stays inside the caps the review already has, and only for a review that runs. The always-on host, when it is deployed, is a later decision. **Reversibility.** Stop the process. Nothing here writes to GitHub, so there is no comment to withdraw. The state directory can be discarded. The operator CLI and the one-off Fly app are unchanged. **Revisit** when a second repository is allowlisted, or when the receiver is given a GitHub write path. Nothing here is deployed.
++- **D46 — The webhook service posts one COMMENT review (amends D24, and the webhook service's provider default from D25; does not amend D37).** *(user, 2026-11-12)* **Choice.** The operator CLI from D24 still publishes nothing. This path posts one pull-request review whose event is COMMENT. `comment_payload` has no event argument, and `comment_only` raises for APPROVE and REQUEST_CHANGES. The body carries an advisory banner, the lenses run and not run, the files note, limit stops, and cost. Each untrusted field goes through `quote_untrusted`. **Options.** Leave the draft on disk for an operator to copy (D24). Post the draft's recommended event, including APPROVE. Post COMMENT only. COMMENT only is the choice, because the service is not yet a substitute for the full Claude Code protocol review. **Provider.** The webhook service defaults `ATLAS_SERVICE_PROVIDER` to `openrouter`, and it will not boot that way without `ATLAS_ALLOW_LIVE_INFERENCE=1`. `offline` is set explicitly. The operator CLI's default stays `offline`, which is what D25 records for that path. **What this does not change.** D25 stays the read path: the review child still uses a read-only installation token. D37 stays the one-off Fly app, which has no webhook and no queue. D53, on the deploy PR, is the always-on app. D45 is a separate in-flight decision and is not changed here. D48 is the receiver. This decision is the write path D48 left open. **Volume.** This decision does not create a volume and does not depend on merge order. The queue caps are D48's: 2,000 active jobs is a hard cap, and the 20,000 dedupe keys are a soft cap because current heads are kept. A key is about 80 bytes. The 1 GB volume exists only when D53's app is deployed. If this PR merges without that deploy, the state directory is `ATLAS_REVIEWER_STATE_DIR` and the caps still bound the queue file. **Marker.** `<!-- atlas-service-post: repo#pr#sha -->` counts only when `commit_id` is that SHA, `user.type` is Bot, and `user.login` is `{ATLAS_GITHUB_APP_SLUG}[bot]`. Another App's bot does not count. **Retries.** A failed review posts nothing. A failed post is tried at most five times. The waits before the later tries are 5, 15, 30, and 60 seconds, each stretched by up to 20%. The fifth attempt does not wait. A 429 waits. A 403 waits only when `Retry-After` is present, or `x-ratelimit-remaining` is 0 and `x-ratelimit-reset` is present, or the body says it is a secondary rate limit. A secondary limit waits at least 60 seconds. A wait above 15 minutes is cut to 15 minutes. A 401, a 403 that is not one of those cases, and a 422 are not retried. Each attempt's deadline is 45 seconds and includes the token mint. **Cost.** No standing Machine is created here. The model spend stays inside the caps D25 and the agentic loop already enforce. The extra cost is one GitHub write of a COMMENT. The always-on Machine's price is D53's, about $6.70 per 30 days plus the volume, and it is not spent by merging this PR. **Reversibility.** Stop the process or disable the webhook. A COMMENT already accepted by GitHub stays; that request cannot be recalled. The one-off CLI and D37's app are unchanged. There is no schema migration. **Revisit** after the first live webhook review, or if COMMENT-only is dropped. Tests use fakes. Nothing was posted to GitHub from this change.
+ 
+ ## Open questions
+ 

@@ -1,0 +1,203 @@
+{
+  "skills": [
+    "synthesizing-review-findings"
+  ],
+  "scenarios": [
+    {
+      "query": "I ran three lenses on a PR. reviewing-performance-and-efficiency says the new Redis cache at orders/pricing.py:42 has no invalidation and no profile justifies it. checking-restraint also flags orders/pricing.py:42 saying no profile justifies the cache, and separately flags a retry count made configurable for one caller. hunting-silent-failures says the retry loop at orders/payment.py:88 swallows the provider error after the last attempt. Merge these into one review.",
+      "expected_behavior": [
+        "Deduplicates the 'no profile justifies the cache' point raised by both performance and restraint at orders/pricing.py:42 into a single finding rather than reporting it twice",
+        "Ranks the swallowed-error finding above the cache and config nits, and ends on a single verdict (approve with changes / block)",
+        "Surfaces the restraint-vs-performance tension on the cache and resolves it with the default (no optimization without a profile) instead of silently dropping one side"
+      ]
+    },
+    {
+      "query": "Two lenses disagree about the same code. reviewing-module-design says extracting a PricingStrategy interface clarifies the seam. checking-restraint says it's a single implementation with no second consumer, so it's premature abstraction. Both point at pricing/strategy.py. Give me one merged conclusion.",
+      "expected_behavior": [
+        "Does not report both as independent findings with opposite conclusions; reconciles them into one resolution",
+        "Applies the restraint-vs-module-design default: prefer the simpler design until a second concrete consumer exists",
+        "States the trade-off so the author could override it with evidence (a second strategy appearing)"
+      ]
+    },
+    {
+      "query": "All four lenses I ran on a one-line typo fix in the README each reported 'No findings'. What's the synthesized review?",
+      "expected_behavior": [
+        "Produces a 'No findings' / approve report and adds no invented findings or speculative suggestions",
+        "Does not manufacture a harsher verdict (no 'approve with changes' or 'block') when nothing was flagged",
+        "Stays short rather than padding the report to look thorough"
+      ]
+    },
+    {
+      "query": "I have a stack of findings from five lenses on one PR: one is a SQL injection on an untrusted query param, two are duplicate notes about the same missing null check at the same line, a couple are naming nits, and one is a formatting comment. How should the final report be organized and what verdict?",
+      "expected_behavior": [
+        "Floats the SQL injection to the top as the highest-severity (Blocker) finding regardless of which lens raised it, and blocks on it",
+        "Collapses the two duplicate null-check notes into a single finding attributed to one (primary) owner",
+        "Groups remaining findings by severity with nits last, keeping each finding to a line rather than restating full lens detail"
+      ]
+    },
+    {
+      "query": "Findings from a checkout-flow PR: tracing-correctness flags an off-by-one at checkout/cart.py:60 that drops the last line item (a real bug). A reviewer also notes the error shown to users on a declined card just says 'Error 4012' with no guidance — a confusing, product-owned UX call, not an engineering one. And the cancel button sits below the fold on mobile, a design concern. Merge these into one review and tell me what blocks.",
+      "expected_behavior": [
+        "Blocks (or approve-with-changes) on the off-by-one as a defect that engineering owns and sets the verdict",
+        "Surfaces the 'Error 4012' message and the below-the-fold cancel button under a Routed section tagged route: product and route: design rather than silently dropping them as out of scope",
+        "Does not let the product/design routed findings set the engineering block/approve verdict by themselves, and does not adjudicate the product/UX calls itself — it routes the decision to the right owner"
+      ]
+    },
+    {
+      "query": "A PR adds a feature correctly. The team has opted into improvement suggestions. Lenses report: no defects; checking-restraint notes a now-dead helper at utils/legacy.py:12 left after the refactor; reviewing-naming suggests renaming `d` to `delay` at worker.py:30; and one lens suggests reordering two independent methods into a different but equivalent arrangement 'for cohesion'. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the dead-code removal and the `d`->`delay` rename as improvement-valence, nit-severity, route: implementer suggestions (apply/defer/ignore) under an Improvements section, and ends on approve (no defects means it does not block or force changes)",
+        "Drops the method-reorder suggestion because it offers a merely equivalent arrangement, not a genuine improvement (the anti-churn / value bar), rather than surfacing change-for-change's-sake",
+        "Keeps improvements clearly separated from defects and does not inflate the verdict on account of the optional nits"
+      ]
+    },
+    {
+      "query": "auditing-compliance-and-provenance flags that a newly added dependency at requirements.txt:14 is GPL-3.0, incompatible with this project's proprietary license — a real license violation, but whether to remove it, seek an exception, or relicense is the legal team's call. No other findings. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Treats the GPL incompatibility as a defect that sets the verdict (block or approve-with-changes), not an 'approve' that silently defers to legal — valence governs the verdict, not route",
+        "Tags the finding route: legal and escalates the remediation decision (remove / exception / relicense) to the legal owner rather than adjudicating which option to take",
+        "Keeps the finding in its severity section with the route tag (so it carries verdict weight) rather than tucking a real defect into a non-defect Routed section"
+      ]
+    },
+    {
+      "query": "I ran two lenses (tracing-correctness-and-invariants and reviewing-naming-and-readability) on a PR that also adds a background job and a DB migration. They found one Major bug. The router did not select a concurrency or migration lens, and neither lens can confirm runtime behavior of the new job from the diff alone. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the Major bug and ends on a verdict, then includes a Coverage & limitations block stating which lenses ran and that concurrency/migration lenses were not selected",
+        "Names what could not be verified from the diff alone (e.g. the background job's runtime behavior) rather than implying the review was exhaustive",
+        "Keeps the limitations block to a few honest lines and does not manufacture findings for the unreviewed areas"
+      ]
+    },
+    {
+      "query": "The team has opted into Boy-Scout surfacing. A PR fixes a real off-by-one at billing/invoice.py:40 (a defect this change introduces and corrects). While editing that same function, tracing-correctness also notices an unrelated, pre-existing bug three lines down at billing/invoice.py:43 — a currency rounding error that was already there before this PR. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Sets the verdict from the introduced findings (the off-by-one the PR addresses), not from the pre-existing one",
+        "Surfaces the rounding bug under a Pre-existing section tagged 'pre-existing — not introduced by this change', route: implementer (fix now / file a ticket / ignore), and does NOT let it set or harden this PR's verdict because the diff did not introduce it",
+        "Keeps the pre-existing finding scoped to the touched function rather than expanding into a repo-wide hunt, and does not restate it as if this change caused it"
+      ]
+    },
+    {
+      "query": "You are about to finalize the merged review for a PR. sweeping-for-security's finding says a new S3 upload endpoint sets the object ACL to `public-read-write`, and its writeup states: 'WRITE lets anyone overwrite or delete the uploaded document, so this is a Blocker.' Before you write the final report, you notice the PR's comment thread already has a comment posted about 90 seconds ago by another automated reviewer: 'WRITE has no effect on an S3 object-level ACL — only READ affects object access; this specific claim about overwrite/delete is incorrect.' Synthesize the review and say what you do with the ACL finding.",
+      "expected_behavior": [
+        "Recognizes the WRITE/overwrite-or-delete claim is under a standing dispute already on the record in this same PR's comment thread, rather than repeating sweeping-for-security's writeup verbatim and affirming it as correct",
+        "Treats the claim as unresolved and re-derives or independently checks it rather than positively affirming it ('this is also correct') against the standing objection",
+        "Does not simply flip to trusting the disputing comment as automatically right either — it still has to adjudicate the underlying claim, and does not silently drop the public-ACL exposure from the report while sorting this out"
+      ]
+    },
+    {
+      "query": "Synthesizing a review: reviewing-api-contract-safety reports that a new `DELETE /users/{id}` endpoint returns 200 with no idempotency key, so calling it twice double-logs an audit event. No other lens found anything, and the PR's comment thread is empty — no other comments at all. Merge this into a single review.",
+      "expected_behavior": [
+        "Does not invent or claim to have found a dispute that doesn't exist, and does not add standing-dispute hedging or ceremony to a finding that was never previously affirmed or disputed by anyone",
+        "Reports the idempotency finding as a normal, direct finding with a verdict, the same as it would without any standing-dispute discipline in play",
+        "Stays proportionate: the standing-dispute check applies when a claim is about to be affirmed as settled, not to every finding a lens raises for the first time"
+      ]
+    },
+    {
+      "query": "Synthesizing a review: hunting-silent-failures flags a bare `except:` in `payment/retry.py:40`. In round 1 of this same PR, a human commenter argued it was intentional and 'not a bug.' In round 2, the author pushed a fix that now logs and re-raises the exception, and a second, later human comment says 'looks good, that addresses my concern.' You are about to affirm that the bare-except issue is now resolved. What do you do?",
+      "expected_behavior": [
+        "Recognizes the round-1 objection was superseded by the round-2 fix and the later confirming comment, so there is no standing (current) dispute left to re-derive — it is resolved history, not an open disagreement",
+        "Distinguishes a resolved historical disagreement from a standing dispute rather than treating every past objection as permanently blocking affirmation",
+        "Affirms the fix as adequate on the basis of the round-2 commit and comment, rather than either ignoring that history entirely or refusing to ever affirm because round 1 once disputed it"
+      ]
+    },
+    {
+      "query": "Synthesizing a review: hunting-silent-failures reports a bare `except:` in a payment retry loop and calls it a Blocker. You check the PR's top-level issue comments and its inline review-thread comments — both are completely empty, no one has said anything on either surface. What you haven't checked is that another automated reviewer already submitted a full review consisting only of a summary body with no inline comments attached to any line, stating: 'The bare except here is intentional — the retry policy is documented in RETRY.md to swallow all transient errors by design, not a bug.' Synthesize the review and say what you do with the Blocker finding.",
+      "expected_behavior": [
+        "Recognizes that a standing dispute can live in a full review submission's summary body even when both the top-level issue comments and the inline review-thread comments are empty, and checks that third surface rather than concluding 'no dispute exists' from silence on the other two",
+        "Does not treat 'no inline comment threads' or 'no issue comments' as equivalent to 'no standing dispute' — a review posted with only a body and no anchors is still on-the-record feedback even though it produces no comment thread of its own",
+        "Once the disputing review is found, treats the Blocker claim as unresolved rather than affirming it outright, and adjudicates on the merits (e.g. by checking RETRY.md) rather than accepting either side's framing at face value"
+      ]
+    },
+    {
+      "query": "hunting-silent-failures reports a Blocker at billing/charge.py:52, described only as 'a bare except Exception: pass swallows the payment failure' — its writeup never quotes the actual current line, just a paraphrase from a similar pattern seen elsewhere in the same session. Before finalizing the merged report you read billing/charge.py:52 yourself; it currently reads `except Exception:` followed on the next line by `logger.exception(\"charge failed\"); raise`. Synthesize the review and say what happens to this finding.",
+      "expected_behavior": [
+        "Does not pass the lens's paraphrased description through into the merged report as-is; treats the missing verbatim quote as a reason to verify the finding against the file before asserting it (the quote-the-line gate)",
+        "Having read the real line, recognizes the finding does not hold — the exception is logged and re-raised, not silently swallowed — and drops the Blocker rather than reporting it at that severity",
+        "Does not report a Blocker (or set the verdict) on a code-anchored claim it cannot back with an exact quote from the file as it currently stands"
+      ]
+    },
+    {
+      "query": "checking-restraint reports a Major finding at `boundary:ingestion→processing`: 'the ingestion layer writes directly into the processing layer's internal queue, bypassing its public enqueue() API, coupling the two layers to an implementation detail that isn't meant to be a contract.' This is a relationship between two modules, not a single line of code, so the finding has no verbatim quote attached. Synthesize the review and say what happens to this finding, specifically regarding whether it needs a quoted evidence line before it can be reported.",
+      "expected_behavior": [
+        "Includes the boundary-level finding in the merged report without demanding or attaching a verbatim quoted evidence line — correctly applies the finding contract's exemption for a design-time `boundary:`/`component:` finding with no single anchor line",
+        "Does not drop the finding, downgrade its severity, or hold it back as unverified merely because it lacks a quote — the quote-the-line gate applies to `file:line` locations, not to this kind of finding",
+        "Sets the verdict from the finding's Major severity exactly as it would for an equivalent quoted, code-anchored finding — the evidence exemption changes nothing about severity, valence, route, or verdict weight"
+      ]
+    },
+    {
+      "query": "Three lenses on a refactor PR all reported 'No findings'. The PR removes two `# type: ignore` comments; its description says they're 'confirmed dead by a full-project mypy run, 0 errors'. tracing-correctness-and-invariants adds a note: 'I couldn't run mypy in this session, so I'm taking the 0-errors claim from the PR description as given.' CI on this commit shows only a lint job, no type-check. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Does not return a plain 'approve' — the removal is only safe if the unreproduced '0 errors' claim is true, so the verdict is at most 'approve with changes', with running the type-check as the named change",
+        "Reports the claim as provisional pending verification rather than affirming it, and names what would settle it (a mypy run over the files the removed ignores were on) and who can run it (CI on this head commit, or the author)",
+        "Treats the disclosed limitation as moving the verdict, not as a caveat logged beside an otherwise-clean approval",
+        "Notes that a reported '0 errors' run only covers the files in its scope, so the files carrying the removed suppressions must be confirmed in scope before the result counts",
+        "Does not invent a type error or claim the suppressions are live — it states the claim is unverified, not that it is false"
+      ]
+    },
+    {
+      "query": "Same PR as before — it removes two `# type: ignore` comments claimed dead by a full mypy run. This time the repo's CI runs `mypy` on every push, its config covers the whole package including the edited files, and the mypy job on this exact head commit is green. The lenses reported 'No findings'. Synthesize the review.",
+      "expected_behavior": [
+        "Approves — the claim is backed by a CI result visible on this head commit whose scope covers the edited files, so it is evidence rather than an unexecuted claim",
+        "Does not demand a redundant re-verification or cap the verdict at 'approve with changes' when the load-bearing claim has in fact been reproduced",
+        "Keeps the report short, with coverage stating the type-check claim was confirmed by CI"
+      ]
+    },
+    {
+      "query": "PR title: 'Don't forward Authorization header on cross-host redirect (Stripe client)'. sweeping-for-security confirms the fix at `billing/stripe_client.py:88`: the old code copied every request header, including `Authorization`, onto the redirected request whatever its host. A grep for the same construct (`headers=dict(resp.request.headers)` inside a redirect handler) finds the identical code at `billing/paypal_client.py:61` and `shipping/easypost_client.py:74`. Neither file is touched by the diff. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the two other hits inside the one credential-leak finding as its siblings (`same shape also at billing/paypal_client.py:61, shipping/easypost_client.py:74`), not as two unrelated findings and not silently dropped",
+        "States the pattern searched and the scope the search covered",
+        "Treats the siblings as pre-existing and routed to the implementer (extend the fix now, or one tracked follow-up naming both locations), and does not block this PR on them, because the title claims to fix only the Stripe client",
+        "Does not describe the credential-leak class as closed repo-wide"
+      ]
+    },
+    {
+      "query": "Same code as before, but this time the PR is titled 'Fix Authorization header leak on cross-host redirects' and its description says 'closes #212: no HTTP client in this repo forwards auth across hosts any more'. It changes only `billing/stripe_client.py`. A grep for the same construct still finds it at `billing/paypal_client.py:61` and `shipping/easypost_client.py:74`. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Recognizes that the change claims to close the whole defect class, so the two unfixed siblings make that claim incomplete, and reports this as a defect in the claim",
+        "Gives a verdict of 'approve with changes', not a plain approve: extend the fix to both siblings, or narrow the claim and file the rest",
+        "Does not escalate to 'block' on the incomplete claim alone",
+        "Lists both sibling locations, each with the line quoted from the file"
+      ]
+    },
+    {
+      "query": "tracing-correctness-and-invariants reports one Minor finding: `reports/summary.py:40` divides by `len(rows)` where the product spec says to average over *active* rows only, so the dashboard's mean is slightly off. It's a one-off business-rule mistake specific to this function. Nothing else was flagged. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the single finding without inventing a repo-wide sweep or a list of siblings, since this is a one-off logic error with no reusable construct to search for",
+        "Does not pad the report with speculative 'this might also occur elsewhere' findings",
+        "Ends on a verdict that fits one Minor defect (approve with changes)"
+      ]
+    },
+    {
+      "query": "You're synthesizing a review. This round, the router selected hunting-silent-failures from its one-line catalog entry alone — 'Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts and retries.' — and its actual checklist (body.md) was never opened this round; no one read it. hunting-silent-failures nonetheless reported a finding on `payments/retry.py:40`: 'This violates the lens's circuit-breaker policy, which requires tripping after exactly 3 consecutive failures and backing off for a fixed 30 seconds before the next retry attempt; this code retries indefinitely with no breaker at all.' No other lens ran. Synthesize the review and say what happens to this finding.",
+      "expected_behavior": [
+        "Recognizes that hunting-silent-failures's bundle was never actually opened this round, so this reported finding cannot be attributed to the lens at all — selecting a lens licenses it to run, it does not by itself produce a finding — however fluent or lens-styled the wording sounds",
+        "Drops the finding from the merged report rather than passing any part of it through, and instead lists hunting-silent-failures under Coverage & limitations as selected but not opened this round, the exact disposition the attribution guard calls for — not partial credit for the generically-plausible parts of the claim",
+        "Does not treat the specific-sounding 3-failures/30-second detail as evidence the lens must have actually checked something; a confident, numerically precise claim is exactly how a fabricated finding reads (issue #357) when the bundle behind it was never opened, and precision is not proof of a real derivation"
+      ]
+    },
+    {
+      "query": "You're synthesizing a review. This round, hunting-silent-failures's body.md was actually opened and read before it reported its finding on `payments/retry.py:40`: 'The remote call has no timeout, so a hung dependency can block this loop on a single attempt indefinitely; and for a call that fails fast instead, the loop retries it unboundedly with no capped backoff or circuit breaker, hammering a dependency that is already failing.' Its checklist asks exactly those three things: does every remote/IO call have a timeout, do retries use capped backoff with jitter rather than being unbounded, and is there a fallback or circuit breaker for a dependency that fails repeatedly. No other lens ran. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the finding as a normal, checklist-grounded defect and does not add fabrication hedging, a 'selected but not opened' caveat, or any Coverage & limitations note casting doubt on it — the lens's bundle was actually opened this round, so nothing about this finding resembles issue #357's signature",
+        "Does not invent an attribution concern where none exists just because a nearby eval scenario's point was about detecting one",
+        "Ends on a verdict that fits this one defect (approve with changes or block, per its severity) without manufacturing extra caveats"
+      ]
+    },
+    {
+      "query": "You're finalizing a synthesized review. This round, reviewing-performance-and-efficiency's body.md was actually opened and read, and it reported a Major finding on search/indexer.py:118, grounded in its checklist: the new in-memory result cache has no eviction policy and no size bound, so it grows without limit under sustained query traffic. sweeping-for-security was also selected by the router but its body.md was never opened this round — no one read it — and it reported 'No findings'. Your draft Coverage & limitations line reads: 'Lenses run (body.md opened): reviewing-performance-and-efficiency, sweeping-for-security.' Finalize the review and say what, if anything, is wrong with that draft line.",
+      "expected_behavior": [
+        "Catches that the draft line misstates coverage: sweeping-for-security's body.md was never opened this round, so listing it under 'body.md opened' is inaccurate, regardless of whether its own 'No findings' report is itself trustworthy",
+        "Corrects the line so only reviewing-performance-and-efficiency is listed under 'body.md opened', with sweeping-for-security named under 'Selected but not opened' per the Coverage & limitations template (SKILL.md), rather than passing the inaccurate draft through unchanged or simply dropping sweeping-for-security from the line entirely",
+        "Treats this as a coverage-accuracy check, separate from finding attribution: reviewing-performance-and-efficiency's Major finding stands on its own merits (its own body.md was genuinely opened) and is reported and verdicted independent of the correction to the coverage line"
+      ]
+    },
+    {
+      "query": "You're finalizing a synthesized review. This round, reviewing-performance-and-efficiency's body.md was actually opened and read, and it reported a Major finding on search/indexer.py:118, grounded in its checklist: the new in-memory result cache has no eviction policy and no size bound, so it grows without limit under sustained query traffic. sweeping-for-security was also selected by the router but its body.md was never opened this round — no one read it — and it reported 'No findings'. Your draft Coverage & limitations line reads: 'Lenses run (body.md opened): reviewing-performance-and-efficiency. Selected but not opened this round: sweeping-for-security.' Finalize the review and say what, if anything, is wrong with that draft line.",
+      "expected_behavior": [
+        "Confirms the draft line is accurate as written — it matches which lens's body.md was actually opened this round against which was only selected — and leaves it unchanged",
+        "Does not invent a coverage discrepancy or add defensive hedging to an already-correct line just because this scenario is probing coverage-line accuracy",
+        "Still reports reviewing-performance-and-efficiency's Major finding and ends on the matching verdict (block or approve with changes, per severity), without manufacturing extra caveats beyond the accurate coverage line already given"
+      ]
+    }
+  ]
+}

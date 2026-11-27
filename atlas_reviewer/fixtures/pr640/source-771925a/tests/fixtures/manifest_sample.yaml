@@ -1,0 +1,11 @@
+taxonomy_version: v0.2
+skills:
+  - name: hunting-silent-failures
+    description: >
+      Reviews changes for swallowed errors and unsafe fallbacks. Use when
+      reviewing error handling, try/catch, rescue, or resilience code.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 2, source: tests/fixtures/research_sample.md#2 }
+      - { category: 4, source: tests/fixtures/research_sample.md#4 }

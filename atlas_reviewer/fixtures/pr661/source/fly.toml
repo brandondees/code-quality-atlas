@@ -1,0 +1,15 @@
+# One-off atlas_reviewer controller.
+# `fly machine run` reads `app` from this file and disregards the rest
+# (Fly machine-run doc, "Administration"). Publish the image with
+# `fly deploy --build-only --push`. Do not release this file with a plain
+# `fly deploy`: that is a Fly Launch release, and this app is not one.
+# Runbook: atlas_reviewer/deploy-fly.md
+
+app = "atlas-reviewer"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# No http service, no [[services]], and no process group. A service would
+# publish a port. A process group is what Fly Launch keeps running.

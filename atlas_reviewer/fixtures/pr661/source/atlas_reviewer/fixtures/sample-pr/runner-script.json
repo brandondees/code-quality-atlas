@@ -1,0 +1,10 @@
+{
+  "installed": ["python3", "ruff"],
+  "exec": [
+    {"match": "tar -xzf", "stdout": "", "exit_code": 0},
+    {"match": "-I --version", "stdout": "Python 3.13.5", "exit_code": 0},
+    {"match": "-I -m compileall", "stdout": "", "exit_code": 0},
+    {"match": "ruff --version", "stdout": "ruff 0.17.3", "exit_code": 0},
+    {"match": "ruff check", "stdout": "calc.py:3:16: RUF046 Value being cast to `int` is already an integer\nFound 1 error.", "exit_code": 1}
+  ]
+}

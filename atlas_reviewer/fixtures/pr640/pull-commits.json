@@ -1,0 +1,1232 @@
+[
+ {
+  "sha": "a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+  "node_id": "C_kwDOS05PptoAKGEzMjE5ZjliY2U2MzFlNWZlN2QzNjg5NzI2ZmIzMGI1N2NiMmNiMjE",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T20:13:10Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Post finished reviews as a single COMMENT, and never approve.\n\nA webhook review is published as one pull-request review whose event is\nCOMMENT. The payload builder has no event argument, and APPROVE and\nREQUEST_CHANGES are refused before any request. The body says the review\nis advisory, then lists lenses, file coverage, limit stops and cost. A\nretry of the same commit does not post twice, and a failed review posts\nnothing. The posting token may ask for pull_requests write and still\nrefuses every other write.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "d2172555b5204716d3665851e92a55307cd5bf82",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/d2172555b5204716d3665851e92a55307cd5bf82"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAT30QAD5ga7vUb49kdXW+zFF+sCV0\nTNTPz3MwWPCFeiGYFUYR9XDsYy0QOmsx8n1gAfHjxubLJBrHltNzqYyLCufk/eIJ\n6v/KvDeotfJnvs9E6i4wqe/hL1MiFf0TDljJXCkvqoQLRTZUnqIMNhgwakWLurXS\nZ0HK5C1Q8Dqji9Y92RJtuQgodUAAULAEx9oDoU2NAXMy/38xOZ5eTI/LQJbzF6LG\nbqWPKrE7kHRWvLrJDRXFcJVJ0zrCW4p3NlA3xF9J3Re8ahTBYIelMbOgyHPVPTNN\nKH2FqQr/3pDIDR8hjTlnM8lJ/6j4IQdrloHDcpO8CEcUJ3P6Q2YDqSmUcAJeopZj\nkHhxI03W+YTjbaq/Jf+JPMoEMlKovsy7BVlmdn67XKc1JIS9n48xjOtIZ3PXs/Tq\ntVVSi0sXP2VKLpgQusH4kkrdGTRzqabmEPlhu3i9gIEtCpPkPCk6e0LFuZrNMCQP\ngmmW08HPVI+70GevKs5Xr6cQcDTm1f1rRGbCq7eFbwAecQ+KDH8TuudMH5d0Ra1i\nbXRu8T/RNWBolSgVz3CUeDWW5cg8TwEz5YHY5/qMxiUXLZmqiWVgjnF95wFBjGGq\nX8X06sd2ZrRF+faZAFAHZ5G8QXe+nfbrQzFMH2dlOS3ODyH066BgkfWM3MlEfHZw\ndwLfXVG2Ed1EpHIeJJz1\n=wpoZ\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree d2172555b5204716d3665851e92a55307cd5bf82\nparent 771925a538d6744b6017175e8fe5f170abf27a6d\nauthor Cursor Agent <cursoragent@cursor.com> 1794514390 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nPost finished reviews as a single COMMENT, and never approve.\n\nA webhook review is published as one pull-request review whose event is\nCOMMENT. The payload builder has no event argument, and APPROVE and\nREQUEST_CHANGES are refused before any request. The body says the review\nis advisory, then lists lenses, file coverage, limit stops and cost. A\nretry of the same commit does not post twice, and a failed review posts\nnothing. The posting token may ask for pull_requests write and still\nrefuses every other write.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/a3219f9bce631e5fe7d3689726fb30b57cb2cb21/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "771925a538d6744b6017175e8fe5f170abf27a6d",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/771925a538d6744b6017175e8fe5f170abf27a6d",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/771925a538d6744b6017175e8fe5f170abf27a6d"
+   }
+  ]
+ },
+ {
+  "sha": "d659badbb5b654a9d0833a424caa4a0e8f67d985",
+  "node_id": "C_kwDOS05PptoAKGQ2NTliYWRiYjViNjU0YTlkMDgzM2E0MjRjYWE0YTBlOGY2N2Q5ODU",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T20:45:09Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Ignore a planted review marker unless a bot wrote it on this commit.\n\nA person who can comment on the pull request could otherwise copy the\nidempotency marker and stop the service from posting. A marker on\nanother commit does not count either. A failed post still waits out its\nbackoff before the next try.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "f2d3c618486e3929ca36c18d309fc8d2cef91012",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/f2d3c618486e3929ca36c18d309fc8d2cef91012"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/d659badbb5b654a9d0833a424caa4a0e8f67d985",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAPNEQAIqSJMrlS76mbuLmQqeIKO4S\nhxVYg29YZLpDcGmHqLe68WW9GGSh0b6tpP1lWFdpbNzIXynNQg3DTyH8901HI7M+\nFHC0/wql3CKFbnGG8z5wq4uMNLFk0jq7Xnud0Ruk1Nfl3MBJzzty4IDyw3L+FXjn\nsfkwb95kNHVQenIjT0RB/zSSUvB9K1lXuQbQ/oUfdHa6DMPnWcDKWqGqDvrU9EJE\nx7QGcmr3mnLwEQurRKw46Q6L1/vcbbxiaV0QBvOCHvpI5Y+GgiPUPZoErCxLhBMx\noqZ8uKpscICQ+t9W7ic4lXsguVdM719flzmvfcao5PP+lgPBZUmXxxfBtJsPFq6D\nY8h65/w8vEVkiqM9gs+QDnoELZz7xAYQeawRXCGbw5nUsZVv1rvRsEZxuvsT5lT8\nlI72Ttj8fJi2hvPrvbe8PkdGAdE0D2C7Xbkq3IG4v7C5ATGobHllAbDDWE8PujdP\ndI8Y4uxfeZ6UkArSU0NglK4ugRzM94KpO+50sBq3nzGISa2tOfuVh2fQNWGV6rcG\n8Zd/wy1QWNgmO2bxGq2yjBKmDnRqZ0Qy0UjmQZn4fQAy6CdCVkXQEXuHmpwdv76d\nmM0luMYEkNujyCUCKAOv8aQt2eYQsN/mj58MrnF+3azYP7dAJoL/+bXpkSFKT7jK\nWHMOSwMy+xKdIvxCyaIE\n=QTEM\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree f2d3c618486e3929ca36c18d309fc8d2cef91012\nparent a3219f9bce631e5fe7d3689726fb30b57cb2cb21\nauthor Cursor Agent <cursoragent@cursor.com> 1794516309 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nIgnore a planted review marker unless a bot wrote it on this commit.\n\nA person who can comment on the pull request could otherwise copy the\nidempotency marker and stop the service from posting. A marker on\nanother commit does not count either. A failed post still waits out its\nbackoff before the next try.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d659badbb5b654a9d0833a424caa4a0e8f67d985",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/d659badbb5b654a9d0833a424caa4a0e8f67d985",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d659badbb5b654a9d0833a424caa4a0e8f67d985/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/a3219f9bce631e5fe7d3689726fb30b57cb2cb21",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/a3219f9bce631e5fe7d3689726fb30b57cb2cb21"
+   }
+  ]
+ },
+ {
+  "sha": "2b43765333b9ceb6fa1062597f6a108091adf342",
+  "node_id": "C_kwDOS05PptoAKDJiNDM3NjUzMzNiOWNlYjZmYTEwNjI1OTdmNmExMDgwOTFhZGYzNDI",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T21:16:40Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Record the COMMENT write path and close the post race.\n\nD46 amends D24. A post re-checks the head under the lock before create, stops at a 45-second deadline, waits on Retry-After, and does not retry an auth refusal. The posted body is tested against a planted secret and markup.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "bbee605920d60029d9f3201b6ec0bcd77febae14",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/bbee605920d60029d9f3201b6ec0bcd77febae14"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/2b43765333b9ceb6fa1062597f6a108091adf342",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAfYoQAJQQvStB15ecYD1NP/jIgUka\nbzGUEcXWgzSMudPsOGOuiLMAP6InhUi9QhiH7S+mdUsw4XlG7vWe0MDA6+BFyw0o\nSmmhm9juMirEtMUCD1sNT2x2dvB+/74qN+GkinXbsGNm9DCvYqlnzaKFiQZp4o45\n5e4brLBq1C1Y36ENYSEBS5+t0R4c6vDqXNw9gy+PfgwAmWeN661zsLTTBB9AUvat\nqk/BHrC5+BdBcgPQ3HrpOX975GvuXhgO1OFTnhPaBVZkcTZNwvBRkkU1e+csrCqq\nl2GC4SphaLjMshN6V/17KXgqkizuXwLkcV/VaGVyiFafBgE+EbbQlz99tPQRt98V\nuk17xiCe9IT6pq6NWeC009JuFj6G7YL0kiOvFRUGHWLFqnb1go9MzuTHa3EMwTBD\nOpwx5Rs9pFUotgnO7cKX4PJ94tLauoLrZl6eQaczZiqNXJOa63gQifjIlJGHxTlL\ndoZleYYU//C6QeLAp7Aa7lGWWP7fRpWNRCxHoRth3nnnohXDar4uX9uCalEabb9W\n+YYJpqwBN9FDvoLIevF/sKgzuZ/oIp82PUYeyKS31E5DBBKFakZVLhue/ngLl/6p\nJeaL+Z5vdg89iGHd8HXadzZeuGQr8clJ7LyJ6Dti0Pqgjja5ncTfivn4JHBLIGJD\nRgKi7rTsXK7LjLzzl7UU\n=KHGG\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree bbee605920d60029d9f3201b6ec0bcd77febae14\nparent d659badbb5b654a9d0833a424caa4a0e8f67d985\nauthor Cursor Agent <cursoragent@cursor.com> 1794518200 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nRecord the COMMENT write path and close the post race.\n\nD46 amends D24. A post re-checks the head under the lock before create, stops at a 45-second deadline, waits on Retry-After, and does not retry an auth refusal. The posted body is tested against a planted secret and markup.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/2b43765333b9ceb6fa1062597f6a108091adf342",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/2b43765333b9ceb6fa1062597f6a108091adf342",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/2b43765333b9ceb6fa1062597f6a108091adf342/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "d659badbb5b654a9d0833a424caa4a0e8f67d985",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d659badbb5b654a9d0833a424caa4a0e8f67d985",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/d659badbb5b654a9d0833a424caa4a0e8f67d985"
+   }
+  ]
+ },
+ {
+  "sha": "21a910fdd442885fe608bc5e69e271c24f299190",
+  "node_id": "C_kwDOS05PptoAKDIxYTkxMGZkZDQ0Mjg4NWZlNjA4YmM1ZTY5ZTI3MWMyNGYyOTkxOTA",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T22:06:59Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Make COMMENT posting fail closed on auth, 422, and the attempt clock.\n\nA 403 is a rate limit only when the budget is exhausted, Retry-After is set, or the body names a secondary limit. The scrubber covers the Sprites token, the model key, and minted tokens. The marker matches this App's bot. D46 records the choice, the cost, and what it does not change.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "2ffe0d6799cad054f0966b761791219c35372cbf",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/2ffe0d6799cad054f0966b761791219c35372cbf"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/21a910fdd442885fe608bc5e69e271c24f299190",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAA0vYQAAB0XyLswARC1z/XHshAaVVU\nywtLjg2HJ2S9eFGY2a8nswM7oB69VMWfEyKdu38GHKUCaKd0eDfTVVzXIrWHEyEA\n65810yFA1jBiH8zXnaqw529hHIxFrs2qiSvAaclI8D11jhRtd5iHdKYar7Ke1/t3\nUy8LGwXEKcuF3On5XVEqGcGWo3/qIbEX6yCpLJue7vMoy60FPjw6h8+y43vuO1Ri\nyEkuUdvF0r6OxLjvMZKWosYtC1WkxUvhS2mIxCp4JVe+YPYY8YK35a3XZmknpj45\nNWGuiob3n8LK88/dhesuDfcaJE+3wfvTy2hDA/fbkg9KZjTjPAcjWREM5S9KrM0D\ncbt4gOBHtu/jjXxM8sx1iigqOuAu4+EnNGDH4zoB9lxfOe2v21gWxNNtPUprCT98\nY+xSVVONd5g/6pPv5pNJcR7uQ7jHviwgc8hj+mH65hSgYfd5spu3NJJlUGrTSFr7\nY2qkL+V30C7x4P8FyOBmfN6+3Pvxk1nw5fxtCZLmMCvNKWiOGVWWZILBTx8XOTqQ\nIV3VgEYp+Ft7gA55BdXu6wcLN1xwZST+IVt6VCXbtlJRdmd0CVSjBq1IcYUvKN4O\nbSEEXMliEuhnBPzbHaZjeK4NWwXekM19dQQf86i1z3Huix06rN2r8pWPlsc5wwvE\nWOpsSd7EYWww/8KpqFQW\n=Yump\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 2ffe0d6799cad054f0966b761791219c35372cbf\nparent 2b43765333b9ceb6fa1062597f6a108091adf342\nauthor Cursor Agent <cursoragent@cursor.com> 1794521219 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nMake COMMENT posting fail closed on auth, 422, and the attempt clock.\n\nA 403 is a rate limit only when the budget is exhausted, Retry-After is set, or the body names a secondary limit. The scrubber covers the Sprites token, the model key, and minted tokens. The marker matches this App's bot. D46 records the choice, the cost, and what it does not change.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/21a910fdd442885fe608bc5e69e271c24f299190",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/21a910fdd442885fe608bc5e69e271c24f299190",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/21a910fdd442885fe608bc5e69e271c24f299190/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "2b43765333b9ceb6fa1062597f6a108091adf342",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/2b43765333b9ceb6fa1062597f6a108091adf342",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/2b43765333b9ceb6fa1062597f6a108091adf342"
+   }
+  ]
+ },
+ {
+  "sha": "9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+  "node_id": "C_kwDOS05PptoAKDlhM2EwNTQyNDBjZjJiYmQ4MjA4NDAzYzljMWQyNjJiY2VlNWZkMDI",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T23:02:27Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Do not post after stop, and label a 422 as rejected.\n\nstop() leaves a deferred post unsent (test_stop_does_not_send_a_deferred_post). A 422 settles FAILED and is not retried (test_a_rejected_post_fails_without_a_retry). The service log scrubs the Sprites and OpenRouter secrets (test_the_service_log_scrubs_the_sprites_and_openrouter_secrets). limit_timeout is the mint socket timeout (test_limit_timeout_is_the_mint_socket_timeout). Jitter is pinned on the receiver by test_the_post_backoff_includes_jitter.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "4a22da20318b112c66fbc7ad4e33114b81612673",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/4a22da20318b112c66fbc7ad4e33114b81612673"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAA0Z4QABVQk08mlT3UrxGUSsie8CMR\n8wno/YnjB0GeGOCAk4CWf90QD71a0e019sLN1YTkSZdAQxiSyWBTX6oHuoMk06aJ\nWsDvb+z0mg6kQmQQsCRKODuN6YSCON0Z1+fRX80CVLfUUsJIp9K9TGL8/mtkYegI\nICReVn85T4AD2DNLsnJWOij9NjiorJaFEfxgLh0HUNa+aR9F2E5VO9d5sGnKCaAZ\nU8elKKejfr44REmx64SCQYp4Kr04xHA3jLimks3Z07pbQpuXHZQAjJawJsuU7UbB\nimU0sNG97duz79zwLT3T80r2bRa5l3Xc55k9NvRkzD6z8+b6El3rXaysxzkJ+EQ0\n6NnCns0Zwnprp/Jzby1TlOr3pwlqJgVCbUDeb8bUXp3hlT7VsxqZMG92Qy6AzXay\nDbMY8SomNdlToc5302DYRn74MWINQxc6O1gLiyQGboGhm2GNNO4lWi2RekKxYFpt\nEm6Uswjo1OtNceFPKBAUTNBiY0ULx0Fv/ssdi23iX/wX9LDzYykYRckgrxI34oae\nHn7T7cAiBHQkMBEAACBVdeLGhEg1xc5ZWyexJTs7A+9hF6Mn0KLodDZPSackmdKD\n+PWzGXNw0/VbZflrrAaVePnPZ+zNBhbpTPo6aiNpVRU3AnZJqnSxVnQwwM3DrgC4\nwnKzmKdMKgDUk28oeB0q\n=gNwS\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 4a22da20318b112c66fbc7ad4e33114b81612673\nparent 21a910fdd442885fe608bc5e69e271c24f299190\nauthor Cursor Agent <cursoragent@cursor.com> 1794524547 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nDo not post after stop, and label a 422 as rejected.\n\nstop() leaves a deferred post unsent (test_stop_does_not_send_a_deferred_post). A 422 settles FAILED and is not retried (test_a_rejected_post_fails_without_a_retry). The service log scrubs the Sprites and OpenRouter secrets (test_the_service_log_scrubs_the_sprites_and_openrouter_secrets). limit_timeout is the mint socket timeout (test_limit_timeout_is_the_mint_socket_timeout). Jitter is pinned on the receiver by test_the_post_backoff_includes_jitter.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/9a3a054240cf2bbd8208403c9c1d262bcee5fd02/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "21a910fdd442885fe608bc5e69e271c24f299190",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/21a910fdd442885fe608bc5e69e271c24f299190",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/21a910fdd442885fe608bc5e69e271c24f299190"
+   }
+  ]
+ },
+ {
+  "sha": "d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+  "node_id": "C_kwDOS05PptoAKGQ0YzQ2MDI3YzczNWY3MTVlNmVjYzE0OWJhMWMwYWIzMDliOWE0OTU",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-12T23:30:37Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Pin the deferred-post stop, and keep mint deadlines on their own thread.\n\nThe stop test writes the deferred draft and asserts that commit is not posted (test_stop_does_not_send_a_deferred_post). A stop that lands after the post is claimed is not sent (test_stop_after_the_post_is_claimed_does_not_send). limit_timeout is per thread (test_limit_timeout_stays_on_the_calling_thread).\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "0334f7ee41f19859c59eb7f68f810381f5ef97e6",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/0334f7ee41f19859c59eb7f68f810381f5ef97e6"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAATS4QALCH39LzT0yogGseQytqu0Ir\nOCytS1CI2cRaSMP/42A2cD+E7sR4XJaCDq5oqU8RlNIrsyE1yo9X1YN5NKqcuMgU\nHWlZFIFEVxV5ZV201IEzPupmJ/jrE/RKM92Jrt2A6B/gIxPi/mSXyXuBBC2qI7KA\nx76h82uoaEIST3+A3sBaLRBRyDRLEZzzXevpW9WcypYu+5E4jZXvwAgpzpTWuzR6\nSgDKGT/mT+1LlKHmE1kn9lilXgOrRcTK2jh6IvpGYfSt9n5kZSMY4DcXs2N9XY3d\n364HeQuN8dyLP7DtiSOzKYScbTsgnjfxw5zemGi9So60Z0WT4FSmLbTEi2mp2npb\ngwee3p/3bKKYCLGiezTwzLB9ByF0AF59S0S7ynWXj8CtfNpzuj/RY5LdyOwNCw1h\nPFA2SHou3dhFGNarQO6upvo4ZhxGpZy8AEVznidGKBd/+GwBC7JwNjrX9K9YmbI4\nq1chfjjbfvlgUmME/C4YQtwKh9vineRr/Ai8PdvLi02I2Vg7IBvbMw+Nsux8W90/\nzhIs6bIij3jFINp0z1okpUYDv5k1qmPE8sj8Iu1aKcvfmtHw/KeUtnGKEiVYk+RM\n8ZRRtKD6XdVn8hOnPQeLKp5M10HmPwjahShNPezoJNaEOU7ApfyNCjT4ZjWvE5E/\n/ZDWy61xkPltbOi9BNj4\n=ae+u\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 0334f7ee41f19859c59eb7f68f810381f5ef97e6\nparent 9a3a054240cf2bbd8208403c9c1d262bcee5fd02\nauthor Cursor Agent <cursoragent@cursor.com> 1794526237 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nPin the deferred-post stop, and keep mint deadlines on their own thread.\n\nThe stop test writes the deferred draft and asserts that commit is not posted (test_stop_does_not_send_a_deferred_post). A stop that lands after the post is claimed is not sent (test_stop_after_the_post_is_claimed_does_not_send). limit_timeout is per thread (test_limit_timeout_stays_on_the_calling_thread).\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d4c46027c735f715e6ecc149ba1c0ab309b9a495/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/9a3a054240cf2bbd8208403c9c1d262bcee5fd02",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/9a3a054240cf2bbd8208403c9c1d262bcee5fd02"
+   }
+  ]
+ },
+ {
+  "sha": "328db82b30b56018c7eef01695b039696a47f91c",
+  "node_id": "C_kwDOS05PptoAKDMyOGRiODJiMzBiNTYwMThjN2VlZjAxNjk1YjAzOTY5NmE0N2Y5MWM",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T00:03:40Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Keep each post attempt's deadline on its own thread.\n\nA shared poster no longer clears another worker's attempt deadline (test_one_workers_deadline_does_not_clear_anothers). A hostile review narrative is not posted (test_a_hostile_narrative_is_not_posted). limit_timeout is cleared after the mint. Each deferred-post stop gate is pinned on its own (test_claim_post_refuses_a_stopped_worker, test_the_loop_does_not_retry_a_post_after_stop, test_retry_post_does_not_claim_after_stop).\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "f9b55b49ed377af769f4e3494cb35a682c05e0cc",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/f9b55b49ed377af769f4e3494cb35a682c05e0cc"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/328db82b30b56018c7eef01695b039696a47f91c",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAWPYQABGJ2bPY3vFaPMnqLyWbAMiJ\nL21E3H0L+tavtbjnAm4Sf+DPpO/KYcbxNwh+rcGnxvHEgcJJCaMinGVIWbjYGojV\n6mMnFJhecYxLSYVxd0rxZ1dIscaCp4eX8phySEY+6zexK5xRI7UX2ZzCuWFHRARq\npQL8mjLiw8QtUawCLxHlrnN24e575wk8ITlOUG02aIB6WSLsoDfYdHUl8mMvkAeB\nGazYJKQjAjDhcrwlVvTBhjS0owb+qI5w2nGpPlXNjlaeolSHmfzn83pqFS4d8i5f\nlk2eoToiUbpJzpcZURgt4NB794arKKFvfPKPWlxxtk4aCC0rVTe5WIlLYcvlX+vP\nHkai0bQSfjFMtkKyJ+7YW6/xsM9n+wRtv9sYqNV4UpXHHGD16v31b/kNHyQCYqug\niayaoT+ye3W79hZ2hgaOTRFVaPg//aC8EsodFGeD8oEH8HC8uhldQ1Rw9xz7G3OI\n2L5Hg+xpgctls4gxDM9nG63csgO40OEmnturCdrlpoHSjvgczCSe41n++9ucCiUN\nUdyYHpluSfu6eYwYVISXhkt1HTK3vQ5QwlhDUSPopaKDU7R/JVC6oAKXInkvbG4g\n3SFafidJBeKQbHpCIvuDd4Xl7PFLCymQYLdJcJ0DYFTIRwt7Yt4uHlfS1YqhHxwY\nv9pBWEgqclzjrZRtNTi9\n=QuAD\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree f9b55b49ed377af769f4e3494cb35a682c05e0cc\nparent d4c46027c735f715e6ecc149ba1c0ab309b9a495\nauthor Cursor Agent <cursoragent@cursor.com> 1794528220 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nKeep each post attempt's deadline on its own thread.\n\nA shared poster no longer clears another worker's attempt deadline (test_one_workers_deadline_does_not_clear_anothers). A hostile review narrative is not posted (test_a_hostile_narrative_is_not_posted). limit_timeout is cleared after the mint. Each deferred-post stop gate is pinned on its own (test_claim_post_refuses_a_stopped_worker, test_the_loop_does_not_retry_a_post_after_stop, test_retry_post_does_not_claim_after_stop).\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/328db82b30b56018c7eef01695b039696a47f91c",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/328db82b30b56018c7eef01695b039696a47f91c",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/328db82b30b56018c7eef01695b039696a47f91c/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/d4c46027c735f715e6ecc149ba1c0ab309b9a495",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/d4c46027c735f715e6ecc149ba1c0ab309b9a495"
+   }
+  ]
+ },
+ {
+  "sha": "cdbf9ab9c50956529eac8f659788e24a48d289ac",
+  "node_id": "C_kwDOS05PptoAKGNkYmY5YWI5YzUwOTU2NTI5ZWFjOGY2NTk3ODhlMjRhNDhkMjg5YWM",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T06:49:51Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Retry a mint that hit a secondary rate limit, and record the provider default.\n\nA mint 403 with a secondary-limit body is deferred (test_a_mint_secondary_limit_is_retried). A mint 401 is not (test_a_mint_401_is_not_retried). D46 records that the webhook service defaults to openrouter. The review list asks for 100 per page, and the posting token refuses two GitHub accounts.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "07db7fa0e8a69e8c424c34ce28581ac9d48e4ae3",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/07db7fa0e8a69e8c424c34ce28581ac9d48e4ae3"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/cdbf9ab9c50956529eac8f659788e24a48d289ac",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAYZ8QAEQdmL40waTnDwNTV7rAR+P1\nQiG7bK2Cdn308HwVdbygNoTE+lPUOIIV9eM0kKgnw5OtuDdndMGxFj2b/cC0uu6w\nFRAFW6tNV0CaBHOpIpbCfdQG9jl5IqTL06+JQTjjiu41WiI3PKBCxW2paoE+tr1L\noFgGNZyflj3hZVzbNdzqxUPmpGfmRm0Kyrbta6CNnK03B82SiYqCZWtpVL3X3rD6\nknnWoCnorUkfZCiT5KKiAlZY3GjsRjn+CZyfwXqo/0SeQuGQ9yEhjnKMtg658XJT\nVBWlhL5myulC8+lHttDxLWpsun4r4+5P378VDSoCVeG+G/YQ0GKedO9CaENxKbMM\n0P3v+m1CblBmEhuLffMh3Bli+fdjV8py8gQ55ABnFsrE70neBpiG5lkW1ihe9lPl\nsdCSmvHuJxultCyVbUfUN0ltOiCPNhoH3KOsoCbbj43Av6Kh9HW37wuOJ7qyzsJK\nrwp5TObmjX7Wd2ozvbmhfq3meEnH4y4zCYmPFzPKYdcf/4RipHr8jNDOl25zgT0F\n/t/+bRKfvcd9v1hMcVu2AfKXg1DCjX9AbckLrpRU1aQNZHG7H5kT9RlLs+w8AcH/\nrqD4TJe0jM7clnoCRAdfkqN99MsCsrX7Ppsk1sZc5Akf6ncmkEouKg2PaJgMrd/k\nt6V1DBZF0Pa+6ZQL/7z/\n=rXAH\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 07db7fa0e8a69e8c424c34ce28581ac9d48e4ae3\nparent 328db82b30b56018c7eef01695b039696a47f91c\nauthor Cursor Agent <cursoragent@cursor.com> 1794552591 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nRetry a mint that hit a secondary rate limit, and record the provider default.\n\nA mint 403 with a secondary-limit body is deferred (test_a_mint_secondary_limit_is_retried). A mint 401 is not (test_a_mint_401_is_not_retried). D46 records that the webhook service defaults to openrouter. The review list asks for 100 per page, and the posting token refuses two GitHub accounts.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/cdbf9ab9c50956529eac8f659788e24a48d289ac",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/cdbf9ab9c50956529eac8f659788e24a48d289ac",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/cdbf9ab9c50956529eac8f659788e24a48d289ac/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "328db82b30b56018c7eef01695b039696a47f91c",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/328db82b30b56018c7eef01695b039696a47f91c",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/328db82b30b56018c7eef01695b039696a47f91c"
+   }
+  ]
+ },
+ {
+  "sha": "dc25c1d9de62c468764349922e90188082c973e6",
+  "node_id": "C_kwDOS05PptoAKGRjMjVjMWQ5ZGU2MmM0Njg3NjQzNDk5MjJlOTAxODgwODJjOTczZTY",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T07:19:15Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Let the child-secret test reach serve when a publisher is required.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "55ffaeb434eb3c4b095798d8b4c0f7bf49e5bca4",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/55ffaeb434eb3c4b095798d8b4c0f7bf49e5bca4"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/dc25c1d9de62c468764349922e90188082c973e6",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAuxYQAGa64ilY/EqcHw7NUkTHKh4A\nUreVhqIIWhWreIMYyQF+S7iG2kBNrUsbNX8ue489hwU9FTSIa+CyXFEyiF21rdx0\nzKssThdR7UaW57fHq4RQdrRvZkhku6d80kIE5KgEalpv8j4ZQZN8VPLm9zjvSk/b\nlBmdC2VK7MbFvPG86ltpcNq9NAkvOn5kJ3gAseJii4uoJpOzhH+75QHeVtunp8YV\ntX4ZkhuR1//nwh1fvCIhJpYJFmpFbFcIEjq/hXpoHYrWy5T6cH6R089kFSGpFZXt\nQshSwg7sPtK5R4FIJMvhQpCITAFaOwYdIvwXE5VMVhN9uTCCmPVj1n01yvu51fdZ\n+p6fvEEN1+Vgdhsa4Nj6V+WiLWJqbXL+/wFJS1szqsUl2QbBMBagvw5YbyjXWPkr\nOMPIFbFELCKNkTytUVsH8MJSDvfPPrJTYZKTc8esZJL41wLr9HjxSE8YIY+yFAtz\n+AUje8k1UECqBQGerZ6IdOFcoHzJGssldpNoZlqotNuTguMD32hN9gDKmc3TjSny\nm7mzgmCl27otxwkK/nkIU7YNuKmRhUQqODAnxkLvBGAExq5EU/8qBS1VemK47zPk\nEyUwGdUHKQT3GiilRn0xzcOG/mo075+25iqK9iWjB/XjUk5xDBTQ2OwY4JIFmQVX\nW+HxYI76b00k0HnYULn1\n=hfDI\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 55ffaeb434eb3c4b095798d8b4c0f7bf49e5bca4\nparent cdbf9ab9c50956529eac8f659788e24a48d289ac\nauthor Cursor Agent <cursoragent@cursor.com> 1794554355 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nLet the child-secret test reach serve when a publisher is required.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/dc25c1d9de62c468764349922e90188082c973e6",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/dc25c1d9de62c468764349922e90188082c973e6",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/dc25c1d9de62c468764349922e90188082c973e6/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "cdbf9ab9c50956529eac8f659788e24a48d289ac",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/cdbf9ab9c50956529eac8f659788e24a48d289ac",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/cdbf9ab9c50956529eac8f659788e24a48d289ac"
+   }
+  ]
+ },
+ {
+  "sha": "4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+  "node_id": "C_kwDOS05PptoAKDRiMmI1OTI4YTc2YzBhNTQ1ZjNmYzZjY2RlZDE2NmJjZWRjMzdjZmI",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T08:24:01Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Point D46 at D53, and refuse an allowlist entry with no owner.\n\ntest_an_allowlist_entry_without_an_owner_is_refused fails on the IndexError. test_main_scrubs_the_child_secrets now also requires the publisher credential in the scrubber.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "29d4b2b45c5ac0d0bc9f558554c62fbb26f14348",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/29d4b2b45c5ac0d0bc9f558554c62fbb26f14348"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912PCRC1aQ7uu5UhlAAAyS4QAKKT14H61pOh7FiWRzEnGl7x\nifaaTo3HMWcxK8bjM/V1ob3Sqyj1g7+fuhMlwtU7vXAnxTM9BEYMzoBZ4rEaloI0\nkDxkxAk/egvXl+IYN9U9K1qWj2uMo1a/MI/wyB50FswcaqDjM4nMVvY76V3KeNEM\nDkTRy0NWqUpfM865mxdSPxn4cW/CqDiTT1Q7FxaIkUVRlQ7yurLQmqFYHRStVKAI\nDGbyIzZ1uPjFD6P8Pb7Ok0tRw+M/j/MOmbPAz0RL9OIXMCj4RMTjCuk7O8jlfY3c\nvNiLizZPqpoxNWDqG2nYcSjbgbrpzN1Yy+mTOtUKIhQlYXAZsXUQuPq+j+yft4LZ\nYHMDZ5ldmCgHss5byc9pHXL0DID8jdykhYeXE3RSuEIc2w/cGd402nulT84zoAmh\nfMpZVFTrAmhTsP0s6tOayRGZXFxf1pwYZFINUBf2QCv0SPlY+oroXyIjvp52LsQE\nU0vuV+4eWCr9W+nKLj3UN9p9hfTbMVTYzN0/i8atiUkDUPUrvQV/MFqnAvJ61hJd\nZRqTKiZO+MiS7vSSvXEIaLblwo1ZJ/FvkoHPeWov+GptjnHMcUmqlInQwtOAHUhF\nX1kL0iaA0oANXSnepmPSMC0k612OdWhA6eA7V8hJVD0Z+mEmFiCIxE+OFxF2/SVi\n654PWVNXqfsEjGdUDHi2\n=QWgn\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 29d4b2b45c5ac0d0bc9f558554c62fbb26f14348\nparent dc25c1d9de62c468764349922e90188082c973e6\nauthor Cursor Agent <cursoragent@cursor.com> 1794558241 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nPoint D46 at D53, and refuse an allowlist entry with no owner.\n\ntest_an_allowlist_entry_without_an_owner_is_refused fails on the IndexError. test_main_scrubs_the_child_secrets now also requires the publisher credential in the scrubber.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "dc25c1d9de62c468764349922e90188082c973e6",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/dc25c1d9de62c468764349922e90188082c973e6",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/dc25c1d9de62c468764349922e90188082c973e6"
+   }
+  ]
+ },
+ {
+  "sha": "acf51ffcb2c190f19827abe958473cab62a5cee9",
+  "node_id": "C_kwDOS05PptoAKGFjZjUxZmZjYjJjMTkwZjE5ODI3YWJlOTU4NDczY2FiNjJhNWNlZTk",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T08:31:11Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Let the corrupt-queue boot test reach the queue when posting is configured.\n\nmain builds the publisher first, so the test stubs it. The assertion still requires the queue error.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "201eee20dcf264718c652f7fa005ea28fafd0304",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/201eee20dcf264718c652f7fa005ea28fafd0304"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/acf51ffcb2c190f19827abe958473cab62a5cee9",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912QCRC1aQ7uu5UhlAAAjG0QADNBl6iWQgjNaFMzC8vG5xiN\n1Dslq2kOWtQVwpObSp0Wrx69Q9i7YSAn1MvZRBwxeGmh72UJ1rE6s8aWJc5Yhwzi\nF2UVxgPN+f38c9dfX+L0GXn2t35rhDPTnOqLlAcsFnJlm6DckPTEBpN7FZWln2Oi\n6Gi/n8j5sOSUFPku8W0W77hiYlC/8RCAMKI0cvGG9qDogSlxvDg8B3/4cBaz6FUX\nkIfOhaA16J1TfsL/X8Ag1PGFcX0D/uqJkz+Lq6oPfYHICK2gDW8MqAIQznUTTSHc\nFfeT3taVl5HIziYvtosf72nb7kGeyjiVDfM7/QZHyyH1NmFm05vQEJP9i15zHidA\nrWgyi6Rj+M36pje8ZZ3m0PpXUwMamZymOolBHYq1fgPOP0X5TXTYBiZ8+Qb/o9Ss\nyoMsl2YS7O5vEBSEz2ztAApcweb3q+tdNwpsXzCaX/yzlU+ai8DfldQ3uEmeRv4+\ncaguUzsrnc1HqoagxFiMnRfv6fcfxmQRDcJS7XDv4Xz0aQcPboVWMybDCPct3lhB\nFfsuXrzt7d9mxuYdNMNNxHX6bMkac9fscfhgresocTKmPu27dPZUGPWVdSV588UV\nKjjE4gCzgY9ZAWv+GdVlq1VSipblWFxvqKMt4+PbJYnAt/JRYMOWBGPoAxmMSDFg\nI4skDu+FLo/J9ekKTjRf\n=M3sd\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 201eee20dcf264718c652f7fa005ea28fafd0304\nparent 4b2b5928a76c0a545f3fc6ccded166bcedc37cfb\nauthor Cursor Agent <cursoragent@cursor.com> 1794558671 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nLet the corrupt-queue boot test reach the queue when posting is configured.\n\nmain builds the publisher first, so the test stubs it. The assertion still requires the queue error.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/acf51ffcb2c190f19827abe958473cab62a5cee9",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/acf51ffcb2c190f19827abe958473cab62a5cee9",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/acf51ffcb2c190f19827abe958473cab62a5cee9/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/4b2b5928a76c0a545f3fc6ccded166bcedc37cfb"
+   }
+  ]
+ },
+ {
+  "sha": "1785e13dafacccf767877c9157ae200f65e1b23a",
+  "node_id": "C_kwDOS05PptoAKDE3ODVlMTNkYWZhY2NjZjc2Nzg3N2M5MTU3YWUyMDBmNjVlMWIyM2E",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T09:11:12Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Store a superseded post as superseded when it is paused.\n\ntest_a_supersede_that_wins_the_pause_race_is_not_left_pending fails when pause_post always writes POST_PENDING.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "e98d8dc92c53620e93606e883e67b99e3bd48bbf",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/e98d8dc92c53620e93606e883e67b99e3bd48bbf"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/1785e13dafacccf767877c9157ae200f65e1b23a",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912QCRC1aQ7uu5UhlAAAzX4QABC3thF9/VOJOyy8R9S+gGNz\nL+GObaUhiXsXJNKGmk0Tq1MwgVJC3aCU9Zi44qz6eiJ3ngWofTx4y7aetmiS189M\nk1GFtXlzUACA+D8+oSvfkAz6weAxN4zIY+pThzXTBcfIMxUwc3KUngVWd0EqPw3Q\nKld5DU4MAUz5AAUaaeI73G7bxFjwCXSCD2wEn6mPhS/4mKqnIkqEVycdMYEgdeNf\nugM9S4kkde8jduy1/MHZauUHE6IYwOLeJPpF3y0z36fXYLtrysDx67xqAzKm5x6h\nRz7xOckkN5Ydmi52rMtDWcJA8j+dUrSUcC1bAa3c86BqA3LY3tfr3J3LRZW29Dp0\n6exjsMCZh3hn/p1yH0B96gjgB5Udh9hpkR2gMYC9YFVOD8a/bm2tM9hjN60/S8bV\ncuLeRRRbSWo/2e+vMP3aqI+XXYoxHH09ZYLxrU0ZtlpLdO4vVt1BHyugY84rlGXE\n+NNS1ZPSZOytxBFOwOFjJPx5E+LDRjf19z6CKkZ9vHqZq5/PjHCSxwtsBuiWzog2\nFQBK9gRz/ttvWNgQ/w5mzBm1g3nteRPJsbu396LFFet6DU2jhCJ5j4Qu7MLCu+EA\neqLIfDBBp+VFRI0aQ3T1gg2DhIFbVNUTQgidv18IGttA5wIcCXUiv1neYoiLhq+S\nKBuEgLr/Q1IMe1TDt1f3\n=UsMT\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree e98d8dc92c53620e93606e883e67b99e3bd48bbf\nparent acf51ffcb2c190f19827abe958473cab62a5cee9\nauthor Cursor Agent <cursoragent@cursor.com> 1794561072 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nStore a superseded post as superseded when it is paused.\n\ntest_a_supersede_that_wins_the_pause_race_is_not_left_pending fails when pause_post always writes POST_PENDING.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/1785e13dafacccf767877c9157ae200f65e1b23a",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/1785e13dafacccf767877c9157ae200f65e1b23a",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/1785e13dafacccf767877c9157ae200f65e1b23a/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "acf51ffcb2c190f19827abe958473cab62a5cee9",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/acf51ffcb2c190f19827abe958473cab62a5cee9",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/acf51ffcb2c190f19827abe958473cab62a5cee9"
+   }
+  ]
+ },
+ {
+  "sha": "e69d979bf4d65899e2c364cbebd9703d41d153cf",
+  "node_id": "C_kwDOS05PptoAKGU2OWQ5NzliZjRkNjU4OTllMmMzNjRjYmViZDk3MDNkNDFkMTUzY2Y",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T09:34:13Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Remove the run directory when pause_post settles a supersede.\n\ntest_a_supersede_during_pause_removes_the_run_directory fails when the worker ignores the stored state. test_a_failed_pause_save_restores_a_superseded_post fails when a failed save leaves the job superseded or clears cancel.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "f33c279caf39ea4198fd8c054f2037416d7ec3a5",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/f33c279caf39ea4198fd8c054f2037416d7ec3a5"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/e69d979bf4d65899e2c364cbebd9703d41d153cf",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912QCRC1aQ7uu5UhlAAAwKMQAJQ5zqavg97UylA1aXWjo/Ya\nWomuCoEYMDq95+c7IEuctjp0WPuK3mcj8wtFb+v+vc6CDbOLObbDRGr7oRfRE6bF\n7MbgRWANByGclg+m+ZQtolisfa0G55xql3br1RRkHEcvoPowCzNH5yNVj4jajZm+\nMSi4ZlCnnmSvsCOWcRVcL0/HFnTbFiJEdrGj8zOJHEuheQgzVBULbAYQQo6Hlbpt\ngw/Di0HnmGwKy3nCfR0mXvasCElLldfMA8DnUdIp/5I9rDtOECfxWHFIgXa7b4a4\n8AP3UflOaMkCBIzD8x7WVH6B/HElUW3yWExmFEWUspanOAmP31p6aTtO47aC6gdM\nTa3NAbUSURN/k9xT71H/UIh+w8H5GRUo3nEfpQaVC2YVQ1KuQ4BU9HxSpuooCWP9\nwbwtOvD8eQ07wG8vb8uHJb6ufjPXKG330xb2Zp6jXIm0HwrlS0zB2e2SxfAHqwqN\nKenWCNqMOuUabcMphPFgoAwP3PddyVN9ObPA/qhGE7tMZ0ifhr4OUzL94RAHDlva\nTSBcGpymtTTV6PAU3AUTUHBDc6zagCBskzGzOfDIk3pct4csGm1Ya66dlFLaa91y\nnU1qeyzxBcjiNGrSO6xxgtDldE5Du6fEDx9E0V3dGuXvuShiMvVQK99o1EUSVwpx\nPH6vuY7gP63DkK1yp5B3\n=y9UX\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree f33c279caf39ea4198fd8c054f2037416d7ec3a5\nparent 1785e13dafacccf767877c9157ae200f65e1b23a\nauthor Cursor Agent <cursoragent@cursor.com> 1794562453 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nRemove the run directory when pause_post settles a supersede.\n\ntest_a_supersede_during_pause_removes_the_run_directory fails when the worker ignores the stored state. test_a_failed_pause_save_restores_a_superseded_post fails when a failed save leaves the job superseded or clears cancel.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:59:21Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/e69d979bf4d65899e2c364cbebd9703d41d153cf",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/e69d979bf4d65899e2c364cbebd9703d41d153cf",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/e69d979bf4d65899e2c364cbebd9703d41d153cf/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "1785e13dafacccf767877c9157ae200f65e1b23a",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/1785e13dafacccf767877c9157ae200f65e1b23a",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/1785e13dafacccf767877c9157ae200f65e1b23a"
+   }
+  ]
+ },
+ {
+  "sha": "10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+  "node_id": "C_kwDOS05PptoAKDEwZDFjZjliOTdiMWIyOWViZjcxNzZhZGQzYWZlNTUzNzZjZDBjMDI",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T09:57:07Z"
+   },
+   "committer": {
+    "name": "GitHub",
+    "email": "noreply@github.com",
+    "date": "2026-11-13T18:57:19Z"
+   },
+   "message": "Remove the run directory when a waiting post is superseded or fails closed.\n\ntest_a_newer_head_removes_a_pending_post_directory fails when enqueue does not report a POST_PENDING job. test_a_bad_status_line_removes_the_run_directory fails when _fail_closed stores the state without settling.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "57d704825bcb75db86902d03a8c7314d91a18670",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/57d704825bcb75db86902d03a8c7314d91a18670"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN PGP SIGNATURE-----\n\nwsFcBAABCAAQBQJq912QCRC1aQ7uu5UhlAAAOa4QAHKfsoDnAsSAqXHInP67HzZ5\n1DHBBrXqs0H7oQpxCv1H8337qsusm6N0dwfEKZ6ugQ7hLRMirZjyr/I78XMCjNLW\nudZQbJqjUOBMsEJmJmoPZ8zjwdRuqup16yV5sjs+n947vRSfAHF1EDwCrLv5ucJy\nqYwx68hdm/hyuxbVIcw1YWG6Mc9OybFMe93L2ejYoEfSNWBcbuB8iR3FrmMJL/kn\nC1HSa8MDgEVioYZ4ji9D2ifAIMvbHBUm15ZJaShjC5lUHrl8bONztr0RxNyGCjSx\nDU8FouSOxeDrrWVXAZ+A0zzHKgojuUeYje9GIb6YYfYC6SDWXi4PAunXJEVJ4WNJ\nMQ+dNT+fLhyEfuvSmTBNSqIRbxCKwI1VT7/OUykW2vZ5Fq/LOlylVjuu3uuTJElx\ncGgd1GS6tx+6PdxwMBJyrA5ZKhu2yTdmH3zHiLlUfa7OpOwXSejIpln3mjwKJI+z\nVcRRe+SVqmXYs2XgtQ0tA6N70k168lf7P91rmyGUahIp+RCUVHaA5R3vrj1/bV+a\npuX3P1TvgXeDuXmYTcyv5lSW9wxudKJFPaWztzgLCqMdyJjjy1y1pghHlTJPj3Ji\nvEuqqsuluxBR/LAfri+6ZuAPwuwTdqkWwkVcYp0JRPhSejQT26gu4FTXMpv1D3eV\nBratPl+p3sMbdqsycLiu\n=Msi7\n-----END PGP SIGNATURE-----\n",
+    "payload": "tree 57d704825bcb75db86902d03a8c7314d91a18670\nparent e69d979bf4d65899e2c364cbebd9703d41d153cf\nauthor Cursor Agent <cursoragent@cursor.com> 1794563827 +0000\ncommitter GitHub <noreply@github.com> 1794596239 -0800\n\nRemove the run directory when a waiting post is superseded or fails closed.\n\ntest_a_newer_head_removes_a_pending_post_directory fails when enqueue does not report a POST_PENDING job. test_a_bad_status_line_removes_the_run_directory fails when _fail_closed stores the state without settling.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T18:57:25Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/10d1cf9b97b1b29ebf7176add3afe55376cd0c02/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "web-flow",
+   "id": 19864447,
+   "node_id": "MDQ6VXNlcjE5ODY0NDQ3",
+   "avatar_url": "https://avatars.githubusercontent.com/u/19864447?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/web-flow",
+   "html_url": "https://github.com/web-flow",
+   "followers_url": "https://api.github.com/users/web-flow/followers",
+   "following_url": "https://api.github.com/users/web-flow/following{/other_user}",
+   "gists_url": "https://api.github.com/users/web-flow/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/web-flow/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/web-flow/subscriptions",
+   "organizations_url": "https://api.github.com/users/web-flow/orgs",
+   "repos_url": "https://api.github.com/users/web-flow/repos",
+   "events_url": "https://api.github.com/users/web-flow/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/web-flow/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "e69d979bf4d65899e2c364cbebd9703d41d153cf",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/e69d979bf4d65899e2c364cbebd9703d41d153cf",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/e69d979bf4d65899e2c364cbebd9703d41d153cf"
+   }
+  ]
+ },
+ {
+  "sha": "0fe45e5ea79f3abd8e07488a01b623186df96692",
+  "node_id": "C_kwDOS05PptoAKDBmZTQ1ZTVlYTc5ZjNhYmQ4ZTA3NDg4YTAxYjYyMzE4NmRmOTY2OTI",
+  "commit": {
+   "author": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T19:33:07Z"
+   },
+   "committer": {
+    "name": "Cursor Agent",
+    "email": "cursoragent@cursor.com",
+    "date": "2026-11-13T19:33:07Z"
+   },
+   "message": "Share one service module at the entry point, and keep a stopped post's draft.\n\npython -m loads this file as __main__, so the poster was reading a second before_send. The entry point now calls the package module's main. A stop during the post listing goes through pause_post instead of being stored as superseded.\n\ntest_the_module_entry_shares_the_poster_hook fails when the guard calls this file's own main. test_a_stop_during_the_post_keeps_the_draft fails when that stop is settled as superseded.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>",
+   "tree": {
+    "sha": "d6a6a5588c1687645fb5850f868a770941609d77",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/trees/d6a6a5588c1687645fb5850f868a770941609d77"
+   },
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/git/commits/0fe45e5ea79f3abd8e07488a01b623186df96692",
+   "comment_count": 0,
+   "verification": {
+    "verified": true,
+    "reason": "valid",
+    "signature": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAg+qImwGMCy/grKZ50VxRHz3VfWW\nAL3QNbzIy2Nwcn+nQAAAADZ2l0AAAAAAAAAAZzaGE1MTIAAABTAAAAC3NzaC1lZDI1NTE5\nAAAAQDLvclHMDnzzmsoIL/wlMTrG2LYbRpS/p2AoqopiH7+VBtU97j2/9S5/8Dpted2hJS\nV7JtKybjaYBUER3LXIWAA=\n-----END SSH SIGNATURE-----",
+    "payload": "tree d6a6a5588c1687645fb5850f868a770941609d77\nparent 10d1cf9b97b1b29ebf7176add3afe55376cd0c02\nauthor Cursor Agent <cursoragent@cursor.com> 1794598387 +0000\ncommitter Cursor Agent <cursoragent@cursor.com> 1794598387 +0000\n\nShare one service module at the entry point, and keep a stopped post's draft.\n\npython -m loads this file as __main__, so the poster was reading a second before_send. The entry point now calls the package module's main. A stop during the post listing goes through pause_post instead of being stored as superseded.\n\ntest_the_module_entry_shares_the_poster_hook fails when the guard calls this file's own main. test_a_stop_during_the_post_keeps_the_draft fails when that stop is settled as superseded.\n\nCo-authored-by: Brandon Dees <brandondees@users.noreply.github.com>\n",
+    "verified_at": "2026-11-13T19:35:18Z"
+   }
+  },
+  "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/0fe45e5ea79f3abd8e07488a01b623186df96692",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/commit/0fe45e5ea79f3abd8e07488a01b623186df96692",
+  "comments_url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/0fe45e5ea79f3abd8e07488a01b623186df96692/comments",
+  "author": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "committer": {
+   "login": "cursoragent",
+   "id": 199161495,
+   "node_id": "U_kgDOC972lw",
+   "avatar_url": "https://avatars.githubusercontent.com/u/199161495?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/cursoragent",
+   "html_url": "https://github.com/cursoragent",
+   "followers_url": "https://api.github.com/users/cursoragent/followers",
+   "following_url": "https://api.github.com/users/cursoragent/following{/other_user}",
+   "gists_url": "https://api.github.com/users/cursoragent/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/cursoragent/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/cursoragent/subscriptions",
+   "organizations_url": "https://api.github.com/users/cursoragent/orgs",
+   "repos_url": "https://api.github.com/users/cursoragent/repos",
+   "events_url": "https://api.github.com/users/cursoragent/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/cursoragent/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "parents": [
+   {
+    "sha": "10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+    "url": "https://api.github.com/repos/brandondees/code-quality-atlas/commits/10d1cf9b97b1b29ebf7176add3afe55376cd0c02",
+    "html_url": "https://github.com/brandondees/code-quality-atlas/commit/10d1cf9b97b1b29ebf7176add3afe55376cd0c02"
+   }
+  ]
+ }
+]

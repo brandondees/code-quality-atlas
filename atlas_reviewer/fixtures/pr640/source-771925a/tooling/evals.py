@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: MIT
+# tooling/evals.py
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+
+class EvalError(Exception):
+    pass
+
+
+# D8's baseline eval-scenario floor. A lens can opt into a higher, hardened
+# bar via the manifest's `eval_min` (Q21); this is the default every skill
+# must clear regardless. Single source of truth for the three call sites
+# that previously each hardcoded the literal `3` (issue #392).
+D8_MIN_SCENARIOS = 3
+
+
+@dataclass
+class EvalDoc:
+    skills: list[str]
+    scenarios: list[dict]
+
+
+def load_evals(path: str) -> EvalDoc:
+    # A missing file (OSError), malformed JSON (JSONDecodeError), a non-object
+    # body (array/scalar), or a missing required key (KeyError) must all surface
+    # as EvalError so the CLI's `except EvalError` handler renders a clean
+    # "INVALID:" line instead of leaking a raw traceback to the operator. The
+    # explicit isinstance check gives a non-object body an actionable message
+    # rather than Python's raw "list indices must be integers" TypeError text.
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise EvalError(
+                f"{path}: eval doc must be a JSON object, got {type(data).__name__}"
+            )
+        skills = data["skills"]
+        scenarios = data["scenarios"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
+        raise EvalError(f"{path}: {exc}") from exc
+    # `scenarios`/`skills` are hand-authored (CLAUDE.md's source/generated split),
+    # so a shape mistake here is a plausible typo, not a programming error — it
+    # must surface as EvalError like every other malformed-input case above,
+    # not as a raw TypeError/AttributeError from validate_evals downstream.
+    if not isinstance(skills, list) or not all(isinstance(s, str) for s in skills):
+        raise EvalError(f"{path}: 'skills' must be a list of strings")
+    if not isinstance(scenarios, list) or not all(
+        isinstance(s, dict) for s in scenarios
+    ):
+        raise EvalError(f"{path}: 'scenarios' must be a list of objects")
+    return EvalDoc(skills=skills, scenarios=scenarios)
+
+
+def validate_evals(doc: EvalDoc, min_scenarios: int = D8_MIN_SCENARIOS) -> None:
+    # D8's baseline is 3; a lens can opt into a higher, hardened bar via the
+    # manifest's `eval_min` (Q21) — the caller resolves which applies and
+    # passes it in, so this function stays agnostic to *why* the bar differs.
+    if len(doc.scenarios) < min_scenarios:
+        raise EvalError(f"a skill must ship at least {min_scenarios} eval scenarios")
+    for i, s in enumerate(doc.scenarios):
+        if not s.get("query"):
+            raise EvalError(f"scenario {i}: missing query")
+        if not s.get("expected_behavior"):
+            raise EvalError(f"scenario {i}: missing expected_behavior")

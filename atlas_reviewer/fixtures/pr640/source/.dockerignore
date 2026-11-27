@@ -1,0 +1,25 @@
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.atlas-reviewer-state
+htmlcov
+.coverage
+coverage.xml
+node_modules
+docs
+tests
+atlas_reviewer/tests
+atlas_reviewer/fixtures
+*.egg-info
+dist
+# Secrets files and keys never enter the build context
+**/.env
+**/*.env
+**/secrets.env
+**/*.pem

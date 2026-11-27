@@ -1053,6 +1053,27 @@ With it, the run calls the real provider against real Sprites over the
 same fixture — real money, the operator's to start — and is what the
 parity stage's go/no-go runs on.
 
+The committed parity anchors' fixtures are `fixtures/pr640/` and
+`fixtures/pr661/`, each the recorded snapshot at its parity-key anchor
+(#640 at `0fe45e5e`, the head the Nov 14 trial reviewed; #661 at
+`28854775`, the round-5 head the key re-anchored to), built by the
+read-only `snapshot-build` command (`python -m atlas_reviewer
+snapshot-build ...`): the one step allowed to touch the network — the
+GitHub reads go through `gh api`, the trees, the diff and the
+self-contained `history.bundle` come from the local checkout — with the
+committed fixture offline afterward. The snapshot filters to what the
+anchor's reviewer saw: the anchor's lineage commits, the remarks posted
+before the anchor push, the CI at the retained commits with the jobs'
+logs where GitHub still serves them. The prior review rounds reach the
+eval only through the conversation block — no `rounds.jsonl`, the
+owner's 2026-11-26 decision — and the fixture-root `REVIEW.md` and
+`agents-md.txt` are the default branch's files as they stand today (the
+setup spec is today's, not the anchor-time one); the anchor-time copies
+ride in the trees, where the merge-base config read takes them. Each
+fixture's `FIXTURE.md` documents its own provenance — #661's
+reconstructed round-5 body and rebased-away lineage, #640's current-body
+caveat — and the command line that rebuilds it.
+
 ## The BYOK settings page (config slice S10, part B1)
 
 Part B1 is the intake surface: a GitHub App installation's admin signs
@@ -2873,6 +2894,7 @@ D41 records the 2026-11-12 probe that did.
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, job logs for every ingested run's jobs, artifact contents at the head, omissions | via `GitHubReader` |
+| `snapshot.py` | the read-only PR snapshot builder behind the parity anchors' eval fixtures (`snapshot-build`): the anchor's lineage commits, the remarks posted before the anchor push, the CI at the retained commits with the jobs' logs, the trees, the diff and the self-contained `history.bundle`; the build step's GitHub reads go through `gh api`, the fixture is committed and offline afterward | via `gh api` subprocesses and the local git |
 | `controller.py` | one event in, one draft and its review verdict out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
 | `providers.py` | `OfflineProvider` (the default) | no |

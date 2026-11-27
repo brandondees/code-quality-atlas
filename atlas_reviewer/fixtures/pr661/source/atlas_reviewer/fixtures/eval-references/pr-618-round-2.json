@@ -1,0 +1,40 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 618,
+    "head_sha": "44c983eccdc11640c0d12cfeba150e9101e4f314",
+    "round": 2,
+    "reviewed_commit": "44c983eccdc11640c0d12cfeba150e9101e4f314"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "major",
+        "path": "commands/atlas-review-pr.md",
+        "summary": "(new in `44c983e`). In the per-push trigger model, \"post nothing and stop, and let the next wake re-check\" has no next wake. That makes the common restack case end silently. This command supports a `synchronize`-triggered routine that runs ",
+        "lenses": [
+          "hunting-silent-failures",
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 241,
+        "end_line": 242
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/618#pullrequestreview-5848635375",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "tracing-correctness-and-invariants",
+      "hunting-silent-failures",
+      "reviewing-agentic-safety",
+      "auditing-documentation-health",
+      "checking-idioms-and-consistency",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

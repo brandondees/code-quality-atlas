@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-a-change"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this PR:\n```python\ntry:\n    charge(order)\nexcept Exception:\n    pass\norder.mark_paid()\n```",
+      "expected_behavior": [
+        "Selects correctness + silent-failure lenses by relevance",
+        "Loads reference/lenses/hunting-silent-failures/body.md and flags the swallowed exception",
+        "Produces one synthesized verdict via reference/synthesis.md"
+      ]
+    },
+    {
+      "query": "Do a thorough review of this change — use all relevant lenses:\n```diff\n+def parse_amount(s):\n+    return int(s)\n```",
+      "expected_behavior": [
+        "Recognizes 'thorough / all relevant lenses' as comprehensive mode",
+        "Runs every relevant lens, not just the top 2-4",
+        "Applies the comprehensive Nit-pinned severity floor so long-tail findings surface"
+      ]
+    },
+    {
+      "query": "Quick triage of this hotfix before merge:\n```diff\n+ os.system(user_input)\n```",
+      "expected_behavior": [
+        "Recognizes triage mode",
+        "Runs only the critical-tier lenses (correctness/security/data/concurrency)",
+        "Loads reference/lenses/sweeping-for-security/body.md and reports at the Major+ floor"
+      ]
+    }
+  ]
+}

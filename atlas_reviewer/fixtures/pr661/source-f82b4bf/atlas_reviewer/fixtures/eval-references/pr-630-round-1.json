@@ -1,0 +1,54 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 630,
+    "head_sha": "61e931026cca7e2caf458e311e826a1bea06c133",
+    "round": 1,
+    "reviewed_commit": "be82ba72be83a9b125f034b3cfb081c56fbb92a8"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/tests/test_controller.py",
+        "summary": "\u2014 The PR body says both remaining survivors \"are documented in the test file\". Only one of them is: this docstring records the inner `_omissions(...)` forwarding at `controller.py:610`. The other survivor, `select_lenses(config.depth, None,",
+        "lenses": [
+          "reviewing-pr-and-process-hygiene"
+        ],
+        "line": 1870
+      },
+      {
+        "severity": "nit",
+        "path": "atlas_reviewer/tests/test_controller.py",
+        "summary": "\u2014 This test monkeypatches the private `_notes` and asserts on the closure it receives, not on the draft's output. Two consequences: - Renaming `_notes`, inlining it, or changing its keyword-only signature breaks the test even though nothing",
+        "lenses": [
+          "reviewing-test-quality"
+        ],
+        "line": 1944
+      },
+      {
+        "severity": "nit",
+        "path": "atlas_reviewer/tests/test_controller.py",
+        "summary": "\u2014 `_Base(...)`, `ControllerFacts(...)` and `RunnerReport(...)` are built entirely from positional arguments: 7, 6 and 4 slots, several of them `()`. A reader can't tell which empty tuple is which field, and swapping two same-typed fields in",
+        "lenses": [
+          "reviewing-test-quality"
+        ],
+        "line": 1898
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/630#pullrequestreview-5868894625",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "reviewing-test-quality",
+      "checking-idioms-and-consistency",
+      "tracing-correctness-and-invariants",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

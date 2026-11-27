@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "code-quality-atlas": {
+      "source": {
+        "source": "github",
+        "repo": "brandondees/code-quality-atlas"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "code-quality-atlas@code-quality-atlas": true
+  }
+}

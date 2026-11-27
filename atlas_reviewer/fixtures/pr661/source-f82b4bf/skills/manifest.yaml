@@ -1,0 +1,2583 @@
+taxonomy_version: v0.14
+skills:
+  - name: hunting-silent-failures
+    description: >
+      Reviews changes for swallowed or silently-handled errors — empty
+      catch/rescue blocks, ignored returned errors, bare excepts, unhandled
+      promise rejections, broad exception catches — and for unsafe fallbacks,
+      missing timeouts, and absent retries/circuit-breakers. Use when reviewing
+      error handling, exceptions, try/catch, rescue, fallback, resilience,
+      timeouts, or resource cleanup on failure paths.
+    picker: >
+      Where do errors vanish? Swallowed exceptions, silent fallbacks, missing
+      timeouts and retries.
+    shape: diff
+    design: true
+    wave: 1
+    tier: floor
+    cross_ref: [4]    # primary owner: tracing-correctness-and-invariants
+    # Q21: fifth and final hardened, adversarial/red-team-weighted eval suite
+    # (the sweeping-for-security / tracing-correctness-and-invariants /
+    # reviewing-migration-and-data-safety / reviewing-concurrency-and-async
+    # precedent's A-E scenario groups), raised from D8's 3-scenario baseline
+    # (this lens already had 6). See open-questions.md Q21.
+    eval_min: 27
+    built_from:
+      - { category: 2, source: docs/research/cluster-1-correctness.md#2 }
+      - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
+
+  - name: reviewing-naming-and-readability
+    description: >
+      Reviews code for naming and local readability: intention-revealing names
+      vs placeholders, function length and cyclomatic/cognitive complexity, deep
+      nesting, magic numbers/strings, mixed levels of abstraction, and comment
+      accuracy. Use when reviewing readability, naming, complexity, nesting,
+      magic values, or comments.
+    picker: >
+      Can a newcomer read this function? Names, length, nesting, magic values,
+      comment accuracy.
+    shape: diff
+    wave: 1
+    # Q21: third preference-tier lens hardened (wave-1-first rollout). Same
+    # A-E adversarial taxonomy as the floor-tier lenses, minus the design-doc
+    # (A) group — this lens is diff-only, not design-capable — raised from
+    # D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 25
+    built_from:
+      - { category: 5, source: docs/research/cluster-2-readability.md#5 }
+      - { category: 6, source: docs/research/cluster-2-readability.md#6 }
+      - { category: 7, source: docs/research/cluster-2-readability.md#7 }
+
+  - name: reviewing-module-design
+    description: >
+      Reviews module and type design: cohesion and coupling (via connascence),
+      encapsulation, hard-to-misuse interfaces, and making illegal states
+      unrepresentable. Use when reviewing class/module structure, interfaces,
+      type or data modeling, coupling, or API ergonomics for callers.
+    picker: >
+      Are the boundaries right? Coupling, encapsulation, interfaces that are
+      hard to misuse, illegal states unrepresentable.
+    shape: diff
+    design: true
+    wave: 1
+    # Q21: first preference-tier lens hardened, opening the wave-1-first
+    # rollout that follows the five floor-tier lenses. Same A-E adversarial
+    # taxonomy, raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 26
+    built_from:
+      - { category: 9, source: docs/research/cluster-3-structure.md#9 }
+      - { category: 10, source: docs/research/cluster-3-structure.md#10 }
+
+  - name: checking-restraint
+    description: >
+      Reviews changes for over-engineering — premature abstraction, speculative
+      generality, the wrong abstraction, and premature optimization without a
+      profile. The restraint / brake-pedal lens. Use when a change adds
+      abstraction layers, config knobs, generality, or hand-optimized code, or
+      when asking whether a change is doing too much.
+    picker: >
+      Is this change too much? Premature abstraction or optimization — the
+      brake pedal.
+    shape: diff
+    design: true
+    wave: 1
+    cross_ref: [15]   # primary owner: reviewing-performance-and-efficiency (counterweight lens here)
+    # Q21: second preference-tier lens hardened (wave-1-first rollout). Same
+    # A-E adversarial taxonomy, raised from this lens's prior 4-scenario
+    # suite (above D8's 3-scenario baseline). See open-questions.md Q21.
+    eval_min: 24
+    built_from:
+      - { category: 11, source: docs/research/cluster-3-structure.md#11 }
+      - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
+
+  - name: reviewing-llm-integration
+    description: >
+      Reviews LLM/AI integration code for prompt-injection surface, the lethal
+      trifecta, unvalidated model output, missing eval coverage, unpinned models,
+      unbounded token/cost, and PII sent to third-party models. Use when
+      reviewing code that calls an LLM or model API, builds prompts, parses
+      model output, or wires up agents and tools. Skip when the change has no
+      model/LLM call, prompt construction, or model-output handling — ordinary
+      code that never touches an AI API.
+    picker: >
+      Is the model call safe and bounded? Injection surface, output validation,
+      evals, token cost, PII.
+    shape: diff
+    design: true
+    wave: 1
+    cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
+    # Q21: fourth preference-tier lens hardened (wave-1-first rollout). Same
+    # A-E adversarial taxonomy as the prior instances, including the design-doc
+    # (A) group since this lens is design-capable, raised from D8's 3-scenario
+    # baseline. See open-questions.md Q21.
+    eval_min: 26
+    built_from:
+      - { category: 25, source: docs/research/cluster-4-runtime.md#25 }
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: reviewing-agentic-safety
+    description: >
+      Reviews the action/tool surface of agent and tool-using systems — what the
+      model is permitted to *do*, distinct from reviewing-llm-integration's review
+      of the *model call*: tool least-privilege, approval gates and step/spend
+      budgets on autonomous loops, tool metadata and MCP server descriptions as
+      untrusted input (tool poisoning), confused-deputy and token-audience
+      discipline (no token passthrough), inter-agent authentication,
+      sandboxed code execution (no ambient credentials, egress allow-list),
+      agent-memory hygiene, action audit trails, and the action-leg mitigations of
+      the lethal trifecta. Grounded in OWASP's Top 10 for Agentic Applications
+      (ASI01–ASI10) and the MCP security spec. Use when reviewing tool or function
+      definitions exposed to a model, an MCP server or client, an autonomous or
+      multi-agent loop, agent memory, or code that lets a model take actions. Skip
+      when the change has no tools, agents, MCP, or autonomous loop — an ordinary
+      model call with no action surface is reviewing-llm-integration's job.
+    picker: >
+      Is the agent's action surface safe? Tool least-privilege, approval gates &
+      step budgets, untrusted tool metadata, sandboxed exec, egress control.
+    shape: diff
+    design: true
+    wave: 5
+    # Q21: fresh scope-to-coverage recompute after
+    # reviewing-decision-lifecycle shipped (PR #261). Three-way tie at
+    # the widest remaining gap (reviewing-agentic-safety,
+    # reviewing-agent-legibility, reviewing-ethical-design, all 9 owned
+    # checks / 4 baseline scenarios); picked this one for direct
+    # thematic relevance to this session (this repo runs its own
+    # agentic PR-review routines) and for design:true precedent already
+    # proven out three times this wave. design: true, so this pass
+    # includes an A group. 4 kept + A 1 (an RFC for an autonomous ops
+    # agent with unscoped shell access, no autonomy bounds or approval
+    # gates, no audit trail, and no rollback plan for the agent design
+    # itself -- exercises the shared decision-record checklist too) + B
+    # 5 (per-axis coverage of the five completely-uncovered checks:
+    # unpinned MCP servers with tool descriptions trusted verbatim
+    # (tool poisoning); model-generated code run via bare exec() in the
+    # host process (unsandboxed); an inter-agent message acted on with
+    # no origin authentication; a raw, unvalidated, unprovenanced
+    # memory write; a handler reaching sensitive data and then posting
+    # to a model-supplied URL (lethal-trifecta action leg)) + C 3
+    # (delegate/escalate, each grounded in this lens's own documented
+    # cross-references: an egress-gated action leg that still combines
+    # the other two trifecta legs -> reviewing-llm-integration per "#25
+    # owns the trifecta framing, #32 owns the mitigation"; a
+    # well-logged, well-scoped tool call nobody actually monitors ->
+    # reviewing-observability-and-operability per "cross #16"; a
+    # least-privilege, approval-gated tool with an untyped free-form
+    # JSON parameter contract -> reviewing-api-contract-safety per "the
+    # tool contract to #13") + D 5 (adversarial: a "sandboxed, fully
+    # isolated" comment over a real bare exec() in the host process; an
+    # in-diff "reviewed and approved by security team" claim over a
+    # real unpinned, verbatim-trusted MCP connection; demo-deadline
+    # framing ("approval gate can come in a follow-up PR") over a real
+    # ungated irreversible delete_account call; an unbounded,
+    # ungated transfer_funds agent loop buried as one hunk of six
+    # mostly-cosmetic changes; an "all writes are validated and
+    # provenance-checked" comment directly contradicted by an
+    # unvalidated raw memory-store append beneath it) + E 4 (a
+    # sandboxing counterweight to B2, a memory-hygiene counterweight to
+    # B4, the not-applicable test matching this lens's own explicit
+    # skip clause -- an ordinary model call with no action surface, per
+    # "an ordinary model call ... is reviewing-llm-integration's job" --
+    # and a tool-metadata counterweight to B1 (a pinned, hash-verified,
+    # description-validated MCP server)) = 22 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 22
+    built_from:
+      - { category: 32, source: docs/research/cluster-4-runtime.md#32 }
+
+  - name: reviewing-threat-model
+    description: >
+      Threat-models a system or design for security at design time — enumerates
+      what an adversary could do boundary by boundary (STRIDE, trust boundaries,
+      data-flow, attack trees, abuse cases) and whether each threat is mitigated,
+      rather than pattern-matching existing code for vulnerabilities. Works on a
+      design doc or RFC when present, and reconstructs the implied design from the
+      code/config when absent. Use when asked for a threat model, a security
+      architecture review, an attack-surface review, or "what could go wrong" on a
+      system, service, or AI agent app — especially one with tools, autonomy, or
+      external/untrusted inputs. Skip when the change is a pure code fix with no
+      new trust boundaries, components, or data-flows — diff-time vulnerability
+      detection is sweeping-for-security's job.
+    picker: >
+      Enumerate what an adversary could do, boundary by boundary — STRIDE, trust
+      boundaries, abuse cases — and whether each threat is mitigated.
+    shape: diff
+    design: true
+    wave: 4
+    # cross_ref intentionally absent: reviewing-threat-model is the sole primary owner of #38.
+    # sweeping-for-security (#14) owns diff-time vuln detection; these are complementary, not overlapping.
+    # Q21: excluded from every preference-tier scope-to-coverage recompute
+    # this campaign has run — this lens already ships its own native
+    # 21-scenario adversarial suite from original authorship (core-firing /
+    # per-axis-coverage / detect-and-route / red-team / precision groups,
+    # this lens's own A-E-equivalent taxonomy predating the campaign's, per
+    # docs/threat-modeling-design-time-security.md §5), just missing this
+    # eval_min floor annotation. No new scenarios authored here — floor
+    # verified to gate at the exact existing count (21 scenarios, 84
+    # assertions, both independently recounted from the shipped eval.json).
+    eval_min: 21
+    built_from:
+      - { category: 38, source: docs/research/cluster-4-runtime.md#38 }
+
+  - name: reviewing-ai-authored-code
+    description: >
+      Reviews a change for the failure signature of AI-/machine-authored code,
+      independent of who wrote it: hallucinated or typosquatted dependencies
+      (slopsquatting), invented or misused APIs and parameters, plausible-but-wrong
+      constants and logic that reads fluently, hallucinated internal references to
+      symbols that don't exist here, over-helpful unrequested additions (scope
+      creep as a generation artifact), the weak-default security signature, tests
+      that assert the implementation instead of the spec, fabricated
+      comments/citations, and duplication instead of reuse. Flags the signature and
+      hands the deep verdict to the owning lens (#18 supply-chain, #14 security, #1
+      correctness, #11 restraint). Use when reviewing AI-generated or AI-assisted
+      code, a large or unfamiliar diff, or any change that adds dependencies or
+      confident-looking constants and APIs — the defects are attribution-agnostic,
+      so you need not know a model wrote it.
+    picker: >
+      Does this carry the AI-authored failure signature? Hallucinated/typosquatted
+      packages, invented APIs, confident-but-wrong constants, over-helpful scope.
+    shape: diff
+    wave: 5
+    cross_ref: [18]   # primary owner: auditing-dependencies-and-supply-chain
+    # Q21: picked for the widest scope-to-coverage gap remaining among the
+    # unhardened preference-tier lenses — 18 owned checks (9 under #34, this
+    # lens's own AI-authorship-signature territory; 9 under #18, shared with
+    # auditing-dependencies-and-supply-chain) on only 4 baseline scenarios.
+    # Deliberately does NOT build a parallel B-axis sweep of #18's 9 checks —
+    # auditing-dependencies-and-supply-chain's own hardened 22-scenario suite
+    # already covers necessary/healthy/CVEs/pinning/transitive-dup/license/
+    # malicious-install/automated-updates/version-bump/vendor-lock-in from
+    # that category's primary-owner angle, and duplicating it here would
+    # violate G1's single-owner principle for no added signal. No design-doc
+    # (A) group — shape: diff, not design-capable. 4 originals + B 4 (per-axis
+    # coverage of #34's remaining untested checks: hallucinated internal
+    # references, confident-but-wrong API misuse distinct from constants, a
+    # fabricated internal-issue citation, a real-but-freshly-registered
+    # unvetted dependency) + C 4 (this lens's unusually large routing surface
+    # — the two baseline scenarios already exercise the #18 and restraint
+    # delegate boundaries, so C adds the remaining four: security-weakness
+    # signature → sweeping-for-security, a generated test asserting the
+    # implementation's own bug → reviewing-test-quality, duplication instead
+    # of reuse → checking-idioms-and-consistency, plausible-but-wrong
+    # inverted-condition logic → tracing-correctness-and-invariants) + D 5
+    # (adversarial: a confident "verified against the docs" claim over an
+    # invented parameter, a distractor-buried hallucinated env var among nine
+    # correct ones, urgency/already-reviewed framing over a real
+    # publicly-readable S3 object ACL, a "standard template, low scrutiny"
+    # framing over real duplication, a fake "security review passed" claim
+    # over a real weak session-ID generator) + E 3 (a large but genuinely
+    # correct diff, a vague-but-true comment correctly not flagged as
+    # fabricated, the not-applicable test) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 34, source: docs/research/cluster-4-runtime.md#34 }
+      - { category: 18, source: docs/research/cluster-5-verification.md#18 }
+
+  - name: reviewing-agent-legibility
+    description: >
+      Reviews a change for agent-legibility — whether an AI agent can understand,
+      navigate, and safely modify this code within a context budget. The mirror of
+      reviewing-ai-authored-code (quality of code *for* AI readers, not *by* them):
+      context economy and self-containment (a depth-first slice understandable
+      without loading the whole repo — the "40% context rule"), retrieval-friendly
+      and AST-navigable structure, local self-explanation at the edit site,
+      agent-onboarding files (AGENTS.md / CLAUDE.md) present, accurate, and scoped
+      with do-not-touch guardrails, an llms.txt-style index for agent-consumed
+      repos, and no agent-hostile patterns (context-budget-blowing megafiles,
+      bloated scaffolding, duplicated parallel copies). Use when reviewing a change
+      to an AI-/agent-maintained codebase, to agent-onboarding files or repo
+      structure an agent must navigate, or any large or scattered change whose
+      context economy matters. Defers human readability to #5–#8, agent-operator
+      parity to #24, and runtime tool-safety to #32.
+    picker: >
+      Can an AI agent read, navigate, and safely change this within a context
+      budget? Context economy, retrieval-friendly structure, scoped
+      AGENTS.md/CLAUDE.md.
+    shape: diff
+    wave: 5
+    # Q21: fresh scope-to-coverage recompute after reviewing-agentic-safety
+    # shipped (PR #262). Two-way tie at the widest remaining gap with
+    # reviewing-ethical-design (both 9 owned checks / 4 baseline
+    # scenarios); picked this one as the technically lower-risk of the
+    # two and a natural continuation of the prior pick's agent-tooling
+    # theme. shape: diff, not design-capable, so no A group (precedent:
+    # checking-idioms-and-consistency). 4 kept + B 5 (per-axis coverage
+    # of the five completely-uncovered checks: retrieval-friendly
+    # placement -- refund logic buried in a grab-bag utils file; local
+    # self-explanation -- a non-obvious operational constant whose
+    # rationale lives only in a commit message, not at the edit site;
+    # LLM-centric readability -- four individually-simple functions
+    # whose actual behavior only resolves after tracing all of them;
+    # scoped guardrails -- an accurate AGENTS.md that never names a new
+    # generated directory as off-limits; llms.txt-style index -- an SDK
+    # marketed for AI-assistant consumption with no machine-readable
+    # entry-point map) + C 3 (delegate/escalate, each grounded in this
+    # lens's own heuristics.md cross-references: a locally-present
+    # comment that states what rather than why -> reviewing-naming-
+    # and-readability per "distinct from #7's human 'why-not-what'"; a
+    # fourth near-identical parallel implementation, this diff's own
+    # legibility regression, with the repo-wide accumulating-pattern
+    # judgment routed to finding-maintainability-hotspots per "xref #21
+    # change-amplification"; an accurate, well-scoped AGENTS.md that
+    # directly contradicts README.md on the test command and a version
+    # requirement -> auditing-documentation-health, #22's documented
+    # primary owner (per reviewing-pr-and-process-hygiene's own
+    # `cross_ref: [22]` annotation a few entries below)) + D 5 (adversarial:
+    # a "no context needed, fully self-explanatory" comment over a
+    # genuinely four-module-deep read; an "AGENTS.md was already
+    # updated in a separate PR" claim contradicted by the actual branch
+    # content; launch-deadline framing over a new 8,400-line vendored
+    # megafile; a stringly-keyed registry buried as one hunk of a
+    # six-hunk mostly-cosmetic diff; a "fully documented inline" /
+    # locking claim contradicted by code that acquires no lock at all)
+    # + E 4 (a retrieval-friendly counterweight to B1, a guarded-
+    # generated-directory counterweight to B4, the not-applicable test,
+    # a trivial one-line function needing no ceremony) = 21 scenarios.
+    # See open-questions.md Q21.
+    eval_min: 21
+    built_from:
+      - { category: 35, source: docs/research/cluster-2-readability.md#35 }
+
+  - name: reviewing-ethical-design
+    description: >
+      Reviews a change for diff-visible, code-level ethical / responsible-design
+      defects — the non-ML analog of harmful-output review, a sibling of security
+      (harm to the user/subject, not via an attacker): dark patterns and deceptive
+      flows (sneaking, fabricated urgency/scarcity, misdirection/confirmshaming,
+      obstruction, forced action, nagging), manipulative defaults and asymmetric
+      choices (pre-checked consent, opt-out harder than opt-in, auto-renew),
+      discriminatory business logic in plain conditionals (a hardcoded threshold or
+      proxy disadvantaging a group, no model in sight), dishonest state/signals,
+      and consent theater. Strictly detect-and-route: name the pattern with
+      evidence, then route the decision — consent-as-law to #27/legal, product
+      trade-offs to product, a11y mechanics to #23. Use when reviewing
+      consent/opt-out flows, defaults, pricing/eligibility conditionals, or
+      onboarding/checkout/cancellation funnels. Skip internal code with no
+      user-facing behavior; deep model-fairness auditing is out of scope.
+    picker: >
+      Does this manipulate or disadvantage the user? Dark patterns, manipulative
+      defaults, discriminatory conditionals — detect-and-route to product/legal.
+    shape: diff
+    wave: 5
+    # Q21: fresh scope-to-coverage recompute after reviewing-agent-
+    # legibility shipped (PR #264). Its earlier tie partner is now
+    # hardened, leaving this lens alone at the widest remaining gap (9
+    # owned checks / 4 baseline scenarios). shape: diff, not
+    # design-capable, so no A group. 4 kept + B 5 (per-axis coverage of
+    # the five completely-uncovered checks: honest state/truthful
+    # signals -- a "permanently deleted" claim over a soft-delete-only
+    # implementation; consent theater -- a stored consent flag never
+    # checked before sending; coercion/pressure -- an hourly-recurring
+    # upgrade interstitial with no permanent dismiss; vulnerable-user
+    # context -- an undisclosed-odds loot-box mechanic applied
+    # identically to minors; accessibility-as-exclusion -- a
+    # keyboard-inoperable cancel control next to a fully accessible
+    # keep-subscription button) + C 3 (delegate/escalate, each grounded
+    # in this lens's own documented routing boundaries: a legitimately
+    # protective delete-confirmation that's a bare unauthenticated GET
+    # -> sweeping-for-security per "route the protective-control side
+    # to #14"; a correct opt-out default undermined by a missing
+    # under-13 age gate -> auditing-compliance-and-provenance (#27), a
+    # distinct regulatory facet from the consent-as-law delegate the 4
+    # originals already exercise; a contrast-hidden (not
+    # keyboard-inoperable) cancel control -> reviewing-accessibility-
+    # and-i18n (#23), a second, distinct instance of the a11y-mechanics
+    # boundary from B5's own operability instance) + D 5 (adversarial:
+    # a "legal reviewed and approved" claim over a real manipulative
+    # default; an implausible single-ticket justification over a
+    # platform-wide nagging pattern; price-increase-week urgency
+    # framing over a real obstruction (cancellation moved phone-only);
+    # a pre-checked consent default with no decline option buried as
+    # one hunk of a six-hunk mostly-cosmetic diff; a "fully transparent
+    # pricing" claim contradicted by fees applied only after checkout
+    # is rendered) + E 4 (a consent-theater counterweight to B2, a
+    # vulnerable-user counterweight to B4, the not-applicable test
+    # matching this lens's own explicit skip clause verbatim, a
+    # trivial honest low-stakes display needing no ceremony) = 21
+    # scenarios. See open-questions.md Q21.
+    eval_min: 21
+    built_from:
+      - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
+
+  - name: reviewing-usability-and-interaction
+    description: >
+      Reviews a user-facing change for interaction quality — whether a person can
+      tell what is happening, do what they came to do, and recover when it goes
+      wrong. Grounded in Nielsen's 10 usability heuristics: state completeness
+      (an async read produces loading, empty, and error states whether or not
+      anyone designed them), reversibility of destructive actions (undo, or a
+      confirmation naming what is lost — never a bare "Are you sure?"),
+      system-status feedback, error recovery that preserves the user's input,
+      controllability (no undismissable modal, no wizard without a back), and
+      conformity with the expectations this product already set. Use when
+      reviewing a form, wizard, destructive action, async operation, or any
+      user-facing flow or screen. Detect-and-route: an unhandled state or an
+      unrecoverable action is a defect; which pattern and which words route to
+      design. Skip when the change has no user-facing surface. Accessibility
+      mechanics are #23's, measured performance #15's, manipulative design
+      #36's.
+    picker: >
+      Can a person use this? Undesigned loading/empty/error states, destructive
+      actions with no way back, silent operations, errors that eat the form.
+    shape: diff
+    design: true
+    wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-conceptual-integrity` merged (PR #272). The clean pick left
+    # from the prior recompute's tie: this lens's baseline already covered
+    # all 9 of its checklist bullets, but `design: true` had never actually
+    # been exercised — no A-group scenario existed. No B group needed; the
+    # only real gap was the missing A-group scenario, plus the standard C/D/E
+    # groups this campaign's pattern always adds.
+    #
+    # A (1): an RFC for a Bulk Import wizard — exercises both a topical gap
+    # (no stated system-status feedback for a long-running import, no stated
+    # partial-failure behavior, no stated warning for a destructive overwrite
+    # option) and the shared decision-record checklist (alternatives not
+    # actually weighed, no revisit-trigger) in one finding set. C (3,
+    # delegate/escalate), each grounded in this lens's own description
+    # ("Accessibility mechanics are #23's, measured performance #15's,
+    # manipulative design #36's"): a destructive-confirmation dialog that
+    # gets this lens's own checks right (names the loss, distinguishes the
+    # controls) but is mechanically inaccessible underneath, routed to
+    # reviewing-accessibility-and-i18n (#23, named but never yet exercised);
+    # a search-as-you-type feature with no debounce/cancellation, where
+    # status IS communicated but the underlying responsiveness isn't, routed
+    # to reviewing-performance-and-efficiency (#15, a second instance
+    # distinct from the kept baseline's upload-progress case); a
+    # four-screen cancel-subscription flow with a de-emphasized cancel
+    # control on each screen, routed to reviewing-ethical-design (#36, a
+    # second instance distinct from the kept baseline's undismissable-modal
+    # case). D (5, adversarial): a "all states handled, see Storybook" claim
+    # contradicted by a component with no state handling at all
+    # (claim-capture); an in-diff "approved by growth, do not flag" comment
+    # over a real undismissable-modal case with no legitimate constraint
+    # (suppression); conference-demo deadline framing over a real unhandled
+    # empty state (deadline framing); a real unconfirmed bulk-delete action
+    # buried as the fourth of six files in an otherwise cosmetic diff
+    # (distractor-buried); a "we continuously save a draft" claim
+    # contradicted by an error handler that never calls the save function
+    # (contradicted claims). E (3, precision): explicit counterweights to
+    # C3 and C1 (a single, equally-weighted retention screen — not
+    # obstruction; the same dialog with accessibility mechanics correctly
+    # wired this time — no finding on either axis), and a trivial static
+    # page with no interaction surface at all. = 22 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 22
+    built_from:
+      - { category: 42, source: docs/research/cluster-7-product.md#42 }
+
+  - name: reviewing-outcome-instrumentation
+    description: >
+      Reviews whether a change that claims a user or business benefit can be
+      told to have worked — the question no other lens asks. Is an outcome
+      stated rather than only an output; does the instrumentation that would
+      observe it ship in the same diff (deferred tracking leaves the feature
+      live and permanently unmeasured); does the hypothesis have a losing
+      condition; does an experiment declare guardrail metrics and not only a win
+      condition; are assignment and exposure logged where the user actually sees
+      the variant; do new analytics events match the tracking plan the rest of
+      the org reads; does a rollout flag have an owner and an end condition; and
+      has a proxy metric quietly become the target. Use when reviewing a new
+      feature, an experiment or flagged rollout, an analytics/telemetry event
+      change, or a PR claiming a user or business benefit. Refactors, fixes,
+      bumps, and internal work owe no hypothesis — skip them. Which outcome to
+      chase routes to product; whether it is observable at all is engineering's.
+    picker: >
+      After this ships, how would anyone know it worked? Stated outcome,
+      instrumentation in the same diff, a losing condition, experiment guardrails.
+    shape: diff
+    design: true
+    wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `auditing-data-pipeline-health` merged (PR #270). Widest gap among the
+    # remaining lenses fitting the established A-E pattern (11 owned checks
+    # against 10 baseline scenarios) — `reviewing-threat-model` (already at
+    # 21 scenarios natively, missing only its `eval_min` floor) and
+    # `reviewing-artifact-conventions` (`shape: artifact`, a taxonomy not yet
+    # adapted) set aside for the same reasons as the prior recomputes. The
+    # 10-scenario baseline was unusually rich already, covering 10 of 11
+    # checklist bullets well — leaving concrete assignment/exposure code
+    # defects (the baseline's guardrails scenario asks to see the code
+    # rather than being given a real bug in it) as the one clean B-group gap,
+    # and `design: true` had never been exercised at all despite the lens
+    # being design-capable — no A-group scenario existed.
+    #
+    # A (1): an adoption RFC for a dynamic-pricing engine — exercises both a
+    # topical gap (a direction-only hypothesis with no magnitude/horizon/
+    # losing-condition, no guardrails, no instrumentation plan) and the
+    # shared decision-record checklist (alternatives not actually weighed,
+    # no revisit-trigger) in one finding set. B (1, per-axis coverage): a
+    # concrete assignment/exposure code-defect scenario (session-id hashing
+    # instead of user-id, exposure logged before a redirect check) — a code
+    # property checked directly, distinct from the kept baseline's
+    # ask-to-see-the-code framing. C (3, delegate/escalate): a dedicated
+    # PII-in-event-properties scenario routed to
+    # auditing-compliance-and-provenance (#27, distinct from the kept
+    # baseline's tracking-plan-conformance case); a fresh Goodhart/proxy
+    # instance (a streak mechanic) routed to reviewing-ethical-design (#36,
+    # a second instance distinct from the kept baseline's autoplay case); a
+    # breaking event rename mid-measurement routed to
+    # reviewing-data-transformations-and-contracts (#40, a second instance
+    # distinct from the kept baseline's simple new-event case). D (5,
+    # adversarial): claim-capture, an in-diff suppression comment, board-
+    # demo deadline framing over missing guardrails, a distractor-buried
+    # uninstrumented feature in a six-file diff, and a PR claim contradicted
+    # by the actual code path it describes. E (3, precision): a counterweight
+    # to the new B-group case (assignment/exposure done correctly), a second,
+    # rarer "No findings" shape distinct from the kept baseline's skip case
+    # — a change that makes a real claim and passes every applicable check —
+    # and a trivial instrumentation-only addition owing no hypothesis.
+    # = 23 scenarios. See open-questions.md Q21.
+    eval_min: 23
+    built_from:
+      - { category: 43, source: docs/research/cluster-7-product.md#43 }
+
+  - name: reviewing-conceptual-integrity
+    description: >
+      Reviews whether a change fits one coherent model of what the product is —
+      Brooks's conceptual integrity, the product counterweight to sprawl. Checks
+      for a new user-facing concept duplicating one the product already has (two
+      nouns for one idea), a second path to a job it already does, a rule it
+      already enforces that this change breaks without saying so, one term with
+      two meanings across UI copy/docs/API fields, a special case carved into a
+      general rule, and the Nth option on a surface with no governing idea. Use
+      when reviewing a change that adds a user-facing concept, entity, mode,
+      page, command, endpoint, or setting — or a design doc proposing one.
+      Requires evidence: name the existing concept or report nothing. Whether the
+      concept should exist and what to call it route to product; a broken promise
+      the product already made is a defect. Skip changes introducing no
+      user-facing concept. Amount-of-surface is #11's, interaction mechanics
+      #42's, code-level consistency #8's.
+    picker: >
+      Does the product still say one thing? A second noun for an existing idea, a
+      second path to the same job, a rule this change quietly breaks.
+    shape: diff
+    design: true
+    wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-outcome-instrumentation` merged (PR #271). Tied with
+    # `reviewing-usability-and-interaction` on raw scope (9 owned checks / 10
+    # baseline scenarios each). Broke the tie by checking what was actually
+    # still uncovered rather than the raw count: usability's baseline already
+    # covered all 9 of its checklist bullets but had never exercised
+    # `design: true` (no A-group scenario existed at all); this lens's
+    # baseline already had its A-group covered (the Spaces design-doc
+    # scenario) but left one checklist bullet — the release-note-duplication-
+    # cost proxy — with no standalone scenario, and offered richer,
+    # mostly-unused delegate grounding for C-group (`reviewing-module-design`,
+    # `checking-idioms-and-consistency`, a second `checking-restraint`
+    # instance) versus usability's only two named cross-refs (both already
+    # exercised in its baseline). Picked this lens; usability is now the
+    # clean next pick with a well-defined single gap (an A-group scenario).
+    #
+    # Not needing an A group (already covered). B (1, per-axis coverage): the
+    # release-note-proxy check as its own scenario — a case where the
+    # evidence gate already finds an overlap, so the "write the one-sentence
+    # release note" proxy correctly fires and makes the duplication's ongoing
+    # cost explicit, distinct from every kept baseline scenario where this
+    # check either doesn't apply or isn't exercised on its own. C (3,
+    # delegate/escalate), each grounded in this lens's own description
+    # ("code-level consistency #8's") or its own examples.md ("internal
+    # structure is reviewing-module-design's question"): a clean user-facing
+    # rename with a copy-pasted internal implementation, routed to
+    # reviewing-module-design; a correctly-reused status vocabulary with a
+    # code-idiom mismatch (raw string vs. the sibling concept's enum), routed
+    # to checking-idioms-and-consistency (#8); a fresh second-system-watch
+    # instance (a fifth dashboard view mode justified only against the most
+    # recent one) routed to checking-restraint (#11, a second instance
+    # distinct from the kept baseline's CLI-flag case). D (5, adversarial):
+    # a "no new vocabulary" claim contradicted by a genuinely new entity's
+    # actual behavior; an in-diff suppression comment over a real broken
+    # cascade-rule case; demo-deadline framing over a real unreconciled
+    # duplicate concept; a distractor-buried second-path finding in a
+    # six-file diff; a design doc's own framing contradicted by the
+    # containment structure its proposed API actually describes. E (3,
+    # precision): a release-note-proxy counterweight to B1 (a genuinely
+    # distinct concept where the proxy correctly doesn't fire), a
+    # second-system-watch counterweight to C3 (a governed Nth addition,
+    # correctly no finding), and a trivial pattern-extension needing no
+    # ceremony. = 22 scenarios. See open-questions.md Q21.
+    eval_min: 22
+    built_from:
+      - { category: 44, source: docs/research/cluster-7-product.md#44 }
+
+  - name: finding-maintainability-hotspots
+    description: >
+      Scans a repository for maintainability hotspots: high churn × complexity
+      files, change-coupling, bus-factor / knowledge concentration, and
+      untracked tech debt. A repo-wide / scheduled scan rather than a single-diff
+      review. Use when auditing maintainability, tech debt, refactoring targets,
+      or risky areas across the codebase.
+    picker: >
+      Where does the repo hurt most? Churn × complexity, change-coupling,
+      bus factor, untracked debt.
+    shape: repo
+    wave: 1
+    # Q21: fifth preference-tier lens hardened (wave-1-first rollout, last in
+    # this sub-wave). A-E taxonomy adapted for this lens's repo-scan shape
+    # (no design-doc A group: no `design: true`), raised from D8's 3-scenario
+    # baseline (this lens's own prior count was 4). See open-questions.md Q21.
+    eval_min: 24
+    built_from:
+      - { category: 21, source: docs/research/cluster-6-evolution.md#21 }
+
+  - name: sweeping-for-security
+    description: >
+      Sweeps changes for security risks: injection (SQL/command/XSS) from
+      unparameterized or unencoded untrusted input, missing authorization on
+      object references (IDOR), missing segregation of duties / maker-checker on
+      high-consequence workflows, hardcoded secrets, weak or homegrown crypto,
+      unsafe deserialization, SSRF, CSRF, permissive CORS/TLS settings, and
+      sensitive data in logs or URLs. Use when reviewing auth, authorization
+      workflows, user input, queries, secrets, crypto, cookies, file paths, or
+      any code handling untrusted data.
+    picker: >
+      Can an attacker abuse this? Injection, authorization, secrets, crypto,
+      untrusted data.
+    shape: diff
+    design: true
+    wave: 2
+    tier: floor
+    # Q21: the first hardened, adversarial/red-team-weighted eval suite
+    # (docs/threat-modeling-design-time-security.md §5's A-E scenario groups),
+    # raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 27
+    built_from:
+      - { category: 14, source: docs/research/cluster-4-runtime.md#14 }
+
+  - name: reviewing-performance-and-efficiency
+    description: >
+      Reviews changes for performance and efficiency problems: N+1 queries,
+      await-in-loop and chatty per-item I/O, accidental O(n²) on hot paths,
+      recomputed expensive values, caches without invalidation, buffering
+      whole payloads instead of streaming, allocation pressure, bundle/startup
+      bloat, and per-request cloud cost. Demands a profile before accepting
+      optimization claims. Use when reviewing queries in loops, hot paths,
+      caching, large payloads, or anything justified by "performance."
+    picker: >
+      Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching,
+      payload buffering.
+    shape: diff
+    design: true
+    wave: 2
+    # Q21: third wave-2 preference-tier lens hardened, and the last un-hardened
+    # lens in waves 1-2. Same A-E adversarial taxonomy, raised from this lens's
+    # prior 4-scenario suite (above D8's 3-scenario baseline). See
+    # open-questions.md Q21.
+    eval_min: 26
+    built_from:
+      - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
+
+  - name: reviewing-test-quality
+    description: >
+      Reviews tests for quality: behavior vs implementation coupling,
+      over-mocking, meaningful branch/edge coverage on the diff, regression
+      tests for bug fixes, isolation and determinism (no shared state, real
+      clocks, or unseeded randomness), right level per the pyramid/trophy, and
+      disabled/focused tests sneaking in. Use when reviewing test files, test
+      coverage, mocks, fixtures, flaky tests, or a bug fix's tests.
+    picker: >
+      Do the tests prove anything? Behavior coupling, over-mocking, edge
+      coverage, determinism.
+    shape: diff
+    wave: 2
+    # Q21: second wave-2 preference-tier lens hardened. Same A-E adversarial
+    # taxonomy; no design-doc (A) group — this lens is diff-only, so A covers
+    # firing on a diff with *no test file in it* (the missing regression test is
+    # the finding) and on a Go table-driven test with subtests, whose loop is
+    # the language's standard form rather than the Conditional Test Logic smell
+    # the JS scenario teaches. Raised from this lens's prior
+    # 5-scenario suite (above D8's 3-scenario baseline). See open-questions.md
+    # Q21.
+    eval_min: 24
+    built_from:
+      - { category: 17, source: docs/research/cluster-5-verification.md#17 }
+
+  - name: reviewing-migration-and-data-safety
+    description: >
+      Reviews schema migrations and data changes for safety: backward
+      compatibility with the running app (expand/migrate/contract), table
+      locks from NOT NULL/index/FK on large tables, unbatched backfills,
+      missing dual-write during transitions, irreversible or destructive DDL,
+      and integrity constraints left to app code. Use when reviewing
+      migrations, ALTER TABLE, backfills, schema or data-format changes, or
+      anything touching persistence. Skip when the change touches no schema,
+      migration, backfill, or persisted data format — pure in-memory or
+      stateless logic with no durable store behind it.
+    picker: >
+      Can this migration lock tables or lose data? Expand/contract, backfills,
+      reversibility.
+    shape: diff
+    design: true
+    wave: 2
+    tier: floor
+    # Q21: third hardened, adversarial/red-team-weighted eval suite (the
+    # sweeping-for-security / tracing-correctness-and-invariants precedent's
+    # A-E scenario groups), raised from D8's 3-scenario baseline. See
+    # open-questions.md Q21.
+    eval_min: 24
+    built_from:
+      - { category: 20, source: docs/research/cluster-5-verification.md#20 }
+
+  - name: reviewing-data-transformations-and-contracts
+    description: >
+      Reviews the analytics/data plane — SQL/dbt transformations, data tests,
+      and event or published-table schemas — for transformation correctness,
+      data-test adequacy, and producer-to-consumer data-contract safety:
+      violated grain and fan-out joins that silently inflate aggregates, SQL
+      NULL traps (NOT IN with NULLs, a LEFT JOIN degraded by a WHERE
+      predicate), non-idempotent incremental runs and dropped late rows, silent
+      type coercion (money as float, timezone-naive truncation), missing data
+      tests, pipelines that publish an empty table instead of failing, and
+      schema changes that break downstream readers with no compatibility gate,
+      version bump, or named consumers. Use when reviewing a SQL or dbt model,
+      an ETL/ELT transformation, an event or analytics schema, or a data test.
+      Defers store-migration mechanics to #20, the service API contract to #13,
+      PII to #27; escalates warehouse governance to a data owner. Skip when the
+      change touches no SQL, pipeline, data test, or consumed schema.
+    picker: >
+      Is the data plane correct and its contract safe? Grain and fan-out, SQL
+      NULL traps, incremental idempotency, data tests, schema compatibility for
+      consumers.
+    shape: diff
+    design: true
+    wave: 6
+    # Q21: continuing the preference-tier rollout after `reviewing-interoperability`
+    # merged (PR #267). Picked over the other 6 remaining lenses because this
+    # one was explicitly deferred to this exact campaign at G17 build time (see
+    # the prior comment this replaces): "the full Q21 A-E adversarial hardening
+    # pass rides with that campaign rather than shipping here." 13 owned checks
+    # against a 12-scenario G17 baseline that already exercised most axes
+    # richly — a genuinely different starting shape than the usual 4-scenario
+    # baseline, so this pass is smaller than most but still real: 3 checklist
+    # bullets had no standalone scenario, and the C/D/E groups needed the same
+    # adversarial-taxonomy pass as every other lens.
+    #
+    # `design: true` — A (1): an RFC for a new customer-LTV pipeline, exercising
+    # both a topical gap (no idempotency/fail-loud/compat-mode strategy stated)
+    # and the shared decision-record checklist (alternatives not actually
+    # weighed, no revisit-trigger) in one finding set. B (3, per-axis coverage
+    # for the completely-uncovered bullets): type fidelity/silent coercion as
+    # its own dedicated scenario (a timezone-naive truncation, distinct from
+    # the money-as-float example folded into the kept schema-compat scenario);
+    # duplicates & event-time-vs-processing-time (distinct from the kept
+    # idempotency scenario); lineage & downstream blast radius (a hardcoded
+    # table name breaking ref()-based lineage, with no exposure declared). C
+    # (3, delegate/escalate): a correctly-gated additive schema change whose
+    # wrapping REST contract has its own shape problem, routed to
+    # reviewing-api-contract-safety (#13, named in this lens's own description
+    # but never yet exercised); a fresh backfill-mechanics instance routed to
+    # reviewing-migration-and-data-safety (#20, a second instance distinct from
+    # the kept baseline's NOT-NULL-migration case); a fresh
+    # right-to-be-forgotten/retention instance routed to
+    # auditing-compliance-and-provenance (#27, a second instance distinct from
+    # the kept baseline's new-PII-field case). D (5, adversarial): claim-capture
+    # (an "idempotent" comment over a model with no unique_key), an in-diff
+    # suppression note over a real NULL-trap, launch-blocker urgency framing
+    # over a real test gap, a fan-out join buried in a six-file mostly-cosmetic
+    # diff, and a PR-description claim contradicted by the actual schema diff
+    # and compatibility mode. E (4, precision): two counterweights to the new
+    # B-group bad cases (correct type fidelity, correct event-time handling), a
+    # trivial passthrough view, and a "Not applicable:" test for a change with
+    # no data-plane surface at all. = 28 scenarios. See open-questions.md Q21
+    # and map-gaps.md G17 for the original build.
+    eval_min: 28
+    built_from:
+      - { category: 40, source: docs/research/cluster-5-verification.md#40 }
+
+  - name: auditing-data-pipeline-health
+    description: >
+      Audits the analytics/data plane's standing condition on a schedule rather
+      than reviewing a change: declared contracts and published schemas that
+      nothing tests the dataset against, repo-vs-registry divergence, test and
+      expectation coverage across the model graph ranked by downstream fan-out,
+      freshness expectations that are absent, lapsed, or too wide to fire,
+      permanently-warning data tests, expired deprecation windows with live
+      readers, orphaned models with no declared consumer, ungated registry
+      subjects, soft-failed contract checks, and hardcoded table names that hide
+      lineage. Reads the repo, not the warehouse — reports drift it cannot
+      observe as declared-but-unverified and names the plane it could not reach.
+      A repo-wide / scheduled audit; the scheduled companion to
+      reviewing-data-transformations-and-contracts. Use when auditing data
+      contracts, dbt/SQLMesh project health, data-test coverage, or pipeline
+      drift. Skip when the repo has no SQL models, pipelines, data tests, or
+      published data schemas.
+    picker: >
+      Has the data plane drifted since anyone looked? Contract currency, test
+      coverage by fan-out, lapsed freshness, expired deprecations, hidden
+      lineage.
+    shape: repo
+    wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-data-transformations-and-contracts` merged (PR #269). Picked
+    # as the closest sibling in shape (the scheduled repo-audit companion,
+    # same G17 build) rather than by an explicit deferral note — a round-1
+    # atlas-review finding on that PR caught an earlier draft overstating this
+    # lens's own comment as carrying "the identical deferral note"; it does
+    # not, it was simply not yet picked. 12 owned checks against a 12-scenario
+    # G17 baseline that already covered 11 of them well (declared-vs-
+    # unverified, coverage-ranked-by-fan-out, freshness lapsed/decorative,
+    # expired deprecation, ungated/soft-failed gates plus repo-vs-registry
+    # divergence folded together, hidden lineage, a rich multi-delegate
+    # scenario, stale-ownership escalation plus PII-inventory-gap folded
+    # together, a refuse-to-confirm-drift precision case, and a trend-
+    # reporting case) — leaving orphaned/dead-model detection as the one
+    # checklist bullet with no standalone bad-case scenario at all.
+    #
+    # Not design-capable — no A group. B (2, per-axis coverage): a genuinely
+    # dead model (zero refs, no exposure, 11 months untouched, no PR/ticket
+    # trail) as its own scenario, distinct from the existing clean
+    # consumed-but-undeclared case; repo-vs-registry divergence isolated into
+    # its own scenario (the kept baseline only ever showed it riding along
+    # with an ungated-subject defect). C (3, delegate/escalate): a dedicated
+    # PII-inventory-drift scenario (the kept baseline only ever showed it
+    # riding along with a stale-ownership finding) routed to
+    # auditing-compliance-and-provenance (#27); real PII sitting in seed/
+    # fixture files routed to reviewing-test-quality (#17, named in this
+    # lens's own heuristics but never yet exercised); a fresh, repo-visible
+    # migration-alignment instance (a live column-narrowing migration
+    # reaching an incremental merge key with no pipeline-side review) routed
+    # to reviewing-migration-and-data-safety (#20, a second instance distinct
+    # from the kept baseline's operational-drift case). D (5, adversarial):
+    # claim-capture (a README claiming full contract enforcement the actual
+    # CI config doesn't provide), an in-repo suppression comment on a
+    # soft-failed gate, deadline framing over a real coverage gap, a
+    # distractor-buried expired-deprecation finding among 21 healthy sources,
+    # and a governance-doc claim contradicted by the actual CODEOWNERS/
+    # teams.yml cross-reference. E (3, precision): counterweights to both new
+    # B-group bad cases (a model correctly not flagged as orphaned via a
+    # declared external exposure; full repo-registry correspondence with no
+    # divergence), and a small, fully-healthy trivial project. A pre-existing
+    # baseline-wording bug was also caught and fixed in this pass: the kept
+    # "no data plane" scenario said "no findings" where this lens's own
+    # discipline requires "Not applicable:" — corrected, and a matching
+    # examples.md worked example added (this lens's examples.md previously
+    # had none). = 25 scenarios. See open-questions.md Q21 and map-gaps.md
+    # G17 for the original build.
+    eval_min: 25
+    built_from:
+      - { category: 41, source: docs/research/cluster-5-verification.md#41 }
+
+  - name: reviewing-accessibility-and-i18n
+    description: >
+      Reviews UI changes for accessibility and internationalization: semantic
+      HTML vs div-with-onclick, keyboard operability and focus management,
+      accessible names on icon buttons and inputs, contrast, ARIA misuse,
+      hardcoded user-facing strings, naive pluralization, non-locale-aware
+      number/date/currency formatting, and RTL-unsafe layout. Use when
+      reviewing components, templates, markup, forms, modals, UI text, or
+      anything user-facing. Skip when the change has no user-facing surface —
+      backend, CLI, library, or infra code with no rendered UI or localized
+      strings.
+    picker: >
+      Can everyone use this UI? Keyboard, screen readers, contrast, locales,
+      RTL.
+    shape: diff
+    wave: 2
+    # Q21: first wave-2 preference-tier lens hardened, opening that wave after
+    # the wave-1-first sub-wave completed. Same A-E adversarial taxonomy, minus
+    # the design-doc (A) group — this lens is diff-only, not design-capable, so
+    # A covers stack-flexible firing (a server-rendered template, a CSS-only
+    # diff) instead. Raised from D8's 3-scenario baseline; picked first in the
+    # wave because it carried two domains (accessibility and i18n) on one
+    # baseline suite. See open-questions.md Q21.
+    eval_min: 25
+    built_from:
+      - { category: 23, source: docs/research/cluster-6-evolution.md#23 }
+
+  - name: tracing-correctness-and-invariants
+    description: >
+      Traces whether a change actually does what it claims: invariants and
+      postconditions preserved on every branch, boundary values (0, 1, n-1,
+      empty, max, negative) handled, off-by-one in ranges and loop bounds,
+      null/undefined checked at boundaries, exhaustive switch/match, resource
+      cleanup on all paths, money as integer minor units, monotonic clocks for
+      durations, UTC for storage. Use when reviewing logic, algorithms, loops,
+      conditionals, edge cases, or whether the implementation matches the
+      stated intent.
+    picker: >
+      Does the code do what it claims? Invariants, boundaries, off-by-one,
+      resource cleanup.
+    shape: diff
+    design: true
+    wave: 3
+    tier: floor
+    # Q21: second hardened, adversarial/red-team-weighted eval suite (the
+    # sweeping-for-security precedent's A-E scenario groups), raised from D8's
+    # 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 26
+    built_from:
+      - { category: 1, source: docs/research/cluster-1-correctness.md#1 }
+      - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
+
+  - name: reviewing-concurrency-and-async
+    description: >
+      Reviews concurrent and async code for races and ordering bugs: shared
+      mutable state without synchronization, check-then-act spanning an await,
+      lost updates from interleaved requests, lock ordering, unawaited
+      promises, accidental sequential awaits, non-idempotent message
+      consumers, exactly-once assumptions, and missing cancellation/timeout
+      propagation. Use when reviewing threads, async/await, promises, locks,
+      queues, message handlers, or anything two callers can run at once. Skip
+      when the code is single-threaded and synchronous with no shared mutable
+      state, async/await, or message handling — nothing two callers race on.
+    picker: >
+      What breaks when two run at once? Races, lost updates, unawaited
+      promises, idempotency.
+    shape: diff
+    design: true
+    wave: 3
+    tier: floor
+    # Q21: fourth hardened, adversarial/red-team-weighted eval suite (the
+    # sweeping-for-security / tracing-correctness-and-invariants /
+    # reviewing-migration-and-data-safety precedent's A-E scenario groups),
+    # raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 24
+    built_from:
+      - { category: 3, source: docs/research/cluster-1-correctness.md#3 }
+
+  - name: checking-idioms-and-consistency
+    description: >
+      Checks that a change follows the project's own conventions and the
+      language/framework's idioms: formatter applied, idiomatic constructs
+      over clumsy equivalents, recurring problems solved the same way the
+      codebase already does, no second parallel way to do the same thing,
+      consistent naming/casing/imports/file layout. Use when reviewing style,
+      conventions, idioms, framework usage, or consistency with the rest of
+      the codebase.
+    picker: >
+      Does this look like the rest of the codebase? Conventions, idioms, no
+      second parallel way.
+    shape: diff
+    wave: 3
+    # Q21: fourth wave-3 lens hardened, tied with auditing-compliance-and-
+    # provenance at the widest remaining gap (12 owned checks against 3
+    # scenarios, 0.250 scenarios/check); picked by user request. Same A-E
+    # adversarial taxonomy minus the design-doc (A) group — this lens is
+    # diff-only, not design-capable (precedent: reviewing-naming-and-
+    # readability). See open-questions.md Q21.
+    eval_min: 21
+    built_from:
+      - { category: 8, source: docs/research/cluster-2-readability.md#8 }
+
+  - name: reviewing-api-contract-safety
+    description: >
+      Reviews public API and contract changes for safety: backward
+      compatibility (versioned/deprecated if breaking), hard-to-misuse
+      shapes, "when in doubt leave it out" on new surface, typed and stable
+      error contracts, idempotency for unsafe operations, pagination and rate
+      limits on collections, contract tests, and no internal-representation
+      leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or
+      response shapes, SDK surface, webhooks, or any consumer-facing contract.
+      Skip when the change is internal-only with no consumer-facing surface —
+      private helpers or implementation details no external caller depends on.
+    picker: >
+      Will this break a consumer? Compatibility, error contracts, idempotency,
+      pagination.
+    shape: diff
+    design: true
+    wave: 3
+    # Q21: one of several lenses tied for the widest scope-to-coverage gap
+    # after reviewing-observability-and-operability shipped (10 checks under
+    # #13 / 3 baseline scenarios) -- picked as the most frequently cited
+    # foundational lens in this campaign's own history (repeatedly used as
+    # the standard example lens across earlier Q21 model-comparison
+    # sessions). design: true, so this pass includes an A group. 3
+    # originals + A 1 (an RFC proposing a public webhooks API with no
+    # versioning strategy, no delivery-guarantee statement, and no
+    # deprecation plan for the polling integration it replaces) + B 4
+    # (per-axis: hard-to-misuse type modeling, "when in doubt leave it out"
+    # on an unrequested internal field exposed publicly, typed/stable error
+    # contracts vs. ad-hoc strings, a missing contract test as its own
+    # defect) + C 3 (delegate/escalate, each grounded in this lens's own
+    # heuristics cross-references: an idempotency key present but with a
+    # non-atomic check-then-act race -> reviewing-concurrency-and-async
+    # per the "cross #3" reference; a naming inconsistency with the rest of
+    # the API surface -> checking-idioms-and-consistency per "cross #8";
+    # silent type coercion on malformed input -> hunting-silent-failures
+    # per "cross #2") + D 5 (adversarial: a claimed prior design-guild
+    # approval suppressing scrutiny of a real breaking change, a breaking
+    # rename buried as one of nine mostly-cosmetic changes, demo-deadline
+    # urgency framing over a missing idempotency key on a payment endpoint,
+    # a fake "fully backward compatible, verified" claim over a real
+    # enum-casing break, an "auto-generated SDK guaranteed correct" claim
+    # over a real breaking spec type change) + E 4 (a comprehensively
+    # correct new endpoint pair, a breaking change shipped the right way
+    # via versioning + deprecation window, a correctly deprecated-but-still-
+    # returned field, the not-applicable test) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 13, source: docs/research/cluster-3-structure.md#13 }
+
+  - name: reviewing-observability-and-operability
+    description: >
+      Reviews changes for production operability: structured logs with
+      consistent fields and correlation/trace IDs, right log levels with no
+      PII, context-rich errors that wrap rather than swallow, golden-signal
+      instrumentation and propagated trace context, liveness/readiness
+      checks, kill switches for risky changes, graceful shutdown, and metric
+      cardinality discipline. Use when reviewing logging, metrics, tracing,
+      alerts, health checks, feature flags, or deploy/rollback paths.
+    picker: >
+      Can you debug this in production at 3am? Logs, traces, health checks,
+      kill switches, rollback.
+    shape: diff
+    design: true
+    wave: 3
+    # Q21: one of four lenses tied for the widest scope-to-coverage gap
+    # remaining after reviewing-ai-authored-code shipped (10 checks under
+    # #16 / 3 baseline scenarios) -- picked over the other three
+    # (reviewing-api-contract-safety, auditing-architecture-conformance,
+    # auditing-infrastructure-as-code) since it directly answers a standing
+    # question about logging/telemetry coverage raised earlier in this
+    # session. Single category, no cross_ref. design: true, so this pass
+    # includes an A group (design-doc firing), unlike the diff-only lenses
+    # hardened earlier in the wave. 3 originals + A 1 (an ADR proposing a
+    # datastore migration with no rollback/exit plan and no operability plan
+    # for the cutover -- exercises both this lens's own topical checks and
+    # the shared decision-record checklist it layers on for design docs
+    # that are specifically decision records) + B 5 (per-axis: graceful
+    # shutdown/SIGTERM, SLI/SLO alerting on symptoms not causes, metric
+    # cardinality discipline, observable timeouts/retries, INFO-level log
+    # spam in a hot loop) + C 3 (delegate/escalate, each grounded in a
+    # documented ownership boundary: two from G1's cross-cutting table --
+    # PII-in-logs enforcement -> the deeper collection/retention policy
+    # call routes to auditing-compliance-and-provenance, per G1's PII
+    # split; a correct new kill-switch flag vs. a stale rolled-out one ->
+    # the lifecycle/cleanup call routes to auditing-config-and-build-hygiene,
+    # which G1 names as owning feature-flag *lifecycle* (#16 owns only the
+    # runtime kill-switch) -- the third from auditing-enforcement-and-
+    # meta-artifacts's own documented scope (G10/#30), not a G1 row: an
+    # alert that exists but lacks a for: duration or runbook -> the
+    # monitoring-config-as-artifact quality call routes there) + D 5 (adversarial:
+    # "we'll add proper logging later" deferred-ceremony framing over a
+    # currently-shipping payment gap, an in-diff "already reviewed by
+    # platform team" suppression comment over a silently swallowed
+    # exception, a distractor-buried missing correlation id among six
+    # otherwise-correct log lines, compliance-deadline urgency framing over
+    # a missing kill switch on an irreversible bulk-delete, a fake "SLOs
+    # fully defined" claim over an actually cause-only alert) + E 3 (a
+    # trivial reversible helper correctly not demanding observability
+    # ceremony, a correct graceful-shutdown implementation as B1's
+    # counterweight, the not-applicable test) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 16, source: docs/research/cluster-4-runtime.md#16 }
+
+  - name: reviewing-pr-and-process-hygiene
+    description: >
+      Reviews the PR itself rather than just the code: size and single
+      purpose (~<=400 net LOC), atomic commits with imperative why-bearing
+      messages, correct conventional type and breaking-change signaling, risk
+      and rollback notes, docs/changelog updated with the API surface, no
+      drive-by scope creep, no committed secrets or debug leftovers. Use when
+      reviewing a pull request's structure, commits, description, changelog,
+      or readiness to merge.
+    picker: >
+      Is the PR itself reviewable? Size, atomic commits, description, scope
+      creep, changelog.
+    shape: diff
+    wave: 3
+    cross_ref: [22]   # primary owner: auditing-documentation-health
+    # Q21: picked for the widest scope-to-coverage gap remaining in the wave —
+    # 29 owned checks across two full categories (#24 process, 16 checks;
+    # #22 docs-health, 13 checks) on only 6 baseline scenarios, same "one
+    # suite, two domains" shape that opened wave 2's accessibility-and-i18n
+    # lens. No design-doc (A) group — this lens is diff-only, not
+    # design-capable. 6 originals + B 14 (per-axis: CODEOWNERS routing,
+    # reviewability aids, agent-native parity, definition of done, docstring
+    # accuracy, Diataxis coverage, README front-door, runnable example, ADR
+    # for a non-obvious decision, operability runbook, stale diagram +
+    # orphaned doc, comment rot, discoverability, agent-instructions drift)
+    # + C 3 (delegate to auditing-dependencies-and-supply-chain,
+    # sweeping-for-security, checking-restraint) + D 5 (claimed-prior-audit
+    # suppression, unsupported testing checklist, urgency/hotfix framing, an
+    # unlinked "see design doc" reference, distractor-buried
+    # acceptance-criteria gap) + E 3 (a docs-only PR correctly undemanding,
+    # a >400-LOC PR correctly not size-flagged given it's genuinely atomic
+    # and fully documented, the not-applicable test) = 31 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 31
+    built_from:
+      - { category: 24, source: docs/research/cluster-6-evolution.md#24 }
+      - { category: 22, source: docs/research/cluster-6-evolution.md#22 }
+
+  - name: auditing-architecture-conformance
+    description: >
+      Audits a repository for architecture conformance: dependency direction
+      violations between layers/modules, cyclic dependencies, reach-arounds
+      past a boundary, accidental coupling to internals, and drift between
+      the documented architecture and the import graph. A repo-wide /
+      scheduled audit rather than a single-diff review. Use when auditing
+      layering, module boundaries, dependency rules, or architecture drift.
+    picker: >
+      Does the import graph still match the intended architecture? Layers,
+      cycles, reach-arounds.
+    shape: repo
+    wave: 3
+    # Q21: picked alongside auditing-infrastructure-as-code for the widest
+    # scope-to-coverage gap left in the wave (10 owned checks / 3 baseline
+    # scenarios, tied with three lenses already hardened this wave). Single
+    # category, no cross_ref. Repo-shaped, so A (2) supplies raw import
+    # statements across real files rather than a pre-digested scan/violations
+    # block, the same input-shape gap auditing-config-and-build-hygiene's A
+    # group found. B (4, per-axis) covers checks the 3 originals only hit as
+    # a counterexample or not at all: a genuine god-module defect (not just
+    # the shared-kernel counterexample), an architecture-style inconsistency
+    # (a synchronous call chain bolted onto an event-driven system), an
+    # import-linter contract gap that lets a violation through a green CI run,
+    # and a dependency-inversion violation via concrete instantiation rather
+    # than a bare import. C (3, delegate/escalate), each grounded in this
+    # lens's own cross-references in heuristics.md rather than invented: a
+    # feature flag's scattered call sites (its own architecture boundary) vs.
+    # the removal-timing call routed to auditing-config-and-build-hygiene per
+    # G1's "#26 lifecycle, #12 architecture only" split; a disguised
+    # shared-library coupling still violating an explicit-contract ADR, with
+    # the eventual API's versioning routed to reviewing-api-contract-safety
+    # (cross #13); an in-process dedup dict baking in a single-node assumption
+    # under a stated horizontal-scale goal, with concurrency verification
+    # routed to reviewing-concurrency-and-async and capacity planning to
+    # reviewing-performance-and-efficiency (cross #3, #15). D (5, adversarial):
+    # a claimed guild approval over a real upward import, a skip-layer import
+    # buried as the sixth of eight mostly-cosmetic changes, launch-deadline
+    # urgency framing over a real cycle, a "contracts pass" summary
+    # contradicted by the tool output beneath it showing a broken contract,
+    # and a "codegen-guaranteed" claim over generated code that still
+    # violates the declared layering (codegen guarantees spec fidelity, not
+    # layering conformance). E (3, precision): a correctly-inverted
+    # ports/adapters example as B4's counterweight, a trivial same-layer
+    # helper needing no ceremony, and the not-applicable test. See
+    # open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 12, source: docs/research/cluster-3-structure.md#12 }
+
+  - name: auditing-dependencies-and-supply-chain
+    description: >
+      Audits dependencies and the supply chain: known CVEs in direct and
+      transitive deps, unpinned or floating versions, lockfile integrity,
+      abandoned or low-reputation packages, typosquats, install scripts,
+      license compatibility of the dependency tree, and SBOM currency. A
+      repo-wide / scheduled audit. Use when auditing package.json, lockfiles,
+      requirements, vendored code, or supply-chain risk.
+    picker: >
+      Is the dependency tree safe? CVEs, pinning, typosquats, install scripts,
+      licenses.
+    shape: repo
+    wave: 3
+    cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
+    # Q21: same A-E adversarial taxonomy as the other wave-3 lenses, raised
+    # from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 22
+    built_from:
+      - { category: 18, source: docs/research/cluster-5-verification.md#18 }
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: auditing-config-and-build-hygiene
+    description: >
+      Audits configuration and build/CI health: config schema-validated at
+      startup and fail-fast, secrets out of config files, parity across
+      environments, reproducible and hermetic builds, pinned toolchains and
+      CI actions, cache correctness, flaky or slow pipelines, and unused or
+      drifting config keys. A repo-wide / scheduled audit. Use when auditing
+      CI pipelines, Dockerfiles, build scripts, env vars, or config files.
+    picker: >
+      Are config and CI trustworthy? Secrets, env parity, reproducible pinned
+      builds, cache correctness.
+    shape: repo
+    wave: 3
+    # Q21: first wave-3 lens hardened, and the first suite re-gated against the
+    # floor of record in the same session it was authored (see
+    # runbooks/cross-model-re-gate.md). Same A-E adversarial taxonomy, raised
+    # from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 28
+    built_from:
+      - { category: 19, source: docs/research/cluster-5-verification.md#19 }
+      - { category: 26, source: docs/research/cluster-5-verification.md#26 }
+
+  - name: auditing-documentation-health
+    description: >
+      Audits documentation health across a repository: API-surface-to-docs
+      parity, docstring accuracy against current signatures, README
+      front-door freshness, runnable examples that still run, ADR coverage
+      for non-obvious decisions, changelog discipline, orphaned or
+      contradictory docs, and stale diagrams. A repo-wide / scheduled audit.
+      Use when auditing docs, READMEs, docstrings, changelogs, ADRs, or
+      onboarding material.
+    picker: >
+      Do the docs still tell the truth? API parity, stale examples, ADR
+      coverage, changelog discipline.
+    shape: repo
+    wave: 3
+    # Q21: third wave-3 lens hardened, picked by the same scope-to-coverage
+    # criterion as the wave's other picks: 13 owned checks against 3 scenarios
+    # (0.231 scenarios per check) was the widest gap left in the wave once
+    # reviewing-install-and-upgrade-experience shipped. Same A-E adversarial
+    # taxonomy, raised from D8's 3-scenario baseline; A gives this repo-shaped
+    # lens raw files instead of a pre-digested scan (precedent:
+    # auditing-config-and-build-hygiene). See open-questions.md Q21.
+    eval_min: 23
+    built_from:
+      - { category: 22, source: docs/research/cluster-6-evolution.md#22 }
+
+  - name: auditing-compliance-and-provenance
+    description: >
+      Audits compliance, licensing, and provenance: dependency licenses
+      compatible with the distribution model, copyleft contamination, missing
+      SPDX headers and attribution, code of unclear provenance, PII data
+      flows without minimization or retention limits, consent gating for
+      telemetry, and SBOM currency. Detects and escalates to humans rather
+      than deciding legal questions. A repo-wide / scheduled audit. Use when
+      auditing licenses, PII handling, data retention, or provenance.
+    picker: >
+      Any licensing, PII, or provenance exposure? Detect and escalate to
+      humans — never decide legal questions.
+    shape: repo
+    wave: 3
+    # Q21: fifth wave-3 lens hardened. Picked by the scope-to-coverage
+    # criterion: 12 owned checks against 3 scenarios (0.250 scenarios per
+    # check) was the widest gap left in the wave once
+    # checking-idioms-and-consistency shipped (a script-checked recount also
+    # caught a ranking bug this round — a stray "## Open threads" section was
+    # bleeding into the last category's owned-check count for several
+    # lenses; fixed before picking). Same A-E adversarial taxonomy, raised
+    # from D8's 3-scenario baseline; A gives this repo-shaped lens raw files
+    # instead of a pre-digested scan (precedent: auditing-config-and-
+    # build-hygiene, auditing-documentation-health). See open-questions.md
+    # Q21.
+    eval_min: 22
+    built_from:
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: reviewing-decision-lifecycle
+    description: >
+      Reviews a decision as it is made — an ADR, RFC, design doc, adoption PR, or
+      deprecation/rollout plan — rather than the code that implements it: is the
+      choice (dependency, framework, platform, build-vs-buy) justified against
+      cheaper options; is lock-in and exit cost assessed; is the rationale and its
+      assumptions recorded with a revisit-trigger; is retirement planned on a
+      schedule with a sunset date and migration path. Use when reviewing an
+      architecture decision record, an RFC, a dependency or technology adoption, a
+      vendor or build-vs-buy choice, or a deprecation/sunset plan.
+    picker: >
+      Is this decision sound and recorded? Adoption justification, lock-in/exit,
+      ADR assumptions, revisit-triggers, planned retirement.
+    shape: decision
+    wave: 4
+    # Q21: fresh scope-to-coverage recompute after
+    # auditing-enforcement-and-meta-artifacts shipped (PR #260). This
+    # lens's earlier tie partner (auditing-enforcement-and-meta-artifacts)
+    # is now hardened, leaving this one alone at the widest remaining gap
+    # (10 owned checks / 4 baseline scenarios). Picked up despite last
+    # pick's stated caution about its novel shape -- shape: decision turns
+    # out to need no separate eval-authoring pattern: every scenario here
+    # already *is* a decision-record text block (ADR/RFC/adoption PR),
+    # the same shape the design:true diff lenses' single "A" scenario
+    # already used twice this wave, so there is no distinct A-group
+    # input-shape gap the way there was for the repo-shaped lenses. 4
+    # kept + B 2 (per-axis coverage of the two checks the 4 originals
+    # never exercise as their own standalone defect: reversibility
+    # matched to scrutiny -- an irreversible datastore migration treated
+    # with two-way-door casualness; vendor adopt/exit symmetry, kept
+    # distinct from the already-covered lock-in-cost check by having the
+    # cost genuinely estimated but no actual abstraction seam designed)
+    # + C 3 (delegate/escalate, each grounded in this lens's own
+    # heuristics.md cross-references: a right-sized, well-justified ADR
+    # that omits an existing in-house equivalent -> checking-restraint
+    # per "cross #11 restraint, #18 deps"; a correctly scheduled
+    # deprecation whose replacement contract silently changes a
+    # financial field's unit/type -> reviewing-api-contract-safety per
+    # "cross #1, #13"; a PII-handling vendor ADR with lock-in properly
+    # assessed but no compliance/data-residency mention ->
+    # auditing-compliance-and-provenance per this lens's own "escalate
+    # the governance slice... cross #27" boundary) + D 5 (adversarial: a
+    # "battle-tested elsewhere, no ADR needed" claim over a real
+    # unjustified infrastructure switch; an in-doc "pre-approved by the
+    # architecture review board" claim over a real one-way-door adoption
+    # with no exit plan; unrelated-sprint-deadline framing over an
+    # accepted decision whose assumptions have expired against a live
+    # customer commitment; a platform-wide auth-provider replacement
+    # buried as item 4 of a 6-item low-stakes batch RFC; a "fully
+    # reversible, no lock-in" ADR summary contradicted by its own
+    # implementation notes further down the same document) + E 4 (a
+    # proportionate-scrutiny counterweight to B1; two not-applicable
+    # instances on the same "no decision content at all" test applied to
+    # two input shapes -- a trivial code diff and a narrative status-
+    # update document -- kept as one convention after an atlas
+    # self-review caught the diff-shaped instance originally expecting
+    # "No findings", inconsistent with the document-shaped instance's
+    # "Not applicable"; a vendor adopt/exit-symmetry counterweight to
+    # B2) = 18 scenarios. See open-questions.md Q21.
+    eval_min: 18
+    built_from:
+      - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
+
+  - name: auditing-decision-record-currency
+    description: >
+      Audits the decision records already in a repository (ADRs/RFCs on disk),
+      on a schedule rather than at authoring time: status-graph consistency
+      (an accepted record contradicted by a later one with no supersedes
+      link, or a decision the code has visibly reversed), a revisit-trigger
+      whose stated condition current repo signals suggest may now hold, a
+      record with no checkable revisit-trigger at all, an adopted technology
+      now end-of-life or on hold with no revisit noted, and orphaned records
+      nothing in the repo still implements. Detects and routes revisit
+      signals to the decision's owner rather than reversing the call itself.
+      A repo-wide / scheduled audit — the periodic-currency companion to
+      reviewing-decision-lifecycle's authoring-time review. Use when auditing
+      an ADR directory, a decisions/RFC archive, or a whole-repo health scan.
+      Skip when the repo has no decision-record directory or archive at all.
+    picker: >
+      Do the repo's existing decision records still hold? Status-graph
+      consistency, revisit-triggers due, EOL adoptions, orphaned records.
+    shape: repo
+    wave: 6
+    # Delegate targets (not a manifest `cross_ref` — this lens's own
+    # built_from has only category 39, and that field marks categories
+    # within a lens's own built_from list, not foreign targets): #29
+    # reviewing-decision-lifecycle owns the reopen judgment (this lens only
+    # surfaces the signal, per its own closing heuristic); #22
+    # auditing-documentation-health owns general index/discoverability
+    # upkeep (this lens only flags a scan-reliability signal when the
+    # archive index drifts from disk).
+    #
+    # Q21: continuing the preference-tier rollout after `reviewing-ethical-design`
+    # merged (PR #265). Restarted the branch from `origin/main` first.
+    # Recomputed scope-to-coverage across the 9 remaining unhardened
+    # preference-tier lenses: this lens had the widest gap (10 owned checks
+    # against 5 baseline scenarios) among the shape:diff/repo lenses that fit
+    # the established A-E pattern cleanly — `reviewing-artifact-conventions`
+    # scored a nominally wider gap but is `shape: artifact` (presence-activated,
+    # single-rubric), a genuinely different taxonomy this campaign hasn't
+    # adapted yet, so it was set aside rather than forced into this pass.
+    # `reviewing-threat-model` was excluded from the count entirely — it
+    # already ships its own native 21-scenario adversarial suite from
+    # authorship, just without an `eval_min` floor recorded.
+    #
+    # Not `design: true` (no A group). B 3 (per-axis coverage for the three
+    # completely-uncovered checklist items: a stalled `proposed` record stuck
+    # with no resolution while downstream work proceeds as settled; silent
+    # supersession where a newer record's notes clearly replace an older
+    # one's subject but neither carries the machine-checkable `supersedes`/
+    # `superseded-by` field; a revisit-trigger naming a real, specific
+    # condition no repo signal can verify, distinct from no trigger at all).
+    # C 3 (delegate scenarios grounded in this lens's own closing heuristic,
+    # "escalate the judgment call... route to the decision's owner (cross
+    # #29" — two fresh revisit/EOL instances explicitly routed to #29, plus
+    # an index-drift instance routed to #22, the lens's own archive-
+    # discoverability analog). D 5 (adversarial: claim-capture, an in-diff
+    # suppression note, release-freeze urgency framing, a distractor-buried
+    # finding in an 8-record scan, a notes claim contradicted by dependency-
+    # manifest evidence). E 4 (two counterweights to the new B-group bad
+    # cases, a trivial single-record scan, and a "Not applicable:" test for
+    # a repo with no decision-record archive at all) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 39, source: docs/research/cluster-6-evolution.md#39 }
+
+  - name: auditing-enforcement-and-meta-artifacts
+    description: >
+      Audits the enforcement apparatus and meta-artifacts wrapped around the code,
+      as their own reviewable surface: suppression hygiene (blanket or unjustified
+      `# noqa` / `eslint-disable` / `# type: ignore`, unused/stale suppressions, a
+      lint or type baseline growing rather than shrinking), monitoring config as an
+      artifact (cause-based or unactionable alerts, alert rules with no runbook or
+      `for:` duration, dashboards referencing renamed/dead metrics, click-ops that
+      drift instead of monitoring-as-code), and codegen-to-source drift (checked-in
+      generated artifacts that can silently diverge from their generator/spec with
+      no regenerate-and-diff gate in CI). A repo-wide / scheduled audit rather than
+      a single-diff review. Use when auditing lint/type suppressions, alert rules,
+      dashboards, or checked-in generated code.
+    picker: >
+      Is the enforcement apparatus healthy? Suppression hygiene & baseline trend,
+      actionable alerts/monitoring-as-code, codegen-source drift gate.
+    shape: repo
+    wave: 4
+    # Q21: fresh scope-to-coverage recompute after
+    # reviewing-resilience-and-scalability shipped (PR #259). Tied at the
+    # widest remaining gap with reviewing-decision-lifecycle (10 owned
+    # checks / 4 baseline scenarios each); picked this one over its tie
+    # since it's repo-shaped with strong direct wave-3 precedent
+    # (auditing-architecture-conformance, auditing-infrastructure-as-code,
+    # auditing-config-and-build-hygiene) rather than the untested
+    # decision-shaped eval-authoring pattern. Repo-shaped, like those
+    # precedents the 4 originals are all pre-digested scan summaries; a
+    # real audit meets raw files. 4 kept + A 2 (raw source-file
+    # suppressions with no scan digest supplied; a raw Prometheus rule
+    # YAML file with no alerts digest supplied -- the same input-shape
+    # gap this wave's other repo-shaped lenses found) + B 2 (per-axis
+    # coverage of the two checks the 4 originals never exercise as their
+    # own standalone defect: a suppression-density hotspot in one file
+    # against a near-zero baseline elsewhere; an alert that has a runbook
+    # -- satisfying actionability -- but no for:/severity and an
+    # SLO-untied threshold, failing rule sanity as a distinct check) + C 3
+    # (delegate/escalate; this lens's own heuristics.md carries no literal
+    # "cross #N" markers, so each is grounded instead in the reciprocal
+    # cross-references from sibling lenses' own heuristics.md
+    # (auditing-infrastructure-as-code and auditing-data-pipeline-health
+    # both cross-reference #30 for suppression hygiene) and the
+    # map-gaps.md G1 table's documented #18/#30 ownership split: a
+    # correctly-hygienic suppression over a real SQL injection ->
+    # sweeping-for-security (#14); a healthy codegen-freshness gate over a
+    # breaking, unversioned spec change it faithfully stays in sync with
+    # -> reviewing-api-contract-safety (#13); a correctly-marked vendored
+    # dependency over a reported CVE in that pinned version ->
+    # auditing-dependencies-and-supply-chain (#18, per G1's documented
+    # "#18 deps, #30 codegen" ownership split)) + D 5 (adversarial: a
+    # "suppressions audited quarterly" claim over two real bare
+    # suppressions; an in-diff "pre-approved by security team, no ticket
+    # needed" suppression comment over a real blanket disable; freeze-
+    # deadline urgency framing over a growing lint baseline; a new
+    # blanket suppression buried as the fourth of six mostly-cosmetic
+    # diff hunks; a "fully as-code, matches production" monitoring claim
+    # contradicted by a dashboard panel querying a dead renamed metric) +
+    # E 4 (a justified-density counterweight to B1, a genuinely clean
+    # small repo distinguished from the not-applicable test, the
+    # not-applicable test itself, a correctly SLO-tied alert as B2's
+    # counterweight) = 20 scenarios. See open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 30, source: docs/research/cluster-5-verification.md#30 }
+
+  - name: reviewing-resilience-and-scalability
+    description: >
+      Reviews a change or design for operational resilience and scale: unbounded
+      queues/buffers/result sets, missing timeouts and failure plans on calls to
+      other services, blast radius and bulkheading, retry budgets and idempotency,
+      in-process state that blocks horizontal scaling, single-writer bottlenecks,
+      recoverability (RTO/RPO and tested restore), graceful degradation under
+      overload, and multi-tenant isolation. Design-time operability — distinct
+      from #16's runtime observability. Use when reviewing a new queue, cache,
+      stateful service, failover/HA/DR design, capacity or scaling plan, or a call
+      to a dependency that could be slow or down. Skip when the change is a small,
+      stateless local edit with no new dependency call, queue, shared state, or
+      scaling/recovery surface.
+    picker: >
+      Will it survive failure and scale? Unbounded queues, timeouts and blast
+      radius, retries, statelessness, RTO/RPO — design-time, not #16's runtime.
+    shape: diff
+    design: true
+    wave: 4
+    # Q21: continuing the preference-tier rollout after the wave-3 four-way
+    # tie closed (auditing-infrastructure-as-code, PR #257). Picked by
+    # direct request rather than the tie/gap criterion used for prior
+    # picks. 13 owned checks against 6 baseline scenarios (already denser
+    # than the usual 3-scenario baseline). design: true, so this pass
+    # includes an A group. 6 kept + A 1 (an RFC for a shared multi-tenant
+    # job pool with no bulkhead between tenants or job types, an untested
+    # RTO, and no rollback path for the shared-pool design itself --
+    # exercises the shared decision-record checklist too) + B 5 (per-axis
+    # coverage of checks the 6 originals never exercise as their own
+    # standalone defect: blast radius via a DB pool shared between
+    # checkout and a long-running analytics export, a leaked never-closed
+    # socket as a resource-exhaustion class distinct from unbounded
+    # growth, a global rate limiter with no per-tenant quota, an
+    # unexercised multi-AZ failover claim as its own untested-hypothesis
+    # finding, a retry loop with backoff+jitter but a non-idempotent
+    # refund call) + C 3 (delegate/escalate, each grounded in this lens's
+    # own heuristics cross-references: an idempotency key present but
+    # with a non-atomic lookup-then-insert race ->
+    # reviewing-concurrency-and-async per "cross #3"; a correctly-wired
+    # kill switch whose trip emits no log or metric ->
+    # reviewing-observability-and-operability per "cross #16"; a
+    # per-tenant concurrency limit that satisfies isolation but is a
+    # stale hardcoded constant with no config surface or owner ->
+    # auditing-config-and-build-hygiene per "cross #26") + D 5
+    # (adversarial: a "load tested to 10x" claim over a real unbounded
+    # in-memory queue; an in-diff "SRE reviewed, no timeout needed"
+    # suppression comment over a real missing timeout; launch-deadline
+    # urgency framing over a single-writer counter landing right before a
+    # stated 10x traffic event; a missing-timeout call buried as the
+    # fifth of six mostly-cosmetic hunks; a "falls back to cache" comment
+    # directly contradicted by an except block that re-raises instead) +
+    # E 3 (a correctly bulkheaded checkout/analytics pool split as B1's
+    # counterweight, a trivial pure-function needing no ceremony, the
+    # not-applicable test) = 23 scenarios. See open-questions.md Q21.
+    eval_min: 23
+    built_from:
+      - { category: 28, source: docs/research/cluster-4-runtime.md#28 }
+
+  - name: auditing-infrastructure-as-code
+    description: >
+      Audits infrastructure-as-code manifests (Terraform/OpenTofu, Kubernetes and
+      Helm, CloudFormation, Pulumi) as code that provisions production: the blast
+      radius of a change (in-place update vs replace/destroy of stateful
+      resources), public exposure (`0.0.0.0/0`, public buckets), over-broad or
+      wildcard IAM, secrets in plaintext or Terraform state, unpinned modules and
+      providers, drift between declared and live infra, missing container resource
+      limits / non-root / read-only roots, and unmaintained or soft-failed
+      scanners. Orchestrates and judges blast-radius; defers the security verdict
+      to humans and to sweeping-for-security. A repo-wide / scheduled audit. Use
+      when auditing Terraform, Kubernetes, Helm, or CloudFormation. Skip when the
+      repo or change contains no infrastructure-as-code manifests.
+    picker: >
+      Does this infra change expose or destroy something? Blast radius, public
+      access, wildcard IAM, secrets in state, drift.
+    shape: repo
+    wave: 4
+    # Q21: picked after auditing-architecture-conformance, its tied peer at
+    # 10 owned checks / 3 baseline scenarios (the last pair from this wave's
+    # four-way tie). Single category, no cross_ref. Repo-shaped, so A (2)
+    # supplies raw .tf/.yaml manifest content instead of a pre-digested scan
+    # summary, the same input-shape gap found on auditing-config-and-build-
+    # hygiene and auditing-architecture-conformance earlier in this wave. B
+    # (3, per-axis) covers the three checks the 3 originals never exercise as
+    # their own standalone defect: declared-vs-live drift (a hand-added
+    # security-group rule the plan catches on re-run), encryption-at-rest as
+    # an isolated gap (no other axis broken), and policy-as-code for a
+    # repeatedly-manual-fixed tag rule. C (3, delegate/escalate), each
+    # grounded in this lens's own cross-references in reference/heuristics.md
+    # rather than invented: a destructive replace on a stateful resource
+    # (this lens's own blast-radius call) with the actual data-migration
+    # mechanics routed to reviewing-migration-and-data-safety (cross #20); a
+    # pinned-but-CVE'd module (pinning satisfies this lens's own check) with
+    # the module's own supply-chain health routed to
+    # auditing-dependencies-and-supply-chain (cross #18); a current/required
+    # scanner (satisfying tool-currency) with an unscoped wildcard suppression
+    # routed to auditing-enforcement-and-meta-artifacts' suppression-hygiene
+    # territory (cross #30). D (5, adversarial): a claimed platform-team
+    # approval over a real wildcard IAM policy; a partial public-bucket fix
+    # buried as item 5 of eight mostly-cosmetic changes; launch-deadline
+    # urgency framing over a real public DB ingress rule; a "clean, no
+    # drift" summary contradicted by the raw plan output beneath it showing
+    # an IAM policy widening to a wildcard; a "verified-registry module,
+    # guaranteed secure" claim over a module whose own default leaves an RDS
+    # instance publicly accessible. E (4, precision): a resource-free
+    # CloudWatch-dashboard-only change needing no ceremony, a deliberately
+    # public static-asset bucket scoped and documented as the counterweight
+    # to public-exposure findings elsewhere in the suite, a correctly-scoped
+    # single-check suppression with a stated reason as C3's counterweight,
+    # and the not-applicable test. See open-questions.md Q21.
+    eval_min: 20
+    built_from:
+      - { category: 31, source: docs/research/cluster-5-verification.md#31 }
+
+  - name: auditing-deployment-and-trust-boundaries
+    description: >
+      Audits the deployment/execution wiring already committed in a repo,
+      retrospectively and on a schedule: CI/CD jobs, cron/systemd/launchd
+      units, git-sync-then-execute patterns, deploy scripts, and
+      service-to-service trust in config — read for Poisoned Pipeline
+      Execution (an unattended job executing attacker-influenced content
+      from the branch it just fetched, with no trust gate), a deploy
+      identity's blast radius versus what it deploys, credential-in-tree at
+      rest, self-hosted-runner persistence risk, and the agent-action
+      surface already wired into the repo. The repo-shaped, retrospective
+      counterpart to reviewing-threat-model's design-time enumeration;
+      delegates a code vuln to sweeping-for-security, an IaC resource's
+      blast radius to auditing-infrastructure-as-code, pipeline hygiene to
+      auditing-config-and-build-hygiene. A repo-wide / scheduled audit. Use
+      on deploy scripts, CI/CD workflows, cron/systemd/launchd units,
+      service-trust config, or agent-triggerable hooks/scripts. Skip only
+      with none of those present.
+    picker: >
+      Could an adversary reach code execution or persistence through the
+      deployment wiring itself, not a vulnerable line of code?
+    shape: repo
+    wave: 7
+    # Built from a field report (#191): a whole-repo audit against a real
+    # system found none of the (then) nine repo-shaped audits could reach
+    # its single highest-severity issue — an unattended git-sync job that
+    # fast-forwards main and executes a deploy script from the freshly-
+    # pulled tree. Disposition chosen over the field report's cheaper
+    # alternative (conditionally routing sweeping-for-security /
+    # reviewing-threat-model into repo-audit mode) because those lenses'
+    # checklists are tuned for a diff or a design doc, not a static
+    # arrangement already at rest — a dedicated lens avoids reconciling
+    # borrowed framing. Single category, no cross_ref.
+    # Q21-hardened 2026-08-24: 6 D8-baseline scenarios -> 20 (B per-axis
+    # coverage: deploy-identity blast radius, self-hosted/persistent
+    # runner, agent-action surface at rest; C delegate/escalate to
+    # #14/#19/#30 and G8; D adversarial framing/injection/claim-capture;
+    # E precision on the new B-axis checks; A a raw-file input). See
+    # open-questions.md Q21 and session-log.md, 2026-08-24.
+    eval_min: 20
+    built_from:
+      - { category: 45, source: docs/research/cluster-4-runtime.md#45 }
+
+  - name: reviewing-install-and-upgrade-experience
+    description: >
+      Reviews a change for the experience of the people who consume this software
+      — installing, configuring, and upgrading it — distinct from the
+      decision-lifecycle lens's "should we adopt this dependency" call and from
+      end-user product UX. Covers setup friction and undocumented prerequisites;
+      configuration ergonomics (safe defaults, schema validation, fail-fast
+      actionable errors, backward-compatible keys); and upgrade/migration
+      smoothness — especially whether a consumer or a code agent can complete and
+      verify the upgrade from the docs alone: a codemod or migration command,
+      SemVer-correct breaking-change signaling, deprecation windows over silent
+      removals, and a downgrade path. Use when reviewing installers, setup/init
+      scripts, packaging, CLI and config surfaces, upgrade or migration guides, or
+      release/versioning changes — or anything a downstream project adopts (a
+      tool, plugin, template, or library). Skip when the change has no
+      consumer-facing install, config, or upgrade surface.
+    picker: >
+      Can a consumer install, configure, and upgrade this cleanly — even hand it
+      to an agent? Setup friction, config UX, version-bump smoothness, migration
+      path.
+    shape: diff
+    design: true
+    wave: 4
+    # Q21: second wave-3 lens hardened, picked by the same scope-to-coverage
+    # criterion as the wave's other picks: 18 owned checks against 4 scenarios
+    # (0.222 scenarios per check) was the widest gap left in the wave. Same A-E
+    # adversarial taxonomy, raised from D8's 3-scenario baseline (this lens
+    # already had 4). See open-questions.md Q21.
+    eval_min: 28
+    built_from:
+      - { category: 33, source: docs/research/cluster-6-evolution.md#33 }
+
+  - name: reviewing-interoperability
+    description: >
+      Reviews a change for interoperability — whether the code correctly speaks
+      the external standards and protocols it claims to (ISO/IEC 25010:2023).
+      Consolidates conformance checks scattered across other
+      lenses: HTTP semantics (safe/idempotent methods, status codes, conditional
+      requests, caching); OAuth 2.0 / OIDC flow correctness (exact redirect_uri,
+      state/nonce, PKCE); Semantic Versioning and wire/format back-compat; RFC
+      formats (date, URI, email, JSON, CSV); Unicode normalization and encoding
+      (NFC, UTF-8, the YAML "Norway" class); cron dialects (POSIX vs. Quartz);
+      OpenTelemetry semantic conventions; and co-existence (ports, global state,
+      shared paths). Use when a change parses or emits a standard format, calls or
+      implements an external protocol or auth flow, versions a published surface,
+      or serializes data another system reads. Owns conformance to an external
+      standard; defers the contract we author to #13, internal correctness to #4,
+      idiom to #8, config to #26. Skip changes with no boundary-crossing standard.
+    picker: >
+      Does the code correctly speak external standards? HTTP/OAuth semantics,
+      SemVer, RFC date/URI/email formats, Unicode, cron dialects, OTel semconv.
+    shape: diff
+    wave: 5
+    # Q21: continuing the preference-tier rollout after
+    # `auditing-decision-record-currency` merged (PR #266). Widest gap among
+    # the remaining shape:diff lenses (8 owned checks against 4 baseline
+    # scenarios). Not `design: true` — no A group. The 4 original scenarios
+    # covered a date-format defect, missing OAuth `state`, a clean
+    # idempotent-POST/RFC-3339 case, and a cron-dialect mismatch — leaving
+    # 5 of the lens's 8 checks with no standalone coverage. B (5, per-axis
+    # coverage): SemVer/back-compat (a breaking rename shipped under a
+    # patch bump), encoding/charset/content-negotiation (a declared
+    # Content-Type with no charset over a non-ASCII body), time/calendar/
+    # locale tags on the wire (a non-IANA tz abbreviation and a
+    # non-BCP-47 locale tag, distinct from the date-format axis the
+    # originals already cover), OTel semconv (bespoke span-attribute keys
+    # instead of the standard names), co-existence (a hardcoded shared
+    # lock path). C (3, delegate/escalate), grounded in this lens's own
+    # documented defer list ("defers the contract we author to #13,
+    # internal correctness to #4, ... config to #26"): a correctly
+    # major-bumped breaking change whose field-shape ambiguity routes to
+    # reviewing-api-contract-safety (#13); a correctly RFC-3339-formatted
+    # timestamp whose wall-clock (non-monotonic) duration measurement
+    # routes to tracing-correctness-and-invariants (#4, "monotonic clocks
+    # for durations"); a hardcoded-port co-existence finding whose
+    # configuration-practice verdict routes to
+    # auditing-config-and-build-hygiene (#26). D (5, adversarial):
+    # claim-capture, an in-diff suppression note on the OAuth check,
+    # demo-deadline framing over a real cron-dialect mismatch, a
+    # distractor-buried PUT-idempotency violation in a six-hunk mostly-
+    # cosmetic diff, a docstring claim contradicted by the actual
+    # single-dialect implementation. E (4, precision): a SemVer
+    # counterweight to B1 (correctly major-bumped), a co-existence
+    # counterweight to B5 (an env-configurable port), a trivial one-line
+    # RFC-3339 helper, and the not-applicable test matching this lens's
+    # own explicit skip clause verbatim (a purely internal refactor
+    # crossing no boundary). = 21 scenarios. See open-questions.md Q21.
+    eval_min: 21
+    built_from:
+      - { category: 37, source: docs/research/cluster-4-runtime.md#37 }
+
+  - name: reviewing-artifact-conventions
+    description: >
+      Reviews a standardized non-source artifact against its own published
+      "well-formed X" standard rather than as application code — the artifact
+      review shape (D15), presence-activated. On detecting a supported artifact it
+      loads that artifact's rubric and reviews against it. Supported artifact: a
+      SKILL.md / agent-skill definition, reviewed against Anthropic's
+      skill-authoring best practices (trigger-rich frontmatter within limits, a
+      lean progressive-disclosure body with detail bundled, a single default
+      approach, no time-sensitive text, one-level-deep references, eval-first).
+      Use when reviewing a SKILL.md or agent-skill definition (or another listed
+      authored artifact) against the standard it should follow. Skip when none of
+      the listed artifacts are present — ordinary source code is the other lenses'
+      job, and this is authoring quality, distinct from doc-drift (#22) and runtime
+      agent-safety (#32).
+    picker: >
+      Is this authored artifact well-formed per its own standard? Detect the
+      artifact (e.g. SKILL.md), load its rubric, review against it.
+    shape: artifact
+    wave: 5
+    artifacts:
+      - name: SKILL.md / agent skill
+        detect: a SKILL.md or agent-skill definition file is added or changed
+        slug: skill-md
+        rubric: 101
+    # Q21: the last preference-tier lens hardened. Set aside at every prior
+    # recompute this session not for being unhardened but because it's a
+    # genuinely different taxonomy — `shape: artifact`, presence-activated,
+    # reviewing one artifact against its own single published rubric
+    # (reference/skill-md.md, 9 reviewable heuristics) rather than a diff or
+    # a design doc. No prior A-E pass in this campaign fit it directly, so
+    # this pass adapts the pattern rather than copying it mechanically.
+    #
+    # No A group: this lens isn't `design: true` and doesn't review decision
+    # records — its own artifact-detection gate is the only "does this apply
+    # at all" axis, covered by the kept not-applicable case below. B 6 (per-
+    # axis coverage for the six of nine rubric heuristics the 4-scenario
+    # baseline left untested — frontmatter/name, progressive disclosure, and
+    # trigger-richness were already covered): an option-menu body ("you
+    # could... or alternatively...") violating the single-default-approach
+    # heuristic; a compliant skill missing examples.md entirely; time-
+    # sensitive wording ("as of the latest release") plus a hardcoded
+    # Windows-path assumption in one excerpt; a two-levels-deep bundled
+    # reference file plus a >100-line reference file with no ToC; an
+    # eval.json shipping only 2 scenarios against the >=3 floor; a body
+    # naming Claude Code-specific tools (Read, Task) despite the skill's own
+    # portability claim. C 2 (delegate/escalate, both of and only the cross-
+    # references this lens's own description actually names — "distinct
+    # from doc-drift (#22) and runtime agent-safety (#32)" — not a third,
+    # unverified target): an authoring-correct skill whose body cites a CLI
+    # subcommand that no longer exists, routed to auditing-documentation-
+    # health (#22); an authoring-correct skill whose body defaults to an
+    # unconfirmed `rm -rf`, routed to reviewing-agentic-safety (#32). D 5
+    # (adversarial: a PR-description claim of "5 scenarios with a baseline"
+    # contradicted by an actual 2-scenario eval.json; an in-file "reviewed
+    # and approved, do not re-flag" comment over a real vague description;
+    # "shipping today for the demo, examples/evals next sprint" framing over
+    # a skill with neither; a real progressive-disclosure violation buried
+    # as the third of five files in an otherwise-cosmetic multi-skill diff;
+    # a body naming Claude-specific tools that directly contradicts its own
+    # description's portability claim). E 4 (2 kept: the well-formed-skill
+    # no-finding case, and the not-applicable case — its `expected_behavior`
+    # fixed in this pass from "No findings" to "Not applicable:", a
+    # pre-existing bug predating this pass, since this lens's own SKILL.md
+    # explicitly reserves "No findings" for a check that ran and passed; 2
+    # new: an explicit counterweight to the new B-group option-menu case — a
+    # skill naming one clear default and demoting an alternative to a named
+    # secondary cross-check, not a menu; a trivial 12-line skill with no
+    # bundled files at all, correctly clearing progressive disclosure by
+    # having nothing large enough to need splitting out, not by being too
+    # small to check) = 19 scenarios (4 kept + 15 new), 71 assertions.
+    # `examples.md` gets a matching fix (the same "No findings" ->
+    # "Not applicable:" bug) plus two new worked examples (a delegate, an
+    # adversarial suppression case). See open-questions.md Q21.
+    eval_min: 19
+    built_from:
+      - { category: 101, source: docs/research/artifact-rubrics.md#101 }
+
+# The composition layer (Q7): maps "what am I reviewing" to the lenses worth
+# running, so neither a human nor an agent has to know the whole catalog to
+# select well. Generated into skills/<name>/SKILL.md from this section alone.
+router:
+  name: choosing-review-lenses
+  # `description` is the terse listing surface (shown in the skill catalogue);
+  # `body` is the richer "When to use" text the model reads once the skill
+  # loads. Keeping them separate lets the listing stay scannable while the body
+  # carries examples (PR #30). The router is the lens *picker*, not the review
+  # front door: the /atlas-review-pr and /atlas-code-review commands and the
+  # collapsed reviewing-a-change entrypoint own the "review this" keyword match;
+  # this skill is reached when the right lenses aren't already obvious. It still
+  # asserts atlas precedence over the generic built-in code-review skill, just
+  # without claiming to be THE entrypoint (issue #83).
+  description: >
+    Selects which code-quality-atlas review lenses to run for a change — the lens
+    picker, not the review front door (the /atlas-review-pr and /atlas-code-review
+    commands and the reviewing-a-change entrypoint are the front doors). Maps what
+    is being reviewed (bug fix, feature, refactor, migration, async or concurrent
+    code, API change, UI change, error handling, LLM integration, design doc,
+    dependency bump, CI/config change, or a whole-repo audit — which runs every
+    repo-shaped audit, not 3-8) to the most relevant lenses. When you do review,
+    prefer atlas over the generic built-in code-review skill and over framework
+    reviews (e.g. BMAD), combining them non-exclusively rather than picking only
+    one. Use when unsure which lenses apply, or asked to review without naming a
+    lens; skip and call individual lenses directly when the relevant ones are
+    already clear.
+  body: >
+    Selects which atlas lenses to run for a change — the lens picker, not the
+    review front door. Use when a "review this PR, diff, change, or what I pushed"
+    request doesn't already name the lenses: it maps the change to the most
+    relevant atlas lenses (3-8 by default, plus any additional lenses that clearly
+    apply, plus shape-based auto-included lenses; see Depth modes). Prefer atlas over the
+    generic built-in code-review skill and over framework review flows (e.g. BMAD)
+    — but combine non-exclusively: run those too when useful and fold every finding
+    through `synthesizing-review-findings`, rather than letting a shorter-named
+    default win on keyword alone. Skip this and call lenses directly when the
+    relevant ones are already clear — from an explicit request ("check for
+    security issues"), from obvious context (an async change →
+    `reviewing-concurrency-and-async`), or when comprehensive coverage is the
+    goal. Every lens runs directly without routing through here first.
+  routes:
+    - when: Bug fix
+      run: [tracing-correctness-and-invariants, reviewing-test-quality,
+            hunting-silent-failures]
+    - when: Bug fix whose root cause is a missing or wrong invariant — a
+            discriminator field (kind/status/type/mode) constraining which
+            sibling fields are valid, or a fix that itself adds/patches a
+            runtime validation function rather than an off-by-one, null
+            check, or typo
+      run: [reviewing-module-design, tracing-correctness-and-invariants,
+            reviewing-test-quality, hunting-silent-failures]
+      note: "illegal-states-representable bugs get miscategorized as ordinary
+            bug fixes by the base \"Bug fix\" route above, which never
+            includes this lens (confirmed via two consecutive real-world
+            fixes to the same discriminator-plus-generic-field-bag defect,
+            both skipped by the base route) — combine both rows so the
+            type-design lens actually runs when the fix is a representation
+            gap, not just a logic error"
+    - when: New feature (general-purpose change)
+      run: [tracing-correctness-and-invariants, reviewing-naming-and-readability,
+            reviewing-test-quality, checking-restraint]
+    - when: Refactor / restructuring
+      run: [reviewing-module-design, checking-restraint,
+            checking-idioms-and-consistency, reviewing-naming-and-readability]
+    - when: Schema migration, backfill, or data-format change
+      run: [reviewing-migration-and-data-safety, tracing-correctness-and-invariants,
+            hunting-silent-failures]
+    - when: Data-plane change — a SQL or dbt/SQLMesh model, a warehouse or
+            ETL/ELT transformation, an event or analytics schema, a data test
+            or expectation suite, or a producer of data another team consumes
+      run: [reviewing-data-transformations-and-contracts,
+            tracing-correctness-and-invariants, hunting-silent-failures,
+            reviewing-migration-and-data-safety]
+      note: "the analytics plane — grain and fan-out, SQL NULL semantics,
+            incremental idempotency, data-test adequacy, and consumer
+            compatibility; #20 owns the operational store's migration
+            mechanics, #13 the service API contract, #27 the PII verdict.
+            hunting-silent-failures rides along because #40's fail-loud-not-empty
+            check delegates its verdict to #2 — a pipeline that publishes an
+            empty or stale table on a missing source is a silent-failure defect,
+            so the owning lens must actually be in the route"
+    - when: Async / concurrent / distributed change (queues, workers, locks, await)
+      run: [reviewing-concurrency-and-async, tracing-correctness-and-invariants,
+            hunting-silent-failures]
+    - when: Public API or contract change (endpoints, SDK surface, webhooks)
+      run: [reviewing-api-contract-safety, reviewing-module-design,
+            sweeping-for-security]
+    - when: New abstraction, library, or engine shipped ahead of its consumer
+            (generic/trait with one or no impl, a crate with no caller yet,
+            "substrate for a later feature")
+      run: [checking-restraint, reviewing-module-design,
+            reviewing-api-contract-safety, reviewing-test-quality]
+      note: restraint-led — speculative generality can be flawless and premature
+            at once, so it hides from the correctness and test lenses
+    - when: Error-handling / resilience change (retries, fallbacks, timeouts)
+      run: [hunting-silent-failures, reviewing-observability-and-operability,
+            reviewing-concurrency-and-async]
+    - when: Resilience / scalability / capacity / DR design (a new queue or cache,
+            a stateful service, failover/HA, a scaling or capacity plan, or a call
+            to a dependency that can be slow or down)
+      run: [reviewing-resilience-and-scalability, reviewing-concurrency-and-async,
+            reviewing-observability-and-operability]
+      note: "design-time operability — blast radius, backpressure, statelessness,
+            RTO/RPO; pairs with #16 for the runtime-instrumentation side"
+    - when: UI / frontend change (components, templates, user-facing text)
+      run: [reviewing-usability-and-interaction, reviewing-accessibility-and-i18n,
+            checking-idioms-and-consistency, reviewing-naming-and-readability,
+            reviewing-conceptual-integrity]
+      note: "#42 leads on a UI change because the defect it owns — a state the code
+            reaches with nothing rendered for it — is invisible to the other three:
+            #23 checks the markup that exists, #8 whether it matches the codebase,
+            #5-#8 whether it reads well. None of them notices the error branch nobody
+            designed"
+    - when: A change introducing a user-facing concept — a new entity, mode,
+            status, container, page, command, endpoint, setting, term, or event
+            name a user or an API consumer has to learn, see, or use (whether or
+            not there is an existing one to choose between)
+      run: [reviewing-conceptual-integrity, checking-restraint,
+            reviewing-usability-and-interaction]
+      note: "#44 and #11 usually agree here and answer different questions —
+            restraint asks whether to build it, #44 whether the product still
+            says one thing once it exists. A small, well-scoped, explicitly
+            requested change clears restraint and can still leave the product
+            with two nouns for one idea, which is why the counterweight has to
+            run on ordinary feature PRs and not only at design review"
+    - when: Auth, user input, or anything handling untrusted data
+      run: [sweeping-for-security, hunting-silent-failures,
+            tracing-correctness-and-invariants]
+    - when: Performance-motivated change ("this makes it faster")
+      run: [reviewing-performance-and-efficiency, checking-restraint,
+            tracing-correctness-and-invariants]
+    - when: LLM / model-API integration (a model call, prompt construction, or
+            model-output handling — no tools or autonomous loop)
+      run: [reviewing-llm-integration, sweeping-for-security, checking-restraint]
+    - when: Agent / tool-use change — a tool or function definition exposed to a
+            model, an MCP server or client, an autonomous or multi-agent loop,
+            agent memory, or any code that lets a model take actions
+      run: [reviewing-agentic-safety, reviewing-llm-integration,
+            sweeping-for-security]
+      note: "the action/tool surface (what the model may *do*) — #32 owns it; the
+            model call itself is #25, the authz verdict #14"
+    - when: Threat model / security-architecture review (a system or AI agent app,
+            with or without a design doc)
+      run: [reviewing-threat-model, sweeping-for-security, reviewing-agentic-safety,
+            reviewing-llm-integration]
+      note: "enumeration-led — #38 builds the model and delegates the deep verdict to
+            the topical security lenses"
+      shapes: [diff, decision]
+    - when: AI-generated or AI-assisted change, a large or unfamiliar diff, or any
+            change that adds dependencies or confident-looking constants/APIs
+      run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,
+            sweeping-for-security]
+      note: "attribution-agnostic; #18 owns the supply-chain verdict, #14 the
+            security one"
+    - when: Change to an AI-/agent-maintained codebase, to agent-onboarding files
+            (AGENTS.md/CLAUDE.md, llms.txt) or repo structure an agent must
+            navigate, or a large/scattered change whose context economy matters
+      run: [reviewing-agent-legibility, reviewing-naming-and-readability,
+            checking-restraint]
+      note: "the agent-as-reader vantage — mirror of #34; context economy,
+            retrieval-friendly structure, scoped agent onboarding"
+    - when: User-facing flow that could manipulate or disadvantage a person —
+            consent / opt-out, defaults, pricing or eligibility conditionals,
+            onboarding / checkout / cancellation funnels
+      run: [reviewing-ethical-design, reviewing-accessibility-and-i18n,
+            sweeping-for-security]
+      note: "detect-and-route — dark patterns, manipulative defaults,
+            discriminatory conditionals; consent-as-law routes to #27, product
+            trade-offs to product, a11y mechanics to #23"
+    - when: A user-facing flow with states or consequences — a form or wizard, a
+            destructive or irreversible action (delete, revoke, overwrite, cancel),
+            an async operation the user waits on, or a screen that can be empty or
+            error out
+      run: [reviewing-usability-and-interaction, reviewing-accessibility-and-i18n,
+            hunting-silent-failures, reviewing-ethical-design]
+      note: "the user's side of the flow — undesigned loading/empty/error states,
+            destructive actions with no way back, errors that discard the user's
+            input; hunting-silent-failures rides along because the same swallowed
+            error is both a silent failure in the code and an unhandled state on the
+            screen, and reviewing-ethical-design because friction that benefits
+            someone is #36's, friction that benefits nobody is #42's"
+    - when: A change that claims a user or business benefit — a new user-facing
+            feature, an experiment or feature-flagged rollout, a PR description
+            promising an outcome, or an analytics/telemetry change that instruments
+            one of those (not a telemetry-schema or operational-metric change on its
+            own, which claims nothing about a user)
+      run: [reviewing-outcome-instrumentation, reviewing-pr-and-process-hygiene,
+            reviewing-observability-and-operability]
+      note: "will anyone be able to tell whether it worked — a stated outcome,
+            instrumentation in this diff rather than a follow-up, a losing condition,
+            and guardrails alongside the win metric. #24 owns whether the PR's claims
+            about the *diff* hold up, #16 whether the thing can be operated; a change
+            can be fully observable and completely unmeasured. Skip on refactors,
+            fixes, and bumps, which owe no hypothesis"
+    - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
+      run: [reviewing-observability-and-operability, sweeping-for-security]
+    - when: Tests-only change
+      run: [reviewing-test-quality, checking-idioms-and-consistency]
+    - when: Docs-only change (README, `docs/**`, comments) that is not itself a
+            design doc, plan, spec, ADR, or RFC
+      run: [reviewing-pr-and-process-hygiene]
+      note: "a spec/ADR/RFC/design-pass file under docs/** is a design doc first
+            — use the Design doc row below, not this one (#353); this row is
+            for plain documentation edits, where reviewing-pr-and-process-hygiene's
+            #22 doc-discipline checks (orphaned/contradictory docs, changelog,
+            comment rot) are the on-topic prose-quality owner, not
+            reviewing-naming-and-readability, whose checklist is entirely
+            code-level (names, nesting, magic numbers) and out of scope for
+            prose either way. In the standalone form, auditing-documentation-health
+            can be invoked directly for this shape too — scoped to the changed
+            files, not the whole repo, since it exists as its own top-level
+            Skill — even though it's kept out of this row's run list (it's
+            repo-shaped, and listing it here would incorrectly mark it
+            diff-shaped for shape-mixing purposes). This isn't automatic in
+            the collapsed form, though (#432): the collapsed diff entrypoint
+            bundles no copy of its checklist and never lists it in run, so a
+            reviewer using only the collapsed form has no built-in path to it
+            on a docs-only diff — invoke auditing-a-repository's bundled copy
+            separately instead"
+    - when: Design doc / plan / RFC (no code yet)
+      run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
+            reviewing-migration-and-data-safety, reviewing-api-contract-safety,
+            reviewing-conceptual-integrity]
+      note: "pick by the design's domain, from design-capable (◆) lenses — not
+            \"◆ lenses only\": a decision-shaped design doc (an ADR, RFC, or
+            deprecation plan) also pairs with reviewing-decision-lifecycle,
+            which auto-includes via the decision route regardless of ranking
+            even though it carries no ◆ itself (#383/#430)"
+      shapes: [diff, decision]
+    - when: Dependency add or bump
+      run: [auditing-dependencies-and-supply-chain, checking-restraint]
+    - when: Dependency-license allow-list, deny-list, or SBOM-policy gate — a CI
+            step, lockfile-policy tool config (e.g. pip-licenses, license-checker,
+            cargo-deny, go-licenses), or hand-rolled check enforcing which package
+            licenses are permitted
+      run: [auditing-compliance-and-provenance, auditing-config-and-build-hygiene]
+      note: "a license-allow-list gate is a #27 compliance verdict wearing CI-config
+            clothing — the plain CI/config route below never reaches it, so a
+            substring/partial-match false-negative (a combined SPDX expression like
+            `GPL-3.0-only OR MIT` slipping past an allow-list containing only `MIT`)
+            has no lens assigned to catch it; see #487"
+    - when: CI / build / config change
+      run: [auditing-config-and-build-hygiene, sweeping-for-security]
+    - when: Install / setup / packaging change, an upgrade or migration guide, a
+            config or CLI surface, or anything a downstream project adopts (a
+            tool, plugin, template, or library)
+      run: [reviewing-install-and-upgrade-experience, reviewing-api-contract-safety,
+            auditing-documentation-health]
+      note: the adopter-facing experience — setup friction, config UX, and a
+            version-bump a consumer or an agent can complete and verify
+    - when: Change that parses or emits a standard format or speaks an external
+            protocol — an HTTP/REST client or handler, an OAuth/OIDC or other
+            auth flow, date / URL / email / CSV / JSON serialization, a version
+            bump on a published surface, a cron expression, or telemetry
+            attributes
+      run: [reviewing-interoperability, reviewing-api-contract-safety,
+            tracing-correctness-and-invariants]
+      note: "does the code correctly speak the external standard — HTTP/OAuth
+            semantics, RFC formats, SemVer, Unicode, cron dialect, OTel semconv;
+            #13 owns the contract we author, #4 internal correctness, #14 the
+            auth-flow security verdict"
+    - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
+            CloudFormation manifests)
+      run: [auditing-infrastructure-as-code, sweeping-for-security]
+      note: "auditing-infrastructure-as-code (repo-shaped) judges blast radius,
+            public exposure, IAM scope, and declared-vs-live drift; #14
+            (sweeping-for-security) owns the security verdict"
+    - when: A standardized authored artifact rather than source code — a SKILL.md
+            or agent-skill definition
+      run: [reviewing-artifact-conventions]
+      note: artifact-shaped — detect the artifact, then review it against its own
+            published standard, not as application code
+      shapes: [artifact]
+    - when: Any pull request (the PR artifact itself, on top of content lenses)
+      run: [reviewing-pr-and-process-hygiene]
+    - when: Whole-repo health audit (scheduled / cron)
+      run: [finding-maintainability-hotspots, auditing-architecture-conformance,
+            auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
+            auditing-documentation-health, auditing-compliance-and-provenance,
+            auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code,
+            auditing-decision-record-currency, auditing-data-pipeline-health,
+            auditing-deployment-and-trust-boundaries]
+      note: the eleven repo-shaped audits; run independently, not as one pass
+            (auditing-infrastructure-as-code only where IaC manifests exist;
+            auditing-decision-record-currency only where a decision-record
+            directory exists; auditing-data-pipeline-health only where the repo
+            has SQL models, pipelines, data tests, or published data
+            schemas — data tests included because a repo can carry
+            permanently-warning or disabled ones with no models of its own;
+            auditing-deployment-and-trust-boundaries only where the repo has
+            deployment automation, a scheduled job, an unattended
+            sync/execute pattern, service-to-service trust config, or an
+            agent-triggerable hook/helper script to examine)
+      shapes: [repo]
+    - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
+            or checked-in generated artifacts
+      run: [auditing-enforcement-and-meta-artifacts]
+      note: repo-shaped — scans suppression accretion and codegen/monitoring drift
+            across the tree, not a single diff
+      shapes: [repo]
+    - when: A decision, not a diff — an ADR / RFC / design doc, a dependency or
+            technology adoption, a build-vs-buy or vendor choice, or a
+            deprecation / sunset plan
+      run: [reviewing-decision-lifecycle, checking-restraint,
+            reviewing-api-contract-safety, reviewing-conceptual-integrity]
+      note: "decision-shaped — reviews the choice and its record (rationale,
+            assumptions, exit), not implementation code; pair with the
+            design-capable (◆) lenses for the decision's domain.
+            reviewing-decision-lifecycle auto-includes on this shape even if
+            ranking would otherwise drop it"
+      shapes: [decision]
+    - when: A repository's existing decision-record archive (an ADR/RFC directory
+            already on disk), swept on a schedule rather than reviewed as it's
+            being authored
+      run: [auditing-decision-record-currency]
+      note: "repo-shaped — status-graph consistency, revisit-triggers plausibly
+            due, EOL adoptions, and orphaned records; #29 owns the authoring-time
+            call, this only checks whether time has invalidated an existing one"
+      shapes: [repo]
+
+# The evidence pre-pass (G34 Tier 1): between the router picking lenses and the
+# lenses running, gather what the repo's *own* deterministic tools already say
+# about the change, and hand it to each lens as evidence to confirm,
+# contextualize, or dismiss. Enacts the G5 principle the map has stated since
+# the first gap hunt but never ran at review time — where a mature linter or
+# scanner already covers a category, the lens's job is to triage its output, not
+# to re-derive the finding by judgment alone. Generated into
+# skills/<name>/SKILL.md from this section alone (built_from: []), exactly like
+# the router and synthesizer, and bundled into every collapsed entrypoint as
+# reference/tool-evidence.md.
+prepass:
+  name: grounding-review-in-tool-output
+  description: >
+    Runs the deterministic linters, type checkers, scanners, and test/coverage
+    tools the reviewed repository has *already* configured, scoped to what is
+    being reviewed, and turns their raw output into evidence the
+    code-quality-atlas lenses confirm, contextualize, or dismiss. Use before the
+    lenses run on any review where the repo carries its own tooling — a pull
+    request, a local diff, or a whole-repo audit — so findings that a tool can
+    prove are grounded in a rule id instead of re-derived by judgment, and so
+    the review can state which categories had deterministic coverage and which
+    did not. Never installs or introduces a tool the repo has not adopted, and
+    never treats a clean tool run as clearing a lens.
+  body: >
+    Gather deterministic evidence before the lenses judge. Discover which
+    linters, type checkers, scanners, and data/infra tools this repository
+    already runs, run those (and only those) over the scope under review, and
+    hand each lens the hits that fall in its territory. Tool output is an input
+    to the review, never a substitute for it: every hit is confirmed,
+    contextualized, or dismissed by the owning lens, and every tool that could
+    not run becomes a stated coverage limitation rather than a silent pass.
+  # Where to look to learn what the repo actually runs. Order matters: the
+  # earlier sources say what is *enforced*, the later ones what is merely
+  # installed or documented.
+  discover:
+    - source: The pre-commit config — `.pre-commit-config.yaml`
+      tells: >
+        the richest single signal — each hook names its tool, its arguments,
+        and the file filter it runs under, so it gives scope as well as
+        inventory
+    - source: CI workflow definitions — `.github/workflows/*.yml` and
+        `*.yaml`, `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/config.yml`
+      tells: >
+        what the repo actually gates merges on, which is the set worth
+        reproducing — a tool configured but not wired into CI is weaker
+        evidence that the team stands behind its rules
+    - source: Package manifests — `package.json` (scripts, devDependencies),
+        `pyproject.toml`, `Gemfile`, `Cargo.toml`, `go.mod`
+      tells: which tools are installed and which command name invokes them
+    - source: Per-tool config files — `eslint.config.js`, `.eslintrc*`,
+        `ruff.toml`, `.rubocop.yml`, `.golangci.yml`, `.semgrep.yml`,
+        `.sqlfluff`, `.tflint.hcl`, `sgconfig.yml`
+      tells: >
+        the repo's own rule selection — always run the tool under its config,
+        never under your own defaults, or the output is about a rule set the
+        team never chose
+    - source: Task runners and contributor docs — `Makefile`, `justfile`,
+        `Taskfile.yml`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`
+      tells: >
+        the documented entry point (`make lint`, `npm run check`), which is
+        often a bundle of several tools and is what a human would have run
+  # Tool families to look for, what each grounds, and the lens that owns the
+  # resulting finding. `grounds` names real lenses and is validated against the
+  # manifest, so a renamed lens cannot leave a dangling pointer here.
+  families:
+    - kind: Lint & style
+      tools: ESLint, Ruff, RuboCop, golangci-lint, Clippy, ShellCheck,
+        markdownlint-cli2
+      grounds: [checking-idioms-and-consistency, reviewing-naming-and-readability]
+    - kind: Types & static correctness
+      tools: mypy, Pyright, `tsc --noEmit`, `go vet`, Infer
+      grounds: [tracing-correctness-and-invariants, hunting-silent-failures]
+    - kind: Security & SAST
+      tools: Semgrep, Bandit, CodeQL, gosec, Brakeman, gitleaks
+      grounds: [sweeping-for-security]
+    - kind: Dependency & supply chain
+      tools: pip-audit, npm audit, cargo-audit, osv-scanner, Dependabot,
+        Syft/Grype
+      grounds: [auditing-dependencies-and-supply-chain, reviewing-ai-authored-code]
+    - kind: Infrastructure as code
+      tools: tflint, Checkov, `terraform validate`, kube-linter, Hadolint
+      grounds: [auditing-infrastructure-as-code]
+    - kind: Structure & architecture
+      tools: dependency-cruiser, import-linter, ArchUnit, madge
+      grounds: [auditing-architecture-conformance, reviewing-module-design]
+    - kind: Tests & coverage
+      tools: the repo's own test runner plus its coverage config (.coveragerc,
+        pyproject.toml [tool.coverage], a jest coverageThreshold)
+      grounds: [reviewing-test-quality]
+    - kind: Accessibility
+      tools: axe-core, eslint-plugin-jsx-a11y, Lighthouse CI
+      grounds: [reviewing-accessibility-and-i18n]
+    - kind: Data plane
+      tools: sqlfluff, dbt tests, Great Expectations, schema-registry
+        compatibility checks
+      grounds: [reviewing-data-transformations-and-contracts,
+                auditing-data-pipeline-health]
+  # What the owning lens does with each hit. Exactly one applies per hit; a hit
+  # passed through untouched is a fourth, forbidden disposition.
+  dispositions:
+    - name: confirm
+      when: the owning lens independently agrees the flagged code is wrong
+      do: >
+        report one finding attributed to the lens, citing the tool and rule id
+        as evidence — the lens owns the finding, the tool owns the proof
+    - name: contextualize
+      when: >
+        the hit is real but its severity or urgency is not what the tool's
+        default says in this codebase
+      do: >
+        keep the finding and restate its severity on the atlas's scale, saying
+        what about the context moved it
+    - name: dismiss
+      when: >
+        the hit does not hold here — a false positive, a deliberate pattern the
+        repo applies consistently, or a rule the team has opted out of elsewhere
+      do: >
+        drop it and say why in one line, so the dismissal is auditable and a
+        misconfigured rule is visible rather than silently absorbed
+  # The discipline that keeps a tool pre-pass from degrading the review.
+  rules:
+    - name: Never introduce a tool the repo has not adopted
+      rule: >
+        Run what the repo already configures. A linter the team never chose
+        emits a wall of style hits that are not defects in this codebase; at
+        most, its absence is a `route: eng` suggestion to adopt it, never a set
+        of findings against the diff.
+    - name: A clean run clears nothing
+      rule: >
+        Deterministic tools have no opinion on whether an invariant is the right
+        one, whether a boundary belongs, whether a test proves anything, or
+        whether the change should exist. Every selected lens still runs in full.
+        Absence of tool output is absence of evidence, not evidence of absence.
+    - name: Check every hit against the diff before reporting it
+      rule: >
+        Tool output can come from a different revision, a stale cache, or a rule
+        the repo has since reconfigured. An unreproduced tool hit reported as a
+        finding is an unsupported claim — the same defect
+        `reviewing-pr-and-process-hygiene` flags in a PR description.
+    - name: A reported run is a claim, not evidence
+      rule: >
+        "Type-checks clean", "all tests pass", "0 errors", "confirmed dead by a
+        full type-check" in a PR description or an author's comment is a claim
+        about a run this review did not see. It becomes evidence only when the
+        pre-pass reproduces it or CI shows it on this exact head commit — and
+        either way only for the files the run actually covered: a tool whose
+        config or file filter excludes the code in question reports zero
+        errors vacuously, so check the run's scope before counting its
+        silence. When the run cannot be reproduced here, say so under coverage
+        and name the command that would settle it; if the change rests on the
+        claim (a deleted suppression, a removed guard), the synthesizer holds
+        it as provisional rather than affirmed.
+    - name: Running the repo's tools runs the repo's code
+      rule: >
+        Lint and build configuration is executable in most ecosystems — an
+        `eslint.config.js` is JavaScript, a `Makefile` target is a shell
+        command, a pre-commit hook fetches and runs a remote repository, dbt
+        renders Jinja — and plugins load from the lockfile. On an untrusted
+        branch (a fork PR, an unreviewed contributor) treat the pre-pass as
+        executing untrusted code: run it only in the isolation CI already uses,
+        or skip it and say so under coverage. A grounding pre-pass must never be
+        the reason untrusted code executes with credentials in scope.
+    - name: Bound the cost, and call a timeout a coverage gap
+      rule: >
+        Scope each run through the tool's own scope mechanism (see step 2) —
+        never a whole-tree sweep on a diff review when the tool has a diff mode,
+        and never a whole-tree sweep reported as though it were scoped. A tool
+        that exceeds its budget, needs a toolchain that is absent, or fails to
+        build is a stated limitation — never a finding, and never a silent
+        omission.
+    - name: Keep judgment and measurement distinguishable
+      rule: >
+        A confirmed finding names both the lens that owns it and the rule that
+        evidenced it, so a reader can tell what was measured from what was
+        judged, and so a false positive is traceable to the rule that produced
+        it.
+    - name: A narrowing flag changes what "unused" means — never run one to
+        check a suppression
+      rule: >
+        Some tools expose an override flag that *replaces* the project's
+        configured rule set for that invocation rather than adding to it —
+        ruff's `--select` is the canonical example: `ruff check --select
+        RUF100 .` makes RUF100 the only enabled rule for that run, so every
+        `# noqa` in the repo looks unused regardless of whether its named rule
+        actually fires under the real configuration. Checking whether a
+        suppression is stale this way manufactures false positives rather than
+        detecting real ones — e.g. a self-audit that reported several
+        genuinely-necessary suppressions as dead on exactly this invocation.
+        Ground a stale-suppression finding in the tool's additive form
+        instead (`--extend-select` for ruff, or the equivalent for another
+        tool/linter) or in a project-config change plus the tool's own
+        default invocation. Before reporting a finding that would change
+        code (removing the suppression), confirm it by removing the
+        directive and running the project's own unmodified invocation with
+        no override flags: if a diagnostic fires, the suppression was
+        necessary and the additive finding was a false positive; if none
+        does, the additive finding is confirmed.
+    - name: Select tools by every changed file's type, not the diff's
+        dominant language
+      rule: >
+        Match the inventory from step 1 against every path the diff touches,
+        not against the type most of the diff is written in. A PR that
+        changes four Python files and one Markdown file still owes whatever
+        tool the repo has configured for `.md` — if `.markdownlint-cli2.jsonc`
+        and a CI job for it exist, select markdownlint-cli2 because that one
+        file matches, not because it loses a popularity count to the other
+        four. The same holds for a lone shell script against ShellCheck or a
+        single workflow YAML against actionlint. This failure mode is
+        specific to a file outnumbered by a different language in the same
+        diff — a same-language diff never hits it — and it is exactly how a
+        configured markdownlint run went unselected on a Python-dominant PR
+        while CI and a second reviewer still caught the violation it would
+        have caught first (#576).
+    - name: A changed file type with no matching tool is a coverage gap, not
+        silence
+      rule: >
+        When a changed path's extension or filename pattern has no entry in
+        the step-1 inventory, that absence belongs in the coverage line by
+        name — the dedicated slot in What to hand on below — not folded into
+        "No deterministic coverage," which names lenses and categories, never
+        file types. A reader scanning "Tools run: ruff, mypy" on a diff that
+        also touched a `.md` file has no way to tell whether the repo simply
+        has no Markdown tooling or whether one exists and was never selected;
+        naming the untested extension removes that ambiguity instead of
+        leaving a silent, implied clean result (#576).
+    - name: Name the pending job and its linters, not just "in progress"
+      rule: >
+        A CI check still running is not yet evidence, but "in progress" alone
+        tells the reader nothing about what it would have covered once it
+        finished. When a required check that gates deterministic tooling has
+        not reported yet, name the specific job(s) still pending and the
+        linter(s) each one runs — sourced from the same workflow file the
+        step-1 inventory already read — e.g. "the `gate` job is still
+        running; it runs ruff, mypy, and markdownlint-cli2" — so a reader can
+        tell which categories are only provisionally clear rather than
+        genuinely covered (#576).
+
+# The other half of composition (Q7): once the router's chosen lenses each emit
+# findings, this merges them into one report — deduplicated, conflicts
+# reconciled, severity-ranked, single verdict. Generated into
+# skills/<name>/SKILL.md from this section alone (built_from: []), so manifest
+# edits regenerate it and docs drift never flags it. Fan-out stays advisory by
+# default but the finding contract lets a harness mechanize the same merge (D12).
+synthesizer:
+  name: synthesizing-review-findings
+  description: >
+    Merges the findings of several code-quality-atlas lenses — and of any other
+    review method run alongside them (the built-in code-review skill, a framework
+    review like BMAD, linter output, or human notes) — into one review:
+    deduplicates issues raised by more than one source, reconciles lenses that
+    pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks
+    by severity, and ends on a single block/approve verdict. Use after running any
+    set of atlas review lenses (and any companion reviewers) on a change —
+    typically 3-8 in standard review mode, uncapped in comprehensive mode — when
+    assembling multi-source review output into one report, or when overlapping
+    findings need deduplicating and prioritizing.
+  severity_order: [Blocker, Major, Minor, Nit]
+  tensions:
+    - between: [checking-restraint, reviewing-module-design]
+      about: a new abstraction or boundary — one lens brakes, one wants the seam
+      resolve: >
+        Favor the simplest design the current requirements justify; add the
+        boundary only once a second concrete consumer exists. Restraint wins
+        until then.
+    - between: [checking-restraint, reviewing-performance-and-efficiency]
+      about: hand-optimization without a profile
+      resolve: >
+        No optimization lands without a profile showing the hot path.
+        Performance wins only on measured evidence; otherwise keep the simple
+        version.
+    - between: [checking-restraint, reviewing-test-quality]
+      about: how much test coverage is enough
+      resolve: >
+        Cover the behavior and a regression test for any fixed bug; stop at
+        coverage that only pins implementation detail. More tests is not
+        automatically better.
+    - between: [checking-restraint, reviewing-api-contract-safety]
+      about: new validation or surface "to be safe" vs. leaving it out
+      resolve: >
+        "When in doubt, leave it out" — minimal new public surface wins; add
+        validation only on surface that actually ships now.
+    - between: [reviewing-performance-and-efficiency, reviewing-naming-and-readability]
+      about: a fast but cryptic form vs. a clear but slower one
+      resolve: >
+        Keep the readable form unless a profile proves the clear version is the
+        bottleneck; if the fast form must stay, require a comment explaining why.
+    - between: [checking-restraint, reviewing-resilience-and-scalability]
+      about: defensive resilience machinery (retries, circuit breakers, multi-region,
+        extra replicas) vs. simplicity
+      resolve: >
+        Add resilience in proportion to the availability/scale target and the
+        failure modes the system will actually face; do not engineer for scale or
+        failures with no stated requirement. Restraint wins absent an SLO or scale
+        target — but a real unbounded queue, missing timeout, or untested restore
+        is a correctness/operability defect, not gold-plating, and stands.
+    - between: [checking-restraint, reviewing-conceptual-integrity]
+      about: whether a change is "too much" versus whether it fits the product's
+        existing model
+      resolve: >
+        Different questions, and they are usually on the same side. Restraint
+        asks whether to build this at all; conceptual integrity asks, given that
+        it ships, whether the product still says one thing. A small, requested,
+        well-scoped change clears restraint and can still add a second noun for
+        an existing idea — that finding stands and restraint does not suppress
+        it. Where both fire on the same addition they agree: report it once,
+        under whichever lens's evidence is concrete, and route the decision.
+        Where they genuinely diverge, restraint's "don't build it" is the
+        cheaper fix and goes first.
+    - between: [reviewing-conceptual-integrity, reviewing-usability-and-interaction]
+      about: a second way of doing something — a mechanics mismatch or a model
+        mismatch
+      resolve: >
+        Split by what the user trips on. A control that behaves differently from
+        its siblings is #42's: the user trips on it in the moment, and the fix is
+        to make it behave like the others. Two concepts covering one job is
+        #44's: the user trips on it when choosing between them, and no amount of
+        making them behave alike helps. A change can carry both, and then both
+        report — but neither restates the other's finding.
+    - between: [reviewing-conceptual-integrity, reviewing-api-contract-safety]
+      about: an endpoint that is safe and well-formed but invents its own resource
+        model
+      resolve: >
+        #13 owns whether the contract is compatible, paginated, and hard to
+        misuse; #44 owns whether it fits the model the rest of the API already
+        teaches. A new endpoint can pass every #13 check and still be the second
+        way to fetch the same resource. Conversely, matching the house model does
+        not excuse an unversioned breaking change. Both stand on their own
+        evidence, and neither lens's ownership sets the verdict: rank them by
+        the severity each reported, exactly as every other pair is ranked. #13's
+        finding is usually the blocking one because #44's is usually routed —
+        an observation about the common case, not a rule that outranks a #44
+        defect.
+    - between: [reviewing-observability-and-operability, auditing-compliance-and-provenance]
+      about: how much to log for operability vs. keeping PII and secrets out of logs
+      resolve: >
+        Log enough to operate and debug, but never PII, secrets, or regulated
+        data in the clear — redact or tokenize at the logging boundary. Privacy
+        wins on any field that could identify a person; add scrubbed, structured
+        fields rather than dropping the observability.
+    - between: [sweeping-for-security, reviewing-usability-and-interaction]
+      about: protective friction (a confirmation, a re-auth, a rate limit) vs. a flow
+        the user can actually complete
+      resolve: >
+        Friction that defends a real, named threat stands — say which threat, and
+        the usability finding becomes a request to make the friction cheaper, not to
+        remove it. Friction with no threat behind it is an unconsidered flow and
+        #42 wins. Where the trade-off is genuine (how many confirmations, where the
+        step sits), surface both readings and route the call to design rather than
+        settling it in an engineering review. Distinct from the
+        security ↔ ethical-design pair: that one is about friction someone benefits
+        from, this one about friction nobody does.
+    - between: [checking-restraint, reviewing-usability-and-interaction]
+      about: designing a screen for every state vs. not building surfaces nobody hits
+      resolve: >
+        Handle the states the code can actually reach — if the fetch can fail, the
+        error state is reachable and its absence is a defect, not gold-plating.
+        Restraint wins on states the code cannot produce and on polish beyond a
+        plainly handled state. On a fourth variant of an existing pattern the two
+        lenses agree rather than compete: restraint says don't build another one,
+        #42 says users were taught the existing one — so the finding still
+        surfaces with its evidence and the decision routes to design. Restraint
+        never suppresses a consistency finding; it argues against adding surface.
+    - between: [checking-restraint, reviewing-outcome-instrumentation]
+      about: instrumenting the change vs. adding telemetry and flags nobody reads
+      resolve: >
+        Instrument the outcome the change actually claims, and nothing else.
+        Restraint wins by default on telemetry unrelated to that claim: a refactor
+        or bug fix owes no hypothesis, "track everything" is its own failure mode,
+        and each event carries cost and a PII surface (#27). Where a claimed benefit
+        has no observation at all, name the **smallest missing signal** — often one
+        event, sometimes an existing event or dashboard that already covers it, in
+        which case there is no finding. The exception is an experiment or rollout:
+        assignment and exposure records, the losing condition, the relevant
+        guardrails, and flag ownership are what make the result interpretable at
+        all, so restraint does not trade them away as surplus telemetry.
+    - between: [reviewing-ethical-design, reviewing-outcome-instrumentation]
+      about: a metric the change moves vs. whether a reasonable user would have
+        chosen the behavior that moves it
+      resolve: >
+        Goodhart's seam. A win on a proxy metric (clicks, session length, DAU) that
+        a reasonable user would not have chosen is not a win — surface both readings
+        together, name the proxy and what it stood for, and route the call to
+        product. Neither lens adjudicates it: #36 does not veto a shipped metric and
+        #43 does not certify one as success. If the mechanism moving the metric is
+        itself a dark pattern, that is #36's finding on its own terms and keeps its
+        severity.
+    - between: [reviewing-performance-and-efficiency, reviewing-accessibility-and-i18n]
+      about: a leaner/faster UI vs. accessible markup and assistive-tech support
+      resolve: >
+        Accessibility is a correctness requirement, not an optimization to trade
+        away. Keep the accessible markup and hit the performance target another
+        way (lazy-load, code-split, cache). Drop a11y only against a measured
+        budget proving no other path exists — which is almost never.
+    - between: [checking-restraint, reviewing-install-and-upgrade-experience]
+      about: backward-compat shims and deprecation windows for consumers vs.
+        removing the old path now
+      resolve: >
+        Keep the old path working for one deprecation window with a warning that
+        names the replacement whenever the project has external consumers; remove
+        in place only for internal-only or never-released surface. Consumer
+        smoothness wins while real adopters exist; restraint wins when there are
+        none.
+    - between: [checking-idioms-and-consistency, finding-maintainability-hotspots]
+      about: matching the existing pattern vs. changing it to reduce future churn
+      resolve: >
+        Stay consistent with the established idiom by default; diverge only when
+        the current pattern is a demonstrated maintenance hotspot (high
+        change-amplification or repeated edits) and the new form measurably lowers
+        that cost. Consistency wins until evolvability has evidence.
+    - between: [checking-restraint, reviewing-data-transformations-and-contracts]
+      about: how much data-test and data-contract ceremony a new model or event
+        schema needs
+      resolve: >
+        Require the tests that pin the model's grain and the columns consumers
+        actually read, and a versioned contract only where a real consumer
+        outside this change exists; skip blanket per-column expectation suites
+        and contract machinery on an internal, single-consumer model. Restraint
+        wins on breadth — but a missing grain/uniqueness test on a fanned-out
+        join, or a consumer-breaking schema change with no compatibility gate,
+        is a defect rather than gold-plating and stands.
+    - between: [sweeping-for-security, reviewing-ethical-design]
+      about: added friction or a confirmation step — a protective safety control
+        vs. manipulative obstruction
+      resolve: >
+        Keep friction that protects the user or prevents abuse (confirmations on
+        destructive or irreversible actions, step-up auth on high-consequence
+        operations, a cooling-off period); cut friction that serves the business
+        against the user's clear intent (hard-to-cancel, buried opt-out,
+        roach-motel flows). Security's protective friction wins; obstruction does
+        not — the test is whose interest the friction serves, not its presence.
+modes:
+  - name: triage
+    breadth: >
+      the critical tier only — correctness, security, data-safety, and concurrency
+    floor: Major
+    triggers: [triage, quick review, fast check, pre-merge gate]
+    note: >
+      A pre-merge gate: run only the critical-tier lenses and report Major and above.
+  - name: review
+    breadth: >
+      the top 3-8 lenses by relevance, plus any additional relevant lenses the
+      reviewer judges worthwhile (the default; not a strict cap)
+    floor: escalating
+    triggers: [review, review this, code review, review this PR, review the diff]
+    note: >
+      Default per-PR depth: relevance-ranked top-N (3-8) with the round-based
+      escalating floor; extend past N when the change's scope genuinely calls
+      for another lens.
+  - name: comprehensive
+    breadth: >
+      every relevant lens, uncapped — the full audit set at repo scope
+    floor: Nit
+    triggers: [thorough, comprehensive, deep review, use all relevant lenses, review everything]
+    note: >
+      On-demand or scheduled: run all relevant lenses and pin the floor at Nit so
+      readability-class and other long-tail findings surface instead of being trimmed.
+entrypoints:
+  - name: reviewing-a-change
+    description: >
+      Review a diff, pull request, or code change with the code-quality-atlas
+      lenses. Use for "review this PR / diff / change / what I pushed". Ranks the
+      relevant diff lenses by relevance and runs them at the chosen depth
+      (review = top few; comprehensive = all relevant), then synthesizes one
+      verdict. The collapsed, repo-independent entrypoint for change review.
+    shapes: [diff]
+  - name: auditing-a-repository
+    description: >
+      Run a whole-repository health audit with the code-quality-atlas repo-shaped
+      audits (architecture, dependencies, config/build, docs, compliance,
+      enforcement, infrastructure-as-code, decision-record currency,
+      data-pipeline health, deployment/execution and trust-boundary security,
+      maintainability hotspots). Use for a scheduled or on-demand repo audit, not
+      a single diff. Runs the applicable audits and synthesizes one report.
+    shapes: [repo]
+  - name: reviewing-a-decision
+    description: >
+      Review a decision rather than code — an ADR, RFC, design doc, dependency or
+      technology adoption, build-vs-buy or vendor choice, or a deprecation/sunset
+      plan. Reviews the choice and its record (rationale, lock-in, exit, revisit
+      trigger) with the decision lens plus the design-capable lenses for the
+      decision's domain.
+    shapes: [decision]
+    include_design: true
+  - name: reviewing-an-artifact
+    description: >
+      Review a standardized authored artifact against its own published standard
+      rather than as application code — e.g. a SKILL.md / agent-skill definition.
+      Detects the artifact and applies its rubric. The collapsed entrypoint for
+      artifact-shaped review.
+    shapes: [artifact]

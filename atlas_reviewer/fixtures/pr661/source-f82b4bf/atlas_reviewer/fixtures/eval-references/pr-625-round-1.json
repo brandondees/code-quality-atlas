@@ -1,0 +1,62 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 625,
+    "head_sha": "b708435166846723dfc5ef32797eb8105efef9f5",
+    "round": 1,
+    "reviewed_commit": "f6ad7f9f584ef793f0ef4c3f4b89f50826cd0f45"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "major",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "`timeout 45 env -u FLY_ACCESS_TOKEN FLY_API_TOKEN=\"[REDACTED:assignment]\" fly ...`: the shell expands the token into an argument, so `timeout`'s argv holds `FLY_API_TOKEN=[REDACTED:assignment] for the whole run. `timeout` forks the child an",
+        "lenses": [],
+        "line": 501,
+        "end_line": 503
+      },
+      {
+        "severity": "major",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "`flyp logs --app atlas-reviewer --no-tail` covers the whole app, and this same file (line 586) records that it returns only the last 100 lines. The `Main child exited normally with code: N` line it points to has no Machine ID filter. This s",
+        "lenses": [
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 490,
+        "end_line": 495
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "`fly_commands()` in `atlas_reviewer/tests/test_fly_deploy.py:340-348` keeps only segments whose first word is `fly` or `flyp`. These two commands start with `timeout`, so `test_every_runbook_fly_command_names_its_app_or_org` and `test_only_",
+        "lenses": [],
+        "line": 533
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/deploy-fly.md",
+        "summary": "The paragraph says a SIGTERM sent straight to the CLI leaves the entrypoint holding, so `exit-code` can be copied. That reads as a way to stop a run and keep its output. But it never says how to send that signal. That would mean `flyp ssh c",
+        "lenses": [],
+        "line": 459,
+        "end_line": 463
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/625#pullrequestreview-5864680638",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "auditing-documentation-health",
+      "sweeping-for-security",
+      "tracing-correctness-and-invariants",
+      "reviewing-observability-and-operability",
+      "reviewing-test-quality",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

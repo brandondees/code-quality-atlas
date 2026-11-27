@@ -1,0 +1,18 @@
+diff --git a/calc.py b/calc.py
+index 1111111..2222222 100644
+--- a/calc.py
++++ b/calc.py
+@@ -1,6 +1,10 @@
+ def line_total(price_cents: int, quantity: int, discount_pct: int) -> int:
+-    return price_cents * quantity * (100 - discount_pct) // 100
++    gross = price_cents * quantity
++    discount = round(gross * discount_pct / 100)
++    return gross - discount
+diff --git a/settings.ini b/settings.ini
+new file mode 100644
+--- /dev/null
++++ b/settings.ini
+@@ -0,0 +1,3 @@
++[payments]
++aws_key_id = AKIAIOSFODNN7EXAMPLE
++password = correct-horse-battery-staple

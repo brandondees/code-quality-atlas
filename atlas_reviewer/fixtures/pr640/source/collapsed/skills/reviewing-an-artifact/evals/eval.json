@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-an-artifact"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this new SKILL.md I wrote for our agent skill.",
+      "expected_behavior": [
+        "Detects the SKILL.md artifact and reviews it against its own published standard, not as application code",
+        "Loads reference/lenses/reviewing-artifact-conventions/body.md and applies the artifact rubric",
+        "Synthesizes deviations from the standard into one verdict via reference/synthesis.md"
+      ]
+    },
+    {
+      "query": "Thorough review of this agent-skill definition — check it against every relevant convention.",
+      "expected_behavior": [
+        "Recognizes comprehensive mode and applies the full artifact rubric uncapped",
+        "Reports only real deviations from the standard, down to the Nit-pinned floor",
+        "Replies 'No findings' for a well-formed artifact rather than inventing issues"
+      ]
+    },
+    {
+      "query": "Here's a diff that only touches application code, no SKILL.md or standardized artifact. Should this entrypoint run?",
+      "expected_behavior": [
+        "Recognizes the artifact lens is presence-activated and no listed artifact is present",
+        "Declines to apply the artifact rubric and defers to the change-review entrypoint instead",
+        "Does not fabricate artifact-convention findings on ordinary source code"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,303 @@
+# Distribution & cross-environment reliability
+
+How to get the suite **reliably present** everywhere you run it — local Claude
+Code (CLI / desktop / IDE), other `SKILL.md` agents, and especially **Claude
+Code web / cloud sessions and routines**, where the plugin install path does
+*not* work.
+
+If you just want the happy-path install commands, see [`install.md`](install.md).
+This page is the *decision* layer: which channel for which environment, and why.
+
+## The one constraint that decides everything
+
+A skill only runs if its **body** (`SKILL.md`) is on a filesystem the session
+reads. Per the [Claude Code on the web
+docs](https://code.claude.com/docs/en/claude-code-on-the-web), a **cloud session
+loads exactly three things** — and a marketplace plugin is *not* one of them:
+
+| What | Loaded in cloud? | Why |
+|---|---|---|
+| The reviewed repo's `.claude/skills/` | ✅ Yes | part of the clone |
+| Skills **enabled on claude.ai** (account GUI) | ✅ Yes, automatically | attached to your account |
+| Your machine's `~/.claude/skills/` | ❌ No | lives on your machine, not in the repo |
+| A **marketplace plugin** (`enabledPlugins` / `extraKnownMarketplaces`) | ❌ No | the cloud runtime never runs the plugin-install step |
+
+The [routines docs](https://code.claude.com/docs/en/routines) enumerate what a
+cloud session can use — *"shell commands, skills committed to the cloned
+repository, and connectors"* — and **plugins are absent from that list**.
+`enabledPlugins`/`extraKnownMarketplaces` is a **CLI-local** feature; committing
+it to a repo's `.claude/settings.json` has **no effect in web/cloud**. This was
+verified the hard way: the snippet committed, and the skills still didn't load.
+
+> **Correction to earlier docs.** A prior version of [`install.md`](install.md)
+> claimed the committed marketplace snippet covers Claude Code web sessions. It
+> does not — the docs' own "what loads" list excludes plugins. That claim has
+> been corrected.
+
+### Why "just fetch it at runtime" can't work either
+
+It's tempting to think a setup script or a manual `/plugin marketplace add` could
+pull the suite in. It can't, and the reason is worth recording so nobody burns
+time looking for a whitelist that doesn't exist.
+
+Cloud sessions don't get open `github.com` access. Git is rewritten through a
+**per-session credential proxy** (`http://127.0.0.1:<port>/git/<owner>/<repo>`)
+that is **scoped to the repositories you connected to the session**. Cloning any
+*other* repo — even a public one like this marketplace — returns **403**:
+
+```text
+fatal: unable to access 'http://127.0.0.1:41729/git/brandondees/code-quality-atlas.git/': 403
+```
+
+The network *allowlist* you can configure (npm, PyPI, crates.io, …) governs
+**package-registry HTTPS**, not arbitrary `git clone`. There is no "allow this
+repo" setting because it isn't a domain rule — it's repo-level authorization in
+the proxy. So any channel that fetches the suite at runtime is a dead end in
+cloud. The two channels below work precisely because they **fetch nothing**:
+account skills come from your account, and vendored bodies are already in the
+clone.
+
+## Channel matrix
+
+| Channel | Body lives in | CLI / desktop / IDE | Web / cloud | Repo-independent | Update story |
+|---|---|---|---|---|---|
+| **Plugin (marketplace)** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | per-commit; auto/manual refresh |
+| **Settings-based marketplace** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | n/a for cloud; pinnable to a branch/tag (`ref`) |
+| **Skulto sync** | personal/project `SKILL.md` dir | ✅ | only if synced into the cloned repo | depends | `skulto pull` / `update`; roster-pinned (`skulto save`), not content-pinned |
+| **Repo `.claude/skills/`** (vendored) | the cloned repo | ✅ | ✅ **documented** | ❌ (per repo) | re-vendor on update; pinned by default (commit in `.atlas-vendored`, or the `<self>` sentinel for a self-vendored repo — see below) |
+| **Account skills on claude.ai** (GUI) | your Anthropic account | ⚠️ verify for CLI | ✅ **documented, automatic** | ✅ | re-upload on update — see Channel A's "Updating" below for the procedure |
+
+✅ works · ⚠️ conditional · ❌ doesn't apply
+
+**Two different "version" signals — don't confuse them.** `.claude-plugin/plugin.json`
+carries a `version` field (currently a static `0.1.0`, added for marketplace-listing
+display) — that is *not* what tells you which build you're actually running. The
+"per-commit" update story in the table above is real and is reported separately by
+`hooks/route.sh`, which resolves `git rev-parse --short HEAD` against the plugin's
+own installed checkout specifically because a hand-maintained version string can
+drift from it. Treat `plugin.json`'s `version` as cosmetic marketplace metadata;
+treat the commit SHA `route.sh` reports as the actual installed build identifier.
+[`docs/open-questions.md`](open-questions.md)'s D9 (the original commit-SHA call,
+plus its 2026-09-07 addendum on this static field) and D23 (the 2026-09-25
+re-affirmation, with the concrete conditions for switching to semver) have the
+full history.
+
+Only vendoring pins to a commit by default. The settings-based marketplace
+*can* be pinned instead of tracking latest, but only to a **branch or
+tag** — issue #388: this wasn't documented at all until this was written.
+Exact-commit pinning is a *plugin*-source field inside a marketplace's own
+`marketplace.json`, a schema level a consumer's own `settings.json` doesn't
+reach, and this repo doesn't currently cut tagged releases to pin to anyway
+(see [`install.md`](install.md)'s "Pinning" callout for the full caveat and
+example). Skulto's `save`/`sync` is a **roster** pin, not a content one —
+`skulto.json` records which skills come from which source repos, not a
+version or commit per skill, so `sync` always fetches whatever is current
+there. The interactive `/plugin marketplace add`/`/plugin install` flow's
+positional `owner/repo` syntax has no confirmed pin argument, so it stays
+update-only (this section) or auto-update-off (`install.md`'s stale-install
+gotcha) for now.
+
+## Two forms: standalone (44) vs collapsed (4)
+
+Every channel above can ship the suite in **either of two forms** — install **one
+form, not both** (they cover the same lenses):
+
+- **Standalone (44 skills)** — the default. One `SKILL.md` per lens (41) plus the
+  three composition skills: the `choosing-review-lenses` router, the
+  `grounding-review-in-tool-output` tool-grounding pre-pass, and the
+  `synthesizing-review-findings` synthesizer.
+  Richest top-level discoverability; the most skills to upload/list.
+- **Collapsed (4 entrypoints)** — `reviewing-a-change`, `auditing-a-repository`,
+  `reviewing-a-decision`, `reviewing-an-artifact`. Each entrypoint bundles its
+  shape's lenses under `reference/lenses/<lens>/body.md` and loads them on demand,
+  carrying the same relevance-ranked routing, depth modes, and synthesis. Best for
+  **cloud / account-skill / context-budget-constrained** surfaces — 4 uploads or 4
+  vendored folders instead of 44, at the cost of one extra `Read` per lens.
+
+The collapsed form ships as its own marketplace plugin,
+**`code-quality-atlas-collapsed`** (see [`install.md`](install.md)), and the
+distribution scripts take `--collapsed` to package/vendor it. Pick the form per
+surface; do not install both into the same session.
+
+## Recommendation for a "both" workflow
+
+You review **a known set of your own repos** *and* **occasional arbitrary repos**
+in cloud. Two documented channels cover this — no plugin path involved:
+
+- **Arbitrary + known repos in cloud → enable the suite as account skills on
+  claude.ai.** This is the only **repo-independent** cloud channel, and the docs
+  state account-enabled skills *"are loaded into cloud sessions automatically."*
+  One-time upload, then every cloud session on any repo has the suite. This is
+  the channel for the arbitrary-repo case that nothing repo-committed can reach.
+- **Known repos → also vendor `.claude/skills/`** into each, when you want the
+  suite **committed/pinned** with the repo, working in **local CLI offline**, or
+  shared with teammates who don't have your account skills. Belt-and-suspenders
+  over the account channel.
+- **Local CLI keeps using the plugin / Skulto** — the **source of truth** the
+  other channels are generated from. The plugin is a *CLI* convenience; it is not
+  a cloud channel.
+
+## Channel details
+
+### A. Account skills on claude.ai — repo-independent, the cloud default
+
+The claude.ai web GUI (**Settings → Capabilities / Skills**) offers, alongside
+Anthropic's skill packs, **create-custom-skill / upload-a-zip**. A skill enabled
+here is attached to *you*, not a repo, and the docs say it loads into cloud
+sessions automatically — so it covers every repo, including ones you've never
+touched.
+
+Each `SKILL.md` is self-contained, so upload is mechanical. Two practical points
+to confirm on first use, since the docs describe the *mechanism* but not these
+specifics:
+
+1. **Custom-uploaded skills behave like the Anthropic packs** (i.e. the
+   "loaded automatically" statement covers your own uploads, not just first-party
+   ones). Verify with a one-skill test before doing the whole set.
+2. **One skill per zip — confirmed.** The GUI rejects a multi-skill bundle
+   ("must contain exactly one top-level folder"), so it's one upload per
+   standalone skill — lenses *and* composition skills — ~44 total. Each zip is a single `<name>/` folder shipping the runtime
+   resources — `SKILL.md`, `reference/`, **and `examples.md`** (a lens opens it
+   for the output format) — and excluding the dev-only `evals/`.
+
+[`tooling/package-account-zips.sh`](../tooling/package-account-zips.sh) builds the
+upload-ready zips with exactly that inclusion rule:
+
+```bash
+tooling/package-account-zips.sh               # 44 zips -> dist/account-skills/
+tooling/package-account-zips.sh --collapsed   # 4 zips (the collapsed entrypoints)
+```
+
+The `--collapsed` flag packages the **4 collapsed entrypoints**
+(`collapsed/skills/`) instead of the 44 standalone skills — far fewer GUI uploads,
+with the lenses bundled and loaded on demand. Pick **one form**: the 44 standalone
+skills *or* the 4 collapsed entrypoints, not both (see *Two forms* below).
+
+There is **no bulk path** through the GUI: no multi-skill zip, and (per the note
+below) no usable API. For the **standalone** form the ~44 uploads are unavoidable
+today (the collapsed form needs 4) — which is the cost
+that motivates the structural rethink in
+[`open-questions.md`](open-questions.md) (fewer top-level skills, more nesting).
+
+> **No programmatic shortcut.** The Claude API has a `POST /v1/skills` (workspace
+> scope) that could bulk-create skills, but per the [Agent Skills
+> docs](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
+> skills **do not sync across surfaces** — Claude Code loads only filesystem
+> skills (`.claude/skills/`) and the claude.ai account-GUI skills, **not** API
+> workspace skills. So the GUI upload (or vendoring) is the only path into cloud
+> sessions; the API loop won't help here.
+
+**One-skill validation (5 min):** upload one distinctive lens
+(`tracing-correctness-and-invariants.zip`), enable it, open a cloud session on an
+**unrelated** repo, and ask for a review — confirm that lens is offered. If it
+surfaces, upload the rest; if not, fall back to vendoring (B).
+
+**Updating (re-upload on a new commit) — issue #389.** Anthropic's own docs
+describe *uploading* a zip through Settings → Features but document no
+separate "replace" or "update in place" action for an already-uploaded
+custom skill — that mechanic isn't confirmed to exist, so this repo doesn't
+claim one. The procedure that's actually guaranteed by the documented
+upload flow: delete the outdated skill, then re-upload the freshly-built zip
+for the same lens under the same name. Before committing to this at the full
+~44-skill scale, confirm on one skill first whether delete-then-reupload
+preserves its enabled state or requires re-enabling — re-run the one-skill
+validation above after any re-upload either way, since a skill that fails to
+re-surface after an update is otherwise silent (no error, just absence from
+that session's tools). There is no versioning or diffing here: re-upload
+means the whole skill, not a patch, exactly like the first install.
+
+### B. Vendor into the target repo — committed, offline, CLI too
+
+Copy each lens's `SKILL.md` into the consuming repo under
+`.claude/skills/<name>/SKILL.md` and **commit** it. Both CLI and cloud sessions
+on that repo load it automatically; nothing is fetched at runtime, so it is
+immune to every cloud failure mode (no marketplace fetch, no plugin install, no
+account dependency).
+
+```text
+<target-repo>/
+└── .claude/
+    └── skills/
+        ├── choosing-review-lenses/SKILL.md
+        ├── synthesizing-review-findings/SKILL.md
+        └── …one folder per lens
+```
+
+Ship `SKILL.md` and the files a lens loads at runtime — `reference/` and
+`examples.md` — and exclude only the dev-only `evals/`.
+[`tooling/vendor-skills.sh`](../tooling/vendor-skills.sh) does exactly this from a
+code-quality-atlas clone:
+
+```bash
+# from inside the code-quality-atlas clone; pass the OTHER repo
+tooling/vendor-skills.sh ~/code/my-service              # 44 standalone skills
+tooling/vendor-skills.sh ~/code/my-service --collapsed  # OR the 4 collapsed entrypoints
+( cd ~/code/my-service && git add .claude/skills && git commit -m "vendor code-quality-atlas review suite" )
+```
+
+`--collapsed` vendors the 4 collapsed entrypoints instead of the 44 standalone
+skills. **Vendor one form, not both** — the two cover the same lenses.
+
+`skulto install brandondees/code-quality-atlas -y` run inside the target repo is
+an equivalent alternative.
+
+**Tradeoff:** bodies are duplicated into each repo and pin to the synced commit —
+refresh by re-running the sync and committing the diff. `skulto save` writes a
+`skulto.json` that `skulto sync` reproduces for teammates.
+
+**This repo dogfoods Channel B on itself.** `code-quality-atlas`'s own
+`.claude/skills/` carries a self-vendored copy of its 44 lenses (`tooling/
+vendor-skills.sh .`, target = the repo's own root), so that a cloud session
+reviewing `code-quality-atlas` itself resolves lens content through the same
+`Skill`-tool path a consuming repo gets from vendoring — not a bootstrap case
+special-cased in `commands/atlas-review-pr.md`. `tests/
+test_self_vendored_skills_sync.py` fails the build if a lens changes without a
+matching re-vendor; see [`regenerating-skills.md`](runbooks/regenerating-skills.md)
+step 5.
+
+### C. Plugin / Skulto — local source of truth (CLI only)
+
+Install the plugin (or Skulto-sync) for **local** CLI / desktop / IDE work, per
+[`install.md`](install.md). This repo stays canonical; both the account zips and
+the vendored bodies are *generated from it*, so updates have one origin. Do **not**
+expect the plugin to appear in cloud sessions — it won't.
+
+## Automation
+
+- **Channel A — [`tooling/package-account-zips.sh`](../tooling/package-account-zips.sh):**
+  emits one upload-ready zip per lens (`<name>/SKILL.md` + `reference/` +
+  `examples.md`, no `evals/`) for the claude.ai GUI. `--collapsed` emits the 4
+  collapsed-entrypoint zips instead. Each zip also carries its own `NOTICE.md`
+  and a vendored copy of `LICENSE-CC-BY-4.0` — an uploaded zip is extracted
+  into a claude.ai account skill with no ongoing relationship to this git
+  repo, so the license text ships inside every zip rather than only being
+  linked, mirroring Channel B's self-contained notice below.
+- **Channel B — [`tooling/vendor-skills.sh`](../tooling/vendor-skills.sh):**
+  copies the same runtime resources into a target repo's `.claude/skills/`,
+  idempotently, ready to commit. `--prune` safely drops only previously-vendored
+  skills that have left the suite (tracked via a `.atlas-vendored` marker; never
+  touches the target repo's own skills — a marker line is only ever trusted as
+  a name to prune or check ownership of if it's a bare skill name, `a-z0-9-`
+  only; anything else, including a path-traversal segment planted or hand-edited
+  into what's meant to be a generated file, is dropped with a warning rather
+  than acted on, #377). If a target repo already has its own,
+  non-tool-managed directory at a colliding skill name, that name is skipped
+  with a warning (and the run exits non-zero) rather than overwritten; pass
+  `--force` to overwrite it anyway. `--collapsed` vendors the 4
+  collapsed entrypoints instead of the 44 standalone skills. `--dry-run`
+  reports what a run would vendor/prune/skip without writing, deleting, or
+  overwriting anything. The `skulto` flow
+  above is an alternative. Every run also writes/refreshes a `NOTICE.md` and a
+  `LICENSE-CC-BY-4.0` alongside the vendored skills — the vendored content is
+  CC BY 4.0 (see [License](../LICENSE)), which requires attribution on
+  redistribution; the notice names the source and vendored commit, and the
+  license text is copied verbatim (not just linked) so the target repo's copy
+  is self-contained. Commit both files along with the vendored skills and
+  don't remove them while the skills stay in the target repo.
+
+```bash
+tooling/vendor-skills.sh ~/code/my-service            # vendor/refresh into that repo
+tooling/vendor-skills.sh ~/code/my-service --dry-run  # preview first, touches nothing
+tooling/vendor-skills.sh ~/code/my-service --prune    # also drop stale vendored skills
+tooling/vendor-skills.sh ~/code/my-service --collapsed  # the 4 collapsed entrypoints
+```

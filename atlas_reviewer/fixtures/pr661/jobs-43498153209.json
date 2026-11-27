@@ -1,0 +1,225 @@
+{
+ "total_count": 1,
+ "jobs": [
+  {
+   "id": 132136600337,
+   "run_id": 43498153209,
+   "workflow_name": "ci",
+   "head_branch": "cursor/full-pr-context-rounds-218c",
+   "run_url": "https://api.github.com/repos/brandondees/code-quality-atlas/actions/runs/43498153209",
+   "run_attempt": 1,
+   "node_id": "CR_kwDOS05Pps8AAAAew_SDEQ",
+   "head_sha": "28854775e5965eb554b368cc3a543969a635b681",
+   "url": "https://api.github.com/repos/brandondees/code-quality-atlas/actions/jobs/132136600337",
+   "html_url": "https://github.com/brandondees/code-quality-atlas/actions/runs/43498153209/job/132136600337",
+   "status": "completed",
+   "conclusion": "success",
+   "created_at": "2026-11-13T20:04:38Z",
+   "started_at": "2026-11-13T20:04:41Z",
+   "completed_at": "2026-11-13T20:08:54Z",
+   "name": "gate",
+   "steps": [
+    {
+     "name": "Set up job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 1,
+     "started_at": "2026-11-13T20:04:41Z",
+     "completed_at": "2026-11-13T20:04:42Z"
+    },
+    {
+     "name": "Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 2,
+     "started_at": "2026-11-13T20:04:42Z",
+     "completed_at": "2026-11-13T20:04:44Z"
+    },
+    {
+     "name": "Detect relevant changes",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 3,
+     "started_at": "2026-11-13T20:04:44Z",
+     "completed_at": "2026-11-13T20:04:45Z"
+    },
+    {
+     "name": "Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 4,
+     "started_at": "2026-11-13T20:04:45Z",
+     "completed_at": "2026-11-13T20:04:46Z"
+    },
+    {
+     "name": "Run python -m venv --clear \"$RUNNER_TEMP/venv\"",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 5,
+     "started_at": "2026-11-13T20:04:46Z",
+     "completed_at": "2026-11-13T20:04:57Z"
+    },
+    {
+     "name": "dependency vulnerability audit",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 6,
+     "started_at": "2026-11-13T20:04:57Z",
+     "completed_at": "2026-11-13T20:05:09Z"
+    },
+    {
+     "name": "lint (ruff)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 7,
+     "started_at": "2026-11-13T20:05:09Z",
+     "completed_at": "2026-11-13T20:05:09Z"
+    },
+    {
+     "name": "format (ruff)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 8,
+     "started_at": "2026-11-13T20:05:09Z",
+     "completed_at": "2026-11-13T20:05:09Z"
+    },
+    {
+     "name": "type-check (mypy)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 9,
+     "started_at": "2026-11-13T20:05:09Z",
+     "completed_at": "2026-11-13T20:05:12Z"
+    },
+    {
+     "name": "tests",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 10,
+     "started_at": "2026-11-13T20:05:12Z",
+     "completed_at": "2026-11-13T20:06:09Z"
+    },
+    {
+     "name": "reviewer service tests (atlas_reviewer)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 11,
+     "started_at": "2026-11-13T20:06:09Z",
+     "completed_at": "2026-11-13T20:08:35Z"
+    },
+    {
+     "name": "reviewer service dry run (offline fixture PR event)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 12,
+     "started_at": "2026-11-13T20:08:35Z",
+     "completed_at": "2026-11-13T20:08:36Z"
+    },
+    {
+     "name": "eval structure (all skills)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 13,
+     "started_at": "2026-11-13T20:08:36Z",
+     "completed_at": "2026-11-13T20:08:36Z"
+    },
+    {
+     "name": "eval structure (collapsed entrypoints)",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 14,
+     "started_at": "2026-11-13T20:08:36Z",
+     "completed_at": "2026-11-13T20:08:36Z"
+    },
+    {
+     "name": "provenance drift",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 15,
+     "started_at": "2026-11-13T20:08:36Z",
+     "completed_at": "2026-11-13T20:08:36Z"
+    },
+    {
+     "name": "Generated trees are in sync",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 16,
+     "started_at": "2026-11-13T20:08:36Z",
+     "completed_at": "2026-11-13T20:08:37Z"
+    },
+    {
+     "name": "license compatibility",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 17,
+     "started_at": "2026-11-13T20:08:37Z",
+     "completed_at": "2026-11-13T20:08:39Z"
+    },
+    {
+     "name": "requirements.txt is in sync with requirements.in",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 18,
+     "started_at": "2026-11-13T20:08:39Z",
+     "completed_at": "2026-11-13T20:08:45Z"
+    },
+    {
+     "name": "markdownlint",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 19,
+     "started_at": "2026-11-13T20:08:45Z",
+     "completed_at": "2026-11-13T20:08:51Z"
+    },
+    {
+     "name": "shellcheck",
+     "status": "completed",
+     "conclusion": "skipped",
+     "number": 20,
+     "started_at": "2026-11-13T20:08:51Z",
+     "completed_at": "2026-11-13T20:08:51Z"
+    },
+    {
+     "name": "actionlint",
+     "status": "completed",
+     "conclusion": "skipped",
+     "number": 21,
+     "started_at": "2026-11-13T20:08:51Z",
+     "completed_at": "2026-11-13T20:08:51Z"
+    },
+    {
+     "name": "Post Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 41,
+     "started_at": "2026-11-13T20:08:51Z",
+     "completed_at": "2026-11-13T20:08:52Z"
+    },
+    {
+     "name": "Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 42,
+     "started_at": "2026-11-13T20:08:52Z",
+     "completed_at": "2026-11-13T20:08:52Z"
+    },
+    {
+     "name": "Complete job",
+     "status": "completed",
+     "conclusion": "success",
+     "number": 43,
+     "started_at": "2026-11-13T20:08:52Z",
+     "completed_at": "2026-11-13T20:08:52Z"
+    }
+   ],
+   "check_run_url": "https://api.github.com/repos/brandondees/code-quality-atlas/check-runs/132136600337",
+   "labels": [
+    "ubuntu-latest"
+   ],
+   "runner_id": 1000045050,
+   "runner_name": "GitHub Actions 1000045050",
+   "runner_group_id": 0,
+   "runner_group_name": "GitHub Actions"
+  }
+ ]
+}

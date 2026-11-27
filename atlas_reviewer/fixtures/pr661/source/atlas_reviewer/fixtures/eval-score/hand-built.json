@@ -1,0 +1,63 @@
+{
+  "input": {
+    "repo": "example-org/example-app",
+    "pr": 1,
+    "head_sha": "abc123",
+    "round": 1
+  },
+  "reference": {
+    "verdict": "REQUEST_CHANGES",
+    "findings": [
+      {
+        "severity": "major",
+        "path": "a.py",
+        "line": 10,
+        "end_line": 12,
+        "lenses": ["tracing-correctness-and-invariants"],
+        "summary": "the total drops the last element"
+      },
+      {
+        "severity": "minor",
+        "path": "b.py",
+        "line": 2,
+        "lenses": ["reviewing-naming-and-readability"],
+        "summary": "the name hides the unit"
+      },
+      {
+        "severity": "nit",
+        "path": "c.py",
+        "line": 1,
+        "lenses": ["reviewing-naming-and-readability"],
+        "summary": "trailing blank line"
+      }
+    ]
+  },
+  "candidate": {
+    "verdict": "COMMENT",
+    "coverage_complete": false,
+    "unreviewed_files": 1,
+    "changed_files": ["a.py", "b.py", "c.py"],
+    "lenses_run": ["tracing-correctness-and-invariants"],
+    "outside_diff_reads": [],
+    "findings": [
+      {
+        "severity": "major",
+        "path": "a.py",
+        "line": 11,
+        "summary": "off-by-one in the total"
+      },
+      {
+        "severity": "major",
+        "path": "d.py",
+        "line": 4,
+        "summary": "a defect the reference did not report"
+      },
+      {
+        "severity": "nit",
+        "path": "c.py",
+        "line": 1,
+        "summary": "trailing blank line"
+      }
+    ]
+  }
+}

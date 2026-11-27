@@ -1,0 +1,18 @@
+{
+ "repo": "brandondees/code-quality-atlas",
+ "pr_number": 661,
+ "head_sha": "28854775e5965eb554b368cc3a543969a635b681",
+ "base_sha": "f82b4bf18b252daf76759f21d2b09ed4f09d39c9",
+ "branch": "cursor/full-pr-context-rounds-218c",
+ "cutoff": "2026-11-13T19:59:56+00:00",
+ "commits_source": "git-reconstructed",
+ "counts": {
+  "commits": 5,
+  "issue_comments": 3,
+  "reviews": 2,
+  "review_comments": 6,
+  "check_runs": 2,
+  "workflow_runs": 1,
+  "job_logs": 1
+ }
+}

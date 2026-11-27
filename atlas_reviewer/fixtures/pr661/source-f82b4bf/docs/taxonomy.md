@@ -1,0 +1,294 @@
+# The Code Quality Map
+
+**Status:** v0.14 (2026-08-23 — the repo-shaped, retrospective security audit field feedback surfaced was missing). Maximal scope.
+**Shape:** 7 clusters → 45 categories → ~140 factors. Four **review shapes**: diff, repo/cron, **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)), and **artifact** (D15 — shipped 2026-06-24; [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md)).
+
+Cross-links between factors are deliberate; quality dimensions genuinely overlap. Where a category is partly covered by existing prior art, see [`prior-art.md`](prior-art.md) for the mapping (kept out of this file so the map stays tool-agnostic).
+
+> **v0.14 changes:** promoted **#45 Deployment-pipeline & trust-boundary security**, the repo-shaped, retrospective counterpart to #38 — field-confirmed by [issue #191](https://github.com/brandondees/code-quality-atlas/issues/191): a whole-repo audit of a real system found none of its (then) nine repo-shaped audits could reach the single highest-severity issue present, an unattended `git-sync` job that fast-forwards `main` and then executes a deploy script from the freshly-pulled tree — Poisoned Pipeline Execution, live, not hypothetical. #38 enumerates threats **generatively** at design time, on a doc or a reconstructed architecture sketch; #45 applies the same STRIDE/trust-boundary discipline **retrospectively**, on a schedule, to the deployment/execution wiring **as it is already committed** — CI/CD jobs, cron/systemd/launchd units, git-sync-then-execute patterns, deploy scripts, service-to-service trust assumed in config. **G1 boundaries:** #14 owns diff-time code-level vuln detection, #31 owns declared-IaC blast-radius/exposure, #19 owns pipeline hygiene/reliability (not adversarial reach), #30 owns suppression/monitoring hygiene, #32 owns the model-driven agent's own tool-call surface at call time — #45 owns whether the *arrangement* of already-existing pieces lets an adversary reach code execution, privilege escalation, or persistence, and delegates each component-level fix to its owner. Detect-and-escalates (G8) only for org/infra-authority calls (rotating a possibly-compromised credential, an ephemeral-runner cost tradeoff) a repo checkout can't decide alone. Shape `repo` — the eleventh repo-shaped audit. Distinct from [G15](map-gaps.md#g15--production-evidence--runtime-informed-review-a-candidate-fifth-shape)'s still-open `shape: runtime` candidate: #45 reads what's **committed** (config, scripts, unit files) on a repo checkout alone, never live telemetry, so it closes the *static* half of the gap #191 confirmed while G15's telemetry-informed review stays a separate, deferred candidate. Rationale: [`map-gaps.md` G30](map-gaps.md#g30--threat-modeling-as-a-designdecision-time-security-discipline), research [`research/cluster-4-runtime.md`](research/cluster-4-runtime.md#45-deployment-pipeline--trust-boundary-security-repo-shaped).
+>
+> **v0.13 changes:** promoted **#44 Conceptual integrity & product coherence** ([G24](map-gaps.md#g24--candidate-cluster-vii-product-experience--value) VII-H) — Cluster VII's own counterweight, and built third on the cluster's own argument that it is needed *before* the cluster grows rather than after. #42 surfaces usability gaps and #43 surfaces outcome gaps; a product that answers both can still drift into a pile of individually-justified surfaces nobody can hold in their head. #11 and #15 are the *code's* brakes — this is the *product's*. Covers a **new user-facing concept duplicating one that exists** (two nouns for one idea), a **second path** to a job the product already does, **one term with two meanings** across UI copy/docs/API fields (Evans's ubiquitous language, bounded by Evans's bounded context so it does not over-fire), a **special case carved into a general rule**, and the **Nth option** added to a surface with no governing idea (Brooks's second-system effect, made countable). **The defect half is narrow and load-bearing:** a rule the product *already enforces* that the change breaks without saying so — every other resource cascades on delete and this one orphans children — is a broken promise with ordinary severity; everything else routes. **Evidence gate:** name the existing concept, where it lives, and the one-sentence rule a user would apply to choose between them, or report nothing — a genuinely new concept filling a real gap is not a defect for being new. **G1 boundaries:** #11 owns *amount* and #44 owns *fit* (a small requested change clears restraint and can still add a second noun); #42 owns interaction *mechanics* and #44 the *model* (a fourth date picker is #42's, "folders" and "collections" both existing is #44's); code-level consistency stays #8, module cohesion #9/#10, contract safety #13, doc drift #22, the decision record #29/#39. Shape `diff`, design-capable — **the shape call went against the cluster's own earlier prediction** that VII-H would be decision-only: a counterweight has to run where accretion happens, and accretion happens one ordinary feature PR at a time. Rationale: research [`research/cluster-7-product.md`](research/cluster-7-product.md).
+>
+> **v0.12 changes:** opened **Cluster VII — Product, Experience & Value** ([G24](map-gaps.md#g24--candidate-cluster-vii-product-experience--value)), the topic-cluster-sized hole the first six clusters left: they are all about *the code and its lifecycle*, and none was about **the product as experienced and valued by the people who use it**. Promoted its two highest-leverage members per G24's own incremental disposition — **#42 Usability & interaction quality** (VII-A) and **#43 Product value & outcome instrumentation** (VII-F). #42 asks what a heuristic evaluation asks: can a person tell what is happening, do what they came for, and recover when it goes wrong — state completeness (loading/empty/error, folding in VII-B's most diff-visible check), reversibility of destructive actions, system-status feedback, error recovery that preserves the user's work, controllability, and conformity with the expectations the product already set. #43 asks the question no other lens asks: **after this ships, how will anyone know whether it worked** — a stated outcome, instrumentation for it *in the same diff*, a losing condition, experiment guardrails as well as a win condition, and events that match the plan the rest of the org reads. **Cluster-wide constraints:** every member carries **skip-when-no-user-facing-surface**, and every member is **detect-and-route** (G23) — but routing is not softening, and the split is what keeps the cluster honest: an unhandled state, an unrecoverable destructive action, lost input, or a claimed benefit with no way to observe it is an ordinary **defect**; which pattern, which words, and which outcome to chase are surfaced with evidence and routed to design/product with no engineering verdict. **G1 boundaries:** a11y mechanics stay #23, measured performance #15, manipulative design #36, code-level idiom #8, adopter experience #33; ops metrics and SLOs stay #16, claims-vs-diff-evidence #24, event *schema* and consumers #40, decision records #29/#39, flag config #26. Both `diff`-shaped and design-capable. **Closes G31's** long-noted `security ↔ usability` tension, which had been waiting on exactly this lens. VII-C/D/G/H/J remain unbuilt candidates; VII-E/VII-I remain add-factors to #23. Rationale: [`map-gaps.md` G24](map-gaps.md#g24--candidate-cluster-vii-product-experience--value), research [`research/cluster-7-product.md`](research/cluster-7-product.md).
+>
+> **v0.11 changes:** promoted **#41 Data-contract drift & pipeline health** — the repo/cron arm of [G17](map-gaps.md#g17--data-engineering--data-contract-quality), completing the gap. The scheduled companion to #40, and the same authoring-time-vs-currency split as #29↔#39: #40 reviews a data-plane *change*, #41 audits the plane's *standing condition* — the drift that accumulates when no diff touches it. Covers declared-contract-vs-observed-data divergence, test and expectation coverage across the model graph ranked by downstream fan-out, freshness expectations that are absent/lapsed/decorative, expired deprecation windows with live readers, ungated registry subjects and soft-failed contract checks, repo-vs-registry divergence, orphaned models, lineage the graph cannot see, and permanently-warning tests. **Evidence discipline is the defining constraint:** a repo audit reads the repo, not the warehouse, so a drift it cannot observe is reported as "declared but unverified," never as confirmed — and its coverage statement names the plane it could not reach (G19). **G1 boundary:** the operational store's declared-vs-live schema drift stays #20, docs drift #22, suppression/monitoring/codegen drift #30, churn hotspots #21; PII inventory routes to #27 and the fail-loud verdict to #2. Contract ownership and whether to re-negotiate a drifted contract detect-and-escalate (G8) to a data owner. Shape `repo` — the tenth repo-shaped audit. Rationale: [`map-gaps.md` G17](map-gaps.md#g17--data-engineering--data-contract-quality).
+>
+> **v0.10 changes:** promoted **#40 Data-engineering & data-contract quality** (gap [G17](map-gaps.md#g17--data-engineering--data-contract-quality)) — the analytics/data plane, previously unowned by an OLTP-app-centric map. Covers SQL/dbt/Spark **transformation correctness** (grain and fan-out, three-valued-logic traps, incremental idempotency, type fidelity, event-time semantics), **data-test adequacy** (the right tests for the ways *this* model can be wrong, plus unit tests for non-trivial logic), and producer↔consumer **data contracts** for events and published schemas (compatibility mode, versioning, deprecation window, named consumers). **G1 boundary:** #40 defers the operational store's DDL/lock/backfill mechanics to #20, the service API contract to #13, external wire-format conformance to #37, PII/retention adjudication to #27, code-test craft to #17, query cost to #15, and the fail-loud verdict to #2 — and **detect-and-escalates (G8)** warehouse governance (data ownership, retention mandates, cost policy) to a data owner. Scope is **data-as-code in the repo**. Shape `diff`, design-capable. The **repo/cron contract-drift arm** named in G17's disposition is a noted follow-up, per the #35/#32 incremental precedent. Rationale: [`map-gaps.md` G17](map-gaps.md#g17--data-engineering--data-contract-quality), [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
+> **v0.9 changes:** promoted **#39 Decision-record currency** — the last unbuilt piece of [Q15](open-questions.md#q15)/[`decision-time-review-shape.md`](decision-time-review-shape.md)'s §5 item 3 (`decision-record-audit`). A `shape: repo` scheduled sweep over a repository's *existing* ADRs/decision records: does an accepted decision still hold, are its stated assumptions contradicted by current repo signals (dependency manifests, EOL status), is a revisit-trigger's condition now plausibly met, and is an ADR marked Accepted while the code has visibly moved past it (an undocumented reversal). **G1 boundary:** #39 does not re-litigate the original adoption call (that's #29, at authoring time) and does not check whether a non-obvious decision *has* a record at all (that's #22's "ADR coverage" factor) — it only checks whether *time* has invalidated an existing record. Companion to #29, same cluster. Rationale: [`decision-time-review-shape.md`](decision-time-review-shape.md)§5b.
+>
+> **v0.8 changes:** promoted **#38 Threat modeling / design-time security** (gap G30) — the generative, design-time threat-*enumeration* discipline (STRIDE / trust boundaries / attack trees / abuse cases) sibling to #14/#25/#32. **G1 boundary:** #38 owns enumeration and **delegates** the deep verdict to #14 (code vuln) / #32 (agent action) / #25 (model call), escalating to a human (G8) only for custom-crypto correctness or third-party-auth adjudication. Shape `diff`, design-capable (lands in both the change and decision collapsed entrypoints). Rationale: [`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md), [`map-gaps.md` G30](map-gaps.md#g30--threat-modeling-as-a-designdecision-time-security-discipline).
+>
+> **v0.7 changes:** promoted the **interoperability arm** of round-3 gap G18 — #37 Interoperability & external-standard conformance; the first of the two ISO/IEC 25010:2023 characteristics with no owner (**compatibility / interoperability**). Consolidates the scattered "does the code correctly speak an external standard" factor-notes (HTTP/OAuth/OIDC semantics, SemVer, RFC date/email/URI formats, Unicode normalization, cron dialects, OTel semconv, standard interchange formats) from #4/#8/#13/#26 into one owner. **G1 boundary:** #37 owns conformance to an *external/published* standard; the contract *we* author stays #13, internal time/encoding correctness stays #4, internal idiom stays #8, config validity stays #26. The **safety arm** of G18 (fail-toward-safe defaults, the new ISO 25010:2023 safety characteristic) **shipped 2026-06-24** as add-factors on #2 (code-level fail-toward-safe / fail-closed) and #28 (design-level degrade-toward-safe), each detect-and-escalating deep hazard analysis — completing G18 (both ISO/IEC 25010:2023 characteristics now owned). Rationale in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) and [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
+> **v0.6 changes:** promoted the third round-3 (Wave C) new lens — #36 Ethical / responsible-design defects (non-ML) (gap G16); the diff-visible, code-level ethics class with no owner today — dark patterns, manipulative defaults, obstruction, and discriminatory business logic in plain conditionals. The **non-ML analog of #25's harmful-output** and a sibling of #14; strictly **detect-and-route** (consent-as-law → #27/legal, product trade-off → product, a11y mechanics → #23). Deep model-fairness auditing stays out of scope. Adds a `sweeping-for-security ↔ reviewing-ethical-design` tension (protective friction vs. obstruction). Rationale in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) and [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
+> **v0.5 changes:** promoted the second round-3 (Wave C) new lens — #35 Agent-legibility (the codebase as a working environment for AI maintainers, gap G20); a Cluster II vantage rotation from "can a human understand it?" to "can an agent understand, navigate, and safely modify this within a context budget?" The **mirror image of #34** (quality of AI-authored code ↔ quality of code for AI readers); cross-links #5–#8/#21/#22/#24/#30. Natural shape `diff`; a whole-repo agent-navigability audit arm is a noted follow-up. Rationale in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) and [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
+> **v0.4 changes:** promoted the first round-3 (Wave C) new lens — #34 AI-authored-code defects (the failure signature of machine-authored code, gap G14); attribution-agnostic, cross-refs #18/#1/#11/#14. Rationale in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) and [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
+> **v0.3 changes:** promoted four categories from the round-2 gap hunt — #28 Operational & resilience design, #29 Decision lifecycle, #30 Enforcement apparatus & meta-artifacts, #31 Infrastructure-as-code; added factors to #16/#17/#19/#20/#22/#25/#27; named **decision-time** as a third review shape. Resolves the G9 #12 drops (folded into #28) and the G10 framing gap (#30). Rationale in [`open-questions.md`](open-questions.md) (D13) and [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md).
+>
+> **v0.2 changes:** promoted three categories (#25 AI/LLM-integration, #26 Configuration & environment, #27 Compliance/licensing/provenance); broadened #3 (distributed correctness) and #9 (caller ergonomics / internal-API DX); cross-linked money/units between #4 and #23; kept logging folded in #16. Rationale in [`open-questions.md`](open-questions.md) (D5).
+
+---
+
+## Cluster I — Does it work? (Correctness & Robustness)
+
+### 1. Functional correctness & logic
+
+Matches intent/spec; edge cases & boundary conditions; off-by-one; null/undefined handling; invariant preservation; dead/unreachable code; determinism & reproducibility.
+
+### 2. Error handling & resilience
+
+No silent failures / swallowed exceptions; fail-loud vs. graceful degradation; actionable error messages; input validation at boundaries; retry/backoff/circuit-breaker correctness; timeout handling; partial-failure & rollback.
+
+### 3. Concurrency, async & distributed correctness
+
+Data races; deadlocks & lock ordering; atomicity & visibility; async/await & unhandled rejections; thread-safety of shared state; frontend DOM/timing/lifecycle races. **Distributed facet:** message ordering; idempotent consumers; "exactly-once" myths; eventual consistency; clock skew; saga / distributed-transaction integrity.
+
+### 4. Resource & state management
+
+Leaks (memory, file handles, sockets, connections); lifecycle & cleanup; idempotency where required; numerical precision/overflow; time/timezone/clock correctness; money/units/measurement correctness *(cross-links #23)*.
+
+---
+
+## Cluster II — Can humans understand it? (Readability & Clarity)
+
+### 5. Naming
+
+Intention-revealing; consistent; domain language; progressive refinement of vague/placeholder names.
+
+### 6. Local readability
+
+Function/method length & single responsibility; cyclomatic/cognitive complexity; nesting depth & control-flow clarity (early returns); magic numbers/strings → named constants; "altitude" mixing (high + low level in one function); symmetry of expression.
+
+### 7. Comments & inline docs
+
+Why-not-what; docstring completeness & accuracy; comment rot / staleness; commented-out code.
+
+### 8. Consistency & idiom
+
+Adherence to project conventions/style guide; idiomatic language/framework use; pattern consistency across the codebase.
+
+### 35. Agent-legibility — the codebase as an environment for AI maintainers  *(promoted v0.5)*
+
+Cluster II's readability axis (#5–#8) **rotated to the agent reader**: *can an AI agent understand, navigate, and safely modify this within a context budget?* — distinct from #5–#8 (human-framed, same axis) and from #24's agent *operator* parity. **Context economy / self-containment:** the change is a depth-first slice understandable without loading the whole repo (the "40% context rule"; grounded in *lost-in-the-middle* retrieval limits). **Retrieval-friendly, AST-navigable structure:** names/paths/boundaries an agent reaches by search, behavior exposed through structurally-addressable surfaces rather than stringly-typed indirection. **Local self-explanation:** the *why* an agent needs sits at the edit site, not in distant files (cross-links #7). **Agent onboarding:** `AGENTS.md` / `CLAUDE.md` present, accurate, and *scoped* (the agent analog of #22's README front-door — drift is #22/#24, artifact-conformance is #30, but *good scoped onboarding content* is here), with do-not-touch guardrails so autonomous edits fail safe; an `llms.txt`-style index for agent-consumed repos. The **mirror image of #34** (quality *of* AI-authored code ↔ quality of code *for* AI readers — neither subsumes the other), and the **G11 pattern again** (the suite optimizes its own artifacts for agent-legibility via D7 but never reviewed for it). **G1 single-owner:** #35 owns the attribution-agnostic agent-as-reader signature and names the overlap, deferring the deep verdict to the owning lens. Natural shape `diff`; a whole-repo agent-navigability audit arm is a noted follow-up. *(Resolves map-gaps G20 — code-owner role; the operator role stays a G9-deepen of #24 + #32/#30.)*
+
+---
+
+## Cluster III — Is it well-designed? (Structure & Architecture)
+
+### 9. Module / unit design
+
+Cohesion (SRP); coupling (loose, explicit interfaces); encapsulation & information hiding; interface design (minimal, hard-to-misuse); **caller ergonomics / internal-API DX** — the next engineer should fall into the pit of success; composition vs. inheritance.
+
+### 10. Type & data modeling
+
+Make illegal states unrepresentable; invariants encoded in types; parse-don't-validate boundaries; schema/constraint design.
+
+### 11. Abstraction & simplicity
+
+YAGNI / no speculative generality; DRY vs. *premature* abstraction (the wrong-abstraction trap); over-engineering / accidental complexity; removing rather than adding (dependency elimination). **(Counterweight category.)**
+
+### 12. System architecture
+
+Layering & boundary enforcement; dependency-graph health (cycles, god modules, fan-in/out); architectural pattern compliance; scalability of the design; backward/forward compatibility strategy; feature-flag architecture.
+
+### 13. API & contract design
+
+Versioning; backward/forward compatibility; consistent conventions (REST/GraphQL/RPC); error-response contracts; pagination & rate limiting; idempotency keys; contract tests. *(External contracts; for the internal-caller side see #9.)*
+
+---
+
+## Cluster IV — Cross-cutting runtime qualities
+
+### 14. Security
+
+Injection (SQL/command/XSS/path traversal); authn/authz gaps & IDOR; hardcoded secrets; sensitive-data/PII handling & logging; crypto correctness (no homegrown crypto); dependency/supply-chain CVEs; least privilege; safe defaults; CSRF/SSRF/deserialization.
+
+### 15. Performance & efficiency
+
+Algorithmic complexity & hot paths; N+1 queries & DB access patterns; redundant work; allocations/GC pressure; caching correctness & invalidation; I/O batching & network round-trips; lazy vs. eager / streaming vs. buffering; bundle size & startup (frontend); cloud-resource cost efficiency (FinOps facet). **Counterweight:** premature optimization.
+
+### 16. Observability & operability
+
+Structured logging (levels, no PII); metrics, tracing, instrumentation; health/readiness checks; feature flags & kill switches; debuggability (context-rich errors); graceful startup/shutdown; SLO/error-budget instrumentation. *(Instrumentation emitted from app code; the monitoring **config** as a reviewed artifact — alert rules, dashboards, SLO definitions — is #30.)*
+
+### 25. AI/LLM-integration quality  *(promoted v0.2)*
+
+Prompt-injection & untrusted-input surface; structured-output validation & schema enforcement; eval/test coverage for nondeterministic behavior; model & prompt versioning/pinning; token & cost efficiency; timeouts / retries / fallbacks for model calls; PII sent to third-party models; response caching; guardrails & refusal handling; reproducibility & temperature discipline; graceful degradation when the model is wrong; **harmful-output eval coverage** (bias/toxicity/safety, detect-and-escalate — deep fairness auditing stays governance, out of scope). *(Model weights as an artifact — model card, datasheet, training-data provenance — are #27.)* **#25 owns the *model call*; the *action/tool* surface is #32 (D14).**
+
+### 32. Agentic & tool-use safety  *(promoted v0.3, D14)*
+
+The **action/tool surface** of agent systems — what the model is permitted to *do*, distinct from #25's *model call*. Tool least-privilege & explicit allow-lists; approval gates & step/iteration budgets on autonomous loops; **tool metadata as untrusted input** (poisoned tool descriptions); confused-deputy & token-audience discipline; inter-agent authentication; sandboxed code execution; agent-memory hygiene; action audit trails; **excessive agency** (OWASP LLM06 / ASI-class). Grounded in OWASP's **Top 10 for Agentic Applications** (ASI01–ASI10) + Threats-and-Mitigations companion and the MCP security-best-practices page. Cross-cuts #13 (tool contracts), #14 (authz), #24 (agent process), #25 (model call). **G1 single-owner:** #32 owns agentic action-safety; the **lethal-trifecta *framing*** stays in #25, but the mitigations that gate its exfil/action leg are #32 (#25 references #32, no double-report). Natural shape `diff`; a repo-shaped whole-agent-system audit arm is a noted follow-up. *(Resolves map-gaps G2; closes Q16.)*
+
+### 28. Operational & resilience design  *(promoted v0.3)*
+
+Design-time operability, distinct from #16's *runtime* operability. **Resilience as design:** failure-mode / blast-radius analysis, bulkheads, graceful degradation, dependency-failure plans (beyond #2/#3 code-level handling). **Recoverability:** RTO/RPO, *tested* restore — not just backups taken (absorbs #20's backup-note). **Scalability as design:** statelessness, horizontal-scaling readiness, single-writer bottlenecks, backpressure on unbounded queues (resolves the dropped #12 factor; absorbs system-wide rate-limit/quota). **Multi-tenancy isolation** (noisy-neighbour, per-tenant quotas). Reviewed at *decision time* (RFC/design doc) and on a diff (a new stateful singleton or unbounded queue). Cross-links #12, #16, #2/#3.
+
+### 34. AI-authored-code defects  *(promoted v0.4)*
+
+The **failure signature of machine-authored code itself**, independent of who or what wrote it — distinct from #25 (code that *calls* a model) and #27 (a provenance *marker*). Now that AI-assisted code is the median diff, these recur and are diff-reviewable: **package hallucination → slopsquatting** (~20% of LLM-recommended packages don't exist, ~43% recur — a registration target); **plausible-but-wrong** constants/APIs and logic that reads fluently; **invented/misused APIs** and **hallucinated internal references** (a symbol used but never defined here); **over-helpful, unrequested additions** (scope creep as a generation artifact); the **weak-default security signature** (~45% of LLM code carries a flaw); **tests that assert the implementation** rather than the spec; fabricated comments/citations; and **duplication instead of reuse**. Does *not* require knowing the author was a model — the signature is attribution-agnostic — but the base rate is highest on generated diffs. **G1 single-owner:** #34 owns the attribution-agnostic AI-defect *signature* and names the overlap, deferring the deep verdict to the owning lens — the *package-existence/slopsquat* leg cross-refs **#18** supply-chain, *plausible-wrong logic* is adjacent to **#1**, *over-helpful additions* to **#11** restraint, the *security* leg to **#14**. Natural shape `diff`. *(Resolves map-gaps G14.)*
+
+### 36. Ethical / responsible-design defects (non-ML)  *(promoted v0.6)*
+
+The **diff-visible, code-level** ethics class — reviewed today only where it is *legal* (#27) or *ML-output* (#25 harmful-output); the **non-ML analog of #25** and a sibling of #14 (harm to the *user/subject* vs. via an *attacker*). **Dark patterns / deceptive flows:** sneaking, fabricated urgency/scarcity, misdirection/confirmshaming, obstruction, forced action, nagging (Mathur's 7 categories; the EDPB's 6 families / 16 subcategories). **Manipulative defaults & asymmetric choices:** pre-checked consent, opt-out harder than opt-in, buried "reject," negative-option/auto-renew. **Discriminatory business logic in plain conditionals:** a hardcoded threshold/branch (direct or by proxy — ZIP, surname, device, locale) that disadvantages a protected or vulnerable group, no model in sight. **Honest state, wired consent (withdrawal as easy as granting — GDPR Art. 7(3)), and coercion-free control flow.** Grounded in live regulation (GDPR Art. 7, DSA Art. 25, FTC Act §5); automated detection caps below ~50%, so it is a **judgment lens**. **G1 single-owner:** #36 owns the attribution-agnostic diff-visible ethical-defect signature and is strictly **detect-and-route (G8/G23)** — names the pattern with evidence, then routes the *decision*: consent-as-law → **#27** / `legal`, product/UX trade-off → `product` / `leadership`, a11y mechanics → **#23**; it never adjudicates a non-engineering call nor silently drops one. Discriminatory logic and consent-theater are typically genuine `defect`s; most dark-pattern verdicts are `route: product`. Natural shape `diff`; a design-time arm is a noted follow-up. **Out of scope:** deep model-fairness / dataset auditing (no diff artifact — governance); user-facing *transparency UX* is the unbuilt G24 VII-G. *(Resolves map-gaps G16.)*
+
+### 37. Interoperability & external-standard conformance  *(promoted v0.7)*
+
+The first of the two ISO/IEC 25010:2023 characteristics with no owner — **compatibility / interoperability**: *does the code correctly speak the external standards and protocols it claims to?* #13 owns the contract **we** design and publish; #8 owns **internal** idiom; #4 owns **internal** time/encoding/number correctness — none asks whether a value crossing the boundary conforms to the **external** spec a third party parses. Consolidates the scattered factor-notes: **HTTP semantics** (safe/idempotent methods, status codes, conditional requests & caching — RFC 9110/9111; idempotency keys); **OAuth 2.0 / OIDC** flow correctness (exact `redirect_uri`, `state`/`nonce`, PKCE — RFC 9700, OIDC Core); **SemVer** discipline and wire/format back-compat; **RFC-defined formats** (date RFC 3339, URI RFC 3986, email RFC 5321/5322, JSON RFC 8259, CSV RFC 4180); **Unicode** normalization & encoding edges (UAX #15, UTS #39/#46, UTF-8, the YAML "Norway" class); **cron/schedule dialects** (POSIX vs. Quartz); **OTel semantic conventions** and well-known files; and the ISO **co-existence** facet (sharing ports/global state/filesystem without detriment). **G1 single-owner:** #37 owns conformance to an *external/published* standard and cross-links #4/#8/#13/#26, deferring the internal-correctness or contract-authoring verdict to them. Natural shape `diff`; deep standards-**certification** machinery escalates (G8). *(Resolves the interoperability arm of map-gaps G18; the safety arm shipped 2026-06-24 as add-factors on #2/#28 — both ISO/IEC 25010:2023 unowned characteristics now closed.)*
+
+### 38. Threat modeling / design-time security  *(promoted v0.8, G30)*
+
+The **generative** design-time security discipline: enumerate what an adversary could do, boundary by boundary, before the code is trusted — **STRIDE** per component, **data-flow + trust-boundary** analysis, **attack trees**, **abuse/misuse cases**, Shostack's four questions. Distinct from #14 (diff-time vuln *detection*), #32 (agentic action surface), and #25 (the model call). **G1 single-owner:** #38 owns the enumeration and **delegates** the deep verdict — a concrete vuln → #14, an agent action/tool threat → #32, an LLM prompt-injection/output threat → #25 — and **detect-and-escalates (G8)** to human security review only for custom-crypto correctness or third-party-auth adjudication. Works on a design doc/RFC when present and **reconstructs** the implied design from code/config when absent (bounded to architecture level). Natural shape `diff`, design-capable. *(Resolves map-gaps G30.)*
+
+### 45. Deployment-pipeline & trust-boundary security  *(promoted v0.14, field report #191)*
+
+The **retrospective**, repo-shaped counterpart to #38: the same STRIDE/trust-boundary discipline, applied on a schedule to the deployment/execution arrangement **as it is already committed and would run today**, not to a diff or a proposed design. CI/CD jobs, cron/systemd/launchd units, git-sync-then-execute patterns, deploy scripts, and service-to-service trust assumed in config, read for **Poisoned Pipeline Execution** (a job that executes attacker-influenced content from the branch it just fetched, with no intervening trust gate — OWASP's CI/CD Top 10), a deploy identity's blast radius versus what it deploys, credential-in-tree at rest, self-hosted-runner persistence risk, and the agent-action surface a coding-agent session would find already wired into the repo. **G1 single-owner:** #45 owns whether the *arrangement* of already-existing, already-committed pieces lets an adversary reach code execution, privilege escalation, or persistence — distinct from #14 (a vulnerable *line* of code), #31 (a declared-IaC resource's blast radius/exposure), #19 (pipeline *hygiene* — is CI required, is it flaky — not adversarial reach), #30 (suppression/monitoring hygiene), and #32 (an agent's tool-call surface at model-call time, diff-shaped); it **delegates** each component-level fix to its owner the same way #38 does. **Detect-and-escalates (G8)** only for org/infra-authority calls a repo checkout can't decide alone (rotating a possibly-compromised credential, an ephemeral-runner cost tradeoff). Natural shape `repo` — the eleventh repo-shaped audit. *(Field-confirmed by [issue #191](https://github.com/brandondees/code-quality-atlas/issues/191); closes the static half of map-gaps G15's gap, G15's live-telemetry `shape: runtime` candidate remains open/deferred.)*
+
+---
+
+## Cluster V — The system around the code (Verification & Supply)
+
+### 17. Test quality & coverage
+
+*Meaningful* coverage (not vanity %); isolation, determinism, speed; edge-case coverage; test-pyramid balance (unit/integration/e2e); flakiness; testing behavior not implementation; mocking discipline vs. over-mocking; testability/seams; regression tests for fixed bugs; property-based/fuzz where valuable; **test-apparatus health** — fixtures/factories/builders as first-class code (General Fixture, Mystery Guest, Generous-Leftovers smells), test-data & golden-file hygiene (provenance, schema-drift, no real PII).
+
+### 18. Dependencies & supply chain
+
+Necessity (avoid trivial deps); CVE status; version staleness; transitive bloat; lockfile/pinning & reproducible builds; vendor lock-in risk. *(License compatibility moved to #27.)*
+
+### 19. Build, CI/CD & tooling
+
+Build reproducibility/hermeticity; CI reliability (not flaky, fast); lint/format/static-analysis gates; type-checking in CI; pre-commit hooks; deploy safety (rollbacks, canaries); pipeline-as-code quality; secrets in CI; **progressive-delivery strategy** as a reviewed plan (cohorts, ramp %, guardrail metrics, auto-abort — cross #24, #28). *(Suppression hygiene and codegen↔source drift are #30; IaC manifests are #31.)*
+
+### 20. Data & persistence safety
+
+Migration safety (reversible, zero-downtime, backfills); transaction boundaries; integrity constraints; idempotent migrations; schema-drift detection; backup/restore considerations; **data lifecycle as design** — retention/TTL/archival/growth bounds *(the compliance facet of retention is #27; the recoverability facet — RTO/RPO, tested restore — is #28)*. *(The analytics/data plane — transformations, data tests, data contracts — is #40.)*
+
+### 40. Data-engineering & data-contract quality  *(promoted v0.10, G17)*
+
+The analytics/data plane as reviewed code — the sibling of #20 on the other side of the OLTP boundary. **Transformation correctness:** grain declaration and fan-out joins that silently inflate aggregates; SQL three-valued-logic traps (`NOT IN` with `NULL`s, `LEFT JOIN` degraded by a `WHERE` predicate, `COUNT(col)` vs `COUNT(*)`); incremental-run idempotency and late-arriving data; backfill and history-rewrite consistency; type fidelity and silent coercion (money as float, timezone-naive truncation, epoch units); event-time vs. processing-time and at-least-once duplicates. **Data-test adequacy:** tests proportional to how *this* model can be wrong (grain uniqueness, `not_null`, accepted values, referential integrity, freshness/volume), plus unit tests for non-trivial transformation logic — and fail-loud rather than publishing an empty or stale table (cross #2, #16). **Data contracts:** producer↔consumer compatibility for events and published schemas — compatibility mode, additive-with-default changes, version bump, deprecation window, named consumers, real lineage via `ref()`/`source()`. **G1 boundary:** the operational store's DDL/lock/backfill mechanics are #20; the service API contract is #13; external wire-format conformance is #37; PII/retention adjudication is #27; code-test craft is #17; query cost is #15; the fail-loud verdict is #2. Warehouse **governance** (data ownership, retention mandates, cost policy) is detect-and-escalated to a data owner (G8) — scope is data-as-code in the repo. The repo/cron **contract-drift** arm shipped as **#41**.
+
+### 41. Data-contract drift & pipeline health  *(promoted v0.11, G17)*
+
+The scheduled companion to #40 — the same authoring-time-vs-currency split as #29↔#39: #40 reviews a data-plane *change*, #41 audits the plane's *standing condition*, the drift that accumulates when no diff touches it. **Contract currency:** declared contracts, published schemas, and `accepted_values`/type declarations that nothing tests the dataset against, or whose most recent available evidence no longer holds; repo-vs-registry divergence (a schema file never registered, or a registered version with no counterpart here). **Coverage as a standing condition:** test and expectation coverage walked across the model graph and ranked by downstream fan-out plus declared exposures; freshness and volume expectations that are absent, lapsed, or so wide they cannot fire; permanently-warning or permanently-failing data tests (a suppression with extra steps). **Lifecycle drift:** expired deprecation windows with live readers; orphaned models with no consumer, distinguished from consumed-but-undeclared; ungated registry subjects (`NONE`) and soft-failed contract checks; lineage the `ref()` graph cannot see (hardcoded table names), which under-reports every blast-radius answer by exactly those edges. **Evidence discipline (the defining constraint):** a repo audit reads the repo, not the warehouse — drift that cannot be observed from here is reported as *declared but unverified*, never as confirmed, and the audit's coverage statement names the plane it could not reach (G19). **G1 boundary:** diff-time review of a change is #40; the operational store's declared-vs-live schema drift is #20; docs drift #22; suppression / monitoring-config / codegen drift #30; churn hotspots #21. PII inventory routes to #27, the fail-loud verdict to #2, and contract ownership detect-and-escalates (G8) to a data owner.
+
+### 26. Configuration & environment  *(promoted v0.2)*
+
+Config validation & safe defaults; secret/config separation; environment parity (dev/staging/prod); feature-flag *lifecycle* & stale-flag cleanup; twelve-factor adherence; portability & environment assumptions (OS/arch/runtime-version, hardcoded paths, locale/encoding/timezone assumptions).
+
+### 30. Enforcement apparatus & meta-artifacts  *(promoted v0.3)*
+
+The machinery wrapped around the code, reviewed as its own surface (the G10 framing gap — a *silent* hole no taxonomy-vs-skills diff could find). **Suppression hygiene:** `# noqa` / `eslint-disable` / `# type: ignore` accretion, blanket-disabled rules, lint-baseline growth, suppressions with no rationale or expiry — the act of *opting out of enforcement* (cross #8, #19, #21). **Monitoring-config as artifact:** alert-rule / dashboard / SLO-definition correctness, symptom-based alerting, runbook linkage, dashboard drift — the config, not the instrumentation (#16). **Codegen ↔ source drift:** checked-in generated/compiled output stale vs. its generator/spec. **Artifact-authoring quality** *(G11, D15)*: is a non-source artifact that carries its own published "well-formed X" standard actually well-formed per that standard — `SKILL.md` / agent skills (Anthropic authoring best-practices), `AGENTS.md`, MCP tool surfaces, model cards, datasheets — *the authoring quality, distinct from #22 doc-drift and #32 runtime agent-safety.* Reviewed via the **`shape: artifact`** mechanism (D15, **shipped 2026-06-24**): the lens `reviewing-artifact-conventions` presence-detects an artifact and loads its bundled rubric (rubric content in [`research/artifact-rubrics.md`](research/artifact-rubrics.md)); first artifact is `SKILL.md` authoring.
+
+### 31. Infrastructure-as-code  *(promoted v0.3)*
+
+IaC manifests (Terraform / k8s / Helm / CloudFormation) as reviewed code: change blast-radius, over-broad IAM / public exposure (cross #14 least-privilege), drift between declared and live infra, module/provider hygiene. Distinct from #19 (the build/CI pipeline) and #26 (app config keys). Mature scanners exist (Checkov, Trivy, OPA/Sentinel) → the lens orchestrates + judges blast-radius, it doesn't re-implement them.
+
+---
+
+## Cluster VI — Evolution & humans (Maintainability & Process)
+
+### 21. Maintainability & evolvability
+
+Change amplification (one change → many edits); blast radius / ripple effects; refactorability (safe to change); tech-debt visibility & accounting; onboarding cost; bus factor / knowledge concentration.
+
+### 22. Documentation & knowledge
+
+API docs & docstrings; README / onboarding docs; architecture decision records (the *why*); runbooks & operational docs; changelogs; usage examples & diagrams; **documentation as a designed system** — information architecture & audience fit (Diátaxis quadrant balance, mode-mixing), not just freshness/accuracy.
+
+### 23. Accessibility & i18n
+
+WCAG conformance; semantic markup & ARIA; keyboard nav & focus management; localization (no hardcoded strings, RTL, number/date/**currency & unit** formatting — correctness facet cross-links #4); responsive/edge layouts; design fidelity vs. spec.
+
+### 24. Process & collaboration
+
+PR size & reviewability; commit atomicity & message hygiene; risk signaling in commits/PRs; ownership (CODEOWNERS); definition of done; agent-native parity (any action a user can take, an agent can too).
+
+### 27. Compliance, licensing & provenance  *(promoted v0.2)*
+
+Dependency license compatibility & copyleft contamination (moved/extended from #18); code provenance & attribution (incl. AI-generated code); regulatory & data-privacy obligations (GDPR/CCPA-style data handling, residency, retention, consent); accessibility-as-legal-requirement; export/compliance constraints; **non-code asset licensing** (fonts, images, datasets, model weights — SPDX headers don't attach to blobs); **model/dataset provenance** (model cards, datasheets, training-data lineage — cross #25); **privacy-by-design / data-minimization** as a design-time check (does the flow *need* the field at all — one step before PII detection).
+
+### 29. Decision lifecycle  *(promoted v0.3)*
+
+Decisions reviewed *as they are made*, not the code that implements them — the **decision-time shape** ([`decision-time-review-shape.md`](decision-time-review-shape.md)). **Choose / adopt:** is this the right dependency / framework / platform to adopt vs. a smaller option or building it; lock-in & **exit cost** (build-vs-buy *TCO / procurement* escalates to humans, G8-style). **Revisit:** does an accepted ADR still hold — are its assumptions current, are revisit-triggers recorded at authoring time (the periodic sweep of *existing* records for currency is #39's job, not this one's). **Retire:** deprecation header + sunset date + migration path as a *planned* activity (cross #1 dead-code, #13 versioning). The topic whose natural shape is `decision`.
+
+### 39. Decision-record currency  *(promoted v0.9)*
+
+A `shape: repo` scheduled sweep over decision records already in the repository (ADRs/RFCs on disk) — the periodic-audit companion to #29's authoring-time review. Does an accepted decision still hold: are its stated assumptions (load, scale, team size, vendor support) contradicted by current repo signals; has a recorded revisit-trigger's condition plausibly been met; is an ADR still marked Accepted while the code has visibly reversed it (the named dependency/technology is gone, or a later, contradicting ADR exists with no supersedes/superseded-by link); is a decision referencing a technology now approaching or past end-of-life with no revisit noted. **G1 boundary:** does not re-judge the original adoption call (#29) and does not check whether a non-obvious decision has a record at all (#22's ADR-coverage factor) — only whether an *existing* record's currency has rotted.
+
+### 33. Install, upgrade & configuration experience  *(promoted v0.3)*
+
+The experience of a downstream **consumer** adopting, configuring, and upgrading this software — the adopter-facing counterpart to #29's "should *we* adopt this dependency" call, and distinct from end-user product UX. **Install / setup:** first-run friction, undocumented prerequisites, idempotent & reproducible installers, time-to-first-success. **Config UX:** safe defaults and a zero-config common case, startup schema validation with fail-fast actionable errors, backward-compatible keys (#26 is the *internal* config-hygiene view; this is the *adopter*-facing one). **Upgrade / migration:** SemVer-correct breaking-change signaling, codemods / migration commands and upgrade notes that let a consumer *or a code agent* complete and verify a version bump from the docs alone, deprecation windows over silent removals, and a downgrade / rollback path. Pulls together the adopter-facing slices of #22 (docs), #13 (contract), #26 (config), and #29 (deprecation) as one reviewable experience. Natural shape `diff`, design-capable; a whole-repo "is this pleasant to adopt" audit arm is a noted follow-up. Grounded in the scope-boundary reframe ([`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md), G23 detect-and-route): adopter experience is reviewable at review time even when some calls route to maintainers/product.
+
+---
+
+## Cluster VII — The product as experienced and valued (Product, Experience & Value)  *(opened v0.12, G24)*
+
+The first six clusters are all about **the code and its lifecycle**. This one is about the **product as experienced and valued by the people who use it** — the topic axis the map never carved ([`map-gaps.md` G24](map-gaps.md#g24--candidate-cluster-vii-product-experience--value)). Two standing constraints apply to **every** member: **skip when there is no user-facing surface** (backend, CLI-less library, infra), and **detect-and-route** (G23) — surfacing is not deciding. Routing is not softening, though: a gap the code actually produces is an ordinary defect; only the judgment calls route. Opened with its two highest-leverage members; VII-C/D/G/H/J remain candidates and VII-E/VII-I remain add-factors to #23. Research: [`research/cluster-7-product.md`](research/cluster-7-product.md).
+
+### 42. Usability & interaction quality  *(promoted v0.12, G24 VII-A)*
+
+Interaction quality as a reviewer can check it on a diff, grounded in Nielsen's 10 heuristics and ISO 9241-110 controllability. **State completeness** — an async read introduces loading, empty/zero-data, error, and success states whether or not anyone designed them, and the ones nothing renders are the finding (folds in VII-B's most diff-visible check). **Reversibility** — a destructive or irreversible action needs undo, or a confirmation that *names what is lost*; and the slip case (a destructive control identical to its safe neighbour) is checked separately from the mistake case. **Visibility of system status**, **error recovery that preserves the user's input** (an error path that clears a filled form is a data-loss defect, not a copy problem), **controllability** (no undismissable modal, no wizard without a back), **recognition over recall**, and **conformity with the expectations this product already set**. **G1 boundary:** a11y mechanics are #23 (a flow can be perfectly accessible and still baffling), *measured* performance is #15 (#42 owns whether the wait is communicated), deliberate manipulation is #36 (a usability failure benefits nobody; a dark pattern benefits someone), code-level idiom is #8, adopter setup/upgrade is #33. Shape `diff`, design-capable — heuristic evaluation works on a mockup.
+
+### 43. Product value & outcome instrumentation  *(promoted v0.12, G24 VII-F)*
+
+The question no other lens asks: **after this ships, how will anyone know whether it worked?** A change that claims a user or business benefit states the outcome it expects to move; the instrumentation that would observe it ships **in the same diff** (deferred instrumentation leaves the feature live and permanently unmeasured); the hypothesis has a **losing condition** (with "we'll keep it regardless" a legitimate recorded answer — the defect is leaving the question unasked); an experiment declares **guardrail** metrics and not only a win condition (Kohavi); assignment/exposure code is checkable *now* for the properties that silently invalidate the result later; new events match the tracking plan the rest of the org reads; a rollout flag has an owner and an end condition; and a proxy metric that has become the target is surfaced, not adjudicated (Goodhart — the seam where outcome optimisation becomes #36's territory). **G1 boundary:** #24 owns whether a PR's claims are backed by evidence *in the diff*, this owns whether the claim is observable *in production*; #16 owns ops metrics and SLOs (fully observable and completely unmeasured is a real state); #40 owns an event's schema, compatibility, and consumers, this owns whether the event exists and matches the plan; #29/#39 the decision record; #26/#1 flag hygiene and dead branches. **Counterweight, stated up front:** refactors, fixes, bumps, and internal work owe no hypothesis — demanding one is this lens's own failure mode, and `checking-restraint` wins by default on any instrumentation beyond the stated outcome. Shape `diff`, design-capable — the hypothesis belongs in the RFC.
+
+### 44. Conceptual integrity & product coherence  *(promoted v0.13, G24 VII-H)*
+
+Brooks's "most important consideration in system design," made reviewable: does this change fit **one coherent model of what the product is**? The concepts a user must hold, the vocabulary naming them, the rules already taught, and whether a second path now reaches a job the product already does. **A new user-facing concept** either earns its place or reuses an existing one — and the check is gated on evidence: name the existing concept, where it lives, and the one-sentence rule a user would apply to choose between them, or report nothing. **A second path** to an existing job (page, command, endpoint, setting) with nothing retiring or subsuming the old one. **One term, one meaning** across UI copy, docs, API fields, and events — Evans's ubiquitous language, held in check by Evans's bounded context so a term that legitimately differs across a real boundary is not a finding. **A special case carved into a general rule** doubles what a user must remember. **Second-system watch** — the Nth option on a surface, and whether a governing idea decides what belongs or each addition was justified only against the one before it. **The defect half, narrow and load-bearing:** a rule the product already enforces that this change breaks without saying so (every other resource cascades on delete, this one orphans children; every other collection paginates one way, this one invents another) is a broken promise with ordinary severity — everything else is surfaced with evidence and routed to product/design with no engineering verdict. **G1 boundary:** #11 owns *amount*, #44 owns *fit* — a small, requested, well-scoped change clears restraint and can still add a second noun for an existing idea; #42 owns interaction *mechanics* (a control behaving unlike its siblings), #44 the *model* (two concepts covering one job); #8 code-level consistency, #9/#10 module cohesion, #13 contract safety, #22 doc drift, #29/#39 the decision record, #33 the adopter. **Failure mode, stated up front:** "that doesn't fit the model" is unfalsifiable if the model is never named, and this lens firing on every diff is more likely than the incoherence it guards against. Shape `diff`, design-capable.
+
+---
+
+## Candidate additions — resolved (v0.2)
+
+| Candidate | Disposition |
+|---|---|
+| Configuration management | **Promoted** → #26 (merged with portability/environment). |
+| Logging as first-class | **Kept folded** in #16 — not larger than observability. |
+| i18n money / units / measurement | **Kept, cross-linked** #4 ↔ #23 — correctness facet + formatting facet, not its own category. |
+| Licensing / compliance / provenance | **Promoted** → #27. |
+| AI/LLM-specific code quality | **Promoted** → #25. |
+| Internal-API DX / ergonomics | **Folded** into #9 (broadened wording). |
+| Portability & environment assumptions | **Promoted** (merged into #26). |
+
+### Residual minor candidates (still open, low priority)
+
+- **Cloud cost / FinOps efficiency** — currently a factor-note in #15. Promote only if it proves to need its own review behavior. *(2026-06-12: standards now exist — FOCUS billing-data spec, SCI/ISO 21031 carbon rate — filed in cluster-4 research; still factor-level.)*
+- **SLO / error-budget framing** — factor-note in #16; partly a process concern (#24).
+- **Telemetry / analytics privacy** — sits across #16 and #27.
+- **Agentic / tool-use safety** *(2026-06-12)* — **PROMOTED → #32 (D14, closes Q16 / map-gaps G2).** OWASP shipped a dedicated agentic Top 10 (ASI01–ASI10); the trigger gap (agent-heavy repos that don't read as "LLM integration") + G1 cross-cutting ownership cleared the bar. Research moves from #25 to a new #32 section in the build phase.
+- **IaC / workflow review depth** *(2026-06-12)* — Terraform/K8s/Dockerfile/CI-workflow review currently factor-notes in #19 ("pipeline-as-code") and #26 (portability); tooling + heuristics now filed in cluster-5 research (#19). Promote only if IaC-heavy repos prove to need a dedicated lens.
+
+## Candidate additions — resolved (v0.3)
+
+From the round-2 gap hunt ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)). Disposition discipline per D5.
+
+| Candidate | Disposition |
+|---|---|
+| Operational & resilience design (DR/RTO-RPO, capacity, resilience-as-design, multi-tenancy) | **Promoted** → #28 (resolves the G9 #12 scalability drop). |
+| Decision lifecycle (adopt/exit, ADR-still-valid, retire-on-schedule) | **Promoted** → #29; introduces the **decision-time** shape. |
+| Enforcement apparatus (suppression hygiene, monitoring-config, codegen-drift) | **Promoted** → #30 (the G10 framing gap). |
+| Infrastructure-as-code | **Promoted** → #31. |
+| Non-code asset & model/dataset licensing/provenance | **Folded** → #27 (factors). |
+| Privacy-by-design / data-minimization | **Folded** → #27 (design-time factor). |
+| ML harmful-output eval coverage | **Folded** → #25; deep fairness auditing **out-of-scope** (governance). |
+| Test-apparatus health; docs-as-designed-system; data-lifecycle-as-design; rollout-plan | **Folded** → #17 / #22 / #20 / #19 (factors). |
+| Feature-flag *architecture* (#12) | **G9 propagation** — route to the skill-coverage fix, not a new category. |
+| Sustainability / green-software | **Folded** → #15 (a carbon *label* on existing perf/cost findings, not a behavior). |
+| Contributor DevEx as a system; build-vs-buy TCO & vendor selection; deep model-fairness; suite self-dogfooding | **Out-of-scope** — org-measurement / procurement / governance / a practice, not diff-reviewable. |
+| Inclusive / non-exclusionary language | **Folded** → #8/#23 (tool-orchestration; linter-owned, thin LLM value). |
+| Container images; system-wide rate-limit/quota | **Folded** → #19+#18 / #28 (covered as facets). |
+
+---
+
+## Notes on structure
+
+- **Two counterweights** are embedded deliberately: premature abstraction (#11) and premature optimization (#15). The suite must value restraint, not only addition. (See open question Q5 on enforcing this structurally.)
+- **Overlaps are intentional.** Concurrency (#3) is a facet of correctness; security (#14) overlaps dependencies (#18) and compliance (#27); data safety (#20) overlaps migrations and architecture; AI/LLM (#25) overlaps security, testing, and performance. The map is a graph, not a strict tree.
+- **Numbering note:** v0.2 appended 25–27, v0.3 appended 28–33, v0.4 appended #34, v0.5 appended #35, v0.6 appended #36, and v0.7 appended #37 within their clusters (rather than renumber and churn cross-references). Order within a cluster is by topic, not number. (#32 sits with #25 in the AI/LLM cluster; #33 sits with #21/#22/#29 in Cluster VI; #34, #36, and #37 sit with the runtime cluster IV; #35 sits with #5–#8 in Cluster II.) v0.8 appended #38 in cluster IV (with #14/#25/#32 in the runtime cluster). v0.9 appended #39 in Cluster VI, next to #29 (its decision-time authoring-time counterpart). v0.10 appended #40 in Cluster V, next to #20 (its OLTP-side counterpart — #20 owns the operational store, #40 the analytics plane). v0.11 appended #41 immediately after #40, its scheduled-currency companion (the #29↔#39 pairing repeated one cluster over). v0.12 appended **#42 and #43 in a new Cluster VII** — the first new *cluster* since the original map, rather than an append within an existing one, because the axis is a topic the six clusters do not span rather than another member of one of them. v0.13 appended **#44** to that cluster as its counterweight (as #11/#15 are the code's). v0.14 appended **#45** to Cluster IV, immediately after #38 as its retrospective, repo-shaped counterpart.
+- **Topic vs. shape are different axes.** A category is a *topic*; how it's reviewed is a *shape* (diff / repo-cron / decision-time / **artifact**). Most categories are diff-shaped; #21/#30/#31 and the repo audits are repo-shaped; #29 — and the decision-time facets of #27/#28/#25 — are **decision-shaped** ([`decision-time-review-shape.md`](decision-time-review-shape.md)); the #30 artifact-authoring factor is **artifact-shaped** — a fourth shape (D15) where a presence-detected artifact gates an on-demand, artifact-specific rubric ([`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md)). The shape cuts across the topic-clusters, like diff-vs-repo already does. Cluster VII is diff-shaped-and-design-capable in all three of its members so far, but not by nature: VII-J is repo/cron-shaped, so the cluster will spread across shapes like the others. (#44 ships `diff` + design-capable. [`research/cluster-7-product.md`](research/cluster-7-product.md)'s open threads had predicted decision-*only*, and map-gaps G24 catalogued it as design-shaped; the build went with diff + design-capable because a counterweight has to run where accretion happens, which is ordinary feature PRs. The reversal is recorded in that file's open threads.)
+- **Granularity remains the central phase-2 question:** the categories will *not* map 1:1 to skills. Expect collapse into coarser, composable skills. See [`open-questions.md`](open-questions.md) Q1.

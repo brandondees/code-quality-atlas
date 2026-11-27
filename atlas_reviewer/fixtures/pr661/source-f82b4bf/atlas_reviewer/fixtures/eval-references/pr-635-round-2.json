@@ -1,0 +1,26 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 635,
+    "head_sha": "396bf75dc6131e20a55bc89843ba605b79fc1d89",
+    "round": 2,
+    "reviewed_commit": "855644632027272ad38e76c9f53de1bb0e92100c"
+  },
+  "output": {
+    "verdict": "APPROVE",
+    "findings": []
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/635#pullrequestreview-5879748028",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "auditing-documentation-health",
+      "reviewing-decision-lifecycle",
+      "tracing-correctness-and-invariants",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

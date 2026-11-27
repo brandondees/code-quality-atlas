@@ -1,0 +1,86 @@
+[
+ {
+  "id": 5883888349,
+  "node_id": "PRR_kwDOS05Pps8AAAABXrUC3Q",
+  "user": {
+   "login": "copilot-pull-request-reviewer[bot]",
+   "id": 175728472,
+   "node_id": "BOT_kgDOCnlnWA",
+   "avatar_url": "https://avatars.githubusercontent.com/in/946600?v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D",
+   "html_url": "https://github.com/apps/copilot-pull-request-reviewer",
+   "followers_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/followers",
+   "following_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/following{/other_user}",
+   "gists_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/subscriptions",
+   "organizations_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/orgs",
+   "repos_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/repos",
+   "events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D/received_events",
+   "type": "Bot",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "body": "Copilot was unable to review this pull request because the user who requested the review has insufficient remaining quota. Try requesting a review at a lower effort level.",
+  "state": "COMMENTED",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/pull/661#pullrequestreview-5883888349",
+  "pull_request_url": "https://api.github.com/repos/brandondees/code-quality-atlas/pulls/661",
+  "author_association": "NONE",
+  "is_copilot_code_review": true,
+  "copilot_code_review_effort": null,
+  "_links": {
+   "html": {
+    "href": "https://github.com/brandondees/code-quality-atlas/pull/661#pullrequestreview-5883888349"
+   },
+   "pull_request": {
+    "href": "https://api.github.com/repos/brandondees/code-quality-atlas/pulls/661"
+   }
+  },
+  "submitted_at": "2026-11-12T23:50:22Z",
+  "commit_id": "f64f60cfb17f8fbb4cdd4e86e0cef3b2f07ef106"
+ },
+ {
+  "id": 5891112666,
+  "node_id": "PRR_kwDOS05Pps8AAAABXyM-2g",
+  "user": {
+   "login": "brandondees",
+   "id": 185732,
+   "node_id": "MDQ6VXNlcjE4NTczMg==",
+   "avatar_url": "https://avatars.githubusercontent.com/u/185732?u=4405602d3b542cc855f014fb7056e30e35b3e07c&v=4",
+   "gravatar_id": "",
+   "url": "https://api.github.com/users/brandondees",
+   "html_url": "https://github.com/brandondees",
+   "followers_url": "https://api.github.com/users/brandondees/followers",
+   "following_url": "https://api.github.com/users/brandondees/following{/other_user}",
+   "gists_url": "https://api.github.com/users/brandondees/gists{/gist_id}",
+   "starred_url": "https://api.github.com/users/brandondees/starred{/owner}{/repo}",
+   "subscriptions_url": "https://api.github.com/users/brandondees/subscriptions",
+   "organizations_url": "https://api.github.com/users/brandondees/orgs",
+   "repos_url": "https://api.github.com/users/brandondees/repos",
+   "events_url": "https://api.github.com/users/brandondees/events{/privacy}",
+   "received_events_url": "https://api.github.com/users/brandondees/received_events",
+   "type": "User",
+   "user_view_type": "public",
+   "site_admin": false
+  },
+  "body": "## Round 1 — Major findings, not blocking merge\n\n<!-- atlas-review round:1 layer-diff:dd36d4c17ab83a90ea6172d52f888ab247f86f8e5dcf04401981749a0faf8d11 -->\n\n**Verdict:** COMMENT. No Blocker. There are two Major findings and two Minor findings worth fixing before the round log is wired to a real caller. The current shape is safe for now: no shipped caller builds a `RoundLog` yet, so neither Major affects any running path today.\n\n### Findings (inline)\n\n| Severity | Location | Lens | Summary |\n|---|---|---|---|\n| Major | `atlas_reviewer/rounds.py:150-184` | tracing-correctness-and-invariants | Prior-round omissions are monotonic. Three things each block approval: going over the budget, a `findings_omitted` record at any head, and a superseded record dropped from the window. Because the log is append-only, every one of them stays forever. Probe: 80 clean records give `30 earlier round(s) not shown`, so the PR can never approve again. |\n| Major | `atlas_reviewer/rounds.py:79-87` (+241) | tracing-correctness-and-invariants / hunting-silent-failures | The unreadable-line count covers the whole file. One bad line for any PR, or any future `ROUND_VERSION` line, blocks approval for every PR in the log. Probe confirmed. |\n| Minor | `atlas_reviewer/rounds.py:210-219` | hunting-silent-failures | `quote_untrusted`'s default 200-character limit truncates prior finding lines with no `Omission`. That contradicts \"Nothing is cut silently\" and \"kept whole\". |\n| Minor | `atlas_reviewer/rounds.py:70-76` | hunting-silent-failures | `Path.exists()` raises `PermissionError` outside the `try`, which breaks the \"does not raise\" contract. A post-spend `append` failure also discards the paid review. |\n| Nit | `atlas_reviewer/coordinator.py:509` | reviewing-observability-and-operability | `_dropped_other` is described as \"counted\" but is discarded. |\n| Nit | `atlas_reviewer/coordinator.py:551-563` | checking-restraint | `first_turn(scope=...)` has no caller. It sets #646's API shape ahead of #646. |\n\n### What looks right\n\n- Prior findings are fenced and quoted. The changed-file list is built from the current diff only. The tests pin both: a second round still lists every file, and markup is kept inert.\n- `coverage_complete` and `_coverage_gap_name` gate on `context_omissions` ahead of the other checks, and the draft lists each omission.\n- `_write_synced` now forces 0600 on every write and closes the fd if `fchmod` fails.\n- The cross-PR filter and the case-folded repository key are tested in both directions.\n\n### Coverage\n\n- **Depth mode:** review (the default). No trusted comment or argument named a mode.\n- **Lenses:** tracing-correctness-and-invariants, hunting-silent-failures, reviewing-test-quality, reviewing-observability-and-operability, checking-restraint, sweeping-for-security (prompt-injection fencing), reviewing-pr-and-process-hygiene. I applied them inline from their routing descriptions and my knowledge of the suite. I did **not** load each lens's `SKILL.md` or `reference/` through the `Skill` tool or a fetch. The diff touches no `.claude/skills/` path, so the Skill tier would have been eligible.\n- **Policy:** `REVIEW.md` and `.code-quality-atlas/preferences.md` were not separately fetched at the base ref (`cursor/configurable-model-zdr-218c`). I applied the template defaults: Nit floor on round 1, Blocker-only `REQUEST_CHANGES`. The diff touches neither policy file.\n- **Tool evidence:** run on head `0dcd4e91` in an isolated worktree with Python 3.12.\n  - `pytest atlas_reviewer/tests/test_rounds.py test_coordinator.py test_conversation.py`: 119 passed.\n  - `ruff check .`: clean.\n  - `ruff format --check .`: clean.\n  - `mypy`: no issues in 71 files.\n  - I did not re-run the full suites or the coverage gates; the PR body reports them green.\n  - Both Majors and the `exists()` Minor were confirmed with small probes.\n- **Scope:** all 12 changed files read. Code files were read in full. `docs/session-log.md`, `docs/open-questions.md` and `docs/agentic-reviewer.md` were skimmed only through the diff stat. No renames.\n- **Own-PR:** posted as `COMMENT`, since the reviewer identity matches the PR author.\n\n### Non-blocking (advisory)\n\nNone beyond the Nits above, all of which are posted inline because round 1's floor is Nit.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_",
+  "state": "COMMENTED",
+  "html_url": "https://github.com/brandondees/code-quality-atlas/pull/661#pullrequestreview-5891112666",
+  "pull_request_url": "https://api.github.com/repos/brandondees/code-quality-atlas/pulls/661",
+  "author_association": "OWNER",
+  "is_copilot_code_review": false,
+  "copilot_code_review_effort": null,
+  "_links": {
+   "html": {
+    "href": "https://github.com/brandondees/code-quality-atlas/pull/661#pullrequestreview-5891112666"
+   },
+   "pull_request": {
+    "href": "https://api.github.com/repos/brandondees/code-quality-atlas/pulls/661"
+   }
+  },
+  "submitted_at": "2026-11-13T12:38:05Z",
+  "commit_id": "0dcd4e91cc6c9b81b7971f1829d931e810e8fdc3"
+ }
+]
