@@ -4354,7 +4354,6 @@ def test_guarded_env_exports_quotes_its_own_path():
     )
 
 
-
 RANK_ORDER_SUITE = {
     "aa_slow.py": b"def slow(n):\n    if n > 9:\n        return 0\n    return n\n",
     "test_aa_slow.py": (
@@ -4491,6 +4490,7 @@ def test_the_changed_spans_rank_only_the_innermost_changed_def():
     # outer's own BoolOp must not appear by virtue of enclosing the edit.
     assert SweepSpec("widen.py", 2, "drop-operand", 1) not in specs
     assert SweepSpec("widen.py", 2, "drop-operand", 2) not in specs
+
 
 def test_a_command_the_remaining_wall_cannot_fit_is_named_not_clamped(tmp_path):
     """The pass's budget is a bound, not a suggestion: a command the
