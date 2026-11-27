@@ -3930,31 +3930,6 @@ def _grounding_section(review: AgenticReview, scrub: Callable[[str], str]) -> li
     ]
 
 
-def _review_body_sections(
-    review: AgenticReview, scrub: Callable[[str], str]
-) -> list[str]:
-    """The sections a review that ran carries: the delta and selection
-    framing, then the verified findings and the unverified remainder."""
-    lines = (
-        _delta_lines(review, scrub)
-        + _selection_and_rank_lines(review, scrub)
-        + _reassess_sections(review, scrub)
-        + _delta_sections(review, scrub)
-    )
-    lines += ["", "## Findings (verified quotes only)", ""]
-    lines += [_finding_line(f, scrub) for f in review.verified] or [
-        "No verified findings."
-    ]
-    if review.unverified:
-        lines += ["", "## Not verified (not reported as findings)", ""]
-        lines += [
-            f"- {f.id} {quote_untrusted(str(f.finding.location), QUOTED_CHARS, scrub=scrub)}: "
-            f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
-            for f in review.unverified
-        ]
-    return lines
-
-
 def render_draft(
     review: AgenticReview,
     redactor: Redactor,
@@ -3985,7 +3960,6 @@ def render_draft(
             ),
         ]
     else:
-<<<<<<< HEAD
         lines += _delta_lines(review, scrub)
         lines += _selection_and_rank_lines(review, scrub)
         lines += _reassess_sections(review, scrub)
@@ -4004,20 +3978,6 @@ def render_draft(
             ]
         lines += _merge_section(review, scrub)
     lines += _omission_and_secret_lines(review, scrub)
-=======
-        lines += _review_body_sections(review, scrub)
-    if review.context_omissions:
-        lines += ["", "## Context omissions", ""]
-        lines += [
-            f"- {quote_untrusted(item.source, scrub=scrub)} "
-            f"({quote_untrusted(item.limit, scrub=scrub)}): "
-            f"{quote_untrusted(item.detail, scrub=scrub)}"
-            for item in review.context_omissions
-        ]
-    if review.secrets:
-        lines += ["", "## Possible committed secrets (controller findings)", ""]
-        lines += [_secret_line(s, scrub) for s in review.secrets]
->>>>>>> 3e5baa67 (Ground the lenses in the repo's own declared CI tooling before any lens runs)
     lines += ["", "## Lens coverage (attestation ledger)", ""]
     clean = _clean_runs(review.lenses)
     lines += [
