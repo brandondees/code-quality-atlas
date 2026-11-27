@@ -6739,6 +6739,18 @@ eval-parity run file. Met on the way: `Bridge.sweep` crashed on
 interpreter; it now returns every spec inconclusive with the named
 environment gap, the same verdict `run_tests`/`mutate` report there.
 
+**Round-1 review fixes on #865:** the default cutoff is the anchor
+commit's committer date converted to UTC in GitHub's `...Z` shape — a
+non-UTC committer offset no longer compares lexicographically against
+the remarks' timestamps (which could keep post-anchor remarks or drop
+real ones); the bundle step's own `atlas-history` ref is deleted after
+`bundle create`, so the builder leaves the operator's refs exactly as
+it found them; a remark timestamp that is present but null reads as
+missing (kept, like a pending review's); and the build's log order is
+failing-first wherever the failure ran, the anchor head's own failing
+job included. Each carries its revert-check test in
+`test_snapshot.py`.
+
 ## 2026-11-27 — the grounding pre-pass: the repo's declared CI tooling runs before any lens (the harness gap audit's blocker 4, slice S2)
 
 The protocol's step 4.3 had no counterpart in the agentic path: ruff and

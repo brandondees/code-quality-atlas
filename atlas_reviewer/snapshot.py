@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -158,14 +159,14 @@ def resolve_commits(
 def select_before(entries: list[Json], cutoff: str, field: str) -> list[Json]:
     """The remarks posted strictly before `cutoff` (ISO-8601 strings
     compare lexicographically, and GitHub's timestamps are all
-    zero-padded `YYYY-MM-DDTHH:MM:SSZ`). An entry without the field --
-    a pending review's missing `submitted_at` -- is kept: it is older
-    than any instant, the same reading the conversation block's ordering
-    gives it."""
+    zero-padded `YYYY-MM-DDTHH:MM:SSZ`). An entry whose field is absent
+    or null -- a pending review's missing `submitted_at` -- is kept: it
+    is older than any instant, the same reading the conversation block's
+    ordering gives it."""
     return [
         e
         for e in entries
-        if isinstance(e.get(field, ""), str) and e.get(field, "") < cutoff
+        if not isinstance(e.get(field), str) or e.get(field, "") < cutoff
     ]
 
 
@@ -408,9 +409,9 @@ def _logs(
     max_logs: int,
     log_bytes: int,
 ) -> dict[int, bytes]:
-    """Failing jobs first, then the anchor run's, then the rest (newest
-    run first); the count cap stops the build, the byte cap bounds each
-    read."""
+    """Failing jobs first -- whatever run or commit they belong to,
+    newest run first -- then the anchor run's remaining jobs, then the
+    rest; the count cap stops the build, the byte cap bounds each read."""
     failing: list[int] = []
     anchor_jobs: list[int] = []
     rest: list[int] = []
@@ -419,10 +420,10 @@ def _logs(
             job_id = job.get("id")
             if not isinstance(job_id, int):
                 continue
-            if job.get("head_sha") == head_sha:
-                anchor_jobs.append(job_id)
-            elif job.get("conclusion") in FAILING_CONCLUSIONS:
+            if job.get("conclusion") in FAILING_CONCLUSIONS:
                 failing.append(job_id)
+            elif job.get("head_sha") == head_sha:
+                anchor_jobs.append(job_id)
             else:
                 rest.append(job_id)
     wanted = list(dict.fromkeys([*failing, *anchor_jobs, *rest]))[:max_logs]
@@ -489,25 +490,37 @@ def git_diff_path_count(repo_root: Path, base_sha: str, head_sha: str) -> int:
 
 def git_cutoff(repo_root: Path, head_sha: str) -> str:
     """The cutoff the anchor push implies: the anchor commit's own
-    committer date, in the shape GitHub's timestamps carry (`...Z`), so
-    the `select_before` comparisons stay lexicographic within one
-    format."""
+    committer date, converted to UTC in the shape GitHub's timestamps
+    carry (`...Z`), so the `select_before` comparisons stay lexicographic
+    within one format whatever offset the committer's machine wrote."""
     instant = _git(repo_root, "show", "-s", "--format=%cI", head_sha).strip()
-    return instant[:-6] + "Z" if instant.endswith("+00:00") else instant
+    return (
+        datetime.fromisoformat(instant).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
 
 def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
     """The self-contained history bundle the staging's history fetch
-    reads: its ref `refs/heads/atlas-history` at the anchor head, with no
-    prerequisite -- the staged repository's git is synthetic, so a bundle
-    that assumed the base's objects could not be fetched there."""
+    reads: its ref `refs/heads/atlas-history` sits at the anchor head,
+    with no prerequisite -- the staged repository's git is synthetic, so
+    a bundle that assumed the base's objects could not be fetched there.
+    The ref is the bundle command's own addressing need, not a change to
+    the checkout: it is created for the one `bundle create` and deleted
+    again whatever the bundle's outcome, so the operator's repository is
+    left exactly as the build found it."""
     _git(repo_root, "update-ref", "refs/heads/atlas-history", head_sha)
-    subprocess.run(
-        ["git", "-C", str(repo_root), "bundle", "create", str(dest), "refs/heads/atlas-history"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )  # fmt: skip
+    try:
+        subprocess.run(
+            [
+                "git", "-C", str(repo_root),
+                "bundle", "create", str(dest), "refs/heads/atlas-history",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )  # fmt: skip
+    finally:
+        _git(repo_root, "update-ref", "-d", "refs/heads/atlas-history")
 
 
 class GhApiReader:

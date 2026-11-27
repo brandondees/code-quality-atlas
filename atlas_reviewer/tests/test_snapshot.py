@@ -10,6 +10,7 @@ over the recorded snapshot, spending nothing."""
 
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,9 @@ from atlas_reviewer.snapshot import (
     GhApiReader,
     SnapshotFetchError,
     SnapshotSpec,
+    _logs,
+    git_bundle,
+    git_cutoff,
     resolve_commits,
     select_before,
     write_snapshot,
@@ -47,9 +51,10 @@ def test_select_before_keeps_strictly_older_and_keeps_a_pending_remark():
         {"id": 2, "created_at": "2026-11-13T19:33:07Z"},
         {"id": 3, "created_at": "2026-11-13T19:33:08Z"},
         {"id": 4},
+        {"id": 5, "created_at": None},
     ]
     kept = select_before(entries, "2026-11-13T19:33:07Z", "created_at")
-    assert [e["id"] for e in kept] == [1, 4]
+    assert [e["id"] for e in kept] == [1, 4, 5]
     # A pending review has no submitted_at yet: it reads as older than
     # any instant and is kept, whatever the cutoff.
     assert select_before(entries, "2026-11-13T19:33:07Z", "submitted_at") == entries
@@ -82,6 +87,93 @@ def _seed_repo(path: Path):
     git("commit", "-qm", "second")
     head = git("rev-parse", "HEAD").strip()
     return base, first, head
+
+
+def test_the_default_cutoff_converts_a_non_utc_committer_to_utc(tmp_path):
+    """The cutoff is the anchor commit's committer date converted to UTC
+    in GitHub's `...Z` shape: a `+02:00` committer offset must not
+    compare lexicographically against the remarks' `Z` timestamps, or
+    remarks posted between the true push instant and the local-clock
+    reading leak into the fixture (revert-check: the pass-through
+    normalization keeps them)."""
+    base, _first, _head = _seed_repo(tmp_path)
+    env = {**os.environ, "GIT_COMMITTER_DATE": "2026-11-13T21:33:07+02:00"}
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-qm", "tz"],
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    later = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert git_cutoff(tmp_path, later) == "2026-11-13T19:33:07Z"
+    # The seeded repo's own commits still normalize cleanly.
+    assert git_cutoff(tmp_path, base).endswith("Z")
+
+
+def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
+    """The `atlas-history` ref is the bundle command's own addressing
+    need, not a change to the checkout: it exists only while
+    `bundle create` runs and is gone afterwards, whatever the bundle's
+    outcome -- the builder's reads stay read-only over the operator's
+    repository (revert-check: the un-deleted ref survives here)."""
+    _base, _first, head = _seed_repo(tmp_path)
+    dest = tmp_path / "history.bundle"
+    git_bundle(tmp_path, head, dest)
+    refs = subprocess.run(
+        ["git", "-C", str(tmp_path), "show-ref", "refs/heads/atlas-history"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert refs.returncode != 0
+    bundle_heads = subprocess.run(
+        ["git", "bundle", "list-heads", str(dest)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert f"{head} refs/heads/atlas-history" in bundle_heads
+
+
+def test_the_log_order_is_failing_first_wherever_the_failure_ran():
+    """The build's log order is failing jobs first -- whatever run or
+    commit they belong to, newest run first -- then the anchor run's
+    remaining jobs, then the rest: a failing job on the anchor head
+    ranks with the failures, not behind them (revert-check: the
+    anchor-head check ahead of the failure check demotes it)."""
+
+    class Recording:
+        def __init__(self):
+            self.fetched = []
+
+        def raw(self, path, *, accept=None):
+            self.fetched.append(path)
+            return b"log"
+
+        def get(self, path):
+            raise AssertionError(f"unexpected get {path}")
+
+        def items(self, path, key=None):
+            raise AssertionError(f"unexpected items {path}")
+
+    head = "h" * 40
+    spec = SnapshotSpec("o/r", 1, head, "b" * 40, "br", "c")
+    jobs = {
+        5: [{"id": 1, "head_sha": "x" * 40, "conclusion": "failure"}],
+        9: [
+            {"id": 2, "head_sha": head, "conclusion": "failure"},
+            {"id": 3, "head_sha": head, "conclusion": "success"},
+        ],
+    }
+    reader = Recording()
+    logs = _logs(spec, reader, jobs, head, 2, 1_000)
+    assert set(logs) == {1, 2}
+    assert [p.split("/")[-2] for p in reader.fetched] == ["2", "1"]
 
 
 def test_resolve_commits_prefers_the_listing_and_rebuilds_what_it_lost(tmp_path):
