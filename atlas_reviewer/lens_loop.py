@@ -846,6 +846,7 @@ _ARG_SCHEMA: Mapping[str, Mapping[str, Any]] = MappingProxyType(
         "tests": {"type": "string", "description": "test selector for both runs: a file, a directory or file.py::node_id, empty for the whole suite"},
         "command": {"type": "string", "description": "name one proposed test command (the reviewed repo's default-branch REVIEW.md proposes them); it runs only if the run's allow-list carries it pre-approved (installation admins pre-approve on the S10 settings page), takes no selector, and an unapproved one is a named gap"},
         "content": {"type": "string", "description": "run_probe only: the probe test file's full source, written into the disposable copy at its root and run there under a controller-chosen name; never written back"},
+        "end_line": {"type": "integer", "minimum": 1, "description": "the span's last line, at or after line"},
         "selector": {"type": "string", "description": "run_probe only: a ::node-id suffix selecting part of the probe file (::test_x); empty runs the whole probe file"},
     }
 )  # fmt: skip
@@ -859,6 +860,28 @@ _DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
         "run_tests": "run the head tree's pytest suite, or the named test selector, on a disposable copy; the result is evidence at the head SHA",
         "mutate": "apply one mutant (an operator at one line of one file) to a disposable copy of the head tree and report whether the selected tests still pass after it: survived means the guard the mutant stands for is unpinned",
         "run_probe": "write one throwaway test file into a disposable copy of the head tree and run it under the same sandbox as run_tests; the copy is thrown away, so nothing you write survives or reaches the repository",
+        "git_log": "the pull request's commit range as git log --oneline: every commit the pull request adds over its base",
+        "git_show": "one commit's patch from the pull request's range or base's history (optionally one path's patch within it), read-only",
+        "git_blame": "who last touched each line of a path's cited span, as of the pull request's head: read-only pre-existing/introduced context",
+    }
+)
+
+
+# Per-tool overrides where one argument name serves tools with different
+# shapes: `rev` is the staged revisions' enum for the read tools and a
+# full commit SHA for `git_show`; `line` is the statement a mutant names
+# and the first line a blame span starts at.
+_ARG_OVERRIDES: Mapping[tuple[str, str], Mapping[str, Any]] = MappingProxyType(
+    {
+        ("git_show", "rev"): {
+            "type": "string",
+            "description": "git_show only: a full 40-hex commit SHA inside the pull request's range or base's history",
+        },
+        ("git_blame", "line"): {
+            "type": "integer",
+            "minimum": 1,
+            "description": "git_blame only: the first line of the span to blame",
+        },
     }
 )
 
@@ -871,7 +894,10 @@ def tool_schemas() -> tuple[ToolSchema, ...]:
             _DESCRIPTIONS[tool],
             {
                 "type": "object",
-                "properties": {a: dict(_ARG_SCHEMA[a]) for a in arg_names(tool)},
+                "properties": {
+                    a: dict(_ARG_OVERRIDES.get((tool, a), _ARG_SCHEMA[a]))
+                    for a in arg_names(tool)
+                },
                 "required": list(required_args(tool)),
                 "additionalProperties": False,
             },

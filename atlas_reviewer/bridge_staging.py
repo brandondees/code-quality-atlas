@@ -158,6 +158,18 @@ class Staged:
     # refuses the execution tools (there is nothing to execute tests
     # with, guard or not).
     shim_python: TrustedPython | None = None
+    # The real history the staged repository carries (D80's git-history
+    # update): the shas the history tools name and guard with -- the pull
+    # request's head and its base tip -- set only when the run's staging
+    # carried a history bundle; empty means the history tools report the
+    # named no-history gap.
+    history_head: str = ""
+    history_base: str = ""
+    # Why the history is absent, when it is: the over-cap bundle, a fetch
+    # that failed, or a bundle whose head is not the pull request's. The
+    # history tools' named gap carries it; an empty string means the
+    # history is present (or the run staged no bundle and asked for none).
+    history_note: str = ""
     # The GitHub head SHA the head tree was fetched at (provenance, D80):
     # a test or mutant result is tagged with it, so a lens can cite the
     # evidence at the head it belongs to (D73).
@@ -368,6 +380,107 @@ def as_nobody(python: TrustedPython, argv: str) -> str:
 # size collects in tens of seconds, and the bound exists so a module that
 # hangs at import cannot eat the staging budget. The exec's window is the
 # bound plus the kill slack and the copy's staging.
+# The history bundle's upload (D80's git-history update): the controller
+# uploads it in chunks -- one exec's stdin caps at EXEC_STDIN_MAX_BYTES --
+# and the staging step concatenates the parts, fetches the bundle's ref
+# into the staged repository, and verifies the fetched head is the pull
+# request's own. Above the cap the history tools report the named
+# no-history gap instead of a partial history.
+HISTORY_CHUNK_BYTES = 8 * 1024 * 1024
+HISTORY_BUNDLE_MAX_BYTES = 6 * HISTORY_CHUNK_BYTES
+HISTORY_BUNDLE_FILE = "history.bundle"
+HISTORY_REF = "refs/heads/atlas-history"
+HISTORY_FETCHED_REF = "refs/atlas-history/head"
+
+
+def upload_history_bundle(session: Session, bundle: bytes, root: str) -> None:
+    """The history bundle, chunked across the exec-stdin cap: each part is
+    one bounded upload; the staging step concatenates them. Above the cap
+    the refusal is the run's named gap, never a silent partial history."""
+    if len(bundle) > HISTORY_BUNDLE_MAX_BYTES:
+        raise BoundaryError(
+            "the history bundle exceeds "
+            f"{HISTORY_BUNDLE_MAX_BYTES} bytes ({len(bundle)} given); the "
+            "history tools will report no history for this run"
+        )
+    chunks = [
+        bundle[i : i + HISTORY_CHUNK_BYTES]
+        for i in range(0, len(bundle), HISTORY_CHUNK_BYTES)
+    ]
+    for index, chunk in enumerate(chunks):
+        session.upload(
+            chunk,
+            f"{root}/{HISTORY_BUNDLE_FILE}.part{index:02d}",
+            "history bundle part",
+        )
+
+
+def history_fetch_script(root: str, git: str, base: str, head: str) -> str:
+    """One staging exec (D80's git-history update): concatenate the
+    bundle's parts, fetch its ref into the staged repository, and verify
+    the fetched head is the pull request's own. The verdict is one
+    `atlas-history` tag line; a fetch that fails is a staging failure
+    named like the others, and the parts and the bundle file are removed
+    whatever happened."""
+    quoted_root = shlex.quote(root)
+    quoted_file = shlex.quote(f"{root}/{HISTORY_BUNDLE_FILE}")
+    # The control structures join with newlines: a `; `-joined `then;` or
+    # `else;` is a shell syntax error, and the exec would answer nothing.
+    return "\n".join(
+        (
+            f"cd {quoted_root}",
+            f"cat {quoted_file}.part* > {quoted_file} 2>/dev/null",
+            "rm -f " + quoted_file + ".part*",
+            (
+                f"if {quote(git)} --git-dir=repo.git fetch -q {quoted_file} "
+                f"{HISTORY_REF}:refs/atlas-history/head; then"
+            ),
+            (
+                f"  got=$({quote(git)} --git-dir=repo.git rev-parse "
+                "refs/atlas-history/head^{commit})"
+            ),
+            f'  if [ "$got" = {quote(head)} ]; then',
+            '    echo "atlas-history:ok"',
+            "  else",
+            '    echo "atlas-history:wrong-head:$got"',
+            "  fi",
+            "else",
+            '  echo "atlas-history:fetch-failed"',
+            "fi",
+            f"rm -f {quoted_file}",
+        )
+    )
+
+
+def parse_history(code: int | None, text: str, head: str) -> bool:
+    """The history step's verdict: True when the bundle's ref fetched and
+    its head is the pull request's own. A missing verdict or a failed
+    fetch is a staging failure, named; a wrong head is too -- a bundle
+    that does not carry what it claims must not be served as history."""
+    # The verdict is everything after the tag up to the line's end: the
+    # wrong-head verdict carries the SHA the bundle actually served, and
+    # a `[^:\n]` body would stop at that colon and leave the branch
+    # unreachable -- a wrong-head bundle would degrade as "gave no
+    # verdict" instead of naming the head it carried.
+    found = re.findall(r"^atlas-history:(\S+)$", text, re.MULTILINE)
+    if code != 0 or not found:
+        raise BoundaryError(
+            "the history bundle gave no verdict "
+            f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+        )
+    verdict = found[-1]
+    if verdict == "ok":
+        return True
+    if verdict.startswith("wrong-head:"):
+        raise BoundaryError(
+            "the history bundle's head is not the pull request's: "
+            f"{verdict.removeprefix('wrong-head:')}"
+        )
+    raise BoundaryError(
+        "the history bundle could not be fetched into the staged repository"
+    )
+
+
 COLLECTION_BOUND_S = 300
 COLLECTION_BUDGET_S = COLLECTION_BOUND_S + KILL_AFTER_S + 60.0
 
@@ -621,6 +734,8 @@ def stage(
     root: str = BRIDGE_ROOT,
     unpack: UnpackLimits = DEFAULT_UNPACK,
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
+    history_bundle: bytes | None = None,
+    history_base: str = "",
 ) -> Staged:
     """Raises `BoundaryError` when git is missing or untrusted, an upload
     falls short, the runner refuses a tree past `unpack`, or staging does
@@ -657,6 +772,24 @@ def stage(
             budget_s=COLLECTION_BUDGET_S,
         )
         collection_ok, collection_note = parse_collection(code, text)
+    history_head, history_note = "", ""
+    if history_bundle is not None:
+        # The history is optional context: a bundle over the cap, a fetch
+        # that failed, or a bundle that is not what it claims degrade to
+        # the named no-history gap on the history tools -- the review's
+        # other tools are untouched -- never a failed run.
+        try:
+            upload_history_bundle(session, history_bundle, root)
+            code, text = session.exec(
+                "history fetch",
+                history_fetch_script(root, git, history_base, trees.head_sha),
+                stage="bridge staging",
+                budget_s=UNPACK_BUDGET_S,
+            )
+            if parse_history(code, text, trees.head_sha):
+                history_head = trees.head_sha
+        except BoundaryError as exc:
+            history_note = str(exc)
     return Staged(
         root,
         git,
@@ -664,6 +797,9 @@ def stage(
         version,
         pytest,
         shim,
+        history_head,
+        history_base,
+        history_note,
         trees.head_sha,
         collection_ok,
         collection_note,

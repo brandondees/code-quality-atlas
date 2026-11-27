@@ -929,6 +929,36 @@ as a run when it produces one. One test process's wall clock is 180 seconds
 whole-suite baseline under `mutate` — two processes, one call — could
 not fit), overridable with `ATLAS_TEST_TIMEOUT_S` (30 to 600).
 
+## The read-only history tools (D80's git-history update)
+
+The lenses can read the pull request's own history now: `git_log` (the
+commit range as `git log --oneline`), `git_show` (one commit's patch, or
+one path's patch within it), and `git_blame` (who last touched each line
+of a cited span, as of the pull request's head — the pre-existing/
+introduced context a finding's attribution needs). The history reaches
+the runner as a **git bundle** the staging uploads in parts (one exec's
+stdin caps at 10 MiB) and fetches into the staged repository, verified
+against the pull request's own head SHA; the bundle's cap is
+`HISTORY_BUNDLE_MAX_BYTES`. A bundle over the cap, a fetch that fails,
+or a bundle whose head is not the pull request's degrades to the named
+no-history gap -- the run completes and every other tool is untouched,
+never a partial history or a failed run. Because executed code can
+rewrite the staged repository, a re-stage (what every call after a run
+tool does) re-uploads and re-fetches the controller-held bundle; a
+re-fetch that fails there marks the history lost, and the history tools
+report the gap naming the failed re-fetch.
+
+Every history tool is read-only — log, show and blame write nothing —
+and runs in the same runner sandbox as the other tools: deny-all egress,
+the timeout and the byte and line caps. A revision is valid when the
+pull request's head or its base tip reaches it — the PR's range, or
+anything reachable from base — and the exec's rev guard refuses anything
+else before git runs, as a rejected call. A run whose staging carried no
+bundle (the default) reports the named no-history gap: the live
+acquisition of a bundle — a controller-side fetch of the reviewed
+repository into a bundle, capped — is the deploy step this slice leaves
+named for the operator, and the eval's fixtures carry their own.
+
 ## The parity harness's driver: `eval-run` (issue #713's harness-parity slice)
 
 `python -m atlas_reviewer eval-run --fixture <dir>` runs the product's
