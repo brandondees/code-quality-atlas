@@ -325,12 +325,27 @@ jobs:
     # Everything the old single `gate` job ran except the suites: the
     # dependency audit, lint/format/type check, the offline dry run, the
     # structure gates (eval, drift, generated trees, license, requirements
-    # sync), and the non-Python linters. The steps keep their per-step
-    # `if:` gates because their input sets are genuinely disjoint (see the
-    # workflow header) -- a Markdown-only change still gets markdownlint
-    # here while the Python-prefixed steps skip.
+    # sync), and the non-Python linters.
+    #
+    # The job-level gate has to cover EVERY trigger class any step inside
+    # uses -- `python`/`requirements` for the Python pipeline, and
+    # `markdown`/`shell`/`workflows` for markdownlint/shellcheck/actionlint,
+    # which are this job alone's responsibility and have no other home: a
+    # narrower job gate would skip the whole job on a markdown-only or
+    # workflows-only PR, silently dropping that linter from its only
+    # remaining trigger (tests/test_ci_job_gates_cover_step_gates.py pins
+    # the reachability). The expensive steps keep their per-step `if:` gates
+    # because their input sets are genuinely disjoint (see the workflow
+    # header) -- a Markdown-only change still gets markdownlint here while
+    # the Python-prefixed steps (setup-python, pip install, everything
+    # downstream of it) skip.
     needs: changes
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+    if: >-
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.requirements == 'true' ||
+      needs.changes.outputs.markdown == 'true' ||
+      needs.changes.outputs.shell == 'true' ||
+      needs.changes.outputs.workflows == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

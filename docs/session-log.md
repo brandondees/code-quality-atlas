@@ -6430,9 +6430,23 @@ behavioral tests (every spec in exactly one shard, unset selects all,
 malformed/out-of-range/total-mismatch specs fail loudly) sit beside it in
 `test_liveness_sharding.py` and run inside every shard's job, taking the
 spec as an argument so a shard's own env var cannot change what they
-assert. Four `test_ci_*` guards that pinned the single-job shape (the
-filter-location lookups and the require-hashes install scan) were updated
-to the new shape with their intent intact; the require-hashes guard now
+assert. Four CI-shape guards across three files -- the filter lookups in
+`test_ci_python_filter_covers_known_reads.py`, the two ci.yml shape pins
+in `test_session_log_currency.py`, and the install scan in
+`test_ci_require_hashes_install.py` -- were updated to the new shape with
+their intent intact; the require-hashes guard now
 checks every copy of the install, since the setup steps repeat per job.
 Nothing else moved: same concurrency group, same hosted runners, same
 pins, same step order within `lint`, same coverage floors.
+
+The round-1 protocol review on #855 caught the first draft skipping the
+whole `lint` job on markdown-only, shell-only and workflows-only PRs: the
+job-level `python || requirements` gate left markdownlint, shellcheck and
+actionlint — whose step gates could then never fire, actionlint's only
+remaining trigger for new workflow files included — silently dropped while
+the aggregator counted the skipped job as passing. The job gate now covers
+every trigger class its steps read, and
+`tests/test_ci_job_gates_cover_step_gates.py` pins the property
+structurally: every `needs.changes.outputs.*` name any job or step gate
+reads must be defined by the `changes` job, and every output a step reads
+must be covered by its own job's gate.
