@@ -157,6 +157,8 @@ def gather_ci(
     out.items.extend(r.item for r in runs)
     _other_commit_checks(ctx)
     at_head = [r for r in runs if r.item.head_sha == sha]
+    others = [r for r in runs if r.item.head_sha != sha]
+    run_jobs: list[tuple[int, list[Job]]] = []
     for run in _capped(
         ctx,
         "workflow runs at the head SHA",
@@ -167,7 +169,26 @@ def gather_ci(
             SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
         ),
     ):
-        _gather_run(ctx, run, artifacts)
+        run_jobs.append((run.run_id, _gather_run(ctx, run, artifacts)))
+    # The branch's earlier commits' runs get their jobs listed too: a
+    # failure at an earlier commit that was never re-run has a log the
+    # shared budget can spend on (D38's 20-other-commits bound bounds the
+    # extra listings; the head-run cap above is D38's own).
+    for run in _capped(
+        ctx,
+        "workflow runs at other commits",
+        others,
+        config.max_ci_commits,
+        config.max_ci_commits,
+        lambda r: SourceKey(
+            SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
+        ),
+    ):
+        run_jobs.append((run.run_id, _gather_run(ctx, run, artifacts)))
+    # One shared log budget, spent once against the whole branch ordered
+    # failing-first: a per-run pass would let an earlier-visited run's
+    # passing jobs crowd a later run's failing job out of the cap.
+    _gather_job_logs(ctx, _branch_log_order(run_jobs))
 
 
 def _runs(
@@ -363,16 +384,11 @@ def _gather_jobs(ctx: _Ctx, run: WorkflowRun) -> tuple[Job, ...]:
     return jobs
 
 
-def _gather_run(ctx: _Ctx, run: WorkflowRun, with_artifacts: bool = True) -> None:
+def _gather_run(ctx: _Ctx, run: WorkflowRun, with_artifacts: bool = True) -> list[Job]:
     repo, name = ctx.event.repo, run.item.provenance.key.name
     jobs = _gather_jobs(ctx, run)
-    # The whole branch's logs, failing jobs first, within the count cap:
-    # the owner's lifted-context decision (2026-11-26) -- a failure at an
-    # earlier commit that was never re-run is exactly the log the review
-    # needs, so the head-only download gate is gone.
-    _gather_job_logs(ctx, list(jobs))
     if not with_artifacts:
-        return
+        return list(jobs)
     artifacts = _parse_each(
         ctx,
         SourceKind.ARTIFACT,
@@ -386,6 +402,19 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun, with_artifacts: bool = True) -> Non
     )
     ctx.out.items.extend(a.item for a in artifacts)
     _gather_artifacts(ctx, artifacts)
+    return list(jobs)
+
+
+def _branch_log_order(run_jobs: list[tuple[int, list[Job]]]) -> list[Job]:
+    """The branch's jobs in the order the shared log budget is spent
+    against: every run's jobs, newest run first, so `_gather_job_logs`'s
+    stable failing-first sort ranks a later run's failing job ahead of an
+    earlier run's passing one -- the cap is spent once across the whole
+    branch, never per run."""
+    ordered: list[Job] = []
+    for _run_id, jobs in sorted(run_jobs, key=lambda pair: -pair[0]):
+        ordered.extend(jobs)
+    return ordered
 
 
 def _job_links(run: WorkflowRun, jobs: tuple[Job, ...]) -> list[Link]:

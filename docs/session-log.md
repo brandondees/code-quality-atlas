@@ -6416,6 +6416,17 @@ fetch bounds, artifact ZIPs stay out of the agentic block and head-only
 in the one-shot path, and stale evidence is still labelled by its SHA
 and never a result for the head.
 
+**Round-1 review fix on #858:** the shared job-log budget is now spent
+once against the whole branch, ordered failing-first (`_branch_log_order`
+feeds `_gather_job_logs`'s stable sort), so an earlier-visited run's
+passing jobs cannot crowd a later run's failing job out of the cap —
+and the branch's earlier commits' runs get their jobs listed at all
+(bounded by D38's 20-other-commits cap), which is what puts a never
+re-run earlier failure's log in reach. The sample fixture carries the
+other runs' empty jobs/artifacts listings, and
+`test_failing_jobs_first_across_the_whole_branch` pins both halves of
+the fix.
+
 ## 2026-11-27 — the CI gate splits into parallel jobs behind a `gate` aggregator (Brandon-approved Nov 26)
 
 The single `gate` job's median wall clock was ~23 minutes (23.4 median, 26.9
