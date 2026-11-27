@@ -1389,3 +1389,55 @@ def test_an_auto_include_the_picker_also_named_is_not_planned_twice():
     names = [c.name for c in selection.choices]
     assert names.count("reviewing-module-design") == 1
     assert [u.name for u in plan.uses if u.status is LensStatus.RUN] == names
+
+
+def test_an_auto_include_keeps_its_priority_over_a_pick_that_names_it():
+    """When the picker also names a mandated lens, the duplicate comes out
+    of the PICKS, never out of the auto set: the auto choice keeps its
+    place ahead of the picks, so a budget that fits either the mandated
+    lens or a pick ranked before it runs the mandated lens -- dropping
+    the auto choice instead would let the budget run the pick and cut
+    the lens the shape mandates."""
+    library = small_bundle(
+        "checking-restraint",
+        "reviewing-module-design",
+        "reviewing-naming-and-readability",
+    )
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint", "reviewing-module-design"),
+        library,
+        scrub=str,
+        # The critical tier's four bodies plus exactly one more fit; the
+        # next pick does not.
+        budget_chars=550,
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    plan = plan_lenses(library, chosen.choices, budget_chars=550)
+    ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
+    assert "reviewing-module-design" in ran
+    assert "checking-restraint" not in ran
+    names = [c.name for c in chosen.choices]
+    assert names.index("reviewing-module-design") < names.index("checking-restraint")
+
+
+def test_the_shape_facts_read_every_changed_path_not_a_capped_slice():
+    """Shape enforcement reads EVERY changed path: a decision record past
+    a picker prompt's 500-path cap is exactly the record the lenses must
+    be enforced for, and a docs-heavy head of the list must not read
+    docs-only while source follows it (the CodeRabbit finding on the
+    sliced callers)."""
+    from atlas_reviewer.picker import shape_facts
+
+    paths = tuple(f"src/module_{i}.py" for i in range(500)) + (
+        "docs/open-questions.md",
+        "calc.py",
+    )
+    shapes, auto_includes = shape_facts(paths, scrub=str, diff="")
+    assert any("decision record" in shape for shape in shapes)
+    assert "reviewing-decision-lifecycle" in auto_includes
+    assert not any("every changed path is documentation" in s for s in shapes)
+    # A genuinely docs-only full list still states the docs shape.
+    docs_shapes, docs_auto = shape_facts(("README.md", "docs/x.md"), scrub=str)
+    assert any("every changed path is documentation" in s for s in docs_shapes)
+    assert "auditing-documentation-health" in docs_auto

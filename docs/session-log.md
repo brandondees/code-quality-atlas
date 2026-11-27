@@ -6628,3 +6628,27 @@ off git's own extended-header lines (the lines before the first `@@`):
 only when git names no shape at all. Pinned by the reviewer's own repro
 as a test: an edited record whose added line says "add a new file" keeps
 the currency include. Offline only.
+
+## 2026-11-27 (same day) — the cheap fixes' CodeRabbit round (on the stacked #861)
+
+Three findings from the bot's review of the post-merge restack. The
+Major: when the picker ALSO named a mandated lens, the dedupe dropped
+the auto choice (its name was already covered) and left the lens as an
+ordinary pick behind the others — so a one-shot budget that fit either
+the mandated lens or a pick ranked before it ran the pick and cut the
+lens the shape mandates, breaking the ahead-of-the-picks guarantee the
+enforcement exists for. The duplicate is now removed from the PICKS
+instead: the auto choice keeps its place, pinned by a budget-limited
+test where the picker names the mandated lens and the budget fits
+exactly one more body. The Minor on the callers: shape detection read
+the picker prompt's 500-path slice, so a decision record past the cap
+was invisible to the enforcement and a docs-heavy head of the list
+could read docs-only while source followed; the shape facts and their
+mandated names are now one shared `picker.shape_facts` computation over
+EVERY changed path, used by both entry points (the picker prompt keeps
+its own cap), pinned by a test with the decision record at position
+501. The Minor on the shared-sweep test's fixed sleep: the owner thread
+now signals a readiness event (running at all means it claimed the
+entry), and the main thread asserts a bounded wait for it before
+invoking the waiter — the race the fixed sleep carried is gone.
+Offline only.

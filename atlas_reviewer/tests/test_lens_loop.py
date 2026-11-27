@@ -3398,12 +3398,17 @@ def test_a_shared_sweep_waiter_that_times_out_dispatches_nothing():
     from atlas_reviewer.bridge import SweepSpec, SweepVerdict
 
     specs = (SweepSpec("calc.py", 2, "negate-condition"),)
+    claimed = threading.Event()
     release = threading.Event()
     winner: list[int] = []
     waiter: list[int] = []
     share = SharedSweep()
 
     def slow() -> tuple[SweepVerdict, ...]:
+        # Running at all means the owner claimed the entry under the lock;
+        # the main thread waits for this signal instead of sleeping a
+        # fixed interval, so the race the fixed sleep carried is gone.
+        claimed.set()
         winner.append(1)
         assert release.wait(10)
         return (SweepVerdict(specs[0], "survived"),)
@@ -3411,8 +3416,8 @@ def test_a_shared_sweep_waiter_that_times_out_dispatches_nothing():
     owner = threading.Thread(target=lambda: share.verdicts(specs, slow, 30.0))
     owner.start()
     try:
-        # The owner claims the entry first; the waiter then times out.
-        time.sleep(0.05)
+        assert claimed.wait(5), "the owner never claimed the shared entry"
+        assert winner == [1]
 
         def fast() -> tuple[SweepVerdict, ...]:
             waiter.append(1)
@@ -3422,7 +3427,6 @@ def test_a_shared_sweep_waiter_that_times_out_dispatches_nothing():
     finally:
         release.set()
         owner.join()
-    assert winner == [1]
     assert waiter == []
     assert verdicts is None
 

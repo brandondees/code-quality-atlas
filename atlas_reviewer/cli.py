@@ -177,10 +177,9 @@ from atlas_reviewer.picker import (
     Depth,
     LensPreferences,
     LensSelection,
-    guideline_shapes,
     picker_instructions,
     select_agentic_lenses,
-    shape_auto_includes,
+    shape_facts,
 )
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -1221,12 +1220,12 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             return scrubber(text).text
 
         picker_paths = diff_paths(diff)[:500]
-        # The controller's own shape facts (D69 round-1 F4), from the
-        # changed paths this command already holds; the paths are quoted
-        # as data inside the sentences. The lens names those facts mandate
-        # are computed beside them and enforced by the picker itself.
-        shapes = guideline_shapes(picker_paths, scrub=scrub, diff=diff)
-        auto_includes = shape_auto_includes(picker_paths, diff=diff)
+        # The controller's own shape facts (D69 round-1 F4) over EVERY
+        # changed path -- not the picker prompt's 500-path slice
+        # (picker.shape_facts' docstring carries the why). The lens names
+        # those facts mandate are computed beside them and enforced by the
+        # picker itself.
+        shapes, auto_includes = shape_facts(diff_paths(diff), scrub=scrub, diff=diff)
 
         def run_picker() -> str:
             shown = "\n".join(picker_paths) or "(no changed paths)"

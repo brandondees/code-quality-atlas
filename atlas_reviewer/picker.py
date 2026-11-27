@@ -452,6 +452,22 @@ _AUTO_WHY = {
 }
 
 
+def shape_facts(
+    paths: tuple[str, ...], *, scrub: Callable[[str], str], diff: str = ""
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The controller's own shape facts (D69 round-1 F4) and the lens
+    names they mandate, as one computation the callers share: the prose
+    sentences state the shapes to the picker and the note, the names are
+    what the controller enforces itself. Both read EVERY changed path --
+    not a picker prompt's capped slice, which would hide a decision
+    record past the cap from the enforcement and let a docs-heavy head
+    of the list read docs-only while source follows it."""
+    return (
+        guideline_shapes(paths, scrub=scrub, diff=diff),
+        shape_auto_includes(paths, diff=diff),
+    )
+
+
 def _edits_existing(path: str, diff: str) -> bool:
     """Whether the diff shows the path existed before the change, read
     off git's own extended-header lines -- `new file mode` says authored,
@@ -602,7 +618,9 @@ def select_lenses(
     if isinstance(picked, LensSelection):
         return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
-    auto, includes = _dedupe_auto_and_includes(applied, auto_includes, preferences)
+    auto, includes, kept = _dedupe_auto_and_includes(
+        applied, auto_includes, preferences
+    )
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -617,7 +635,7 @@ def select_lenses(
         f"{_preference_record(preferences, applied)}"
     )
     return LensSelection(
-        _with_critical(applied.kept, applied.hygiene, auto) + includes, note, True
+        _with_critical(kept, applied.hygiene, auto) + includes, note, True
     )
 
 
@@ -625,28 +643,30 @@ def _dedupe_auto_and_includes(
     applied: _Applied,
     auto_includes: tuple[str, ...],
     preferences: LensPreferences | None,
-) -> tuple[tuple[LensChoice, ...], tuple[LensChoice, ...]]:
-    """The shape auto-includes and the repo-preference includes after
-    deduping, the one block both selection paths share so they cannot
-    drift: an auto-include the picks, the critical tier or the kept
-    hygiene already carries is dropped (a repeated name would be planned
-    NOT RUN as already chosen), an include an auto-include now covers is
-    dropped the same way, and both respect a preference's exclude."""
+) -> tuple[tuple[LensChoice, ...], tuple[LensChoice, ...], tuple[str, ...]]:
+    """The shape auto-includes, the repo-preference includes, and the
+    picks with the auto-covered names removed -- the one block both
+    selection paths share so they cannot drift. The duplicate is removed
+    from the PICKS, never from the auto set: the auto choice keeps its
+    place ahead of the picks, so a one-shot budget that fits either the
+    mandated lens or a pick ranked before it runs the mandated lens --
+    dropping the auto choice instead would leave the lens ranked behind
+    the picks and budgetable out of the guarantee. An include an
+    auto-include now covers is dropped the same way, and both respect a
+    preference's exclude."""
+    auto = tuple(_auto_choices(auto_includes, preferences))
+    auto_names = {choice.name for choice in auto}
+    kept = tuple(n for n in applied.kept if n not in auto_names)
     covered = {
-        *applied.kept,
+        *kept,
+        *auto_names,
         *CRITICAL_TIER,
         *(choice.name for choice in applied.hygiene),
     }
-    auto = tuple(
-        choice
-        for choice in _auto_choices(auto_includes, preferences)
-        if choice.name not in covered
-    )
-    covered |= {choice.name for choice in auto}
     includes = tuple(
         choice for choice in applied.includes if choice.name not in covered
     )
-    return auto, includes
+    return auto, includes, kept
 
 
 def _order_note(hygiene: tuple[LensChoice, ...]) -> str:
@@ -709,7 +729,9 @@ def _agentic_selection(
     if isinstance(picked, LensSelection):
         return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
-    auto, includes = _dedupe_auto_and_includes(applied, auto_includes, preferences)
+    auto, includes, kept = _dedupe_auto_and_includes(
+        applied, auto_includes, preferences
+    )
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -721,7 +743,7 @@ def _agentic_selection(
         f"{_preference_record(preferences, applied)}"
     )
     return LensSelection(
-        _with_critical(applied.kept, applied.hygiene, auto) + includes, note, True
+        _with_critical(kept, applied.hygiene, auto) + includes, note, True
     )
 
 
