@@ -2724,7 +2724,11 @@ D41 records the 2026-11-12 probe that did.
     review never approves. A failed runner's note is quoted in the draft.
     A settled outcome with no changed-file count shows no coverage.
   - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are
-    ranked by severity. The verdict comes from verified, introduced defects
+    ranked by severity. Findings from different lenses that name the same
+    defect — the same target and the same claim — are one finding whose
+    line names every lens that reported it (issue #822); the merge call
+    (when the review runs one) reconciles what that exact key cannot.
+    The verdict comes from verified, introduced defects
     only. Unverified findings are listed apart and never counted. Possible
     committed secrets that the tools read are controller findings.
   - **Prompt cache.** When the live adapters reported prompt-cache
@@ -2780,6 +2784,8 @@ D41 records the 2026-11-12 probe that did.
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
+| `dedupe.py` | the synthesis's controller-side dedupe (issue #822): findings from different lenses naming the same defect — the same target (path and overlapping or nearby span) and the same claim (statement, valence and attribution) — collapse into one representative that carries every lens attribution; a verified finding and an unverified one never merge | no |
+| `findings.py` | `MintedFinding`, the synthesis's finding record: the minted id, the lens it stands under, and the cross-lens attribution list a dedupe cluster's representative carries | no |
 | `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. The `agentic-review` command builds the path at `<state dir>/rounds.jsonl` unless `--round-log` names another one (D67, D74) | writes the log file |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `reasoning` only when the selected endpoints list it, `cache_control` on every Anthropic-family route plus the explicit part-level breakpoint on a shared prefix's fenced diff, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; endpoint rates when the cost is missing but the token counts are usable, with cache read and write counts at the endpoints' cache rates when the response reports them, and the output count priced as one token, one rate -- the reported reasoning count split out of the completion count, the whole completion count at the higher rate when the count is missing, so it settles rather than keeping the reservation -- D82), and per-session prompt-cache accounting fed to `cache_stats.CacheLedger` (#695). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `cache_stats.py` | per-session prompt-cache accounting from a model's reported usage (#695): sessions bounded by the system prompt, the miss rule (cached tokens below the previous turn's prompt, or unreported), each session's opening-turn cache read — the shared diff prefix's read (D65) — and the run summary's session and total lines. Pure; no I/O | no |
