@@ -994,10 +994,15 @@ are named past the cap in the evidence block and the coverage lines.
 Each command runs in its own disposable copy of the head tree — the same
 copy, no-root guard, verified deny-all egress, clock and framing the
 `bash` tool uses — without spending the attempt's call budget, because
-the pass is the controller's evidence gathering. One command runs at
-most 180 seconds (the execution tools' clock, #843); the pass's whole
-wall budget is 540 seconds, and a command the remainder cannot start is
-a named result, never a silent skip. The commands run with the
+the pass is the controller's evidence gathering. A chain that installs
+or fetches before its check (`pip install x && pytest`) cannot be
+reproduced under deny-all egress: the check is named as unreproducible
+in the evidence block and the coverage lines, never run with its
+provisioning failure reading as the check's own, while offline chains
+(`ruff format --check . && git diff --exit-code`) run whole. One command
+runs at most 180 seconds (the execution tools' clock, #843); the pass's
+whole wall budget is 540 seconds, and a command the remainder cannot
+start is a named result, never a silent skip. The commands run with the
 setup-provisioned tools' own bin directory on PATH, so a repo whose
 setup spec installs its linters resolves them the way CI's environment
 does.

@@ -213,7 +213,7 @@ def _classify(line: str) -> tuple[str, str] | None:
     if head == "make":
         target = tokens[1] if len(tokens) > 1 else ""
         for family in FAMILIES:
-            if re.search(rf"\b{family}\b", target):
+            if _name_declares(target, family):
                 return family, "make"
         return None
     if head in ("python", "python3"):
@@ -242,9 +242,19 @@ def _script_family(tokens: list[str]) -> tuple[str, str] | None:
         return (family, tokens[1]) if family else None
     script = tokens[1] if tokens[1] != "run" else (tokens[2] if len(tokens) > 2 else "")
     for family in FAMILIES:
-        if re.search(rf"\b{family}\b", script):
+        if _name_declares(script, family):
             return family, tokens[0]
     return None
+
+
+def _name_declares(name: str, family: str) -> bool:
+    """Whether a script or make target's name declares the family: some
+    delimited part of the name starts with the family -- `typecheck`,
+    `tests`, `test_unit` and `test:unit` all declare test/type families,
+    the stems the usual script names are built from -- while a family
+    name buried inside another word (`attest`, `latest`) does not, which
+    is the whole difference from a substring match."""
+    return any(part.startswith(family) for part in re.split(r"[:_\-./]", name))
 
 
 def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
@@ -372,22 +382,43 @@ def _step_prefix(step: Mapping[str, object]) -> str:
 
 _SEGMENT_SPLIT = re.compile(r"&&|\|\||;")
 
-# The heads whose segment provisions or fetches rather than checks: a
-# chain mixing one of these with a check is a sequence the sandbox cannot
-# reproduce (deny-all egress fails the provisioning first), so the check
-# is named unreproducible instead of run. `cd`, `export`, `echo` and
-# `sleep` are context, not provisioning: a chain of those and a check
-# runs whole. A segment that itself classifies as a check -- `python3 -m
-# pytest`, `npm test` -- is never provisioning, whatever its head.
-_PROVISIONING = _STATE_CHANGING - {"cd", "echo", "export", "sleep"} | {"git"}
+# The heads whose segment installs, fetches or escalates: a chain mixing
+# one of these with a check is a sequence the sandbox cannot reproduce
+# (deny-all egress fails the install or fetch first), so the check is
+# named unreproducible instead of run. Tool heads that run offline --
+# `git`, a plain `python3 script.py`, a package manager's check verbs --
+# are not here: a chain of those and a check runs whole.
+_PROVISIONING_HEADS = frozenset(
+    {"pip", "pip3", "apt", "apt-get", "brew", "curl", "wget", "docker", "sudo"}
+)  # fmt: skip
+_INSTALL_SUBCOMMANDS = frozenset(
+    {"install", "ci", "add", "update", "upgrade", "fetch", "pull", "link"}
+)
 
 
 def _provisions(segment: str) -> bool:
-    """Whether one shell segment of a chain provisions or fetches: its
-    head names a provisioning tool and the segment itself classifies as
-    no check."""
+    """Whether one shell segment of a chain installs or fetches: its head
+    names a provisioning tool, the segment itself classifies as no
+    check, and the verb is one that reaches the network or the system --
+    a package manager's install-like subcommand, a bare installer, or a
+    `python -m pip`. A check-shaped segment (`python3 -m pytest`, `npm
+    test`, `npm run typecheck`) is never provisioning, whatever its
+    head."""
     tokens = segment.split()
-    return bool(tokens) and tokens[0] in _PROVISIONING and _classify(segment) is None
+    if not tokens or _classify(segment) is not None:
+        return False
+    head = tokens[0]
+    if head in _PROVISIONING_HEADS:
+        return True
+    if head in ("npm", "yarn", "pnpm"):
+        return len(tokens) > 1 and tokens[1] in _INSTALL_SUBCOMMANDS
+    if head in ("python", "python3"):
+        return len(tokens) >= 3 and tokens[1:3] == ["-m", "pip"]
+    if head == "go":
+        return len(tokens) > 1 and tokens[1] in ("get", "install", "download")
+    if head == "cargo":
+        return len(tokens) > 1 and tokens[1] in ("install", "add", "fetch")
+    return False
 
 
 def _joined_lines(run: str) -> list[str]:
@@ -440,7 +471,11 @@ def grounding_evidence(outcome: GroundingOutcome, *, nonce: str) -> str:
     ]
     if outcome.failure:
         lines.append(f"The pass itself failed: {outcome.failure}")
-    if not outcome.plan.configured and not outcome.plan.unparseable:
+    if (
+        not outcome.plan.configured
+        and not outcome.plan.unparseable
+        and not outcome.plan.unreproducible
+    ):
         lines.append(
             "The repo's workflows declare no lint, type or test command; "
             "the pass had nothing to run."

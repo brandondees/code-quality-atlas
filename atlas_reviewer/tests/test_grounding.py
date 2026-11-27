@@ -252,15 +252,26 @@ def test_an_over_cap_evidence_block_names_its_cut():
     assert "[... truncated by atlas_reviewer ...]" in text
 
 
-def test_the_script_and_target_names_match_on_a_word_boundary():
-    """`npm run attest` and `make latest` contain a family's name as a
-    substring but name no check the pass runs; the match is a word
-    boundary, so a script like `test:unit` still classifies."""
+def test_the_script_and_target_names_match_as_delimited_stems():
+    """A script or make target's name declares its family when a
+    delimited part of the name starts with it -- `typecheck`, `tests`,
+    `test_unit` and `test:unit` all classify, the stems the usual script
+    names are built from -- while a family name buried inside another
+    word (`attest`, `latest`) does not. The stem prefix is what round 2's
+    word-boundary match got wrong: it dropped the most common check
+    names, silently, and the coverage section then reported the family
+    as unconfigured."""
     from atlas_reviewer.grounding import _classify
 
+    assert _classify("npm run typecheck") == ("type", "npm")
+    assert _classify("pnpm typecheck") == ("type", "pnpm")
+    assert _classify("make typecheck") == ("type", "make")
+    assert _classify("make tests") == ("test", "make")
+    assert _classify("npm run tests") == ("test", "npm")
+    assert _classify("make test_unit") == ("test", "make")
+    assert _classify("npm run test:unit") == ("test", "npm")
     assert _classify("npm run attest") is None
     assert _classify("make latest") is None
-    assert _classify("npm run test:unit") == ("test", "npm")
     assert _classify("make lint") == ("lint", "make")
 
 
@@ -309,3 +320,60 @@ def test_a_chain_that_provisions_before_its_check_is_named_not_run():
     # The unreproducible check's tool still covers its file types, and
     # its family is configured: the Not run line carries the why.
     assert not any(".py" in line for line in lines if "no configured tool" in line)
+
+
+def test_offline_chain_segments_do_not_make_a_check_unreproducible():
+    """A chain's segment makes its check unreproducible only when the
+    segment installs or fetches -- what deny-all egress actually fails.
+    Offline segments (`git diff`, a plain `python3 script.py`, a package
+    manager's check verbs) ride along, and the check runs whole:
+    `npm run typecheck && npm test` must not lose its test to the
+    round-3 provisioning set, and `pip install x && pytest` still does."""
+    contents = {
+        ".github/workflows/chains.yml": (
+            b"jobs:\n"
+            b"  gate:\n"
+            b"    steps:\n"
+            b"      - run: ruff format --check . && git diff --exit-code\n"
+            b"      - run: npm run typecheck && npm test\n"
+            b"      - run: python3 scripts/gen.py && python3 -m pytest -q\n"
+            b"      - run: pip install -r requirements.txt && python3 -m pytest -q\n"
+        )
+    }
+    plan = grounding_plan(contents)
+    assert [c.command for c in plan.commands] == [
+        "ruff format --check . && git diff --exit-code",
+        "npm run typecheck && npm test",
+        "python3 scripts/gen.py && python3 -m pytest -q",
+    ]
+    assert [(c.family, c.command) for c in plan.unreproducible] == [
+        (
+            "test",
+            "pip install -r requirements.txt && python3 -m pytest -q",
+        )
+    ]
+
+
+def test_an_all_unreproducible_block_does_not_contradict_itself():
+    """A repo whose every declared check sits in a provisioning chain
+    still declared them: the block must not open with 'the workflows
+    declare no lint, type or test command' and then list the checks it
+    just named (round-3 review of #871)."""
+    contents = {
+        ".github/workflows/provisioned.yml": (
+            b"jobs:\n"
+            b"  gate:\n"
+            b"    steps:\n"
+            b"      - run: pip install -r requirements.txt && python3 -m pytest -q\n"
+        )
+    }
+    plan = grounding_plan(contents)
+    assert not plan.configured and plan.unreproducible
+    text = grounding_evidence(GroundingOutcome(plan, ()), nonce="f00dfeed")
+    assert "declare no lint, type or test command" not in text
+    assert (
+        "Checks the sandbox cannot reproduce" in text and "python3 -m pytest -q" in text
+    )
+    lines = grounding_coverage_lines(GroundingOutcome(plan, ()), set())
+    assert any("Not run:" in line and "not reproducible here" in line for line in lines)
+    assert any("type (no configured command)" in line for line in lines)
