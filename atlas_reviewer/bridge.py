@@ -33,6 +33,7 @@ import base64
 import codecs
 import hashlib
 import io
+import itertools
 import json
 import os
 import re
@@ -77,7 +78,7 @@ from atlas_reviewer.bridge_staging import (
     stage_script,
     upload_history_bundle,
 )
-from atlas_reviewer.diffs import split_files
+from atlas_reviewer.diffs import risk_tier, split_files
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import KILL_AFTER_S
 from atlas_reviewer.notes import quote_untrusted
@@ -2125,10 +2126,35 @@ def _secrets(scan: SecretScan, places: Sequence[_Where]) -> tuple[BridgeSecret, 
 
 
 SWEEP_CAP = 24
-SWEEP_RUN_BOUND_S = 60
-SWEEP_BUDGET_S = 300.0
+# One scoped run's wall clock, matched to the execution tools' own
+# per-process budget (#843): a whole-suite baseline took about 74 seconds
+# on the box, and a slow suite timed out into INCONCLUSIVE under the old
+# 60-second bound exactly the way `run_tests`' did before its raise.
+SWEEP_RUN_BOUND_S = 180
+# The pass's wall budget, derived from the per-run bound rather than
+# carried beside it, so the two cannot silently desync again: the budget
+# holds about five of the scoped runs the bound allows, and a group the
+# remainder cannot start is inconclusive, named, never an unbounded exec.
+SWEEP_BUDGET_S = 5.0 * SWEEP_RUN_BOUND_S
 SWEEP_TAG = "atlas-sweep"
 _BASELINE_TAG = "atlas-baseline"
+# The plan's operator ranking: the mutation classes the parity key's
+# mutants are -- a dropped BoolOp operand, a break that should be a
+# continue -- sweep before the comparison flips and the guard negations,
+# which is the ordering that lets the anchors' own mutants into a capped
+# plan instead of the first alphabetical file's.
+_SWEEP_OPERATOR_RANK: Mapping[str, int] = MappingProxyType(
+    {
+        "drop-operand": 0,
+        "break-continue": 0,
+        "flip-compare": 1,
+        "negate-condition": 2,
+    }
+)
+# A file with no added line of its own (its guards came in through the
+# called-function widening) cannot be near the diff; the sentinel keeps
+# its guards ranked behind every changed file's own.
+_NO_DIFF_DISTANCE = 1 << 30
 
 
 @dataclass
@@ -3353,8 +3379,9 @@ class SweepSpec:
     """One mutant the controller's pre-pass sweeps (D80's 2026-11-26
     update): a file, the line the condition or the break/continue starts
     on, the operator, and `drop-operand`'s kept operand. Built from the
-    diff's added lines over the head tree's own AST, deduplicated, and
-    capped by the caller."""
+    diff's added lines over the head tree's own AST, widened to the guards
+    of the functions the diff changes or calls one hop away, ranked by
+    relevance, deduplicated, and capped by the caller."""
 
     path: str
     line: int
@@ -3446,6 +3473,100 @@ def _imports_module(source: str, module: str) -> bool:
     return False
 
 
+def _def_spans(tree: ast.AST) -> list[tuple[str, int, int]]:
+    """Every function definition as `(name, first line, last line)`, the
+    span its body's guards live in. `end_lineno` is never None on a
+    function node under this repo's 3.12 floor; the `or` is the type
+    checker's."""
+    spans: list[tuple[str, int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            spans.append((node.name, node.lineno, node.end_lineno or node.lineno))
+    return spans
+
+
+def _changed_spans(
+    spans: Sequence[tuple[str, int, int]], added: frozenset[int]
+) -> list[tuple[str, int, int]]:
+    """The definitions whose body the diff adds a line to: the functions
+    the diff changes, whose every guard -- added or pre-existing -- is
+    sweep-relevant, because the change is what moved their behavior."""
+    return [
+        (name, start, end)
+        for name, start, end in spans
+        if any(start <= line <= end for line in added)
+    ]
+
+
+def _call_names(
+    tree: ast.AST,
+    added: frozenset[int],
+    changed: Sequence[tuple[str, int, int]],
+) -> frozenset[str]:
+    """The names the changed code calls, one hop: a call's own line is an
+    added line, or it sits inside a function the diff changes. Both the
+    plain and the attribute form count (`begin_post(job)` and
+    `board.begin_post(job)` both name `begin_post`), so a caller spelling
+    does not decide what the sweep can reach."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        line = node.lineno
+        if line not in added and not any(
+            start <= line <= end for _name, start, end in changed
+        ):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return frozenset(names)
+
+
+def _guard_tier(
+    line: int,
+    added: frozenset[int],
+    changed: Sequence[tuple[str, int, int]],
+    called: Sequence[tuple[str, int, int]],
+) -> int | None:
+    """How far the guard's line sits from the change, as the plan ranks
+    relevance: 0 on an added line, 1 inside a function the diff changes,
+    2 inside a function the changed code calls one hop away, None
+    otherwise -- a guard nothing in the diff reaches is not swept."""
+    if line in added:
+        return 0
+    if any(start <= line <= end for _name, start, end in changed):
+        return 1
+    if any(start <= line <= end for _name, start, end in called):
+        return 2
+    return None
+
+
+def _distance_to_diff(line: int, added: frozenset[int]) -> int:
+    """The guard's line's distance to the nearest added line of its own
+    file; 0 on an added line itself, and the no-diff sentinel in a file
+    whose guards came in only through the called-function widening."""
+    if not added:
+        return _NO_DIFF_DISTANCE
+    return min(abs(line - target) for target in added)
+
+
+def _rank(spec: SweepSpec, tier: int, distance: int) -> tuple[int, int, int, int, int]:
+    """The plan's relevance order: the mutation classes the parity key's
+    mutants are -- a dropped BoolOp operand, a break that should be a
+    continue -- sweep before the comparison flips and the guard negations;
+    then nearest to the change first, the added line itself over the
+    changed function's other guards over the called function's."""
+    return (
+        _SWEEP_OPERATOR_RANK[spec.operator],
+        tier,
+        distance,
+        spec.line,
+        spec.operand or 0,
+    )
+
+
 def sweep_specs(
     diff: str,
     contents: Mapping[str, bytes],
@@ -3453,15 +3574,18 @@ def sweep_specs(
 ) -> tuple[SweepSpec, ...]:
     """The changed conditions and break/continue statements the sweep
     will try: every `if`/`while`/conditional expression, `and`/`or`
-    operand, `break`/`continue` and comparison that starts on a line the
-    diff adds, in the head tree's own parse. Deduplicated, sorted into
-    path-and-line order (`ast.walk` is breadth-first, so the sort is what
-    makes the docstring's promise true), capped -- a bigger diff sweeps
-    the first `cap` specs in that order. Test files name no mutant: the
+    operand, `break`/`continue` and comparison in the head tree's own
+    parse whose line the diff reaches -- on an added line, inside a
+    function the diff changes, or inside a function the changed code
+    calls one hop away (the #640 anchor's `begin_post` cancel check is
+    pre-existing code a changed caller reaches, and the #661 anchor's
+    budget loop sits mid-file in an almost-wholly-new module). Deduplicated,
+    ranked by relevance and capped by round-robin over the changed files,
+    so no one file's alphabetical luck spends the cap another file's
+    relevant guards never see. Test files name no mutant: the
     sweep mutates the code the tests import, never the tests themselves,
     and a test-file mutant would only spend the cap."""
-    specs: list[SweepSpec] = []
-    seen: set[tuple[str, int, str, int | None]] = set()
+    parsed: dict[str, tuple[ast.Module, frozenset[int]]] = {}
     file_diffs = {f.path: f.text for f in split_files(diff)}
     for path in sorted(file_diffs):
         if _is_test_path(path):
@@ -3470,43 +3594,94 @@ def sweep_specs(
         if data is None:
             continue
         try:
-            tree = ast.parse(data.decode("utf-8"))
+            module = ast.parse(data.decode("utf-8"))
         except (SyntaxError, UnicodeDecodeError):
             continue
-        added = added_lines(file_diffs[path])
-        for node in ast.walk(tree):
+        parsed[path] = (module, added_lines(file_diffs[path]))
+    spans_by_path: dict[str, list[tuple[str, int, int]]] = {}
+    changed_by_path: dict[str, list[tuple[str, int, int]]] = {}
+    called_names: set[str] = set()
+    for path, (head, added) in parsed.items():
+        spans = _def_spans(head)
+        spans_by_path[path] = spans
+        changed_by_path[path] = _changed_spans(spans, added)
+        called_names |= _call_names(head, added, changed_by_path[path])
+    order: list[tuple[tuple[int, str], list[tuple[SweepSpec, int, int]]]] = []
+    for path in sorted(parsed, key=lambda p: (risk_tier(p).rank, p)):
+        called = [
+            (name, start, end)
+            for name, start, end in spans_by_path[path]
+            if name in called_names
+        ]
+        head, added = parsed[path]
+        ranked = _file_specs(path, head, added, changed_by_path[path], called)
+        order.append(((risk_tier(path).rank, path), ranked))
+    return _round_robin(order, cap)
+
+
+def _file_specs(
+    path: str,
+    tree: ast.AST,
+    added: frozenset[int],
+    changed: Sequence[tuple[str, int, int]],
+    called: Sequence[tuple[str, int, int]],
+) -> list[tuple[SweepSpec, int, int]]:
+    """One changed file's sweep candidates with their relevance fields:
+    the guards the diff reaches, each carrying its tier and its distance
+    to the nearest added line, in the plan's rank order."""
+    out: list[tuple[SweepSpec, int, int]] = []
+    seen: set[tuple[str, int, str, int | None]] = set()
+
+    def add(spec: SweepSpec, tier: int) -> None:
+        key = (spec.path, spec.line, spec.operator, spec.operand)
+        if key in seen:
+            return
+        seen.add(key)
+        out.append((spec, tier, _distance_to_diff(spec.line, added)))
+
+    for node in ast.walk(tree):
+        line = getattr(node, "lineno", None)
+        if line is None:
+            continue
+        tier = _guard_tier(line, added, changed, called)
+        if tier is None:
+            continue
+        if isinstance(node, (ast.If, ast.While, ast.IfExp)):
+            add(SweepSpec(path, line, "negate-condition"), tier)
+        elif isinstance(node, ast.BoolOp):
+            for operand in range(1, len(node.values) + 1):
+                add(SweepSpec(path, line, "drop-operand", operand), tier)
+        elif isinstance(node, (ast.Break, ast.Continue)):
+            add(SweepSpec(path, line, "break-continue"), tier)
+        elif isinstance(node, ast.Compare):
+            add(SweepSpec(path, line, "flip-compare"), tier)
+    out.sort(key=lambda item: _rank(item[0], item[1], item[2]))
+    return out
+
+
+def _round_robin(
+    order: Sequence[tuple[tuple[int, str], list[tuple[SweepSpec, int, int]]]],
+    cap: int,
+) -> tuple[SweepSpec, ...]:
+    """The cap spent round-robin over the changed files, one spec per file
+    per pass in each file's own rank order, files in risk-tier then path
+    order: a bigger diff sweeps every changed file's most relevant guards
+    before any file's second pick, never the first `cap` specs of one
+    file's alphabetical luck."""
+    specs: list[SweepSpec] = []
+    for _pass in itertools.count():
+        if len(specs) >= cap:
+            break
+        took = False
+        for _key, ranked in order:
             if len(specs) >= cap:
                 break
-            line = getattr(node, "lineno", None)
-            if line is None or line not in added:
-                continue
-            if isinstance(node, (ast.If, ast.While, ast.IfExp)):
-                spec = SweepSpec(path, line, "negate-condition")
-            elif isinstance(node, ast.BoolOp):
-                spec = None
-                for operand in range(1, len(node.values) + 1):
-                    key: tuple[str, int, str, int | None] = (
-                        path, line, "drop-operand", operand,
-                    )  # fmt: skip
-                    if key not in seen and len(specs) < cap:
-                        seen.add(key)
-                        specs.append(SweepSpec(path, line, "drop-operand", operand))
-                continue
-            elif isinstance(node, (ast.Break, ast.Continue)):
-                spec = SweepSpec(path, line, "break-continue")
-            elif isinstance(node, ast.Compare):
-                spec = SweepSpec(path, line, "flip-compare")
-            else:
-                continue
-            assert spec is not None
-            key = (spec.path, spec.line, spec.operator, spec.operand)
-            if key in seen:
-                continue
-            seen.add(key)
-            specs.append(spec)
-    return tuple(
-        sorted(specs, key=lambda s: (s.path, s.line, s.operator, s.operand or 0))
-    )
+            if _pass < len(ranked):
+                specs.append(ranked[_pass][0])
+                took = True
+        if not took:
+            break
+    return tuple(specs[:cap])
 
 
 def sweep_groups(

@@ -2789,9 +2789,9 @@ def test_added_lines_reads_the_head_side_of_each_hunk():
 
 def test_sweep_specs_names_the_changed_conditions():
     specs = sweep_specs(SWEEP_DIFF, {"clamp.py": SWEEP_MODULE})
-    # Path-and-line order, the walk's picks sorted deterministic: within
-    # one line the operator name orders (drop-operand < flip-compare <
-    # negate-condition).
+    # The plan's rank order: the mutation classes (drop-operand,
+    # break-continue) first, then the comparison flips, then the guard
+    # negations -- within one line here, all tier 0 at distance 0.
     assert specs == (
         SweepSpec("clamp.py", 2, "drop-operand", 1),
         SweepSpec("clamp.py", 2, "drop-operand", 2),
@@ -2816,6 +2816,176 @@ def test_sweep_specs_dedupes_and_caps():
     assert len(sweep_specs(doubled, {"clamp.py": SWEEP_MODULE}, cap=2)) == 2
     # A file the controller's copy does not hold is not swept.
     assert sweep_specs(SWEEP_DIFF, {}) == ()
+
+
+WIDEN_MODULE = (
+    b"def guard(n):\n"
+    b"    if n < 0 or n > 9:\n"
+    b"        return 0\n"
+    b"    return n\n"
+    b"\n"
+    b"def touched(n):\n"
+    b"    return guard(n)\n"
+)
+WIDEN_CHANGED_MODULE = (
+    b"def guard(n):\n"
+    b"    if n < 0 or n > 9:\n"
+    b"        return 0\n"
+    b"    probe(n)\n"
+    b"    return n\n"
+)
+WIDEN_RANKED_MODULE = (
+    b"def guard(n):\n"
+    b"    if n < 0 or n > 9:\n"
+    b"        return 0\n"
+    b"    return n\n"
+    b"\n"
+    b"def touched(n):\n"
+    b"    if n == 3:\n"
+    b"        return guard(n)\n"
+    b"    return n\n"
+)
+WIDEN_CALLED_DIFF = (
+    "diff --git a/widen.py b/widen.py\n"
+    "--- a/widen.py\n"
+    "+++ b/widen.py\n"
+    "@@ -1,4 +1,7 @@\n"
+    " def guard(n):\n"
+    "     if n < 0 or n > 9:\n"
+    "         return 0\n"
+    "     return n\n"
+    "+\n"
+    "+def touched(n):\n"
+    "+    return guard(n)\n"
+)
+WIDEN_CHANGED_DIFF = (
+    "diff --git a/widen.py b/widen.py\n"
+    "--- a/widen.py\n"
+    "+++ b/widen.py\n"
+    "@@ -1,4 +1,5 @@\n"
+    " def guard(n):\n"
+    "     if n < 0 or n > 9:\n"
+    "         return 0\n"
+    "+    probe(n)\n"
+    "     return n\n"
+)
+
+
+def test_sweep_specs_reaches_a_guard_in_a_function_the_changed_code_calls():
+    """The added-lines-only rule kept the anchors' key mutants out of the
+    plan (#846's gap): `begin_post`'s cancel check is pre-existing code a
+    changed caller reaches one hop away, and a plan that cannot name it
+    cannot aim the controller's sweep at the finding. The guard a called
+    function carries is in the plan now; without the widening this file's
+    diff adds no guard line at all and the plan is empty."""
+    specs = sweep_specs(WIDEN_CALLED_DIFF, {"widen.py": WIDEN_MODULE})
+    assert specs == (
+        SweepSpec("widen.py", 2, "drop-operand", 1),
+        SweepSpec("widen.py", 2, "drop-operand", 2),
+        SweepSpec("widen.py", 2, "flip-compare"),
+        SweepSpec("widen.py", 2, "negate-condition"),
+    )
+
+
+def test_sweep_specs_reaches_a_guard_in_a_function_the_diff_changes():
+    """A guard inside a changed function on a pre-existing line is
+    sweep-relevant the same way: the change is what moved the function's
+    behavior, and the plan reads its whole body, not only the added
+    lines."""
+    specs = sweep_specs(WIDEN_CHANGED_DIFF, {"widen.py": WIDEN_CHANGED_MODULE})
+    assert specs == (
+        SweepSpec("widen.py", 2, "drop-operand", 1),
+        SweepSpec("widen.py", 2, "drop-operand", 2),
+        SweepSpec("widen.py", 2, "flip-compare"),
+        SweepSpec("widen.py", 2, "negate-condition"),
+    )
+
+
+def test_sweep_specs_ranks_the_mutation_classes_ahead_of_the_other_guards():
+    """A dropped-operand mutant in a called function outranks the added
+    lines' own flip and negate guards: the classes the parity key's
+    mutants are sweep first, and a plan ordered only by tier or line
+    would spend the cap on negate-conditions while the BoolOp went
+    unswept."""
+    diff = WIDEN_CALLED_DIFF.replace(
+        "+    return guard(n)\n",
+        "+    if n == 3:\n+        return guard(n)\n+    return n\n",
+    ).replace("@@ -1,4 +1,7 @@", "@@ -1,4 +1,9 @@")
+    specs = sweep_specs(diff, {"widen.py": WIDEN_RANKED_MODULE})
+    assert specs == (
+        SweepSpec("widen.py", 2, "drop-operand", 1),
+        SweepSpec("widen.py", 2, "drop-operand", 2),
+        SweepSpec("widen.py", 7, "flip-compare"),
+        SweepSpec("widen.py", 2, "flip-compare"),
+        SweepSpec("widen.py", 7, "negate-condition"),
+        SweepSpec("widen.py", 2, "negate-condition"),
+    )
+
+
+def test_sweep_specs_ranks_nearer_to_the_diff_first_within_a_class():
+    """Two pre-existing BoolOps in one changed function rank by their
+    distance to the nearest added line: the guard nearest the change
+    sweeps before the farther one."""
+    module = (
+        b"def guard(n):\n"
+        b"    if n < 0 or n > 9:\n"
+        b"        return 0\n"
+        b"    if n == 1 or n == 2:\n"
+        b"        return 1\n"
+        b"    probe(n)\n"
+        b"    return n\n"
+    )
+    diff = (
+        "diff --git a/widen.py b/widen.py\n"
+        "--- a/widen.py\n"
+        "+++ b/widen.py\n"
+        "@@ -1,5 +1,7 @@\n"
+        " def guard(n):\n"
+        "     if n < 0 or n > 9:\n"
+        "         return 0\n"
+        "     if n == 1 or n == 2:\n"
+        "         return 1\n"
+        "+    probe(n)\n"
+        "+    return n\n"
+    )
+    specs = sweep_specs(diff, {"widen.py": module})
+    assert specs == (
+        SweepSpec("widen.py", 4, "drop-operand", 1),
+        SweepSpec("widen.py", 4, "drop-operand", 2),
+        SweepSpec("widen.py", 2, "drop-operand", 1),
+        SweepSpec("widen.py", 2, "drop-operand", 2),
+        SweepSpec("widen.py", 4, "flip-compare"),
+        SweepSpec("widen.py", 2, "flip-compare"),
+        SweepSpec("widen.py", 4, "negate-condition"),
+        SweepSpec("widen.py", 2, "negate-condition"),
+    )
+
+
+def test_sweep_specs_spends_the_cap_round_robin_over_the_changed_files():
+    """The cap used to fill from the first file in path order, so a big
+    first file starved every other changed file's guards (#846's gap).
+    The cap is spent one pick per file per pass: each changed file's most
+    relevant guards are in the plan before any file gets a second."""
+    doubled = SWEEP_DIFF + SWEEP_DIFF.replace("clamp.py", "other.py").replace(
+        "a/clamp.py", "a/other.py"
+    )
+    contents = {"clamp.py": SWEEP_MODULE, "other.py": SWEEP_MODULE}
+    specs = sweep_specs(doubled, contents, cap=4)
+    assert specs == (
+        SweepSpec("clamp.py", 2, "drop-operand", 1),
+        SweepSpec("other.py", 2, "drop-operand", 1),
+        SweepSpec("clamp.py", 2, "drop-operand", 2),
+        SweepSpec("other.py", 2, "drop-operand", 2),
+    )
+
+
+def test_the_sweep_run_bound_matches_the_execution_tools_clock():
+    """The sweep's scoped run is one of the execution tools' test
+    processes (#843 raised their per-process clock from 60s for exactly
+    the whole-suite reason the sweep's own bound shares): the two bounds
+    move together, so a suite that fits `run_tests` fits the sweep's
+    scoped run too."""
+    assert SWEEP_RUN_BOUND_S == DEFAULT_LIMITS["run_tests"].timeout_s
 
 
 def test_sweep_groups_group_by_module_and_require_an_importer():
