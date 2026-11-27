@@ -70,9 +70,11 @@ _KNOWN_EXTERNAL_READS = (
 def _load_filter_globs() -> dict:
     ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     ci = yaml.safe_load(ci_text)
+    # The filters live in the shared `changes` job since the gate split:
+    # every downstream job gates itself on that job's outputs.
     filter_step = next(
         s
-        for s in ci["jobs"]["gate"]["steps"]
+        for s in ci["jobs"]["changes"]["steps"]
         if s.get("uses", "").startswith("dorny/paths-filter@")
     )
     # dorny/paths-filter's `filters:` input is itself a YAML document

@@ -6395,3 +6395,43 @@ pins the eleven ids, spans, encloses and echo evidence, and
 `test_the_secret_echo_refusals_are_graded_on_their_spans` pins found,
 partial and lost boundaries per site. Offline only: recorded JSON and the
 span grader; no model call, network call or secret read.
+
+## 2026-11-27 — the CI gate splits into parallel jobs behind a `gate` aggregator (Brandon-approved Nov 26)
+
+The single `gate` job's median wall clock was ~23 minutes (23.4 median, 26.9
+max over the 12 latest successful runs, Nov 26), and the parity-key liveness
+step owned most of it: 795s median, because a `mutant` spec pays the
+anchor's whole test suite twice (baseline, then splice) and the baseline
+cache is per-process, so five full anchor suites ran serially inside one
+job. The split (approved by Brandon on Nov 26): a `changes` job computes
+the dorny/paths-filter outputs once and every downstream job gates itself
+on them — with the schedule special case folded into the
+`python`-family outputs rather than repeated as
+`github.event_name == 'schedule' ||` on every step — then `lint` (the
+audit/lint/type-check/structure gates and the non-Python linters, keeping
+their per-step `if:` gates since their input sets stay genuinely disjoint,
+#339), `tests` (tooling + atlas_settings, the two fast coverage runs),
+`reviewer-tests` (the slow ~4,600-test suite), `liveness-shards` +
+`liveness` (a matrix with one shard per mutant spec, selected by a
+`LIVENESS_SHARD=i/n` env var the test module reads at collection), and a
+final aggregator still named `gate` — `if: always()`, failing on any
+failed or cancelled needed job, counting skipped as passing, so every
+branch-protection consumer of the check name keeps working and the
+skipped-steps-pass semantics carries up to job granularity.
+
+The shard grouping lives in `atlas_reviewer/liveness/sharding.py`
+(stdlib-only import chain, so the shard-list job installs nothing and a
+new liveness-carrying key record is picked up automatically — the workflow
+never lists test ids or a hardcoded count): one shard per mutant so each
+anchor's baseline runs in the same process as the splice it serves, with
+the cheap quote/absent reads riding in the first shard. The selector's
+behavioral tests (every spec in exactly one shard, unset selects all,
+malformed/out-of-range/total-mismatch specs fail loudly) sit beside it in
+`test_liveness_sharding.py` and run inside every shard's job, taking the
+spec as an argument so a shard's own env var cannot change what they
+assert. Four `test_ci_*` guards that pinned the single-job shape (the
+filter-location lookups and the require-hashes install scan) were updated
+to the new shape with their intent intact; the require-hashes guard now
+checks every copy of the install, since the setup steps repeat per job.
+Nothing else moved: same concurrency group, same hosted runners, same
+pins, same step order within `lint`, same coverage floors.

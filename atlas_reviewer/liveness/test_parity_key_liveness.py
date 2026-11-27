@@ -29,7 +29,13 @@ from pathlib import Path
 
 import pytest
 
-from atlas_reviewer.parity_key import BODY, KEY_DIR, KeyFinding, load_key
+from atlas_reviewer.liveness.sharding import (
+    SHARD_ENV_VAR,
+    all_pairs,
+    label,
+    select_from_env,
+)
+from atlas_reviewer.parity_key import BODY, KeyFinding
 
 _REPO = Path(__file__).resolve().parents[2]
 _FAILURE = re.compile(r"^(?:FAILED|ERROR) (.+)$", re.MULTILINE)
@@ -128,21 +134,27 @@ def _live_file(finding: KeyFinding, spec_file: str) -> Path:
     return _worktree(finding.reviewed_commit) / spec_file
 
 
-def _ids_with_liveness() -> list[tuple[KeyFinding, int]]:
-    pairs: list[tuple[KeyFinding, int]] = []
-    for finding in load_key(KEY_DIR):
-        for index in range(len(finding.liveness)):
-            pairs.append((finding, index))
-    return pairs
+# The CI matrix fans the anchor suites out over shards (the single gate
+# job's dominant cost): LIVENESS_SHARD=i/n selects one shard, unset runs
+# everything, and a malformed or out-of-range value raises here so the job
+# fails loudly instead of silently running nothing. Selection behavior is
+# specified by test_liveness_sharding.py; this module only wires the
+# environment through it at collection time.
+_ALL_PAIRS = all_pairs()
+_SHARD_SPEC = os.environ.get(SHARD_ENV_VAR)
+_SELECTED = select_from_env(_ALL_PAIRS)
+if _SHARD_SPEC is not None:
+    assert _SELECTED is not None
+    if not _SELECTED:
+        pytest.skip(
+            f"no liveness spec is assigned to shard {_SHARD_SPEC}",
+            allow_module_level=True,
+        )
 
 
-def _label(pair: tuple[KeyFinding, int]) -> str:
-    finding, index = pair
-    spec = finding.liveness[index]
-    return f"{finding.id}-{spec.kind}-{index}"
-
-
-@pytest.mark.parametrize("pair", _ids_with_liveness(), ids=_label)
+@pytest.mark.parametrize(
+    "pair", _ALL_PAIRS if _SELECTED is None else _SELECTED, ids=label
+)
 def test_the_key_finding_is_still_live_at_its_anchor(
     pair: tuple[KeyFinding, int],
 ) -> None:
