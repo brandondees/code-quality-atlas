@@ -96,7 +96,7 @@ from atlas_reviewer.attestation import (
     body_digest,
     next_step,
 )
-from atlas_reviewer.bridge import Bridge, BridgeSecret, Status, run_bridge
+from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.budget import valid_cost
 from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
@@ -156,7 +156,6 @@ from atlas_reviewer.history_source import HistoryBundle
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
-    NOTED_TIMEOUT_TOOLS,
     AgenticLimits,
     Derivation,
     FinalReply,
@@ -4337,17 +4336,16 @@ def _lens_line_parts(r: LensResult, scrub: Callable[[str], str]) -> list[str]:
         parts.append("its retry did not run before the review ended")
     if r.reassess_note:
         parts.append(f"re-assessment: {r.reassess_note}")
-    noted = sum(
-        1
-        for tool in o.tools
-        if tool.status == Status.TIMED_OUT.value and tool.tool in NOTED_TIMEOUT_TOOLS
-    )
-    if noted:
+    if o.noted_tools:
         # The timeout policy (Brandon's Nov 26 decision): a model-chosen
         # exec that ran past its own clock is the cost of exploring --
-        # named here, never a partial-lens cause.
+        # named here, never a partial-lens cause. The attestation's own
+        # tuple is the one source of truth (round 1 of #867): the draft
+        # renders exactly what the ledger carries, never a recount of
+        # the tool log.
+        names = " and ".join(sorted(set(o.noted_tools)))
         parts.append(
-            f"{noted} exploration call(s) timed out (noted; the tool stayed available)"
+            f"{names} exploration call(s) timed out (noted; the tool stayed available)"
         )
     repairs = o.nudges.count("quote-repair")
     if repairs:

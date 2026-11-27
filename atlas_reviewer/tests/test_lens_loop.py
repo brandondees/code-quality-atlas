@@ -3473,7 +3473,7 @@ def test_a_bash_timeout_is_noted_and_never_partial(tmp_path):
     outcome, _, _ = _bash_timeout_attempt(tmp_path, "bash")
     assert outcome.state is LensState.CLEAN
     assert Cause.TOOL_GAP not in outcome.causes
-    assert outcome.noted_timeouts == 1
+    assert outcome.noted_tools == ("bash",)
 
 
 def test_a_probe_timeout_is_noted_and_never_partial(tmp_path):
@@ -3482,7 +3482,26 @@ def test_a_probe_timeout_is_noted_and_never_partial(tmp_path):
     outcome, _, _ = _bash_timeout_attempt(tmp_path, "run_probe")
     assert outcome.state is LensState.CLEAN
     assert Cause.TOOL_GAP not in outcome.causes
-    assert outcome.noted_timeouts == 1
+    assert outcome.noted_tools == ("run_probe",)
+
+
+def test_the_draft_renders_exactly_what_the_loop_counted(tmp_path):
+    """The pin round 1 of #867 asked for: the draft renders the
+    loop-produced outcome's own `noted_tools` -- one source of truth,
+    from the classification through the ledger to the lens line, never a
+    recount."""
+    from atlas_reviewer.coordinator import LensResult, render_draft, synthesize
+
+    outcome, _, _ = _bash_timeout_attempt(tmp_path, "bash")
+    assert outcome.noted_tools == ("bash",)
+    draft = render_draft(
+        synthesize([LensResult(LENS, 1, DIGEST, outcome, attempts=1)]),
+        Redactor(),
+    )
+    line = next(line for line in draft.splitlines() if line.startswith(f"- L1 {LENS}:"))
+    assert (
+        "bash exploration call(s) timed out (noted; the tool stayed available)" in line
+    )
 
 
 def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
@@ -3502,4 +3521,4 @@ def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
     )
     assert outcome.state is LensState.PARTIAL
     assert Cause.TOOL_GAP in outcome.causes
-    assert outcome.noted_timeouts == 0
+    assert outcome.noted_tools == ()

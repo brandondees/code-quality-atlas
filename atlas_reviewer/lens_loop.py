@@ -1631,8 +1631,11 @@ class _Progress:
     nudges: list[str] = field(default_factory=list)
     # The guarded-exec timeouts the timeout policy notes instead of
     # holding the lens partial (Brandon's Nov 26 decision): a bash
-    # command or a probe that ran past its own clock.
-    noted_timeouts: int = 0
+    # command or a probe that ran past its own clock. The tool names,
+    # not a count -- the draft names what timed out, and this one
+    # collection is the attestation's whole truth about it (round 1 of
+    # #867: a recounted copy in the renderer diverged from the ledger).
+    noted_tools: list[str] = field(default_factory=list)
     unread_nudged: bool = False
     stall_nudged: bool = False
     # The no-progress detector's window (D58, D66): consecutive turns that
@@ -1744,7 +1747,7 @@ class _Progress:
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
-                noted_timeouts=self.noted_timeouts,
+                noted_tools=tuple(self.noted_tools),
             )
         best = held if held is not None and held.findings else self.finding_hold
         if best is not None and best.findings:
@@ -1766,7 +1769,7 @@ class _Progress:
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
-                noted_timeouts=self.noted_timeouts,
+                noted_tools=tuple(self.noted_tools),
             )
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
@@ -1780,7 +1783,7 @@ class _Progress:
             mutants_survived=self.mutants_survived,
             limit_hit=limit_hit,
             nudges=tuple(self.nudges),
-            noted_timeouts=self.noted_timeouts,
+            noted_tools=tuple(self.noted_tools),
             diff_prefix=self.prefix_note,
         )
 
@@ -2506,7 +2509,7 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
             # of held partial. Genuine unavailability -- every other
             # status, and a timeout on the run tools, whose whole-suite
             # clock is the review's own budget -- stays fail-closed.
-            p.noted_timeouts += 1
+            p.noted_tools.append(result.tool)
         else:
             p.causes.add(Cause.TOOL_GAP)
     if result.outcome is MutantOutcome.INCONCLUSIVE:
@@ -2904,7 +2907,7 @@ def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutc
             test_runs=p.runs_executed,
             mutants_survived=p.mutants_survived,
             nudges=tuple(p.nudges),
-            noted_timeouts=p.noted_timeouts,
+            noted_tools=tuple(p.noted_tools),
             diff_prefix=p.prefix_note,
             **kw,
         )

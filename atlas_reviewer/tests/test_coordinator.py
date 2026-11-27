@@ -408,12 +408,15 @@ def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
 
 
 def test_a_noted_timeout_names_itself_in_the_lens_line():
-    """The timeout policy (Brandon's Nov 26 decision): a bash or probe
-    call that ran past its own clock is noted in the draft's lens line --
-    and a run_tests timeout is not, it stays a gap the status carries."""
+    """The timeout policy (Brandon's Nov 26 decision): the attestation's
+    `noted_tools` tuple is the one source of truth (round 1 of #867) --
+    the draft renders exactly what the ledger carries, naming the tools,
+    and never recounts the tool log. A failed attempt's outcome carries
+    tool calls but an empty tuple, so it renders no note."""
     noted = AttemptOutcome(
         Attestation.ATTESTED,
         changed_files=1,
+        noted_tools=("bash", "run_probe"),
         tools=(
             ToolUse("bash", "{}", Status.TIMED_OUT.value),
             ToolUse("run_probe", "{}", Status.TIMED_OUT.value),
@@ -428,8 +431,20 @@ def test_a_noted_timeout_names_itself_in_the_lens_line():
         ).splitlines()
         if line.startswith(f"- L1 {LENS}:")
     )
-    assert "2 exploration call(s) timed out" in line
+    assert "bash and run_probe exploration call(s) timed out" in line
     assert "the tool stayed available" in line
+    divergent = AttemptOutcome(
+        Attestation.UNACKNOWLEDGED,
+        frozenset({Cause.MODEL_ERROR}),
+        changed_files=1,
+        tools=(ToolUse("bash", "{}", Status.TIMED_OUT.value),),
+    )
+    assert not any(
+        "exploration call(s) timed out" in line
+        for line in render_draft(
+            synthesize([lens_result(divergent)]), Redactor()
+        ).splitlines()
+    )
     plain = AttemptOutcome(Attestation.ATTESTED, changed_files=1)
     assert not any(
         "exploration call(s) timed out" in line
