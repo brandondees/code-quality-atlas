@@ -24,13 +24,25 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Weekly, path-independent: the "dependency vulnerability audit" step below
-  # is path-gated (only runs when python/requirements changed), so a CVE
-  # published against an unchanged pin is never scanned between pushes (#379).
-  # This trigger and the step's own `if:` (search "schedule" below) exist so
-  # pip-audit runs against main on a fixed cadence regardless of diff.
+  # Two path-independent cadences, distinguished downstream by
+  # github.event.schedule (event_name is `schedule` for both):
+  #
+  # Weekly (`0 6 * * 1`): the "dependency vulnerability audit" step in
+  # `lint` is path-gated on PRs (only runs when python/requirements
+  # changed), so a CVE published against an unchanged pin is never scanned
+  # between pushes (#379). This trigger and that step's `if:` (via the
+  # `changes` job's outputs) exist so pip-audit runs against main on a
+  # fixed cadence regardless of diff.
+  #
+  # Daily (`30 6 * * *`): the parity-key liveness check (the `liveness`
+  # job). It only exercises fixed anchor commits, so most PRs have no
+  # reason to pay for it -- but a pytest or dependency release that changes
+  # an anchor suite's pass set is environment drift no PR diff carries, and
+  # the daily run is what catches it between pushes.
   schedule:
     - cron: "0 6 * * 1"
+    - cron: "30 6 * * *"
+  workflow_dispatch:
 
 # Superseded pull_request runs are cancelled; push and scheduled runs never
 # are. Two platform facts shape this block:
@@ -43,17 +55,18 @@ on:
 #    queued behind it. So no wording of this block can promise a recorded
 #    run for every commit; the newest head's run is the one that completes.
 # 2. `schedule` events resolve to the default branch's ref, so a ref-only
-#    group would put pushes and the weekly run in the same group -- and by
-#    fact 1, any push landing while the scheduled audit sat pending behind
+#    group would put pushes and the scheduled runs in the same group -- and by
+#    fact 1, any push landing while a scheduled run sat pending behind
 #    another run would silently replace it, losing that week's diff-
 #    independent pip-audit (#379).
 #
-# The group therefore carries the event name, separating the weekly audit
-# from main pushes entirely: a push can neither cancel (fact: cancel-in-
-# progress is false for non-PR events) nor supersede a pending audit, and
-# within the schedule group consecutive weekly runs can never overlap, so
-# pending-supersession there is harmless. Superseded *pending* main pushes
-# being replaced is accepted for the same reason: the newest head's result
+# The group therefore carries the event name, separating the scheduled runs
+# (weekly pip-audit, daily liveness) from main pushes entirely: a push can
+# neither cancel (fact: cancel-in-progress is false for non-PR events) nor
+# supersede a pending audit, and within the schedule group consecutive
+# scheduled runs can never overlap, so pending-supersession there is
+# harmless. Superseded *pending* main pushes being replaced is accepted for
+# the same reason: the newest head's result
 # is the one that matters, and any head that reaches the front of its group
 # still gets a complete, recorded run. PR runs keep the cancel: they are
 # far more frequent, superseding one is unambiguous, and a superseded PR
@@ -109,17 +122,22 @@ jobs:
     #
     # The schedule special case is folded into the `python`-family outputs
     # rather than repeated as `github.event_name == 'schedule' ||` on every
-    # downstream step: on a `schedule` event dorny/paths-filter has no
-    # `before` SHA to diff against and falls back to the single last
+    # downstream step: on the weekly scheduled audit dorny/paths-filter has
+    # no `before` SHA to diff against and falls back to the single last
     # commit, so if that commit happens to touch neither `python` nor
     # `requirements`, the Python pipeline -- including
     # tests/test_session_log_currency.py -- would silently skip on that
     # week's scheduled run, defeating the point of a periodic, diff-
     # independent currency check (CodeRabbit finding on PR #522). Forcing
-    # those three outputs true on a schedule keeps every schedule-eligible
-    # step running; the `shell`/`markdown`/`workflows` outputs stay
+    # those three outputs true on the weekly cron keeps every audit step
+    # running; the `shell`/`markdown`/`workflows` outputs stay
     # filter-faithful because markdownlint, shellcheck and actionlint never
     # had a schedule override in the single-job shape either.
+    #
+    # The forcing names the weekly cron specifically, not any `schedule`
+    # event: the daily liveness schedule (see `on:`) must not turn into a
+    # daily full audit, so the filter step itself skips on it and every
+    # output stays false -- the daily run exercises only the `liveness` job.
     #
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
@@ -132,12 +150,13 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      python: ${{ github.event_name == 'schedule' || steps.filter.outputs.python == 'true' }}
-      requirements: ${{ github.event_name == 'schedule' || steps.filter.outputs.requirements == 'true' }}
-      session_log_substantive: ${{ github.event_name == 'schedule' || steps.filter.outputs.session_log_substantive == 'true' }}
+      python: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || steps.filter.outputs.python == 'true' }}
+      requirements: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || steps.filter.outputs.requirements == 'true' }}
+      session_log_substantive: ${{ (github.event_name == 'schedule' && github.event.schedule == '0 6 * * 1') || steps.filter.outputs.session_log_substantive == 'true' }}
       shell: ${{ steps.filter.outputs.shell == 'true' }}
       markdown: ${{ steps.filter.outputs.markdown == 'true' }}
       workflows: ${{ steps.filter.outputs.workflows == 'true' }}
+      liveness: ${{ steps.filter.outputs.liveness == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -152,46 +171,14 @@ jobs:
       # `shell` and `markdown` each gate their own single step
       # independently, since shellcheck and markdownlint need no Python
       # setup at all.
-      #
-      # `docs/research/**` is in `python`, not treated as docs-only: every
-      # entry in skills/manifest.yaml's `source:` field is a
-      # `docs/research/*.md` path that `tooling.cli generate`/`drift`
-      # actually reads at generation time (tooling/generate_common.py,
-      # tooling/drift.py) -- a change there can change generated output and
-      # must reach the generated-tree-check.
-      #
-      # Round 3 review found this list was STILL incomplete after two prior
-      # fix rounds each patched a narrower subset (round 1: only checked
-      # `tooling/*.py`; round 2: checked `tests/*.py` but only for the paths
-      # that round's reviewer happened to name). Rather than a fourth manual
-      # patch of the same shape, this round did an exhaustive audit of every
-      # path any `tests/*.py` file reads and added
-      # `tests/test_ci_python_filter_covers_known_reads.py`, which asserts
-      # this filter covers every path in that audit's inventory -- so the
-      # NEXT gap (a new test reading a new path) is a failing test here
-      # instead of a fifth review round. The full audit, for reference:
-      # `commands/atlas-init.md`/`templates/agents-routing-snippet.md`/
-      # `AGENTS.md`/`CLAUDE.md` (test_routing_snippet_sync.py, issues
-      # #64/#167's drift guard); `templates/REVIEW.md`/`REVIEW.md`
-      # (test_review_template_sync.py); `docs/map/**`
-      # (test_map_twins_sync.py); `LICENSE*` (test_license_paths_exhaustive.py,
-      # walking top-level dirs; also covers `LICENSE-CC-BY-4.0`, read by
-      # test_vendor_skills.py/test_package_account_zips.py); `.pre-commit-config.yaml`
-      # (test_precommit_ci_version_sync.py); `hooks/**`
-      # (test_hooks.py -- NOT covered by being in the `shell` filter below,
-      # since `shell` doesn't gate the `tests` step); `.claude-plugin/
-      # plugin.json`/`marketplace.json`/`README.md`/`docs/distribution.md`/
-      # `docs/install.md`/`docs/collapsed-entrypoints-and-depth-modes.md`/
-      # `docs/review-depth-modes.md`/`docs/open-questions.md`
-      # (test_doc_counts.py); `.claude/skills/**`
-      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py);
-      # `docs/session-log.md` (test_session_log_currency.py, #513/#516);
-      # `docs/runbooks/pr-review-automation.md` (4 tests, see below --
-      # atlas review round 2, #522). The rest of `docs/` (`runbooks/`'s
-      # other files, `plans/`) remains genuinely markdown-only -- no test
-      # or tooling module reads those paths, and the drift-guard test
-      # above would catch it if that ever changed.
-      - name: Detect relevant changes
+      # Skipped on the daily liveness schedule: on a `schedule` event this
+      # filter has no `before` SHA to diff against (only the last-commit
+      # fallback), and the daily run must not resurrect a full audit from
+      # whatever the newest main commit touched -- the weekly audit keeps
+      # the fallback behavior, where the outputs-forcing above already
+      # makes every audit step run.
+      - if: github.event_name != 'schedule' || github.event.schedule == '0 6 * * 1'
+        name: Detect relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
@@ -320,6 +307,35 @@ jobs:
             # actionlint step below.
             workflows:
               - ".github/**"
+            # The parity-key liveness check only exercises fixed anchor
+            # commits -- the anchor suites run inside each anchor's own
+            # worktree -- so on a pull request it runs only when something
+            # that can change its result changed: the key records and the
+            # loader that parses them (parity_key.py plus the package's
+            # __init__ in its import chain), the liveness tests and shard
+            # selector themselves, the root conftest.py that anchors
+            # pytest's rootdir for every suite invocation, pyproject.toml
+            # (a [tool.pytest.ini_options] table there would change how the
+            # anchor suites are collected), the dependency set the suites
+            # run under, and this workflow file (which decides how the
+            # check is invoked). Not gated on the rest of atlas_reviewer/**:
+            # a change there can only touch liveness by breaking the
+            # parity_key import, which the reviewer suite's job fails on in
+            # the same push anyway. Always runs on push to main, on either
+            # schedule, and on workflow_dispatch -- main and the schedules
+            # are where environment drift (a pytest or dependency release
+            # changing an anchor suite's pass set) gets caught, since the
+            # anchors themselves are fixed. See the `liveness` job.
+            liveness:
+              - "atlas_reviewer/fixtures/parity-key/**"
+              - "atlas_reviewer/liveness/**"
+              - "atlas_reviewer/parity_key.py"
+              - "atlas_reviewer/__init__.py"
+              - "conftest.py"
+              - "pyproject.toml"
+              - "requirements.in"
+              - "requirements.txt"
+              - ".github/workflows/ci.yml"
 
   lint:
     # Everything the old single `gate` job ran except the suites: the
@@ -395,8 +411,9 @@ jobs:
         # of the path filter, so a CVE against an unchanged pin doesn't wait
         # for the next python/requirements-touching push to be caught. (The
         # schedule forcing lives in the `changes` job's outputs -- see that
-        # job's comment; on a scheduled run those outputs are true, so this
-        # step runs.)
+        # job's comment; on the weekly scheduled audit those outputs are
+        # true, so this step runs. The daily liveness schedule skips this
+        # whole job.)
         #
         # Placed immediately after the hash-verified dependency install --
         # the only thing it needs -- and deliberately ahead of the other
@@ -863,8 +880,8 @@ jobs:
         # `push` and for a contributor's local `pytest` run -- there's no
         # single PR diff to reason about there, which is exactly the "many
         # small innocent merges left the log stale" case the calendar check
-        # still needs to catch; on a scheduled run CI_EVENT_NAME is
-        # `schedule`, which enforces unconditionally regardless of the
+        # still needs to catch; on the weekly scheduled audit CI_EVENT_NAME
+        # is `schedule`, which enforces unconditionally regardless of the
         # filter var (which the `changes` job forces true there anyway).
         if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         env:
@@ -939,8 +956,18 @@ jobs:
       - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: pip install --require-hashes --ignore-installed -r requirements.txt
       - name: reviewer service tests (atlas_reviewer)
+        # `-n auto`: the suite's 4,600 tests spread over the runner's cores.
+        # Measured locally on 4 workers: 6m19s serial -> ~1m45s with xdist
+        # (~3.7x). pytest-cov merges coverage across the xdist workers into
+        # one report, so the same [tool.coverage.report] floor is enforced
+        # over the whole suite as before -- verified against live runs,
+        # including order-shuffled ones. The suite is offline and its tests
+        # share no mutable state (the per-context markers and facts are
+        # reset per test), which is what makes worker parallelism safe
+        # here; the shuffle runs are also what surfaced and pinned the
+        # reset_events gap this PR fixes in call_facts.py.
         if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
-        run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+        run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer -n auto
 
   liveness-shards:
     # Computes the liveness matrix from the parity key itself, so a new
@@ -992,7 +1019,23 @@ jobs:
     # The round-5 anchor is not on any branch, so the step fetches it by
     # SHA from origin.
     needs: [changes, liveness-shards]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+    # Path-gated on pull requests (the `liveness` filter in the `changes`
+    # job): the check only exercises fixed anchor commits, so an ordinary
+    # PR -- code, docs, skills -- cannot change its result and doesn't pay
+    # ~8 minutes of anchor suites for nothing. It always runs on push to
+    # main, on either schedule, and on workflow_dispatch: main and the
+    # schedules are where environment drift gets caught (a pytest or
+    # dependency release changing an anchor suite's pass set), since the
+    # anchors themselves are fixed.
+    #
+    # The job-level `if:` is the only gate in this job -- every step needs
+    # the environment whenever the job runs, so unlike the other jobs there
+    # are no step-level `if:`s to keep in sync with it.
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.liveness == 'true'
     runs-on: ubuntu-latest
     # 90 minutes bounded the old single job because five anchor suites ran
     # serially behind ~13 minutes of other steps, and two runs were killed
@@ -1022,7 +1065,6 @@ jobs:
       # the rest of the job. Narrows what a compromised dependency pulled in
       # by the pip install below could exfiltrate.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         with:
           python-version: "3.12"
           # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
@@ -1050,14 +1092,14 @@ jobs:
       # setup-python already puts this exact interpreter's pip/python on
       # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
       # tooling.cli included).
-      - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
-        run: pip install --require-hashes --ignore-installed -r requirements.txt
+      - run: pip install --require-hashes --ignore-installed -r requirements.txt
       - name: parity-key liveness (anchor suites, sharded)
         # LIVENESS_SHARD=i/n (set by the matrix above) selects this job's
         # shard at collection time; the value is validated against the key
         # itself, so a matrix/key disagreement fails loudly rather than
-        # silently skipping specs.
-        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        # silently skipping specs. Stays serial within the shard (no
+        # pytest-xdist): a mutant spec splices a shared anchor worktree, so
+        # parallel workers in one shard would race the splice.
         env:
           LIVENESS_SHARD: ${{ matrix.shard }}
         run: python -m pytest atlas_reviewer/liveness -q
