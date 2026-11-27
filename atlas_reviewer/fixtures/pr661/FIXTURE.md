@@ -51,14 +51,28 @@ involves — everything here is committed and the runs over it are offline.
   default branch's files **as they stand today** (the owner's decision:
   setup uses today's default-branch `REVIEW.md`, which carries the setup
   spec), not the anchor-time copies; the anchor-time copies ride in the
-  trees, where the merge-base config read takes them.
+  trees, where the merge-base config read takes them. The setup spec's
+  `review_setup_files:` line declares `requirements.txt`, and that file
+  is deliberately **not** recorded: the replayed setup phase would run
+  the spec's install against a real package index, which the offline
+  stage-0 contract cannot carry — the replay names the gap (the
+  declared file is not served by the fixture's default branch) and no
+  setup phase runs, the same named shape a fixture without the file
+  produces; a production run on the live default branch does install
+  it, and that fidelity gap is this fixture's recorded cost.
 
 ## The body
 
 `pull.json`'s body is **the round-5 body**, taken from
-`../parity-key/661-round5-body.md` (reconstructed from the merged body
-with its own provenance note; GitHub does not expose body-edit history)
-— the text 661-m1 grades and the round-5 review actually read.
+`../parity-key/661-round5-body.md` (reconstructed from the merged body;
+GitHub does not expose body-edit history) — the text 661-m1 grades and
+the round-5 review actually read. The reconstruction file's leading
+HTML comment is its provenance note for the parity key's human reader
+(it names the graded finding and lists each deviation), so the builder
+strips it from the replayed body — the reviewer reads the PR text alone,
+its stale-CI citation included, never the note that says what the
+defect is. The provenance lives here and in the parity key's own copy
+of the file.
 
 ## Rebuilding
 

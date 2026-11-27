@@ -6896,3 +6896,21 @@ only where it is used (the mutation re-splice, whose call gate
 guarantees it) and rebuilds exactly as the initial staging does
 otherwise; `test_a_read_after_the_grounding_pass_restages_without_a_staged_pytest`
 pins the read-after-grounding flow on a pytest-less runner.
+
+**The CodeRabbit round on the rebased branch (five fixes and a doc
+alignment, recorded as a D97 update):** the replayed body a
+`--body-file` override carries is stripped of its file's leading
+provenance comment (it named the graded finding); the setup spec's
+`review_setup_files:` line's files are deliberately not recorded (the
+replayed setup phase would run the spec's install against a real
+package index — a live PyPI fetch inside the offline stage-0, and a
+failed runner on every CI-shaped host — so the deviation is documented
+in the fixtures' FIXTURE.md instead); the cutoff comparison
+normalizes any ISO-8601 cutoff to UTC's `...Z` shape before the
+lexicographic compare; the default cutoff is derived after the
+ensure-commit fetch, inside the boundary conversion; every git
+subprocess the builder and its tests run strips the
+repository-location environment overrides; and the private-name
+guard's exemption is narrowed to the two `history.bundle` files with
+its docstring stating that scope. The rebase onto #871 also exposed a
+main bug the re-stage fix above records.

@@ -28,6 +28,7 @@ redacts at read time, exactly as it redacts live GitHub responses.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -156,13 +157,30 @@ def resolve_commits(
     return entries, source
 
 
+def _utc_z(instant: str) -> str:
+    """One ISO-8601 instant in the shape GitHub's timestamps carry
+    (`...Z`), whatever offset it was written with; a value that does not
+    parse is returned unchanged, and the caller that owns the format
+    fails loudly on it instead."""
+    try:
+        parsed = datetime.fromisoformat(instant)
+    except ValueError:
+        return instant
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def select_before(entries: list[Json], cutoff: str, field: str) -> list[Json]:
-    """The remarks posted strictly before `cutoff` (ISO-8601 strings
-    compare lexicographically, and GitHub's timestamps are all
-    zero-padded `YYYY-MM-DDTHH:MM:SSZ`). An entry whose field is absent
-    or null -- a pending review's missing `submitted_at` -- is kept: it
-    is older than any instant, the same reading the conversation block's
-    ordering gives it."""
+    """The remarks posted strictly before `cutoff`. The cutoff is
+    normalized to UTC in GitHub's timestamp shape first (`...Z`), so the
+    lexicographic comparison is within one format whatever offset the
+    cutoff or the committer was written with -- an explicit `--cutoff`
+    with a non-UTC offset must not read as a different instant than it
+    names. An entry whose field is absent or null -- a pending review's
+    missing `submitted_at` -- is kept: it is older than any instant, the
+    same reading the conversation block's ordering gives it."""
+    cutoff = _utc_z(cutoff)
     return [
         e
         for e in entries
@@ -217,7 +235,17 @@ def write_snapshot(
     anchor_pull["base"] = base
     anchor_pull["changed_files"] = diff_paths
     if spec.body is not None:
-        anchor_pull["body"] = spec.body
+        # A `--body-file` override is a body reconstructed offline (e.g.
+        # #661's round-5 body), and the reconstruction file's leading
+        # HTML comment is provenance for the fixture's human reader — it
+        # names the graded finding and the deviations, so it must never
+        # ride into the body the replayed reviewer reads. The body text
+        # itself, its stale-CI citations included, is kept whole; the
+        # provenance lives in the fixture's FIXTURE.md and in the parity
+        # key's own copy of the file. A PR body that was never
+        # overridden (the `pull.json` GitHub serves today) is recorded
+        # verbatim, its own leading comments included.
+        anchor_pull["body"] = _reconstructed_body(spec.body)
 
     _write_json(
         out / "event.json",
@@ -294,6 +322,22 @@ def write_snapshot(
     )
 
 
+def _reconstructed_body(body: str) -> str:
+    """The replayed body an override file carries: the file's leading
+    HTML comment block -- the reconstruction's provenance note for the
+    fixture's human reader -- is removed, and everything after it is the
+    body. A body whose first content is not an HTML comment, or whose
+    comment never closes, is kept whole: the builder never guesses at
+    where a provenance note ends."""
+    stripped = body.lstrip()
+    if not stripped.startswith("<!--"):
+        return body
+    end = stripped.find("-->")
+    if end == -1:
+        return body
+    return stripped[end + len("-->") :].lstrip("\n")
+
+
 def _write_json(path: Path, payload: object) -> None:
     path.write_text(
         json.dumps(payload, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
@@ -326,7 +370,12 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
     branch as it stands today (the owner's setup decision: setup uses
     today's default-branch REVIEW.md), not the anchor-time one; the two
     trees come as the exact tarball bytes GitHub serves for those
-    revisions, which is what a live review's `get_tarball` fetches."""
+    revisions, which is what a live review's `get_tarball` fetches. The
+    setup spec's `review_setup_files:` line's files are deliberately not
+    recorded: the replayed setup phase would run the spec's install
+    against a real package index, which the offline stage-0 contract
+    cannot carry; the replay names the gap instead, and the fixture's
+    FIXTURE.md documents the deviation."""
     pull = reader.get(f"repos/{spec.repo}/pulls/{spec.pr_number}")
     commits_all = reader.items(f"repos/{spec.repo}/pulls/{spec.pr_number}/commits")
     issue_comments = reader.items(f"repos/{spec.repo}/issues/{spec.pr_number}/comments")
@@ -335,6 +384,10 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
     repository = reader.get(f"repos/{spec.repo}")
     branch = repository.get("default_branch")
     default_branch = branch if isinstance(branch, str) and branch else "main"
+    review_md = reader.raw(
+        f"repos/{spec.repo}/contents/REVIEW.md?ref={default_branch}",
+        accept=_RAW_ACCEPT,
+    )
     return FetchedSnapshot(
         pull=pull,
         commits_all=commits_all,
@@ -342,10 +395,7 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
         reviews=reviews,
         review_comments=review_comments,
         default_branch=default_branch,
-        review_md=reader.raw(
-            f"repos/{spec.repo}/contents/REVIEW.md?ref={default_branch}",
-            accept=_RAW_ACCEPT,
-        ),
+        review_md=review_md,
         agents_md=reader.raw(
             f"repos/{spec.repo}/contents/AGENTS.md?ref={default_branch}",
             accept=_RAW_ACCEPT,
@@ -453,6 +503,30 @@ def _logs(
 
 # --- the local-git side (no network) ---
 
+# The repository-location overrides an operator's environment may carry:
+# any of these would redirect the builder's `-C repo_root` subprocesses at
+# another repository, index or object store, so every git subprocess runs
+# without them. Everything else in the environment is inherited as the
+# operator set it.
+_REPO_LOCATION_VARS = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_NAMESPACE",
+)
+
+
+def _git_env() -> dict[str, str]:
+    """The environment the builder's git subprocesses run under: the
+    caller's, minus the repository-location overrides above."""
+    return {
+        k: v for k, v in os.environ.items() if k not in _REPO_LOCATION_VARS
+    }  # fmt: skip
+
 
 def _git(repo_root: Path, *args: str) -> str:
     result = subprocess.run(
@@ -460,6 +534,7 @@ def _git(repo_root: Path, *args: str) -> str:
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     )
     return result.stdout
 
@@ -473,6 +548,7 @@ def git_ensure_commit(repo_root: Path, sha: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     if probe.returncode == 0 and probe.stdout.strip() == "commit":
         return
@@ -481,6 +557,7 @@ def git_ensure_commit(repo_root: Path, sha: str) -> None:
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     )
 
 
@@ -508,9 +585,7 @@ def git_cutoff(repo_root: Path, head_sha: str) -> str:
     carry (`...Z`), so the `select_before` comparisons stay lexicographic
     within one format whatever offset the committer's machine wrote."""
     instant = _git(repo_root, "show", "-s", "--format=%cI", head_sha).strip()
-    return (
-        datetime.fromisoformat(instant).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    )
+    return _utc_z(instant)
 
 
 def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
@@ -529,6 +604,7 @@ def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )  # fmt: skip
     preexisting = probe.stdout.strip() if probe.returncode == 0 else None
     _git(repo_root, "update-ref", "refs/heads/atlas-history", head_sha)
@@ -541,6 +617,7 @@ def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
             capture_output=True,
             text=True,
             check=True,
+            env=_git_env(),
         )  # fmt: skip
     finally:
         if preexisting is not None:

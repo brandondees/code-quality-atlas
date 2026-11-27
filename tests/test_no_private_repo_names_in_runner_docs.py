@@ -29,18 +29,18 @@ already public in this repo's own git history -- both anchor heads are
 fetchable from origin by SHA, so the strings they carry add no exposure
 the history does not already have -- and whose content must not be
 re-genericized, because a snapshot that differs from the anchor it
-records would falsify the eval the fixture exists for (the history
-bundle must carry the anchor's own commits and their bytes; quote and
-liveness checks grade the anchor's own tree). The trees ship as the
-tarball bytes GitHub serves, so no loose anchor file is scanned; what
-the scan still flags inside a snapshot is the compressed `history.bundle`,
-whose git objects carry the anchor era's own copies of these strings.
-The rebuild source is the public anchor (``gh api`` reads plus ``git
-bundle`` of public commits), never the private canonical, so the
-regression this guard exists to catch -- a fresh verbatim re-copy --
-cannot come through this path. The exemption is scoped to those two
-snapshot directories; a new fixture needs its own entry here, deliberate
-each time.
+records would falsify the eval the fixture exists for. The exemption
+covers exactly the two files named in `_RECORDED_SNAPSHOTS` -- each
+fixture's `history.bundle`, whose compressed git objects carry the
+anchor era's own copies of these strings; every other file in those
+directories is scanned and passes (the trees ship as GitHub's tarball
+bytes, which do not contain the strings, and the fixtures' JSON, logs
+and prose are clean). The rebuild source is the public anchor (``gh
+api`` reads plus ``git bundle`` of public commits), never the private
+canonical, so the regression this guard exists to catch -- a fresh
+verbatim re-copy -- cannot come through this path; a rebuild's bundle is
+byte-identical to the committed one, so the exemption cannot grow on its
+own. A new fixture needs its own entry here, deliberate each time.
 """
 
 import subprocess
@@ -74,8 +74,8 @@ _PRIVATE_STRINGS = (
 # frozen public-history content, exempt from the scan, each added
 # deliberately.
 _RECORDED_SNAPSHOTS = (
-    "atlas_reviewer/fixtures/pr640/",
-    "atlas_reviewer/fixtures/pr661/",
+    "atlas_reviewer/fixtures/pr640/history.bundle",
+    "atlas_reviewer/fixtures/pr661/history.bundle",
 )
 
 
@@ -109,8 +109,10 @@ def test_no_known_private_strings_in_tracked_tree():
             continue
         relative_path = path.relative_to(ROOT).as_posix()
         if relative_path.startswith(_RECORDED_SNAPSHOTS):
-            # A recorded anchor snapshot is frozen public-history content
-            # (see this file's docstring); it is exempt, not genericized.
+            # The recorded snapshot's history bundle is frozen
+            # public-history content (see this file's docstring); it is
+            # exempt, not genericized. Every other file in the snapshot
+            # directories is scanned below like any other tracked file.
             continue
         try:
             data = path.read_bytes()

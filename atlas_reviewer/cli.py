@@ -2572,21 +2572,24 @@ def _cmd_snapshot_build(args: argparse.Namespace, run: _Run) -> int:
     a fixture that silently lacks its PR, listings or trees would review
     as something it is not."""
     repo_root = Path(args.repo_root)
-    cutoff = args.cutoff or git_cutoff(repo_root, args.head_sha)
     body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else None
-    spec = SnapshotSpec(
-        repo=args.repo,
-        pr_number=args.pr,
-        head_sha=args.head_sha,
-        base_sha=args.base_sha,
-        branch=args.branch,
-        cutoff=cutoff,
-        body=body,
-    )
-    for sha in (spec.head_sha, spec.base_sha):
+    for sha in (args.head_sha, args.base_sha):
         git_ensure_commit(repo_root, sha)
     reader = GhApiReader()
     try:
+        # The default cutoff needs the anchor commit locally, which the
+        # ensure-commit fetch above may have brought in -- derive it
+        # here, inside the boundary conversion, never before the fetch.
+        cutoff = args.cutoff or git_cutoff(repo_root, args.head_sha)
+        spec = SnapshotSpec(
+            repo=args.repo,
+            pr_number=args.pr,
+            head_sha=args.head_sha,
+            base_sha=args.base_sha,
+            branch=args.branch,
+            cutoff=cutoff,
+            body=body,
+        )
         data = fetch_snapshot(spec, reader)
         commits, commits_source = resolve_commits(
             repo_root, spec, data.commits_all, git_ancestors(repo_root, spec.head_sha)

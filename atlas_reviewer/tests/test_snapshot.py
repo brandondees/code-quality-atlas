@@ -21,10 +21,12 @@ from atlas_reviewer import cli
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.history_source import fixture_history
 from atlas_reviewer.snapshot import (
+    _REPO_LOCATION_VARS,
     GhApiReader,
     SnapshotFetchError,
     SnapshotSpec,
     _logs,
+    _reconstructed_body,
     git_bundle,
     git_cutoff,
     resolve_commits,
@@ -41,6 +43,24 @@ SAMPLE_SCENARIOS = FIXTURE / "scenarios"
 HEAD_640 = "0fe45e5ea79f3abd8e07488a01b623186df96692"
 BASE_640 = "771925a538d6744b6017175e8fe5f170abf27a6d"
 HEAD_661 = "28854775e5965eb554b368cc3a543969a635b681"
+
+
+def _git_env(**overrides: str) -> dict[str, str]:
+    """The environment a test's git subprocess runs under: the caller's,
+    minus the repository-location overrides (so an exported `GIT_DIR` or
+    `GIT_INDEX_FILE` in the invoking session cannot redirect a temporary
+    repository's operations at the caller's own repository or index),
+    plus the caller's explicit overrides (`GIT_COMMITTER_DATE` and
+    friends stay expressible)."""
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in _REPO_LOCATION_VARS
+    }  # fmt: skip
+    env.update(overrides)
+    return env
+
+
 BASE_661 = "f82b4bf18b252daf76759f21d2b09ed4f09d39c9"
 
 
@@ -71,6 +91,7 @@ def _seed_repo(path: Path):
             capture_output=True,
             text=True,
             check=True,
+            env=_git_env(**kwargs),
         ).stdout
 
     git("init", "-q", "-b", "main")
@@ -99,7 +120,7 @@ def test_the_default_cutoff_converts_a_non_utc_committer_to_utc(tmp_path):
     reading leak into the fixture (revert-check: the pass-through
     normalization keeps them)."""
     base, _first, _head = _seed_repo(tmp_path)
-    env = {**os.environ, "GIT_COMMITTER_DATE": "2026-11-13T21:33:07+02:00"}
+    env = _git_env(GIT_COMMITTER_DATE="2026-11-13T21:33:07+02:00")
     subprocess.run(
         ["git", "-C", str(tmp_path), "commit", "--allow-empty", "-qm", "tz"],
         env=env,
@@ -111,6 +132,7 @@ def test_the_default_cutoff_converts_a_non_utc_committer_to_utc(tmp_path):
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout.strip()
     assert git_cutoff(tmp_path, later) == "2026-11-13T19:33:07Z"
     # The seeded repo's own commits still normalize cleanly.
@@ -133,6 +155,7 @@ def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     assert refs.returncode != 0
     bundle_heads = subprocess.run(
@@ -140,6 +163,7 @@ def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
 
@@ -154,17 +178,20 @@ def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
         ["git", "-C", str(other), "commit", "-qm", "the operator's own tip"],
         capture_output=True,
         check=True,
+        env=_git_env(),
     )  # fmt: skip
     theirs_tip = subprocess.run(
         ["git", "-C", str(other), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout.strip()
     subprocess.run(
         ["git", "-C", str(other), "update-ref", "refs/heads/atlas-history", theirs_tip],
         capture_output=True,
         check=True,
+        env=_git_env(),
     )  # fmt: skip
     git_bundle(other, theirs_tip_before, tmp_path / "other-bundle")
     restored = subprocess.run(
@@ -172,6 +199,7 @@ def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout.strip()
     assert restored == theirs_tip
 
@@ -232,6 +260,7 @@ def test_resolve_commits_prefers_the_listing_and_rebuilds_what_it_lost(tmp_path)
             capture_output=True,
             text=True,
             check=True,
+            env=_git_env(),
         ).stdout.split()
     )
     commits, source = resolve_commits(tmp_path, spec, listing, ancestors)
@@ -423,11 +452,17 @@ def test_the_committed_anchor_fixture_carries_the_documented_snapshot(
     assert base_tarball.is_file() and base_tarball.stat().st_size > 1_000_000
     assert (fixture_dir / "REVIEW.md").is_file()
     assert (fixture_dir / "agents-md.txt").is_file()
+    # A reconstructed body carries no provenance comment naming the
+    # graded finding.
+    if pr == 661:
+        assert "661-m1" not in pull["body"]
+        assert "43429340358" in pull["body"]
     bundle_heads = subprocess.run(
         ["git", "bundle", "list-heads", str(fixture_dir / "history.bundle")],
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
 
@@ -563,6 +598,7 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
         capture_output=True,
         text=True,
         check=True,
+        env=_git_env(),
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
     assert (out / "source.tar.gz").read_bytes() == b"head tarball bytes"
@@ -616,6 +652,41 @@ def test_the_anchor_fixture_runs_offline_through_eval_run(tmp_path, fixture_dir)
     assert payload["head_sha"] == (
         HEAD_640 if fixture_dir.name == "pr640" else HEAD_661
     )
+
+
+def test_select_before_normalizes_a_non_utc_explicit_cutoff():
+    """An explicit cutoff written with a non-UTC offset names the instant
+    it says, not the string it is: a remark posted after that instant --
+    in UTC, the shape GitHub's timestamps compare in -- is excluded even
+    though its zero-padded `...Z` text sorts before the offset-form
+    cutoff string (revert-check: the string comparison keeps it, and the
+    fixture would carry future conversation)."""
+    entries = [
+        {"id": 1, "created_at": "2026-11-13T19:32:00Z"},
+        {"id": 2, "created_at": "2026-11-13T20:00:00Z"},
+        {"id": 3, "created_at": "2026-11-13T21:34:00Z"},
+    ]
+    kept = select_before(entries, "2026-11-13T21:33:07+02:00", "created_at")
+    assert [e["id"] for e in kept] == [1]
+
+
+def test_a_reconstructed_body_rides_without_its_provenance_comment():
+    """A `--body-file` override is a body reconstructed offline, and its
+    leading HTML comment is the reconstruction's provenance note for the
+    fixture's human reader -- it names the graded finding, so it must
+    never ride into the body the replayed reviewer reads. The body text
+    after the comment, its stale-CI citations included, is kept whole;
+    a body that does not open with an HTML comment is kept whole."""
+    body = (
+        "<!--\nReconstructed ... names 661-m1 ... -->\n## Summary\n\n"
+        "`gate` on `61273b4f` (run 43429340358)\n"
+    )
+    cleaned = _reconstructed_body(body)
+    assert cleaned.startswith("## Summary")
+    assert "661-m1" not in cleaned
+    assert "43429340358" in cleaned
+    assert _reconstructed_body("## plain body\n") == "## plain body\n"
+    assert _reconstructed_body("<!-- never closed") == "<!-- never closed"
 
 
 def test_the_committed_fixtures_load_through_the_merged_history_loader():

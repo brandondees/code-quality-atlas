@@ -45,9 +45,17 @@ offline.
   test proves the eval path stages this history for the fixture.
 - **Setup** — the fixture-root `REVIEW.md` and `agents-md.txt` are the
   default branch's files **as they stand today** (the owner's decision:
-  setup uses today's default-branch `REVIEW.md`, which carries the
-  setup spec), not the anchor-time copies; the anchor-time copies ride
-  in the trees, where the merge-base config read takes them.
+  setup uses today's default-branch `REVIEW.md`, which carries the setup
+  spec), not the anchor-time copies; the anchor-time copies ride in the
+  trees, where the merge-base config read takes them. The setup spec's
+  `review_setup_files:` line declares `requirements.txt`, and that file
+  is deliberately **not** recorded: the replayed setup phase would run
+  the spec's install against a real package index, which the offline
+  stage-0 contract cannot carry — the replay names the gap (the
+  declared file is not served by the fixture's default branch) and no
+  setup phase runs, the same named shape a fixture without the file
+  produces; a production run on the live default branch does install
+  it, and that fidelity gap is this fixture's recorded cost.
 
 ## The body
 

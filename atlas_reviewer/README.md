@@ -1061,10 +1061,18 @@ read-only `snapshot-build` command (`python -m atlas_reviewer
 snapshot-build ...`): the one step allowed to touch the network — the
 GitHub reads go through `gh api`, with the two trees arriving as the
 exact tarball bytes GitHub serves (committed verbatim, so no loose
-anchor file ships for the repo's content gates to re-lint), and the
-diff, the self-contained `history.bundle` and its `history-base.txt`
-(the merge base the merged loader's contract reads) coming from the
-local checkout — with the committed fixture offline afterward. The
+anchor file ships for the repo's content gates to re-lint), the
+default-branch files the setup spec's `review_setup_files:` line
+declares arriving beside the fixture-root `REVIEW.md`/`agents-md.txt`
+(the replayed setup phase fetches each from the fixture root exactly as
+a live review fetches it from the default branch), a `--body-file`
+override recorded without its file's leading provenance comment (a
+reconstruction note names the graded finding — it is for the fixture's
+human reader, never for the replayed reviewer; the body text and its
+citations are kept whole), and the diff, the self-contained
+`history.bundle` and its `history-base.txt` (the merge base the merged
+loader's contract reads) coming from the local checkout — with the
+committed fixture offline afterward. The
 committed fixtures load through the eval path's own `fixture_history`
 loader, and the stage-0 test proves the eval run stages that history.
 The snapshot
