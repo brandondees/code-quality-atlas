@@ -320,9 +320,10 @@ def test_the_640_fixture_serves_the_anchor_through_the_loader():
     compare = gh.get_compare(repo, "main", HEAD_640)
     assert compare["merge_base_commit"]["sha"] == BASE_640
     assert gh.get_tarball(repo, HEAD_640) == (PR640 / "source.tar.gz").read_bytes()
-    assert gh.get_tarball(repo, BASE_640) == (
-        PR640 / f"source-{BASE_640[:7]}.tar.gz"
-    ).read_bytes()
+    assert (
+        gh.get_tarball(repo, BASE_640)
+        == (PR640 / f"source-{BASE_640[:7]}.tar.gz").read_bytes()
+    )
 
 
 # --- the builder command, offline through a fake reader ---
@@ -435,9 +436,7 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
     assert (out / "source.tar.gz").read_bytes() == b"head tarball bytes"
-    assert (
-        out / f"source-{base[:7]}.tar.gz"
-    ).read_bytes() == b"base tarball bytes"
+    assert (out / f"source-{base[:7]}.tar.gz").read_bytes() == b"base tarball bytes"
 
 
 # --- the stage-0 runs: the real driver over the committed anchors ---
