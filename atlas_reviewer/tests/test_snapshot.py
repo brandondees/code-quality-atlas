@@ -11,6 +11,7 @@ over the recorded snapshot, spending nothing."""
 import io
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import pytest
 
 from atlas_reviewer import cli
 from atlas_reviewer.github_fixture import FixtureGitHub
+from atlas_reviewer.history_source import fixture_history
 from atlas_reviewer.snapshot import (
     GhApiReader,
     SnapshotFetchError,
@@ -117,10 +119,12 @@ def test_the_default_cutoff_converts_a_non_utc_committer_to_utc(tmp_path):
 
 def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
     """The `atlas-history` ref is the bundle command's own addressing
-    need, not a change to the checkout: it exists only while
-    `bundle create` runs and is gone afterwards, whatever the bundle's
-    outcome -- the builder's reads stay read-only over the operator's
-    repository (revert-check: the un-deleted ref survives here)."""
+    need, not a change to the checkout: a ref the operator's repository
+    already carries by that name is saved and restored to its own value,
+    and one that did not exist is deleted again -- in both cases the
+    builder leaves the operator's refs exactly as it found them, whatever
+    the bundle's outcome (revert-check: the unconditional delete removes
+    the operator's ref instead of restoring it)."""
     _base, _first, head = _seed_repo(tmp_path)
     dest = tmp_path / "history.bundle"
     git_bundle(tmp_path, head, dest)
@@ -138,6 +142,38 @@ def test_git_bundle_leaves_the_operators_refs_alone(tmp_path):
         check=True,
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
+
+    # A pre-existing ref of the same name survives the build unchanged.
+    other = tmp_path / "other"
+    _base2, _first2, theirs_tip_before = _seed_repo(other)
+    (other / "mine.txt").write_text("the operator's own\n")
+    subprocess.run(
+        ["git", "-C", str(other), "add", "-A"], capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(other), "commit", "-qm", "the operator's own tip"],
+        capture_output=True,
+        check=True,
+    )  # fmt: skip
+    theirs_tip = subprocess.run(
+        ["git", "-C", str(other), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "-C", str(other), "update-ref", "refs/heads/atlas-history", theirs_tip],
+        capture_output=True,
+        check=True,
+    )  # fmt: skip
+    git_bundle(other, theirs_tip_before, tmp_path / "other-bundle")
+    restored = subprocess.run(
+        ["git", "-C", str(other), "rev-parse", "refs/heads/atlas-history"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert restored == theirs_tip
 
 
 def test_the_log_order_is_failing_first_wherever_the_failure_ran():
@@ -289,7 +325,7 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
         "artifacts-5.json", "job-log-7.txt", "repository.json",
         "compare.json", "REVIEW.md", "agents-md.txt",
         "source.tar.gz", "source-bbbbbbb.tar.gz",
-        "history.bundle", "snapshot.json",
+        "history.bundle", "history-base.txt", "snapshot.json",
     ):  # fmt: skip
         assert name in names, names
     pull = json.loads((tmp_path / "fx" / "pull.json").read_text())
@@ -311,6 +347,8 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
     )
     assert (tmp_path / "fx" / "job-log-7.txt").read_bytes() == b"log"
     assert (tmp_path / "fx" / "history.bundle").read_bytes() == b"bundle"
+    # The loader's contract: the merge base rides beside the bundle.
+    assert (tmp_path / "fx" / "history-base.txt").read_text().strip() == spec.base_sha
     assert (tmp_path / "fx" / "source.tar.gz").read_bytes() == b"head tarball"
     assert (tmp_path / "fx" / "source-bbbbbbb.tar.gz").read_bytes() == b"base tarball"
     manifest = json.loads((tmp_path / "fx" / "snapshot.json").read_text())
@@ -532,12 +570,14 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
 
 
 # --- the stage-0 runs: the real driver over the committed anchors ---
-def _eval_run(tmp_path: Path, fixture_dir: Path, run_file: Path) -> tuple[int, str]:
+def _eval_run(
+    tmp_path: Path, fixture_dir: Path, run_file: Path, *, state: str = "state"
+) -> tuple[int, str]:
     out, err = io.StringIO(), io.StringIO()
     code = cli.main(
         [
             "--state-dir",
-            str(tmp_path / "state"),
+            str(tmp_path / state),
             "eval-run",
             "--fixture",
             str(fixture_dir),
@@ -576,3 +616,72 @@ def test_the_anchor_fixture_runs_offline_through_eval_run(tmp_path, fixture_dir)
     assert payload["head_sha"] == (
         HEAD_640 if fixture_dir.name == "pr640" else HEAD_661
     )
+
+
+def test_the_committed_fixtures_load_through_the_merged_history_loader():
+    """The loader this tree carries (#860's `fixture_history`) needs BOTH
+    `history.bundle` and `history-base.txt`; the committed anchors carry
+    both, and the base it reads back is the merge base the fixture's
+    manifest records -- the same figure the parity-key tests name. This
+    is the test the review asked for and the old shape could not pass:
+    without the base file the loader answers None, the eval stages no
+    history, and the run still reads green."""
+    for fixture_dir, base in ((PR640, BASE_640), (PR661, BASE_661)):
+        loaded = fixture_history(fixture_dir)
+        assert loaded is not None, fixture_dir
+        assert loaded.base_sha == base
+        assert loaded.bundle == (fixture_dir / "history.bundle").read_bytes()
+        assert len(loaded.bundle) > 1_000_000
+
+
+@pytest.mark.parametrize("missing", ["history.bundle", "history-base.txt"])
+def test_a_fixture_missing_either_history_file_is_the_no_history_gap(tmp_path, missing):
+    """The loader's gate, pinned against the builder's output: either
+    file missing is the named no-history gap, not a partial load."""
+    (tmp_path / "history.bundle").write_bytes(b"bundle bytes")
+    (tmp_path / "history-base.txt").write_text("a" * 40 + "\n")
+    (tmp_path / missing).unlink()
+    assert fixture_history(tmp_path) is None
+
+
+def test_the_eval_path_stages_the_fixtures_history(tmp_path, monkeypatch):
+    """The real `eval-run` over a committed anchor hands the fixture's
+    own history to the bridge's staging: the bundle uploader receives the
+    exact committed bytes and the fetch is built with the manifest's
+    merge base, so the history tools read the anchor's real commits
+    (revert-check: the same run over a fixture whose `history-base.txt`
+    is missing records no upload at all -- the named no-history gap)."""
+    from atlas_reviewer import bridge_staging
+
+    recorded: dict[str, object] = {}
+    real_upload = bridge_staging.upload_history_bundle
+    real_script = bridge_staging.history_fetch_script
+
+    def upload(session, bundle, root):
+        recorded["bundle"] = bytes(bundle)
+        return real_upload(session, bundle, root)
+
+    def fetch_script(root, git, base, head):
+        recorded["base"] = base
+        recorded["head"] = head
+        return real_script(root, git, base, head)
+
+    monkeypatch.setattr(bridge_staging, "upload_history_bundle", upload)
+    monkeypatch.setattr(bridge_staging, "history_fetch_script", fetch_script)
+    code, err = _eval_run(tmp_path, PR640, tmp_path / "run.json")
+    assert code == cli.EXIT_OK, err
+    assert recorded["bundle"] == (PR640 / "history.bundle").read_bytes()
+    assert recorded["base"] == BASE_640
+    assert recorded["head"] == HEAD_640
+
+    # The revert half: a fixture without the base file stages nothing.
+    stripped = tmp_path / "no-base"
+    shutil.copytree(
+        PR640,
+        stripped,
+        ignore=shutil.ignore_patterns("history-base.txt"),
+    )
+    recorded.clear()
+    code, err = _eval_run(tmp_path, stripped, tmp_path / "run2.json", state="state-2")
+    assert code == cli.EXIT_OK, err
+    assert recorded == {}

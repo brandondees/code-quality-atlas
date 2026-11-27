@@ -1062,8 +1062,12 @@ snapshot-build ...`): the one step allowed to touch the network — the
 GitHub reads go through `gh api`, with the two trees arriving as the
 exact tarball bytes GitHub serves (committed verbatim, so no loose
 anchor file ships for the repo's content gates to re-lint), and the
-diff and the self-contained `history.bundle` coming from the local
-checkout — with the committed fixture offline afterward. The snapshot
+diff, the self-contained `history.bundle` and its `history-base.txt`
+(the merge base the merged loader's contract reads) coming from the
+local checkout — with the committed fixture offline afterward. The
+committed fixtures load through the eval path's own `fixture_history`
+loader, and the stage-0 test proves the eval run stages that history.
+The snapshot
 filters to what the
 anchor's reviewer saw: the anchor's lineage commits, the remarks posted
 before the anchor push, the CI at the retained commits with the jobs'
@@ -2897,7 +2901,7 @@ D41 records the 2026-11-12 probe that did.
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, job logs for every ingested run's jobs, artifact contents at the head, omissions | via `GitHubReader` |
-| `snapshot.py` | the read-only PR snapshot builder behind the parity anchors' eval fixtures (`snapshot-build`): the anchor's lineage commits, the remarks posted before the anchor push, the CI at the retained commits with the jobs' logs, the trees as the exact tarball bytes GitHub serves, the diff and the self-contained `history.bundle`; the build step's GitHub reads go through `gh api`, the fixture is committed and offline afterward | via `gh api` subprocesses and the local git |
+| `snapshot.py` | the read-only PR snapshot builder behind the parity anchors' eval fixtures (`snapshot-build`): the anchor's lineage commits, the remarks posted before the anchor push, the CI at the retained commits with the jobs' logs, the trees as the exact tarball bytes GitHub serves, the diff, and the self-contained `history.bundle` with its `history-base.txt`; the build step's GitHub reads go through `gh api`, the fixture is committed and offline afterward | via `gh api` subprocesses and the local git |
 | `controller.py` | one event in, one draft and its review verdict out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
 | `providers.py` | `OfflineProvider` (the default) | no |

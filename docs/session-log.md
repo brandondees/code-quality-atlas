@@ -6751,6 +6751,23 @@ failing-first wherever the failure ran, the anchor head's own failing
 job included. Each carries its revert-check test in
 `test_snapshot.py`.
 
+**Round-1 review fix on #865 (the r1 report's Major and Nit):** the
+builder writes `history-base.txt` from the manifest's `base_sha` — the
+merged #860 loader loads a fixture's bundle only when both files are
+present, so the committed anchors were staging no history and reading
+green on the named gap — and both fixtures are rebuilt with it. The
+stage-0 proof is now end to end: a test loads both fixtures through
+`fixture_history` (either file missing pinned as the None gap), and an
+`eval-run` test spies on the staging's `upload_history_bundle` /
+`history_fetch_script` to show the committed bundle bytes reach the
+runner with the manifest's merge base, the same run over a base-less
+fixture recording no upload. The bundle step's ref handling saves and
+restores a pre-existing `refs/heads/atlas-history` instead of deleting
+unconditionally, and the builder strips the volatile nested head/base
+repository objects so a rebuild stays byte-stable. The fixture docs and
+D97 no longer claim the loader is future work — it is in this tree and
+the fixtures load through it.
+
 ## 2026-11-27 — the grounding pre-pass: the repo's declared CI tooling runs before any lens (the harness gap audit's blocker 4, slice S2)
 
 The protocol's step 4.3 had no counterpart in the agentic path: ruff and

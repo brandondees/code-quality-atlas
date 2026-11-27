@@ -206,7 +206,15 @@ def write_snapshot(
     head = dict(anchor_pull.get("head") or {})
     head["sha"] = spec.head_sha
     head["ref"] = spec.branch
+    # The nested repository objects GitHub embeds under head/base carry
+    # the repo's live counters (issue count, size, pushed_at), which move
+    # on every rebuild; the loader reads only the SHAs and refs, so the
+    # volatile copies are dropped and a rebuild stays byte-stable.
+    head.pop("repo", None)
     anchor_pull["head"] = head
+    base = dict(anchor_pull.get("base") or {})
+    base.pop("repo", None)
+    anchor_pull["base"] = base
     anchor_pull["changed_files"] = diff_paths
     if spec.body is not None:
         anchor_pull["body"] = spec.body
@@ -246,6 +254,12 @@ def write_snapshot(
     (out / "REVIEW.md").write_bytes(review_md)
     (out / "agents-md.txt").write_bytes(agents_md)
     (out / "history.bundle").write_bytes(bundle)
+    # The merged loader's contract (`history_source.fixture_history`):
+    # the bundle loads only when `history-base.txt` sits beside it, so
+    # the manifest's merge base is written out verbatim -- without it the
+    # eval would stage no history and report the named no-history gap
+    # while still reading green.
+    (out / "history-base.txt").write_text(f"{spec.base_sha}\n", encoding="utf-8")
     for name, data in trees.items():
         (out / name).write_bytes(data)
     _write_json(
@@ -505,9 +519,18 @@ def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
     with no prerequisite -- the staged repository's git is synthetic, so
     a bundle that assumed the base's objects could not be fetched there.
     The ref is the bundle command's own addressing need, not a change to
-    the checkout: it is created for the one `bundle create` and deleted
-    again whatever the bundle's outcome, so the operator's repository is
-    left exactly as the build found it."""
+    the checkout: a ref the operator's repository already carries by
+    that name is saved and restored to its own value after the build,
+    and one that did not exist is deleted again -- the builder leaves
+    the operator's refs exactly as it found them, whatever the bundle's
+    outcome."""
+    probe = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", "refs/heads/atlas-history"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )  # fmt: skip
+    preexisting = probe.stdout.strip() if probe.returncode == 0 else None
     _git(repo_root, "update-ref", "refs/heads/atlas-history", head_sha)
     try:
         subprocess.run(
@@ -520,7 +543,10 @@ def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:
             check=True,
         )  # fmt: skip
     finally:
-        _git(repo_root, "update-ref", "-d", "refs/heads/atlas-history")
+        if preexisting is not None:
+            _git(repo_root, "update-ref", "refs/heads/atlas-history", preexisting)
+        else:
+            _git(repo_root, "update-ref", "-d", "refs/heads/atlas-history")
 
 
 class GhApiReader:

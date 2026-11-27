@@ -39,10 +39,10 @@ offline.
 - **History** — `history.bundle` is the self-contained git bundle the
   staging's history fetch reads: `refs/heads/atlas-history` at the
   anchor head, no prerequisite (the staged repository's git is
-  synthetic). The eval loader that fills the bridge's history tools from
-  it is the git-history slice's wiring (the brief's S1); until that
-  lands the file is the fixture's record of the PR's history, in the
-  README-documented shape.
+  synthetic). `history-base.txt` carries the merge base beside it — the
+  merged loader's contract (`history_source.fixture_history` loads the
+  bundle only when both files are present) — and the offline stage-0
+  test proves the eval path stages this history for the fixture.
 - **Setup** — the fixture-root `REVIEW.md` and `agents-md.txt` are the
   default branch's files **as they stand today** (the owner's decision:
   setup uses today's default-branch `REVIEW.md`, which carries the
