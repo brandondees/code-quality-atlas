@@ -86,7 +86,7 @@ def _string(value: Any) -> str:
 
 def _path(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_PATH_BYTES:
+    if _utf8_byte_length(text) > MAX_PATH_BYTES:
         raise RejectedError(INVALID, f"is over {MAX_PATH_BYTES} bytes")
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
         raise RejectedError(INVALID, "contains a control character")
@@ -112,7 +112,7 @@ def _prefix(value: Any, revs: frozenset[Rev]) -> str:
 
 def _pattern(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if not text or len(text.encode("utf-8")) > MAX_PATTERN_BYTES:
+    if not text or _utf8_byte_length(text) > MAX_PATTERN_BYTES:
         raise RejectedError(INVALID, f"must be 1 to {MAX_PATTERN_BYTES} bytes")
     if any(c in text for c in "\n\r\0"):
         raise RejectedError(INVALID, "may not contain a newline or NUL")
@@ -158,9 +158,22 @@ MAX_PROBE_CHARS = 16 * 1024
 PROBE_ALLOWED_CONTROLS = frozenset("\n\t\r")
 
 
+def _utf8_byte_length(text: str) -> int:
+    """The text's UTF-8 byte length, as a rejected call when it cannot
+    encode: Python's JSON decoder accepts unpaired surrogates, which no
+    UTF-8 encoder will -- and the exception escaping the tool boundary
+    would end the call without the structured rejection the model can
+    re-issue from. Raised as the fixed invalid shape; the caller adds
+    its own cap's message."""
+    try:
+        return len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise RejectedError(INVALID, "is not encodable as UTF-8 text") from None
+
+
 def _command(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_COMMAND_CHARS:
+    if _utf8_byte_length(text) > MAX_COMMAND_CHARS:
         raise RejectedError(INVALID, f"is over {MAX_COMMAND_CHARS} characters")
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
         raise RejectedError(INVALID, "contains a control character")
@@ -212,7 +225,7 @@ def _probe_content(value: Any, _revs: frozenset[Rev]) -> str:
     the PR's own tests -- and it is never written back: it dies with the
     disposable copy it ran in."""
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_PROBE_CHARS:
+    if _utf8_byte_length(text) > MAX_PROBE_CHARS:
         raise RejectedError(INVALID, f"is over {MAX_PROBE_CHARS} bytes")
     if any(
         ord(c) < 0x20 and c not in PROBE_ALLOWED_CONTROLS or ord(c) == 0x7F

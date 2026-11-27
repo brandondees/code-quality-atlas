@@ -3311,3 +3311,23 @@ def test_the_probe_shares_the_test_run_cap(tmp_path):
     assert first.status is Status.OK
     assert second.status is Status.OVER_SESSION_LIMIT
     assert "all 1 run_tests calls" in second.error.text
+
+
+def test_probe_content_with_an_unpaired_surrogate_is_a_rejected_call(tmp_path):
+    """Python's JSON decoder accepts unpaired surrogates, which no UTF-8
+    encoder will encode: the byte-cap check's encode raised
+    UnicodeEncodeError out of the validator, past the tool boundary's
+    RejectedError handler -- a crashed call instead of the rejected one
+    the model can re-issue from. The same hole sat in every validator
+    that measured UTF-8 length (paths, patterns, commands, bash), so the
+    fix is one helper all of them share."""
+    surrogate = '"' + chr(0xD800) + '"'
+    for tool, args in (
+        # The probe's content and a read's path: two validators on this
+        # layer whose UTF-8 length check used to raise past the boundary.
+        ("run_probe", {"content": surrogate}),
+        ("read_file", {"path": surrogate}),
+    ):
+        refused = one(tmp_path, tool, args)
+        assert refused.status is Status.REJECTED, tool
+        assert "not encodable as UTF-8" in refused.error.text
