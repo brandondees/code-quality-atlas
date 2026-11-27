@@ -35,7 +35,7 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from atlas_reviewer.diffs import DOCS, risk_tier
+from atlas_reviewer.diffs import DOCS, risk_tier, split_files
 from atlas_reviewer.lenses import (
     LENS_BUDGET_CHARS,
     LensChoice,
@@ -400,7 +400,10 @@ def guideline_shapes(
     the guideline applies them through the picker, and the note keeps the
     request auditable when the model leaves one out. The paths are
     PR-controlled and are quoted as data, so a crafted path cannot speak
-    as the controller. `diff` is read only for git's rename records."""
+    as the controller. `diff` is read only for git's rename records. The
+    lens names these facts ask for are enforced separately, by
+    `shape_auto_includes` -- the controller adds those itself instead of
+    trusting the picker to name them."""
     shapes = []
     decisions = tuple(p for p in paths if _is_decision_record(p))
     if decisions:
@@ -428,6 +431,105 @@ def guideline_shapes(
             "among others"
         )
     return tuple(shapes)
+
+
+# The lenses the guideline's auto-includes mandate, and the why each
+# carries into the draft's Lenses line. The rename route's
+# tracing-correctness-and-invariants is the critical tier's own and is
+# always enforced ahead of the picks, so the rename shape adds only the
+# two the tier does not carry.
+DECISION_LENS = "reviewing-decision-lifecycle"
+DECISION_CURRENCY_LENS = "auditing-decision-record-currency"
+DOCS_HEALTH_LENS = "auditing-documentation-health"
+MODULE_DESIGN_LENS = "reviewing-module-design"
+NAMING_LENS = "reviewing-naming-and-readability"
+_AUTO_WHY = {
+    DECISION_LENS: "auto-included: a decision record or the decisions log is touched",
+    DECISION_CURRENCY_LENS: "auto-included: an existing decision record is edited",
+    DOCS_HEALTH_LENS: "auto-included: every changed path is documentation",
+    MODULE_DESIGN_LENS: "auto-included: the diff renames files",
+    NAMING_LENS: "auto-included: the diff renames files",
+}
+
+
+def _edits_existing(path: str, diff: str) -> bool:
+    """Whether the diff shows the path existed before the change: a
+    context or removed line, a rename record, or a deletion -- what
+    distinguishes editing an existing decision record from authoring a
+    new one. A path the diff carries no section for reads as existing:
+    the caller's paths come from that diff, and the cost of a false
+    existing here is one more lens, not a missed one."""
+    for section in split_files(diff):
+        if section.path != path:
+            continue
+        if any(
+            marker in section.text
+            for marker in ("rename to ", "deleted file", "new file")
+        ):
+            return True
+        return any(
+            not line.startswith("+")
+            for line in section.text.split("\n")
+            if line and not line.startswith(_DIFF_HEADERS)
+        )
+    return True
+
+
+_DIFF_HEADERS = (
+    "diff --git",
+    "index ",
+    "--- ",
+    "+++ ",
+    "rename ",
+    "similarity ",
+    "copy ",
+    "@@",
+)
+
+
+def shape_auto_includes(paths: tuple[str, ...], *, diff: str = "") -> tuple[str, ...]:
+    """The lens names the guideline's auto-includes mandate for the change
+    shapes present, in the order the facts are stated: a decision record
+    or the decisions log pulls in reviewing-decision-lifecycle, plus
+    auditing-decision-record-currency when an existing record is edited
+    rather than a new one authored; a docs-only change pulls in
+    auditing-documentation-health; a rename pulls in the restructuring
+    route's reviewing-module-design and reviewing-naming-and-readability.
+    These are what the controller enforces itself (the picker is only
+    told the facts), so the detection shares `guideline_shapes`'s own
+    predicates and the two cannot disagree about what the shapes are."""
+    names: list[str] = []
+    decisions = tuple(p for p in paths if _is_decision_record(p))
+    if decisions:
+        names.append(DECISION_LENS)
+        if any(_edits_existing(p, diff) for p in decisions):
+            names.append(DECISION_CURRENCY_LENS)
+    if paths and all(_is_docs(p) for p in paths) and len(decisions) < len(paths):
+        names.append(DOCS_HEALTH_LENS)
+    if _RENAME_FROM.findall(diff):
+        names.extend((MODULE_DESIGN_LENS, NAMING_LENS))
+    return tuple(dict.fromkeys(names))
+
+
+def _auto_choices(
+    names: tuple[str, ...], preferences: LensPreferences | None
+) -> tuple[LensChoice, ...]:
+    """The shape auto-includes as choices. A repo preference's exclude
+    drops one the same way it drops the controller-added hygiene lens
+    (D69): exclude wins over include on every path, and the auto-include
+    is controller-added, neither floor-tier nor a cap."""
+    drop = set(preferences.exclude) if preferences is not None else set()
+    return tuple(
+        LensChoice(name, _AUTO_WHY[name]) for name in names if name not in drop
+    )
+
+
+def _auto_note(names: tuple[str, ...]) -> str:
+    """The selection-note sentence recording which shape auto-includes the
+    controller enforced, or "" when there were none."""
+    if not names:
+        return ""
+    return f" Auto-included on the shape facts: {', '.join(names)}."
 
 
 def _shape_paths(paths: tuple[str, ...], scrub: Callable[[str], str]) -> str:
@@ -462,6 +564,7 @@ def select_lenses(
     pr_text: str = "",
     preferences: LensPreferences | None = None,
     shapes: tuple[str, ...] = (),
+    auto_includes: tuple[str, ...] = (),
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the
@@ -490,8 +593,22 @@ def select_lenses(
         no_room=lambda: _no_room_for_a_pick(library, depth, budget_chars),
     )
     if isinstance(picked, LensSelection):
-        return _preferenced_fallback(picked, preferences, depth, shapes)
+        return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
+    covered = {
+        *applied.kept,
+        *CRITICAL_TIER,
+        *(choice.name for choice in applied.hygiene),
+    }
+    auto = tuple(
+        choice
+        for choice in _auto_choices(auto_includes, preferences)
+        if choice.name not in covered
+    )
+    covered |= {choice.name for choice in auto}
+    includes = tuple(
+        choice for choice in applied.includes if choice.name not in covered
+    )
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -502,10 +619,11 @@ def select_lenses(
         f"{budget_chars}-character lens budget decides what runs whole: the "
         f"Lenses line says which ran whole and which are NOT RUN, and why."
         f"{_shapes_note(shapes)}"
+        f"{_auto_note(tuple(choice.name for choice in auto))}"
         f"{_preference_record(preferences, applied)}"
     )
     return LensSelection(
-        _with_critical(applied.kept, applied.hygiene) + applied.includes, note, True
+        _with_critical(applied.kept, applied.hygiene, auto) + includes, note, True
     )
 
 
@@ -530,6 +648,7 @@ def select_agentic_lenses(
     pr_text: str = "",
     preferences: LensPreferences | None = None,
     shapes: tuple[str, ...] = (),
+    auto_includes: tuple[str, ...] = (),
 ) -> tuple[LensSelection, LensPlan]:
     """The critical tier plus the picker's full ranking. The one-shot
     character budget is not consulted, so a review-depth PR still calls
@@ -539,10 +658,12 @@ def select_agentic_lenses(
     excluded names from the picks and appends its included names, on the
     fallback paths too, and the note records the override whenever one is
     present; the controller's shape facts (`shapes`) are stated here as
-    well."""
+    well, and the lenses they mandate (`auto_includes`) are added by the
+    controller itself, ahead of the picks, not left to the picker's
+    ranking."""
     selection = _agentic_selection(
         depth, run_picker, library, scrub=scrub, pr_text=pr_text,
-        preferences=preferences, shapes=shapes,
+        preferences=preferences, shapes=shapes, auto_includes=auto_includes,
     )  # fmt: skip
     return selection, plan_agentic_lenses(library, selection.choices)
 
@@ -556,6 +677,7 @@ def _agentic_selection(
     pr_text: str = "",
     preferences: LensPreferences | None = None,
     shapes: tuple[str, ...] = (),
+    auto_includes: tuple[str, ...] = (),
 ) -> LensSelection:
     def has_body(name: str) -> bool:
         return library.body(name) is not None
@@ -563,8 +685,22 @@ def _agentic_selection(
     hygiene = _hygiene_choice(pr_text)
     picked = _pick(depth, run_picker, has_body, scrub=scrub, hygiene=hygiene)
     if isinstance(picked, LensSelection):
-        return _preferenced_fallback(picked, preferences, depth, shapes)
+        return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
+    covered = {
+        *applied.kept,
+        *CRITICAL_TIER,
+        *(choice.name for choice in applied.hygiene),
+    }
+    auto = tuple(
+        choice
+        for choice in _auto_choices(auto_includes, preferences)
+        if choice.name not in covered
+    )
+    covered |= {choice.name for choice in auto}
+    includes = tuple(
+        choice for choice in applied.includes if choice.name not in covered
+    )
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -572,10 +708,11 @@ def _agentic_selection(
         f"The picker ranked {len(picked)} lens name(s), {with_body} with a body. "
         f"{_agentic_order_note(hygiene)}"
         f"{_shapes_note(shapes)}"
+        f"{_auto_note(tuple(choice.name for choice in auto))}"
         f"{_preference_record(preferences, applied)}"
     )
     return LensSelection(
-        _with_critical(applied.kept, applied.hygiene) + applied.includes, note, True
+        _with_critical(applied.kept, applied.hygiene, auto) + includes, note, True
     )
 
 
@@ -632,13 +769,16 @@ def _preferenced_fallback(
     preferences: LensPreferences | None,
     depth: Depth,
     shapes: tuple[str, ...] = (),
+    auto_includes: tuple[str, ...] = (),
 ) -> LensSelection:
     """A fallback selection with the controller's shape facts and the
     repo's preference applied (D69; round-1 F2/F4/F6/F7): an exclude
     drops its non-floor choices here too -- on the fallback paths the
     only excludable choice is the controller-added hygiene lens -- and an
     include is appended even when the picker fell back or made no call,
-    with exclude winning over include. The note records the override
+    with exclude winning over include. The shape auto-includes ride the
+    fallback too: a picker that fell back or made no call does not lift
+    the guideline's own mandate. The note records the override
     whenever one is present, and no longer says "only the critical tier"
     once the preference has added to it or dropped from it. Triage is not
     widened and states no shapes: a preference re-ranks within its depth
@@ -647,8 +787,18 @@ def _preferenced_fallback(
     if depth is Depth.TRIAGE:
         return selection
     note = selection.note + _shapes_note(shapes)
+    covered = {choice.name for choice in selection.choices}
     if preferences is None:
-        return _with_note(selection, note)
+        auto = tuple(
+            choice
+            for choice in _auto_choices(auto_includes, None)
+            if choice.name not in covered
+        )
+        note += _auto_note(tuple(choice.name for choice in auto))
+        return LensSelection(
+            selection.choices + auto, note, selection.used_call,
+            selection.skipped,
+        )  # fmt: skip
     drop = set(preferences.exclude) - set(FLOOR_TIER)
     # A fallback has no picks, so the only excludable choice here is the
     # controller-added hygiene lens: it is recorded once, as the
@@ -662,6 +812,12 @@ def _preferenced_fallback(
         c.name == PR_HYGIENE for c in selection.choices
     )
     covered = {c.name for c in kept}
+    auto = tuple(
+        choice
+        for choice in _auto_choices(auto_includes, preferences)
+        if choice.name not in covered
+    )
+    covered |= {choice.name for choice in auto}
     includes = tuple(
         LensChoice(n, _INCLUDE_WHY)
         for n in preferences.include
@@ -676,13 +832,9 @@ def _preferenced_fallback(
         preferences,
         _Applied((), dropped, (), hygiene_dropped, includes),
     )
-    return LensSelection(kept + includes, note, selection.used_call, selection.skipped)
-
-
-def _with_note(selection: LensSelection, note: str) -> LensSelection:
-    """The selection with its note replaced and everything else kept."""
+    note += _auto_note(tuple(choice.name for choice in auto))
     return LensSelection(
-        selection.choices, note, selection.used_call, selection.skipped
+        kept + auto + includes, note, selection.used_call, selection.skipped
     )
 
 
@@ -772,13 +924,17 @@ def _pick(
 
 
 def _with_critical(
-    names: tuple[str, ...], hygiene: tuple[LensChoice, ...] = ()
+    names: tuple[str, ...],
+    hygiene: tuple[LensChoice, ...] = (),
+    auto: tuple[LensChoice, ...] = (),
 ) -> tuple[LensChoice, ...]:
     """The critical tier first, then the process-hygiene lens when the PR
-    body states verification results, then every other picked name in rank
-    order. `plan_lenses` spends its size budget in this order (and triage
+    body states verification results, then the shape auto-includes the
+    controller enforces, then every other picked name in rank order.
+    `plan_lenses` spends its size budget in this order (and triage
     its critical-tier cap), so a thin or steered pick can add lenses but
-    never displace a critical one, and it reports each name it does not
+    never displace a critical one -- nor an auto-include, which is why
+    they sit ahead of the picks -- and it reports each name it does not
     run."""
     rank = {n: i for i, n in enumerate(names, 1)}
     critical = tuple(
@@ -792,7 +948,7 @@ def _with_critical(
         for n in names
         if n not in CRITICAL_TIER and (n != PR_HYGIENE or not hygiene)
     )
-    return critical + hygiene + picked
+    return critical + hygiene + auto + picked
 
 
 def _no_room_for_a_pick(library: LensLibrary, depth: Depth, budget_chars: int) -> str:

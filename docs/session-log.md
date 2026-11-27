@@ -6568,3 +6568,27 @@ dropping any of those lines fails a test instead of silencing the pins
 on the pull request that needs them. The r1 count Nit is applied the
 owner's way — the "four" is dropped rather than corrected, from the PR
 body and the D80 update and the session log's own entry. Offline only.
+
+## 2026-11-27 — the cheap fixes from the harness gap audit: one sweep per review, lens-attributed tool logs, enforced shape auto-includes (slice S2)
+
+Three cheap items the Nov 26 audit ranked below the blockers, all
+quality-of-run rather than recall. The controller's mutant pre-pass was
+memoized per bridge, and each lens has its own runner, so the two
+mutation lenses each ran the same mutants on their own runners; a
+review-scoped `SharedSweep` memo now runs them once — the first sweep
+lens to reach the pre-pass runs it on its own runner, the others wait
+bounded by the review's remaining wall and read the verdicts, a waiter
+whose wait expires runs its own (the one case where duplication is
+cheaper than starting without evidence), and a failed sweep is shared as
+the review's no-evidence outcome rather than re-run per lens to fail the
+same way. The eval tool log's JSON lines now carry the lens name beside
+tool, status and text, so a pooled review's interleaved lines are
+attributable. And the picker's shape auto-includes — decision-record,
+docs-only, rename — are enforced by the controller now instead of only
+stated to the picker's model (D69's "stated, not enforced" stance was
+explicitly left as the owner's future call; the S2 brief made it):
+`shape_auto_includes` detects the shapes with the same predicates
+`guideline_shapes` uses, the lenses ride the selection ahead of the picks
+on the fallback paths too, a repo preference exclude still drops one, and
+triage is never widened. Offline only: no model call, network call or
+secret read.

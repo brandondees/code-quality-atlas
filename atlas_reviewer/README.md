@@ -993,8 +993,9 @@ fixture's pull request, no picker call; a comma-separated list fixes the
 set by name. `--run-file PATH` writes the eval-parity run file from the
 completed review — the loader's own schema, with the comparison fields
 null — and `--tool-log PATH` logs every tool result, as the model saw it
-(rendered and capped), one JSON line each, so a diagnosis reads
-what happened instead of inferring it from statuses.
+(rendered and capped), one JSON line each naming the lens that served the
+call (the pooled lenses' lines interleave in one file), so a diagnosis
+reads what happened instead of inferring it from statuses.
 
 Offline by default: a fixture run without `--allow-live-inference` uses
 the scripted or dry model and the in-memory runner, spending nothing.
@@ -1870,11 +1871,17 @@ rather than a new one authored), an all-documentation diff
 restructuring route's `reviewing-module-design` and
 `reviewing-naming-and-readability`) -- and states them in the picker's
 instructions and in the draft's Lens selection note, each path quoted as
-data. The shapes are **stated, not enforced**: the picker's model applies
-the guideline, and the note keeps the request auditable when the model
-leaves a shape out. The detection is heuristic (the decisions log by its
+data. The mandated lens names are **enforced by the controller** now, not
+left to the picker's ranking: they ride the selection additively ahead of
+the picks (in the one-shot plan, ahead of the picks' share of the
+character budget, so the budget cannot starve them), on the fallback
+paths too, and the note records which were auto-included. A repo
+preference's `exclude` still drops one the way it drops the
+controller-added process-hygiene lens, and triage is never widened. The
+detection is heuristic (the decisions log by its
 known path, decision-record directory names and ADR/RFC basenames, the
-diff's `rename from`/`rename to` records); a rename a diff serves as
+diff's `rename from`/`rename to` records, an existing record read off the
+diff's context and removed lines); a rename a diff serves as
 delete-plus-add is not detected, and no shape is stated for it.
 
 `lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`

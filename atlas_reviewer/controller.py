@@ -64,6 +64,7 @@ from atlas_reviewer.picker import (
     guideline_shapes,
     picker_instructions,
     select_lenses,
+    shape_auto_includes,
 )
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -785,6 +786,7 @@ def _pick_lenses(
     # data inside the sentences, so the forwarded `scrub` stays the only
     # reader of PR-controlled text here.
     shapes = guideline_shapes(paths[:MAX_PICKER_PATHS], scrub=scrub, diff=diff.text)
+    auto_includes = shape_auto_includes(paths[:MAX_PICKER_PATHS], diff=diff.text)
     if config.model_calls < 2:
         # `run_picker` is the literal `None` here, so `select_lenses`
         # (picker.py) always returns at its own `Depth.TRIAGE` or
@@ -800,6 +802,7 @@ def _pick_lenses(
             scrub=scrub,
             pr_text=pull.body.text,
             shapes=shapes,
+            auto_includes=auto_includes,
         )
     request = PickRequest(
         event.repo,
@@ -820,6 +823,7 @@ def _pick_lenses(
         scrub=scrub,
         pr_text=pull.body.text,
         shapes=shapes,
+        auto_includes=auto_includes,
     )
 
 

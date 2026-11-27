@@ -3528,7 +3528,7 @@ def test_eval_run_logs_the_tool_results_it_served(tmp_path):
     # file exists beside the draft, empty or not.
     for line in tool_log.read_text(encoding="utf-8").splitlines():
         entry = json.loads(line)
-        assert set(entry) == {"tool", "status", "text"}
+        assert set(entry) == {"lens", "tool", "status", "text"}
 
 
 def test_eval_lenses_owners_reads_the_parity_key():

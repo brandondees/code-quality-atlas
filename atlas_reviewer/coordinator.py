@@ -163,6 +163,7 @@ from atlas_reviewer.lens_loop import (
     LensModel,
     Limits,
     PickerSpend,
+    SharedSweep,
     Spend,
     TurnRequest,
     UserText,
@@ -1133,6 +1134,12 @@ def _review_lenses(
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
     runner_setup = setup
+    # The mutant pre-pass runs once per review, not once per sweep lens:
+    # the first sweep lens to reach it runs the mutants on its own runner
+    # and the others read its verdicts (lens_loop.SharedSweep). Created
+    # here because the memo's scope is the review, across the pool's
+    # lenses and their continuations.
+    shared_sweep = SharedSweep()
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         if spend.halted:
@@ -1188,6 +1195,7 @@ def _review_lenses(
             history=history,
             pr_body=pr_body,
             tool_log=tool_log,
+            shared_sweep=shared_sweep,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1575,6 +1583,7 @@ def _review_one(
     history: HistoryBundle | None = None,
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
+    shared_sweep: SharedSweep | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1722,6 +1731,7 @@ def _review_one(
                 lens_trace.wrap_bridge(bridge), job, traced_model,
                 spend, clock, ledger, key, resolved,
                 deadline, started, session, scrub, evidence_digest,
+                shared_sweep,
             )  # fmt: skip
 
     def run_bridge_call(**overrides: Any) -> RunnerReport:
@@ -3187,6 +3197,7 @@ def _attempts(
     session: _Session,
     scrub: Callable[[str], str],
     evidence_digest: str | None = None,
+    shared_sweep: SharedSweep | None = None,
 ) -> str:
     step = next_step(ledger.attempts(key), limits.retries)
     while isinstance(step, RunAttempt):
@@ -3205,6 +3216,7 @@ def _attempts(
                 retry_of=attempts[-1].outcome if step.forced and attempts else None,
                 attempt=step.number,
                 secrets=secrets_seen,
+                shared_sweep=shared_sweep,
             )  # fmt: skip
         except ByokRefusedError as exc:
             # The refusal still leaves the loop, so the runner fails and

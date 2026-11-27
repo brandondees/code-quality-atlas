@@ -180,6 +180,7 @@ from atlas_reviewer.picker import (
     guideline_shapes,
     picker_instructions,
     select_agentic_lenses,
+    shape_auto_includes,
 )
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -1222,8 +1223,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         picker_paths = diff_paths(diff)[:500]
         # The controller's own shape facts (D69 round-1 F4), from the
         # changed paths this command already holds; the paths are quoted
-        # as data inside the sentences.
+        # as data inside the sentences. The lens names those facts mandate
+        # are computed beside them and enforced by the picker itself.
         shapes = guideline_shapes(picker_paths, scrub=scrub, diff=diff)
+        auto_includes = shape_auto_includes(picker_paths, diff=diff)
 
         def run_picker() -> str:
             shown = "\n".join(picker_paths) or "(no changed paths)"
@@ -1255,7 +1258,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             ) as span:
                 selection, plan = _plan_lenses(
                     args, depth, run_picker, library, scrub, pr_text,
-                    lens_preferences.preferences, shapes, event,
+                    lens_preferences.preferences, shapes, event, auto_includes,
                 )  # fmt: skip
                 selection = _with_preference_note(
                     selection, config, (*proposal_notes, *setup_notes)
@@ -2570,6 +2573,7 @@ def _plan_lenses(
     preferences: LensPreferences | None,
     shapes: tuple[str, ...],
     event: PrEvent,
+    auto_includes: tuple[str, ...] = (),
 ) -> tuple[LensSelection, LensPlan]:
     """The review's lens plan: `eval-run --lenses`'s fixed set when the
     command named one, the picker otherwise."""
@@ -2584,6 +2588,7 @@ def _plan_lenses(
         pr_text=pr_text,
         preferences=preferences,
         shapes=shapes,
+        auto_includes=auto_includes,
     )
 
 

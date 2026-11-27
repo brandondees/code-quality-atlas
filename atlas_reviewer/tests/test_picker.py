@@ -1187,3 +1187,185 @@ def test_a_picker_error_is_scrubbed_before_it_is_quoted(value):
     assert value.replace("\\", "\\\\").replace("|", "\\|") not in note
     assert value.replace("`", "\\u0060") not in note
     assert "[REDACTED:possible-committed-secret]" in note
+
+
+def test_the_shape_auto_includes_detect_the_guidelines_mandates():
+    from atlas_reviewer.picker import (
+        DECISION_CURRENCY_LENS,
+        DECISION_LENS,
+        DOCS_HEALTH_LENS,
+        MODULE_DESIGN_LENS,
+        NAMING_LENS,
+        shape_auto_includes,
+    )
+
+    edited = (
+        "diff --git a/docs/open-questions.md b/docs/open-questions.md\n"
+        "--- a/docs/open-questions.md\n"
+        "+++ b/docs/open-questions.md\n"
+        "@@ -1,2 +1,3 @@\n"
+        " old line\n"
+        "+new line\n"
+    )
+    assert shape_auto_includes(("docs/open-questions.md",), diff=edited) == (
+        DECISION_LENS,
+        DECISION_CURRENCY_LENS,
+    )
+    authored = (
+        "diff --git a/docs/rfc/007-new.md b/docs/rfc/007-new.md\n"
+        "--- /dev/null\n"
+        "+++ b/docs/rfc/007-new.md\n"
+        "@@ -0,0 +1,2 @@\n"
+        "+a new record\n"
+    )
+    assert shape_auto_includes(("docs/rfc/007-new.md",), diff=authored) == (
+        DECISION_LENS,
+    )
+    assert shape_auto_includes(("README.md", "docs/other.md")) == (DOCS_HEALTH_LENS,)
+    renamed = "diff --git a/a.py b/b.py\nrename from a.py\nrename to b.py\n"
+    assert shape_auto_includes(("b.py",), diff=renamed) == (
+        MODULE_DESIGN_LENS,
+        NAMING_LENS,
+    )
+    assert shape_auto_includes(("calc.py",)) == ()
+
+
+def test_a_rename_change_auto_includes_the_restructuring_route_lenses():
+    """The protocol's step-2 auto-includes are enforced by the controller,
+    not left to the picker's ranking: a rename pulls in
+    reviewing-module-design and reviewing-naming-and-readability however
+    the picker ranks -- or omits -- them, riding additively after the
+    picks."""
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle(
+            "checking-restraint",
+            "reviewing-module-design",
+            "reviewing-naming-and-readability",
+        ),
+        scrub=str,
+        shapes=("the diff renames a.py to b.py: the guideline's route runs them",),
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    names = [c.name for c in selection.choices]
+    assert names[: len(CRITICAL_TIER)] == list(CRITICAL_TIER)
+    assert ("reviewing-module-design", "auto-included: the diff renames files") in [
+        (c.name, c.why) for c in selection.choices
+    ]
+    assert "reviewing-naming-and-readability" in names
+    assert "checking-restraint" in names
+    assert [u.name for u in plan.uses if u.status is LensStatus.RUN] == names
+    assert "Auto-included on the shape facts: reviewing-module-design, " in (
+        selection.note
+    )
+
+
+def test_the_auto_includes_run_ahead_of_the_picks_in_the_one_shot_budget():
+    """The one-shot plan spends its character budget in the choices' order,
+    so an auto-include placed behind the picks could be budgeted out and
+    the guideline's always-ride-along rule would be hollow. They sit
+    between the critical tier and the picks."""
+    chosen = select_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle("checking-restraint"),
+        scrub=str,
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    names = [c.name for c in chosen.choices]
+    assert names.index("reviewing-module-design") < names.index("checking-restraint")
+
+
+def test_the_auto_includes_ride_a_fallback_selection():
+    """A picker that fell back -- no usable reply -- does not lift the
+    guideline's own mandate: the controller's shapes still add their
+    lenses on the fallback paths."""
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        None,
+        small_bundle(
+            "checking-restraint",
+            "reviewing-module-design",
+            "reviewing-naming-and-readability",
+        ),
+        scrub=str,
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    names = [c.name for c in selection.choices]
+    assert "reviewing-module-design" in names
+    assert "reviewing-naming-and-readability" in names
+    assert [u.name for u in plan.uses if u.status is LensStatus.RUN] == names
+
+
+def test_a_repo_preference_exclude_drops_a_shape_auto_include():
+    """A repo preference's exclude wins over the controller-added
+    auto-include the way it wins over the controller-added hygiene lens
+    (D69): the auto-include is neither floor-tier nor a cap."""
+    preferences = LensPreferences(
+        include=(), exclude=("reviewing-naming-and-readability",)
+    )
+    selection, _ = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        small_bundle("checking-restraint"),
+        scrub=str,
+        preferences=preferences,
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    names = [c.name for c in selection.choices]
+    assert "reviewing-module-design" in names
+    assert "reviewing-naming-and-readability" not in names
+    assert "Auto-included on the shape facts: reviewing-module-design." in (
+        selection.note
+    )
+
+
+def test_triage_is_not_widened_by_the_auto_includes():
+    chosen = select_lenses(
+        Depth.TRIAGE,
+        None,
+        REAL,
+        scrub=str,
+        auto_includes=("reviewing-module-design",),
+    )
+    assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
+
+
+def test_the_auto_included_lenses_exist_in_the_bundle():
+    """An auto-include the bundle carries no body for is NOT RUN, so a
+    renamed or dropped lens would silently hollow the enforcement: the
+    five names the shapes mandate must exist in the real bundle."""
+    from atlas_reviewer.picker import (
+        DECISION_CURRENCY_LENS,
+        DECISION_LENS,
+        DOCS_HEALTH_LENS,
+        MODULE_DESIGN_LENS,
+        NAMING_LENS,
+    )
+
+    for name in (
+        DECISION_LENS,
+        DECISION_CURRENCY_LENS,
+        DOCS_HEALTH_LENS,
+        MODULE_DESIGN_LENS,
+        NAMING_LENS,
+    ):
+        assert LensLibrary().body(name) is not None, name
+
+
+def test_an_auto_include_the_picker_also_named_is_not_planned_twice():
+    """The picker naming a mandated lens must not turn the controller's
+    own copy into a second choice: a repeated name is NOT RUN with
+    "already chosen earlier in this plan", and a NOT RUN lens blocks
+    coverage. The shape's copy dedupes against the covered set."""
+    selection, plan = select_agentic_lenses(
+        Depth.REVIEW,
+        lambda: picks("reviewing-module-design"),
+        small_bundle("reviewing-module-design", "reviewing-naming-and-readability"),
+        scrub=str,
+        auto_includes=("reviewing-module-design", "reviewing-naming-and-readability"),
+    )
+    names = [c.name for c in selection.choices]
+    assert names.count("reviewing-module-design") == 1
+    assert [u.name for u in plan.uses if u.status is LensStatus.RUN] == names
