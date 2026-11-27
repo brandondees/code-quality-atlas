@@ -61,9 +61,9 @@ from atlas_reviewer.notes import ControllerFacts, controller_notes, quote_untrus
 from atlas_reviewer.picker import (
     Depth,
     LensSelection,
-    guideline_shapes,
     picker_instructions,
     select_lenses,
+    shape_facts,
 )
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -780,11 +780,12 @@ def _pick_lenses(
     if diff is None:
         return LensSelection((), "", used_call=False, skipped="no diff to pick for")
     paths = diff_paths(diff.text)
-    # The controller's own shape facts (D69 round-1 F4), computed from the
-    # changed paths this function already holds; the paths are quoted as
-    # data inside the sentences, so the forwarded `scrub` stays the only
-    # reader of PR-controlled text here.
-    shapes = guideline_shapes(paths[:MAX_PICKER_PATHS], scrub=scrub, diff=diff.text)
+    # The controller's own shape facts (D69 round-1 F4) over EVERY changed
+    # path -- not the picker prompt's capped slice (picker.shape_facts'
+    # docstring carries the why). The paths are quoted as data inside the
+    # sentences, so the forwarded `scrub` stays the only reader of
+    # PR-controlled text here.
+    shapes, auto_includes = shape_facts(paths, scrub=scrub, diff=diff.text)
     if config.model_calls < 2:
         # `run_picker` is the literal `None` here, so `select_lenses`
         # (picker.py) always returns at its own `Depth.TRIAGE` or
@@ -800,6 +801,7 @@ def _pick_lenses(
             scrub=scrub,
             pr_text=pull.body.text,
             shapes=shapes,
+            auto_includes=auto_includes,
         )
     request = PickRequest(
         event.repo,
@@ -820,6 +822,7 @@ def _pick_lenses(
         scrub=scrub,
         pr_text=pull.body.text,
         shapes=shapes,
+        auto_includes=auto_includes,
     )
 
 

@@ -6528,6 +6528,30 @@ pin the widening, the ranking and the round-robin. Offline only: no
 model call, Sprite, Fly or network call beyond the anchors' own fetch
 the liveness step already makes.
 
+## 2026-11-27 — the cheap fixes from the harness gap audit: one sweep per review, lens-attributed tool logs, enforced shape auto-includes (slice S2)
+
+Three cheap items the Nov 26 audit ranked below the blockers, all
+quality-of-run rather than recall. The controller's mutant pre-pass was
+memoized per bridge, and each lens has its own runner, so the two
+mutation lenses each ran the same mutants on their own runners; a
+review-scoped `SharedSweep` memo now runs them once — the first sweep
+lens to reach the pre-pass runs it on its own runner, the others wait
+bounded by the review's remaining wall and read the verdicts, a waiter
+whose wait expires runs its own (the one case where duplication is
+cheaper than starting without evidence), and a failed sweep is shared as
+the review's no-evidence outcome rather than re-run per lens to fail the
+same way. The eval tool log's JSON lines now carry the lens name beside
+tool, status and text, so a pooled review's interleaved lines are
+attributable. And the picker's shape auto-includes — decision-record,
+docs-only, rename — are enforced by the controller now instead of only
+stated to the picker's model (D69's "stated, not enforced" stance was
+explicitly left as the owner's future call; the S2 brief made it):
+`shape_auto_includes` detects the shapes with the same predicates
+`guideline_shapes` uses, the lenses ride the selection ahead of the picks
+on the fallback paths too, a repo preference exclude still drops one, and
+triage is never widened. Offline only: no model call, network call or
+secret read.
+
 ## 2026-11-27 (same day) — the sweep's round-1 Major and the nested-def precision fix (on the stacked #859)
 
 The round-1 review's Major: the plan is relevance-ranked but the groups
@@ -6553,6 +6577,27 @@ stays out of the plan. The bare-name call matching stays as
 documented: narrowing it needs an import graph, and the loose match is
 what puts the anchors' called-function guards in scope. Offline only.
 
+## 2026-11-27 (same day) — the cheap fixes' round-1/round-2 review fixes (on the stacked #861)
+
+Round 1's still-open Major, re-checked in round 2: `_edits_existing`
+counted git's own `new file` section among its existing-record markers,
+so a newly AUTHORED decision record pulled in
+`auditing-decision-record-currency` — the exact distinction the shape
+fact draws was inverted for the one case that names it. A new-file
+section now says "not existing"; the mandate test's fixture carries the
+realistic `new file mode` header, which the old fixture omitted and so
+never caught the inversion. Round 1's carried advisory on the
+duplicated dedupe block is fixed: the covered-set/auto/include
+dedupe shared by both selection paths is one helper now, so the one-shot
+and agentic paths cannot drift. And the round-2 advisory on the sweep
+waiter's expiry is fixed the way it suggested: the wait is the review's
+whole remaining wall, so expiry means the deadline has passed and the
+lens stops at its first clock check — the expired waiter now dispatches
+nothing instead of sweeping on a runner whose evidence nothing would
+read (the test that pinned the old fallback now pins this). The failed
+sweep shared as the review's no-evidence outcome stays as documented
+and intended. Offline only.
+
 ## 2026-11-27 (same day) — the sweep-plan pins fire on a parity-key change too (the r1b fix round on #859)
 
 The r1b review's Major: the `sweep-plan-pins` job's filter did not list
@@ -6568,3 +6613,57 @@ dropping any of those lines fails a test instead of silencing the pins
 on the pull request that needs them. The r1 count Nit is applied the
 owner's way — the "four" is dropped rather than corrected, from the PR
 body and the D80 update and the session log's own entry. Offline only.
+
+## 2026-11-27 (same day) — the new-file detection reads git's headers, not the body (round-3 fix on #861)
+
+Round 3's Major on the round-1 fix: `"new file" in section.text`
+searched the section's body lines too, so an edited decision record
+whose changed prose says "new file" — realistic in this repo, the
+decisions log says it often — was misread as newly authored and lost
+the `auditing-decision-record-currency` include; the same body-text
+match applied to the rename and deletion markers. The shape is now read
+off git's own extended-header lines (the lines before the first `@@`):
+`new file mode` says authored, `deleted file mode` and a
+`rename to`/`copy to` record say existing, and the content lines decide
+only when git names no shape at all. Pinned by the reviewer's own repro
+as a test: an edited record whose added line says "add a new file" keeps
+the currency include. Offline only.
+
+## 2026-11-27 (same day) — the cheap fixes' CodeRabbit round (on the stacked #861)
+
+Three findings from the bot's review of the post-merge restack. The
+Major: when the picker ALSO named a mandated lens, the dedupe dropped
+the auto choice (its name was already covered) and left the lens as an
+ordinary pick behind the others — so a one-shot budget that fit either
+the mandated lens or a pick ranked before it ran the pick and cut the
+lens the shape mandates, breaking the ahead-of-the-picks guarantee the
+enforcement exists for. The duplicate is now removed from the PICKS
+instead: the auto choice keeps its place, pinned by a budget-limited
+test where the picker names the mandated lens and the budget fits
+exactly one more body. The Minor on the callers: shape detection read
+the picker prompt's 500-path slice, so a decision record past the cap
+was invisible to the enforcement and a docs-heavy head of the list
+could read docs-only while source followed; the shape facts and their
+mandated names are now one shared `picker.shape_facts` computation over
+EVERY changed path, used by both entry points (the picker prompt keeps
+its own cap), pinned by a test with the decision record at position
+501. The Minor on the shared-sweep test's fixed sleep: the owner thread
+now signals a readiness event (running at all means it claimed the
+entry), and the main thread asserts a bounded wait for it before
+invoking the waiter — the race the fixed sleep carried is gone.
+Offline only.
+
+## 2026-11-27 (same day) — the shape-facts call sites are pinned where the fix lives (the r2 fix round on #861)
+
+The r2 review's Minor: the every-path shape-facts test called the
+helper directly, so restoring the `[:500]` slice at the CLI call site —
+or the controller's — left the whole suite passing; the property the
+commit exists to enforce was unpinned where it matters. Two wired tests
+now pin the call sites themselves: the CLI one drives `_cmd_agentic_review`
+over a fixture whose diff carries 500 filler modules with the decision
+record as the 501st path and asserts the decision shape fact reaches the
+picker's instructions; the controller one does the same through the
+controller's own picker path over a copied fixture. Each call-site
+revert-mutant (the slice restored) kills its own test, verified. The
+helper-level test is reframed as the helper's own contract, complementary
+to the call-site pins. Offline only.

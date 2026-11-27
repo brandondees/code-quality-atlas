@@ -44,6 +44,7 @@ from atlas_reviewer.lens_loop import (
     AssistantText,
     LensJob,
     LimitsUnsetError,
+    SharedSweep,
     Spend,
     ToolResults,
     TurnRequest,
@@ -3337,6 +3338,127 @@ def test_a_failed_sweep_degrades_to_no_evidence(monkeypatch):
     assert _sweep_evidence(ExplodingBridge(), job(), FakeClock()) == ""
 
 
+def _sweep_bridge(runs: list[int], *, block: threading.Event | None = None):
+    from atlas_reviewer.bridge import SweepSpec, SweepVerdict
+
+    class SweepBridge:
+        """The bridge surface a no-tool-turn attempt touches: a sweep
+        plan with one spec, and a sweep that counts its runs, optionally
+        parking until an event releases it (the slow winner)."""
+
+        def sweep_plan(self, diff):
+            return (SweepSpec("calc.py", 2, "negate-condition"),)
+
+        def sweep(self, specs, *, clock, budget_s=None):
+            runs.append(1)
+            if block is not None:
+                block.wait(30)
+            return (SweepVerdict(specs[0], "survived"),)
+
+    return SweepBridge()
+
+
+def test_the_shared_sweep_runs_once_per_review_not_once_per_lens():
+    """The sweep is memoized per bridge, and each lens has its own
+    runner, so test-quality and tracing each ran the same mutants (the
+    gap audit's cheap-fix item): the review's shared memo runs them on
+    the first lens's runner, and the second lens reads the verdicts and
+    dispatches no exec of its own."""
+    first: list[int] = []
+    second: list[int] = []
+    share = SharedSweep()
+    model = ScriptedLensModel([final(), final()])
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(SWEEP_LENSES_ENV, LENS)
+        clock = FakeClock()
+        run_attempt(
+            job(), _sweep_bridge(first), model, Spend(LIMITS.resolve()), clock,
+            review_deadline=600, review_started=0, shared_sweep=share,
+        )  # fmt: skip
+        winner_text = model.requests[0].messages[0].text
+        run_attempt(
+            job(), _sweep_bridge(second), model, Spend(LIMITS.resolve()), clock,
+            review_deadline=600, review_started=0, shared_sweep=share,
+        )  # fmt: skip
+        waiter_text = model.requests[1].messages[0].text
+    assert first == [1]
+    assert second == []
+    assert "tool-evidence" in winner_text
+    assert "calc.py:2 negate-condition: survived" in winner_text
+    assert waiter_text == winner_text
+
+
+def test_a_shared_sweep_waiter_that_times_out_dispatches_nothing():
+    """A winner that does not finish inside the review's remaining wall
+    gets the waiter no evidence, and the waiter dispatches nothing: the
+    wait is the review's whole remaining wall, so expiry means the review
+    deadline has passed and the lens stops at its first clock check -- a
+    sweep run now is runner time nothing would ever read (round-2 review
+    of this PR)."""
+    from atlas_reviewer.bridge import SweepSpec, SweepVerdict
+
+    specs = (SweepSpec("calc.py", 2, "negate-condition"),)
+    claimed = threading.Event()
+    release = threading.Event()
+    winner: list[int] = []
+    waiter: list[int] = []
+    share = SharedSweep()
+
+    def slow() -> tuple[SweepVerdict, ...]:
+        # Running at all means the owner claimed the entry under the lock;
+        # the main thread waits for this signal instead of sleeping a
+        # fixed interval, so the race the fixed sleep carried is gone.
+        claimed.set()
+        winner.append(1)
+        assert release.wait(10)
+        return (SweepVerdict(specs[0], "survived"),)
+
+    owner = threading.Thread(target=lambda: share.verdicts(specs, slow, 30.0))
+    owner.start()
+    try:
+        assert claimed.wait(5), "the owner never claimed the shared entry"
+        assert winner == [1]
+
+        def fast() -> tuple[SweepVerdict, ...]:
+            waiter.append(1)
+            return (SweepVerdict(specs[0], "survived"),)
+
+        verdicts = share.verdicts(specs, fast, 0.05)
+    finally:
+        release.set()
+        owner.join()
+    assert waiter == []
+    assert verdicts is None
+
+
+def test_a_failed_shared_sweep_degrades_every_lens_to_no_evidence():
+    """A sweep failure is the review's, not one lens's: every sweep lens
+    would run the identical mutants over the identical trees, so the
+    waiting lens reads the winner's failure instead of re-running the
+    mutants to fail the same way."""
+    from atlas_reviewer.ports import BoundaryError
+
+    runs: list[int] = []
+    share = SharedSweep()
+    model = ScriptedLensModel([final(), final()])
+
+    class ExplodingBridge(_sweep_bridge(runs).__class__):
+        def sweep(self, specs, *, clock, budget_s=None):
+            runs.append(1)
+            raise BoundaryError("the sweep's exec failed")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(SWEEP_LENSES_ENV, LENS)
+        clock = FakeClock()
+        for _ in range(2):
+            run_attempt(
+                job(), ExplodingBridge(), model, Spend(LIMITS.resolve()), clock,
+                review_deadline=600, review_started=0, shared_sweep=share,
+            )  # fmt: skip
+    assert runs == [1]
+    assert "tool-evidence" not in model.requests[1].messages[0].text
+
+
 def test_a_pull_request_body_finding_verifies_and_reaches_the_draft(tmp_path):
     """The body location form end to end (issue #713's harness-parity
     slice): a finding located at `pull_request.body` with the description's
@@ -3379,7 +3501,9 @@ def test_the_tool_log_carries_every_result_as_the_model_saw_it(tmp_path):
     """The eval driver's diagnostic sink (issue #713's harness-parity
     slice): every tool result the attempt served, one JSON line, in the
     rendered redacted capped form the model saw -- so a diagnosis reads
-    what happened instead of inferring it from statuses."""
+    what happened instead of inferring it from statuses. The pooled
+    lenses' lines interleave in one file, so every line names the lens
+    that served the call."""
     import json as _json
 
     lines: list[str] = []
@@ -3396,9 +3520,11 @@ def test_the_tool_log_carries_every_result_as_the_model_saw_it(tmp_path):
     assert outcome.test_runs == 1
     assert len(lines) == 2
     first = _json.loads(lines[0])
+    assert first["lens"] == the_job.lens
     assert first["tool"] == "run_tests" and first["status"] == "OK"
     assert "passed" in first["text"]
     second = _json.loads(lines[1])
+    assert second["lens"] == the_job.lens
     assert second["tool"] == "read_file"
     assert "return sum" in second["text"]
 

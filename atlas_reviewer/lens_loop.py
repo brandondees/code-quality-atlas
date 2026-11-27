@@ -109,7 +109,7 @@ import math
 import os
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from decimal import Decimal
 from pathlib import Path
@@ -136,6 +136,8 @@ from atlas_reviewer.bridge import (
     MutantOutcome,
     SessionLimits,
     Status,
+    SweepSpec,
+    SweepVerdict,
     render,
 )
 from atlas_reviewer.bridge_args import (
@@ -2016,6 +2018,69 @@ DEFAULT_SWEEP_LENSES = (
 SWEEP_EVIDENCE_CHARS = 6144
 
 
+@dataclass
+class _SweepEntry:
+    """One shared sweep run in progress: the event the waiting lenses
+    block on and the verdicts it finished with, `None` when the sweep
+    failed -- a failure is the review's, not one lens's, because every
+    sweep lens would run the identical mutants over the identical trees."""
+
+    done: threading.Event
+    verdicts: tuple[SweepVerdict, ...] | None
+
+
+@dataclass
+class SharedSweep:
+    """One review's shared mutant-sweep memo: the sweep is the
+    controller's evidence gathering, but each lens has its own runner, so
+    memoizing on the bridge alone still ran the same mutants once per
+    sweep lens. The first lens to reach the pre-pass runs it on its own
+    runner; the others wait for its verdicts instead of re-running the
+    mutants on theirs, bounded by the review's remaining wall so a slow
+    winner cannot hold a lens past its own start. A waiter whose wait
+    expires gets no evidence rather than running its own sweep: the wait
+    is the review's whole remaining wall, so expiry means the review
+    deadline has passed and the lens stops at its first clock check --
+    a sweep it could run now is evidence nothing would ever read
+    (round-2 review of this PR)."""
+
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _entries: dict[tuple[SweepSpec, ...], _SweepEntry] = field(default_factory=dict)
+
+    def verdicts(
+        self,
+        specs: Sequence[SweepSpec],
+        run: Callable[[], tuple[SweepVerdict, ...] | None],
+        wait_s: float,
+    ) -> tuple[SweepVerdict, ...] | None:
+        """The shared sweep's verdicts, run once per review: `run` executes
+        the sweep on the caller's own bridge and returns None when it
+        fails. The first caller owns the run; the rest wait `wait_s` for
+        it, and a waiter the wait expires on gets None -- the review's
+        wall is spent, so the lens it serves stops before any turn."""
+        key = tuple(specs)
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                entry = _SweepEntry(threading.Event(), None)
+                self._entries[key] = entry
+                owner = True
+            else:
+                owner = False
+        if owner:
+            try:
+                entry.verdicts = run()
+            finally:
+                entry.done.set()
+            return entry.verdicts
+        if not entry.done.wait(wait_s):
+            # The winner has not finished inside the review's remaining
+            # wall: there is no evidence to hand the lens and no review
+            # left to read it.
+            return None
+        return entry.verdicts
+
+
 def sweep_lenses(env: Mapping[str, str]) -> frozenset[str]:
     """The lens names the controller's mutant pre-pass runs for:
     `ATLAS_SWEEP_LENSES`'s comma-separated list, or the two mutation
@@ -2026,7 +2091,13 @@ def sweep_lenses(env: Mapping[str, str]) -> frozenset[str]:
     return frozenset(name.strip() for name in raw.split(",") if name.strip())
 
 
-def _sweep_evidence(bridge: Bridge, job: LensJob, clock: Clock) -> str:
+def _sweep_evidence(
+    bridge: Bridge,
+    job: LensJob,
+    clock: Clock,
+    shared: SharedSweep | None = None,
+    wait_s: float = 0.0,
+) -> str:
     """The controller's mutant pre-pass, for the lenses it runs for: the
     changed conditions swept through the same machinery a `mutate` call
     uses, the verdicts fenced as one tool-evidence block appended to the
@@ -2036,15 +2107,27 @@ def _sweep_evidence(bridge: Bridge, job: LensJob, clock: Clock) -> str:
     out of the lens's own wall; the verdicts are memoized on the bridge,
     so a retry attempt reads them instead of re-running the mutants; and
     a failed sweep degrades to no evidence -- evidence gathering never
-    aborts the lens it serves."""
+    aborts the lens it serves. When `shared` is the review's memo, the
+    first sweep lens runs the mutants on its own runner and the others
+    read its verdicts (bounded by `wait_s`, the review's remaining wall),
+    so the sweep costs one pass per review, not one per lens."""
     if job.lens not in sweep_lenses(os.environ):
         return ""
     specs = bridge.sweep_plan(job.diff)
     if not specs:
         return ""
-    try:
-        verdicts = bridge.sweep(specs, clock=clock)
-    except (BoundaryError, StreamTimeoutError):
+
+    def run() -> tuple[SweepVerdict, ...] | None:
+        try:
+            return bridge.sweep(specs, clock=clock)
+        except (BoundaryError, StreamTimeoutError):
+            return None
+
+    if shared is None:
+        verdicts = run()
+    else:
+        verdicts = shared.verdicts(specs, run, wait_s)
+    if verdicts is None:
         return ""
     lines = [
         "The controller swept the diff's changed conditions before this",
@@ -2082,6 +2165,7 @@ def run_attempt(
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
     sleep: Callable[[float], None] = time.sleep,
+    shared_sweep: SharedSweep | None = None,
 ) -> AttemptOutcome:
     """Run one attempt to its end. `review_deadline` and `review_started`
     are on `clock.monotonic`; `attempt` is the attempt's number in its
@@ -2099,8 +2183,15 @@ def run_attempt(
         return AttemptOutcome(Attestation.NOT_DELIVERED)
     # The sweep's bounded, memoized pass runs before the wall clock
     # starts: its seconds are the controller's evidence gathering, not
-    # this lens's wall.
-    sweep_text = _sweep_evidence(bridge, job, clock)
+    # this lens's wall. The review's shared memo makes it one pass per
+    # review; the wait is bounded by the review's remaining wall.
+    sweep_text = _sweep_evidence(
+        bridge,
+        job,
+        clock,
+        shared_sweep,
+        max(review_deadline - clock.monotonic(), 0.0),
+    )
     attempt_start = clock.monotonic()
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
     first_turn_text = job.first_turn + sweep_text
@@ -2490,6 +2581,7 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
         job.tool_log(
             json.dumps(
                 {
+                    "lens": job.lens,
                     "tool": result.tool,
                     "status": result.status.name,
                     "text": render(result),

@@ -2636,6 +2636,56 @@ def test_a_dry_run_states_the_shape_facts_the_picker_is_given(tmp_path, monkeypa
     assert "The controller's shape facts from the changed paths:" in out
 
 
+def test_the_shape_facts_read_every_changed_path_at_the_cli_call_site(
+    tmp_path, monkeypatch
+):
+    """The r2 Minor's pin at the CLI call site: the shape facts are
+    computed from EVERY changed path, not the picker prompt's 500-path
+    slice -- a decision record past the cap (here the 501st) must still
+    reach the picker's instructions, because that is the record the
+    enforcement exists to catch. Restoring the call site's slice fails
+    this test (verified)."""
+    fixtures = _fixture_copy(tmp_path, changed_files=3)
+    diff = (fixtures / "pull.diff").read_text(encoding="utf-8")
+    diff += "".join(
+        f"diff --git a/src/module_{i}.py b/src/module_{i}.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        f"+++ b/src/module_{i}.py\n"
+        "@@ -0,0 +1 @@\n"
+        f"+value = {i}\n"
+        for i in range(500)
+    )
+    diff += (
+        "diff --git a/docs/open-questions.md b/docs/open-questions.md\n"
+        "new file mode 100644\n"
+        "index 0000000..3b18e512dba79e2c8b3b0b8e6c9f1a2d3e4f5a6b\n"
+        "--- /dev/null\n"
+        "+++ b/docs/open-questions.md\n"
+        "@@ -0,0 +1 @@\n"
+        "+Decision: the decisions log gains an entry past the picker's cap.\n"
+    )
+    (fixtures / "pull.diff").write_text(diff, encoding="utf-8")
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt)
+            return '{"lenses": ["reviewing-decision-lifecycle"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    _agentic_on(
+        tmp_path,
+        fixtures,
+        "--lens-script",
+        str(FIXTURE / "scenarios" / "approve.json"),
+    )
+    assert "a decision record or the decisions log is touched" in seen[0].system
+    assert "docs/open-questions.md" in seen[0].system
+
+
 @pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
 def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
     from atlas_reviewer.cli import UsageError, _key_ceiling
@@ -3528,7 +3578,7 @@ def test_eval_run_logs_the_tool_results_it_served(tmp_path):
     # file exists beside the draft, empty or not.
     for line in tool_log.read_text(encoding="utf-8").splitlines():
         entry = json.loads(line)
-        assert set(entry) == {"tool", "status", "text"}
+        assert set(entry) == {"lens", "tool", "status", "text"}
 
 
 def test_eval_lenses_owners_reads_the_parity_key():
