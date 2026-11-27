@@ -6500,7 +6500,7 @@ splices a shared anchor worktree).
 ## 2026-11-27 — the controller's sweep plan reaches the parity key's mutation-class mutants (the #846 gap's fix, harness slice S2)
 
 The Nov 26 gap audit (harness-gap-audit-2026-11-26) recorded that the
-controller's mutant pre-pass could not reach any of the four
+controller's mutant pre-pass could not reach any of the
 mutation-class key Minors at their anchors: the plan filled its cap of 24
 alphabetically in `ast.walk` order over added lines only, so #640's
 `service_post.py` (128 candidates) and `service_queue.py` (7) got nothing
@@ -6552,3 +6552,19 @@ it); pinned by a test asserting the enclosing function's own BoolOp
 stays out of the plan. The bare-name call matching stays as
 documented: narrowing it needs an import graph, and the loose match is
 what puts the anchors' called-function guards in scope. Offline only.
+
+## 2026-11-27 (same day) — the sweep-plan pins fire on a parity-key change too (the r1b fix round on #859)
+
+The r1b review's Major: the `sweep-plan-pins` job's filter did not list
+the parity key's fixtures while the pins are skipped inside the sharded
+liveness job — so the one PR that moves a span or re-anchors a finding,
+the event the pins exist to re-prove the plan against, ran no pins under
+a green gate. The key's fixture glob is in the filter now, and
+`tests/test_ci_sweep_plan_pins_filter_covers_the_key.py` keeps it there
+mechanically: the pins and liveness filters must both list the key's
+glob, and the pins filter must keep naming `bridge.py` and `diffs.py`
+(the modules the `liveness` filter deliberately does not cover), so
+dropping any of those lines fails a test instead of silencing the pins
+on the pull request that needs them. The r1 count Nit is applied the
+owner's way — the "four" is dropped rather than corrected, from the PR
+body and the D80 update and the session log's own entry. Offline only.

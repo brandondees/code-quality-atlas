@@ -344,13 +344,22 @@ jobs:
             # `liveness` filter above deliberately does not list (a change
             # there was read as only able to touch liveness by breaking the
             # parity_key import, which stopped being true once the pins
-            # imported bridge). Gated on the modules the pins exercise plus
-            # the same environment shape the anchor suites run under; a
-            # `sweep_specs` regression would otherwise skip its own PR's CI
-            # and fail main on the push or the daily schedule.
+            # imported bridge). The key's own fixtures are listed too: a
+            # re-anchor or a moved span changes the anchor tree and the
+            # `base..anchor` diff the plan is built from, which is exactly
+            # when the plan-reach relationship must be re-proven -- and the
+            # pins are skipped inside the sharded `liveness` job, so this
+            # filter is the only place a key-only change can trigger them
+            # (tests/test_ci_sweep_plan_pins_filter_covers_the_key.py keeps
+            # the two filters and the key path in sync). Gated on the modules
+            # the pins exercise plus the same environment shape the anchor
+            # suites run under; a `sweep_specs` regression would otherwise
+            # skip its own PR's CI and fail main on the push or the daily
+            # schedule.
             sweep_plan_pins:
               - "atlas_reviewer/bridge.py"
               - "atlas_reviewer/diffs.py"
+              - "atlas_reviewer/fixtures/parity-key/**"
               - "atlas_reviewer/liveness/test_sweep_plan_anchors.py"
               - "conftest.py"
               - "pyproject.toml"
