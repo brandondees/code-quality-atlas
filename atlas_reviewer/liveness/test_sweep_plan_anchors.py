@@ -20,6 +20,7 @@ it lives beside the liveness checks in their own CI step."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -27,6 +28,15 @@ import pytest
 
 from atlas_reviewer.bridge import SWEEP_CAP, SweepSpec, sweep_specs
 from atlas_reviewer.parity_key import KEY_DIR, load_key
+
+pytestmark = pytest.mark.skipif(
+    bool(os.environ.get("LIVENESS_SHARD")),
+    reason=(
+        "the sweep-plan pins run in their own `sweep-plan-pins` job, gated on "
+        "bridge.py/diffs.py; the parity-key shard matrix would otherwise run "
+        "them once per shard"
+    ),
+)
 
 _REPO = Path(__file__).resolve().parents[2]
 _TREES: dict[str, dict[str, bytes]] = {}
