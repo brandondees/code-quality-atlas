@@ -6766,3 +6766,21 @@ actually fails — installers, fetchers, escalators, and a package
 manager's install-like subcommand — so offline chains (`ruff format
 --check . && git diff --exit-code`, `npm run typecheck && npm test`,
 `python3 scripts/gen.py && pytest`) run whole. Offline only.
+
+## 2026-11-27 (same day) — the grounding pre-pass's round-4 fixes (on the stacked #871)
+
+Round 4's advisories, all fixed. The provisioning narrowing had dropped
+the install shapes deny-all egress actually fails: `npm i`, `pnpm i`, a
+bare `yarn` (its no-argument default IS the install), and git's network
+verbs (`fetch`, `clone`, `pull`, `submodule`, `lfs`) — a chain with one
+of those and a check went back to running whole, its install failure
+reading as the check's own; they provision again, while the offline
+verbs (`git diff`, a package manager's check commands) still ride along.
+And the delimited stem match had accepted any part starting with a
+family: `make testdata`, `npm run build:types` and `make
+install-test-deps` classified and would have run generators and
+installers as checks; the matching part must now be the name's first
+delimited part and its remainder a connector suffix (`s`, `ing`,
+`check`, `checker`, `er`), so `typecheck`, `tests`, `test_unit` and
+`test:unit` still classify. The script-family docstring names the match
+it actually does. Offline only.
