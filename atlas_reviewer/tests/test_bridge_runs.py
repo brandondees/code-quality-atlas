@@ -23,7 +23,9 @@ import pytest
 from atlas_reviewer.bridge import (
     DEFAULT_LIMITS,
     EXEC_SLACK_S,
+    GROUNDING_RUN_BOUND_S,
     KILL_AFTER_S,
+    MUTATE_STAGE_SLACK_S,
     MUTATION_SCRIPT,
     SWEEP_BUDGET_S,
     SWEEP_RUN_BOUND_S,
@@ -3169,7 +3171,10 @@ def test_the_grounding_pass_runs_the_declared_commands_and_names_the_gaps(tmp_pa
         ("lint", 0),
         ("test", 0),
     ]
-    assert all("the grounding pass's wall budget was spent" in r.note for r in skipped)
+    assert all(
+        "the grounding pass's remaining wall could not fit this command" in r.note
+        for r in skipped
+    )
     assert all(r.exit is None for r in skipped)
     # The commands run behind the no-root guard in the sandbox, exactly
     # like the bash tool's own execs: the guard's marker is in the script.
@@ -4349,6 +4354,7 @@ def test_guarded_env_exports_quotes_its_own_path():
     )
 
 
+
 RANK_ORDER_SUITE = {
     "aa_slow.py": b"def slow(n):\n    if n > 9:\n        return 0\n    return n\n",
     "test_aa_slow.py": (
@@ -4485,3 +4491,26 @@ def test_the_changed_spans_rank_only_the_innermost_changed_def():
     # outer's own BoolOp must not appear by virtue of enclosing the edit.
     assert SweepSpec("widen.py", 2, "drop-operand", 1) not in specs
     assert SweepSpec("widen.py", 2, "drop-operand", 2) not in specs
+
+def test_a_command_the_remaining_wall_cannot_fit_is_named_not_clamped(tmp_path):
+    """The pass's budget is a bound, not a suggestion: a command the
+    remaining wall cannot fit at its full per-command budget is named,
+    never started into a clamped exec whose timeout would read as a tool
+    outcome CI's run never produced (round-1 review of #871)."""
+    per_command = GROUNDING_RUN_BOUND_S + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
+    results: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        results.extend(
+            bridge.grounding(plan.commands, clock=FakeClock(), budget_s=per_command - 1)
+        )
+        return "done"
+
+    bridge_run(tmp_path, body, source=_grounding_source())
+    assert results
+    assert all(
+        "the grounding pass's remaining wall could not fit this command" in r.note
+        for r in results
+    )
+    assert all(r.exit is None for r in results)

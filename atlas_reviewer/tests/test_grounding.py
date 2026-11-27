@@ -63,13 +63,71 @@ def test_a_repo_with_no_workflows_has_an_empty_inventory():
     assert not plan.configured and not plan.unparseable
 
 
-def test_the_plan_runs_at_most_its_command_cap_and_names_nothing_silently():
+def test_the_plan_runs_at_most_its_command_cap_and_names_the_rest():
+    """The cap bounds the pass's staging cost, not the record: every
+    distinct command past it is carried in the plan's `dropped`, so the
+    evidence block and the coverage lines can name what the cap never
+    ran -- a family whose only commands fell past the cap must not read
+    as one the repo never configured."""
     steps = "".join(f"      - run: ruff check f{i}.py\n" for i in range(20))
     contents = {
         ".github/workflows/many.yml": ("jobs:\n  gate:\n    steps:\n" + steps).encode()
     }
     plan = grounding_plan(contents)
     assert len(plan.commands) == GROUNDING_MAX_COMMANDS
+    assert [c.command for c in plan.dropped] == [
+        f"ruff check f{i}.py" for i in range(GROUNDING_MAX_COMMANDS, 20)
+    ]
+    outcome = GroundingOutcome(plan, tuple(GroundingResult(c) for c in plan.commands))
+    text = grounding_evidence(outcome, nonce="f00dfeed")
+    assert (
+        f"Commands past the pass's {GROUNDING_MAX_COMMANDS}-command cap, not run: "
+        "ruff check f12.py; ruff check f13.py" in text
+    )
+    lines = grounding_coverage_lines(outcome, set())
+    assert any(
+        "ruff check f19.py (past the pass's command cap)" in line for line in lines
+    )
+    # The lint family's commands were all dropped, not never configured.
+    assert not any("lint (no configured command)" in line for line in lines)
+
+
+def test_the_plan_joins_continuations_and_classifies_by_segment():
+    """A run step is a shell script, not a list of lines: a backslash or
+    operator continuation joins, and each `&&`/`||`/`;` segment of the
+    joined line classifies on its own tool, so `cd package && pytest`
+    classifies by the check it chains to -- and the command that runs is
+    the whole chain, with the step's `working-directory` and `env`
+    carried in front of it. A `cargo test`/`go test` subcommand is the
+    check its workflow runs; the same tool's build verb is not."""
+    contents = {
+        ".github/workflows/shaped.yml": (
+            b"jobs:\n"
+            b"  gate:\n"
+            b"    steps:\n"
+            b"      - run: |\n"
+            b"          ruff check \\\n"
+            b"            --select E501 .\n"
+            b"      - run: cd package && python3 -m pytest -q\n"
+            b"      - working-directory: app\n"
+            b"        env:\n"
+            b"          PYTHONDONTWRITEBYTECODE: '1'\n"
+            b"        run: mypy src\n"
+            b"      - run: cargo test --release\n"
+            b"      - run: cargo build --release\n"
+        )
+    }
+    plan = grounding_plan(contents)
+    assert [(c.family, c.command, c.tool) for c in plan.commands] == [
+        ("lint", "ruff check --select E501 .", "ruff"),
+        ("test", "cd package && python3 -m pytest -q", "pytest"),
+        (
+            "type",
+            "cd app && export PYTHONDONTWRITEBYTECODE=1; mypy src",
+            "mypy",
+        ),
+        ("test", "cargo test --release", "cargo"),
+    ]
 
 
 def test_the_classifier_knows_the_documented_entry_points():
@@ -88,6 +146,9 @@ def test_the_classifier_knows_the_documented_entry_points():
     assert _classify("echo hello") is None
     assert _classify("ruff check .") == ("lint", "ruff")
     assert _classify("python3 -m pytest -q") == ("test", "pytest")
+    assert _classify("cargo test --release") == ("test", "cargo")
+    assert _classify("go test ./...") == ("test", "go")
+    assert _classify("cargo build --release") is None
     assert _classify("") is None
 
 
@@ -142,7 +203,7 @@ def test_the_coverage_lines_state_the_four_honest_facts():
         "Not run: python3 -m pytest tests/ -q (the wall budget was spent)."
         == (lines[1])
     )
-    assert "No deterministic coverage: type (no configured command)" in lines[2]
+    assert "No deterministic coverage: type (configured, none ran)" in lines[2]
     # The changed `.md` file has no configured tool; the `.py` files do.
     assert lines[3] == "Changed file types with no configured tool: .md."
 
@@ -169,3 +230,23 @@ def test_the_families_are_the_skills_three_check_families():
     assert not GroundingResult(
         GroundingCommand("lint", "ruff check .", "ruff", "w.yml")
     ).ran
+
+
+def test_an_over_cap_evidence_block_names_its_cut():
+    """The block's cap cuts from the tail -- where the later families and
+    the gap notes sit -- and the cut carries the repo's own truncation
+    marker, so a reader can tell the block ended from the block said
+    nothing (round-1 review of #871, the unmarked tail cut)."""
+    plan = GroundingPlan(
+        tuple(
+            GroundingCommand("lint", f"ruff check f{i}.py", "ruff", "ci.yml")
+            for i in range(12)
+        )
+    )
+    tail = "E501 line too long " * 60
+    outcome = GroundingOutcome(
+        plan,
+        tuple(GroundingResult(c, exit=1, tail=tail) for c in plan.commands),
+    )
+    text = grounding_evidence(outcome, nonce="f00dfeed")
+    assert "[... truncated by atlas_reviewer ...]" in text

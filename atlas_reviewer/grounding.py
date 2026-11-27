@@ -17,19 +17,23 @@ repo's tooling executes the way CI executes it, and every hit is evidence
 the owning lens confirms, contextualizes or dismisses -- a clean run
 clears nothing.
 
-Every gap is named: a workflow file that does not parse, a command the
-pass's wall budget never reached, a family with no configured command,
-and a changed file type no configured tool covers all reach the evidence
-block and the draft's coverage lines, never a silent pass."""
+Every gap is named: a workflow file that does not parse, a command past
+the pass's command cap, a command the pass's wall budget never reached,
+a family with no configured command, and a changed file type no
+configured tool covers all reach the evidence block and the draft's
+coverage lines, never a silent pass."""
 
 from __future__ import annotations
 
+import re
+import shlex
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import yaml
 
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
+from atlas_reviewer.redact import TRUNCATION_MARKER, TRUNCATION_MARKER_CHARS
 
 # The families the pre-pass runs, in the skill's own grouping; a hit is
 # routed to the lens that owns the family, and a family no command covers
@@ -85,11 +89,13 @@ _TOOL_TYPES: Mapping[str, frozenset[str]] = {
 # Lines that install, fetch or otherwise change state instead of checking:
 # the pass reproduces what CI checks, not what it provisions, and the
 # sandbox's deny-all egress would fail them anyway. `python -m pytest`
-# still classifies -- the module names the tool.
+# still classifies -- the module names the tool -- and so does a
+# `cargo test` / `go test` subcommand: the test verb is the check, while
+# the same tool's build or provision verbs are not.
 _STATE_CHANGING = frozenset(
     {
         "pip", "pip3", "python", "python3", "npm", "yarn", "pnpm",
-        "cargo", "go", "apt", "apt-get", "brew", "curl", "wget", "git",
+        "apt", "apt-get", "brew", "curl", "wget", "git",
         "docker", "sudo", "cd", "echo", "export", "sleep",
     }
 )  # fmt: skip
@@ -136,11 +142,14 @@ class GroundingCommand:
 @dataclass(frozen=True)
 class GroundingPlan:
     """The pass's parsed inventory: the commands to run, the workflow
-    files that did not parse (named, never silently skipped), and whether
-    the repo's workflows carried any lint/type/test step at all."""
+    files that did not parse (named, never silently skipped), the distinct
+    commands past the command cap (named the same way, in workflow order),
+    and whether the repo's workflows carried any lint/type/test step at
+    all."""
 
     commands: tuple[GroundingCommand, ...]
     unparseable: tuple[str, ...] = ()
+    dropped: tuple[GroundingCommand, ...] = ()
 
     @property
     def configured(self) -> bool:
@@ -178,15 +187,20 @@ class GroundingOutcome:
 
 
 def _classify(line: str) -> tuple[str, str] | None:
-    """The `(family, tool)` the run-step line's first check tool names,
-    or None when the line names none the pass runs. An installing,
-    fetching or state-changing line is never classified; a package
-    manager's `test`/`run <script>` classifies by the script's name; a
-    `make` target classifies by its target's name."""
+    """The `(family, tool)` the command segment's first check tool names,
+    or None when it names none the pass runs. An installing, fetching or
+    state-changing segment is never classified; a package manager's
+    `test`/`run <script>` classifies by the script's name; a `make`
+    target classifies by its target's name; a `cargo test` or `go test`
+    subcommand is the check its workflow runs."""
     tokens = line.split()
     if not tokens:
         return None
     head = tokens[0]
+    if head in ("cargo", "go"):
+        if len(tokens) > 1 and tokens[1] == "test":
+            return "test", head
+        return None
     if head in ("npm", "npx", "yarn", "pnpm"):
         return _script_family(tokens)
     if head == "make":
@@ -228,11 +242,17 @@ def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
     """The repo's declared lint/type/test commands, parsed from its CI
     workflows over the tree the caller holds (the review's merge-base
     tree: the revision the review is anchored to). Every workflow file's
-    `run:` steps are read line by line; identical commands across jobs
-    run once, the first occurrence's. A file that does not parse as YAML
-    -- or whose shape the parser cannot read -- is named in the plan, not
-    silently skipped."""
+    `run:` steps are read as shell lines -- backslash and operator
+    continuations joined first, then each line's `&&`/`||`/`;` segments
+    classified, so a `cd package && pytest` step classifies by the check
+    it chains to and runs whole -- with the step's `working-directory` and
+    `env` carried into the command that runs. Identical commands across
+    jobs run once, the first occurrence's. A file that does not parse as
+    YAML -- or whose shape the parser cannot read -- is named in the plan,
+    not silently skipped, and so is every distinct command past the
+    command cap."""
     commands: list[GroundingCommand] = []
+    dropped: list[GroundingCommand] = []
     seen: set[str] = set()
     unparseable: list[str] = []
     workflows = sorted(
@@ -241,28 +261,24 @@ def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
         if path.startswith(_WORKFLOW_DIR) and path.endswith(_WORKFLOW_SUFFIXES)
     )
     for path in workflows:
-        for run in _workflow_runs(contents[path], path, unparseable):
-            for line in run.split("\n"):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                classified = _classify(stripped)
-                if classified is None:
-                    continue
-                family, tool = classified
-                if stripped in seen:
-                    continue
-                seen.add(stripped)
-                if len(commands) >= GROUNDING_MAX_COMMANDS:
-                    continue
-                commands.append(GroundingCommand(family, stripped, tool, path))
-    return GroundingPlan(tuple(commands), tuple(unparseable))
+        for command in _workflow_commands(contents[path], path, unparseable):
+            if command.command in seen:
+                continue
+            seen.add(command.command)
+            if len(commands) >= GROUNDING_MAX_COMMANDS:
+                dropped.append(command)
+                continue
+            commands.append(command)
+    return GroundingPlan(tuple(commands), tuple(unparseable), tuple(dropped))
 
 
-def _workflow_runs(data: bytes, path: str, unparseable: list[str]) -> list[str]:
-    """One workflow file's run-step texts, or an empty list with the file
-    named when it does not parse or carries a shape the reader does not
-    understand."""
+def _workflow_commands(
+    data: bytes, path: str, unparseable: list[str]
+) -> list[GroundingCommand]:
+    """One workflow file's declared checks, in file order: each `run:`
+    step's shell lines, joined across continuations, classified by
+    segment, and prefixed with the step's own `working-directory` and
+    `env` so the command that runs is the one the step declares."""
     try:
         parsed = yaml.safe_load(data.decode("utf-8"))
     except (yaml.YAMLError, UnicodeDecodeError):
@@ -277,17 +293,88 @@ def _workflow_runs(data: bytes, path: str, unparseable: list[str]) -> list[str]:
     if not isinstance(jobs, dict):
         unparseable.append(path)
         return []
-    runs: list[str] = []
+    commands: list[GroundingCommand] = []
     for job in jobs.values():
         if not isinstance(job, dict):
             continue
-        found = job.get("steps")
-        if not isinstance(found, list):
+        steps = job.get("steps")
+        if not isinstance(steps, list):
             continue
-        for step in found:
-            if isinstance(step, dict) and isinstance(step.get("run"), str):
-                runs.append(step["run"])
-    return runs
+        for step in steps:
+            if not isinstance(step, dict) or not isinstance(step.get("run"), str):
+                continue
+            prefix = _step_prefix(step)
+            for line in _joined_lines(step["run"]):
+                classified = next(
+                    (
+                        found
+                        for segment in _SEGMENT_SPLIT.split(line)
+                        if (found := _classify(segment))
+                    ),
+                    None,
+                )
+                if classified is None:
+                    continue
+                family, tool = classified
+                commands.append(GroundingCommand(family, prefix + line, tool, path))
+    return commands
+
+
+def _step_prefix(step: Mapping[str, object]) -> str:
+    """The step's own environment as a shell prefix: a `working-directory`
+    becomes the `cd` the step's runner would have run, and an `env` map
+    becomes the exports its runner would have set, so the command text in
+    the evidence is the command that actually ran. Values are shell-
+    quoted as data; a GitHub expression an uninterpolated workflow still
+    carries runs literally and fails named, never guessed at."""
+    parts: list[str] = []
+    directory = step.get("working-directory")
+    if isinstance(directory, str) and directory.strip():
+        parts.append(f"cd {shlex.quote(directory)} && ")
+    env = step.get("env")
+    if isinstance(env, Mapping):
+        exports = " ".join(
+            f"{key}={shlex.quote(value)}"
+            for key, value in env.items()
+            if isinstance(key, str) and isinstance(value, str)
+        )
+        if exports:
+            parts.append(f"export {exports}; ")
+    return "".join(parts)
+
+
+_SEGMENT_SPLIT = re.compile(r"&&|\|\||;")
+
+
+def _joined_lines(run: str) -> list[str]:
+    """The run step's shell lines with continuations joined: a line
+    ending in a backslash, `&&`, `||` or `|` waits for its continuation,
+    so a wrapped `ruff check \\` + `--select X` classifies and runs as
+    the one command its shell would have run. Comment and blank lines
+    never break a pending continuation."""
+    out: list[str] = []
+    pending = ""
+    for raw in run.split("\n"):
+        stripped = raw.strip()
+        if pending:
+            if not stripped or stripped.startswith("#"):
+                continue
+            line = f"{pending} {stripped}"
+        else:
+            line = stripped
+        pending = ""
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith("\\"):
+            pending = line[:-1].rstrip()
+            continue
+        if line.endswith(("&&", "||", "|")):
+            pending = line
+            continue
+        out.append(line)
+    if pending:
+        out.append(pending)
+    return out
 
 
 def grounding_evidence(outcome: GroundingOutcome, *, nonce: str) -> str:
@@ -325,12 +412,18 @@ def grounding_evidence(outcome: GroundingOutcome, *, nonce: str) -> str:
                 f"{result.command.family}: {result.command.command} -- "
                 f"not run ({result.note})"
             )
+    if outcome.plan.dropped:
+        lines.append(
+            f"Commands past the pass's {GROUNDING_MAX_COMMANDS}-command cap, "
+            "not run: " + "; ".join(command.command for command in outcome.plan.dropped)
+        )
     if outcome.plan.unparseable:
         shown = ", ".join(outcome.plan.unparseable)
         lines.append(f"Workflow files that did not parse, so not read: {shown}")
     text = "\n".join(lines)
     if len(text) > GROUNDING_EVIDENCE_CHARS:
-        text = text[: GROUNDING_EVIDENCE_CHARS - 3] + "..."
+        text = text[: GROUNDING_EVIDENCE_CHARS - TRUNCATION_MARKER_CHARS]
+        text += TRUNCATION_MARKER
     return "\n\n" + fence(UntrustedBlock("tool-evidence", RepoText(text)), nonce)
 
 
@@ -385,27 +478,43 @@ def grounding_coverage_lines(
             "nothing."
         )
     not_run = [result for result in outcome.results if not result.ran]
-    if not_run:
+    dropped_notes = [
+        (command, "past the pass's command cap") for command in outcome.plan.dropped
+    ]
+    if not_run or dropped_notes:
         lines.append(
             "Not run: "
             + "; ".join(
-                f"{quote(r.command.command)} ({quote(r.note)})" for r in not_run
+                f"{quote(command.command)} ({quote(note)})"
+                for command, note in [
+                    *[(r.command, r.note) for r in not_run],
+                    *dropped_notes,
+                ]
             )
             + "."
         )
     if outcome.failure:
         lines.append(f"The pre-pass itself failed: {quote(outcome.failure)}")
-    covered_families = {
-        result.command.family for result in outcome.results if result.ran
-    }
-    missing = [family for family in FAMILIES if family not in covered_families]
-    if missing or outcome.plan.unparseable:
-        parts = [f"{family} (no configured command)" for family in missing]
-        if outcome.plan.unparseable:
-            parts.append(
-                "workflow files that did not parse: "
-                + ", ".join(quote(path) for path in outcome.plan.unparseable)
-            )
+    ran_families = {result.command.family for result in outcome.results if result.ran}
+    configured_families = {command.family for command in outcome.plan.commands}
+    parts = []
+    for family in FAMILIES:
+        if family in ran_families:
+            continue
+        # A family nothing ran has no deterministic coverage here; the
+        # wording says which absence it is -- a command the repo never
+        # declared, or one the pass had but never ran (the Not run line
+        # above carries the why).
+        if family in configured_families:
+            parts.append(f"{family} (configured, none ran)")
+        else:
+            parts.append(f"{family} (no configured command)")
+    if outcome.plan.unparseable:
+        parts.append(
+            "workflow files that did not parse: "
+            + ", ".join(quote(path) for path in outcome.plan.unparseable)
+        )
+    if parts:
         lines.append("No deterministic coverage: " + "; ".join(parts) + ".")
     types = _uncovered_types(outcome, changed)
     if types:
@@ -425,7 +534,10 @@ def _uncovered_types(
     named instead of folded into the no-coverage line."""
     if not changed:
         return ()
-    tools = {result.command.tool for result in outcome.results if result.ran}
+    # A configured command covers its tool's file types whether or not it
+    # ran: the reader is telling configured from missing, and a tool the
+    # repo declares is not a gap when its run was skipped.
+    tools = {command.tool for command in outcome.plan.commands}
     covered: set[str] = set()
     for tool in tools:
         covered |= _TOOL_TYPES.get(tool, frozenset())

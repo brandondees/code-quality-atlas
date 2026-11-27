@@ -3770,3 +3770,91 @@ def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
     # The loop's ToolUse records the status NAME; the enum's value names
     # the same state.
     assert run_tests.status == Status.TIMED_OUT.name
+
+def test_the_sweeps_wait_is_recomputed_after_the_grounding_pass():
+    """The grounding pass can spend minutes of the review's wall; the
+    sweep's bounded wait is the wall the review has left after the pass
+    returns, not the figure read before it ran -- a stale bound could
+    hold a sweep waiter past the review's real deadline (round-1 review
+    of #871, the stale wait bound)."""
+    from atlas_reviewer.bridge import SweepSpec
+    from atlas_reviewer.grounding import (
+        GroundingCommand,
+        GroundingPlan,
+        GroundingResult,
+    )
+
+    class GroundingThenSweepBridge:
+        def grounding_plan(self):
+            return GroundingPlan(
+                (
+                    GroundingCommand(
+                        "lint", "ruff check .", "ruff", ".github/workflows/ci.yml"
+                    ),
+                )
+            )
+
+        def grounding(self, commands, *, clock, budget_s=None):
+            clock.advance(100.0)
+            return (GroundingResult(commands[0], exit=0),)
+
+        def sweep_plan(self, diff):
+            return (SweepSpec("calc.py", 2, "negate-condition"),)
+
+        def sweep(self, specs, *, clock, budget_s=None):
+            return ()
+
+    class RecordingSweepShare:
+        def __init__(self):
+            self.waits: list[float] = []
+
+        def verdicts(self, specs, run, wait_s):
+            self.waits.append(wait_s)
+            return run()
+
+    share = RecordingSweepShare()
+    model = ScriptedLensModel([final()])
+    clock = FakeClock()
+    run_attempt(
+        job(), GroundingThenSweepBridge(), model, Spend(LIMITS.resolve()), clock,
+        review_deadline=600, review_started=0,
+        shared_sweep=share, shared_grounding=SharedGrounding(),
+    )  # fmt: skip
+    assert share.waits == [500.0]
+
+
+def test_an_unexpected_grounding_failure_is_named_not_fatal():
+    """The pass's failure handling is not a two-exception list: whatever
+    the pass raises -- a staging failure, a lost runner -- is the named
+    pass failure the block shows, never a crash of the lens it serves
+    (round-1 review of #871)."""
+    runs: list[int] = []
+
+    class UnexpectedlyDeadBridge(_grounding_bridge(runs).__class__):
+        def grounding(self, commands, *, clock, budget_s=None):
+            runs.append(1)
+            raise RuntimeError("the re-stage died")
+
+    text = _grounding_evidence(
+        UnexpectedlyDeadBridge(), job(), FakeClock(), SharedGrounding(), 60
+    )
+    assert "The pass itself failed: the re-stage died" in text
+
+
+def test_a_shared_grounding_failure_reaches_the_waiters():
+    """The owner's failure is the waiters': a shared pass that dies with
+    an unexpected exception stores the failure outcome, and every waiting
+    lens reads it instead of tripping over a missing outcome."""
+    runs: list[int] = []
+    share = SharedGrounding()
+
+    class DeadBridge(_grounding_bridge(runs).__class__):
+        def grounding(self, commands, *, clock, budget_s=None):
+            runs.append(1)
+            raise RuntimeError("the runner died")
+
+    first = _grounding_evidence(DeadBridge(), job(), FakeClock(), share, 60)
+    second = _grounding_evidence(DeadBridge(), job(), FakeClock(), share, 60)
+    assert runs == [1]
+    assert "The pass itself failed: the runner died" in first
+    assert first == second

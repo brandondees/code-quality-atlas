@@ -988,7 +988,8 @@ type checkers, pytest/jest-style runners, and a package manager's or
 `make` target's own `lint`/`type`/`test` entry point). Lines that
 install, fetch or change state are never classified: the pass reproduces
 what CI checks, not what it provisions, and nothing is installed that
-the repo has not adopted. At most 12 commands run per pass.
+the repo has not adopted. At most 12 commands run per pass, and the rest
+are named past the cap in the evidence block and the coverage lines.
 
 Each command runs in its own disposable copy of the head tree — the same
 copy, no-root guard, verified deny-all egress, clock and framing the

@@ -6276,7 +6276,7 @@ def test_the_draft_carries_the_grounding_pre_pass_coverage_lines():
     assert "Tools run:" in draft and "exit 1" in draft
     assert "Not run:" in draft and "mypy" in draft
     assert (
-        "No deterministic coverage: type (no configured command); test (no configured command)"
+        "No deterministic coverage: type (configured, none ran); test (no configured command)"
         in draft
     )
 

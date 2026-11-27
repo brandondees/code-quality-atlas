@@ -2172,7 +2172,12 @@ def _grounding_evidence(
             results = (
                 bridge.grounding(plan.commands, clock=clock) if plan.configured else ()
             )
-        except (BoundaryError, StreamTimeoutError) as exc:
+        except Exception as exc:  # noqa: BLE001 - evidence gathering never aborts the lens
+            # A boundary error, a lost runner, or anything else the pass
+            # did not expect is the pass's failure, not the lens's crash:
+            # the owner stores it and every waiting lens reads the named
+            # failure instead of tripping over a missing outcome
+            # (round-1 review of #871).
             return GroundingOutcome(GroundingPlan((), ()), (), failure=str(exc))
         return GroundingOutcome(plan, results)
 
@@ -2180,6 +2185,7 @@ def _grounding_evidence(
     if (
         not outcome.plan.configured
         and not outcome.plan.unparseable
+        and not outcome.plan.dropped
         and not outcome.failure
     ):
         return ""
@@ -2291,17 +2297,22 @@ def run_attempt(
     # the controller's evidence gathering, not this lens's wall. The
     # grounding pass runs first (the protocol runs the repo's own tooling
     # before any lens); the review's shared memos make each one pass per
-    # review; each wait is bounded by the review's remaining wall.
-    remaining_wall = max(review_deadline - clock.monotonic(), 0.0)
+    # review; each wait is bounded by the wall the review has left *at
+    # that call* -- the sweep's bound is recomputed after the grounding
+    # pass returns, because the pass can spend minutes of it.
     grounding_text = _grounding_evidence(
-        bridge, job, clock, shared_grounding, remaining_wall
+        bridge,
+        job,
+        clock,
+        shared_grounding,
+        max(review_deadline - clock.monotonic(), 0.0),
     )
     sweep_text = _sweep_evidence(
         bridge,
         job,
         clock,
         shared_sweep,
-        remaining_wall,
+        max(review_deadline - clock.monotonic(), 0.0),
     )
     attempt_start = clock.monotonic()
     lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)

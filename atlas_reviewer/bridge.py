@@ -2419,8 +2419,10 @@ class Bridge:
         tree -- the same copy, guard, clock and framing the `bash` tool
         uses -- without spending the attempt's call budget, because this
         is the controller's evidence gathering, not the model's. The
-        pass's wall budget bounds the whole sequence; a command the
-        remainder cannot start is named, never silently skipped. Every
+        pass's wall budget bounds the whole sequence: a command the
+        remainder cannot fit at its full per-command budget is named,
+        never started into a clamped exec and never silently skipped.
+        Every
         command runs PR code, so the bridge stays suspect between
         commands and the next read re-stages; a command that never
         started, a copy that could not be made, and a failed exec are
@@ -2444,13 +2446,18 @@ class Bridge:
             )
         for command in commands:
             remaining = budget_s - (clock.monotonic() - started)
-            if remaining <= 0:
+            if remaining < per_command:
+                # The sweep's own floor shape: a command the remaining
+                # wall cannot fit at its full per-command budget is named
+                # rather than started into a clamped exec -- a run
+                # truncated by the pass's own budget would read as a
+                # tool hit or a tool failure that CI's run never was.
                 out.append(
                     GroundingResult(
                         command,
                         note=(
-                            "the grounding pass's wall budget was spent "
-                            "before this command started"
+                            "the grounding pass's remaining wall could "
+                            "not fit this command"
                         ),
                     )
                 )
