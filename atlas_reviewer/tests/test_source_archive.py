@@ -71,7 +71,13 @@ def test_more_members_than_the_cap_are_refused():
 
 
 @pytest.mark.parametrize(
-    "data", [b"", b"not gzip", gzip.compress(b"gzip but not a tar" * 100)]
+    # mtime=0: without it gzip.compress stamps the header with the current
+    # time, so the derived param id churns every second -- harmless alone,
+    # but pytest-xdist requires every worker to collect the exact same ids,
+    # and workers import this module a second apart, so the ids must not
+    # depend on the wall clock.
+    "data",
+    [b"", b"not gzip", gzip.compress(b"gzip but not a tar" * 100, mtime=0)],
 )
 def test_an_unreadable_archive_is_refused(data):
     with pytest.raises(BoundaryError, match="not a readable gzip tar"):

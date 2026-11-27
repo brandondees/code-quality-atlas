@@ -91,9 +91,11 @@ def take_call_retries() -> int:
 
 
 def reset_events() -> None:
-    """Clear the request-side markers. `run_attempt` calls this at every
+    """Clear the per-context markers. `run_attempt` calls this at every
     attempt start: a follow-up turn that was queued but never ran must not
-    stain the next attempt's spans (review Minor 5)."""
+    stain the next attempt's spans (review Minor 5), and a call whose
+    facts were never consumed by a span must not finish the next one's."""
     _NUDGE.set("")
     _RETRIES.set(0)
     _CALL_RETRIES.set(0)
+    _FACTS.set(None)

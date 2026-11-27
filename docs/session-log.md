@@ -6450,3 +6450,49 @@ every trigger class its steps read, and
 structurally: every `needs.changes.outputs.*` name any job or step gate
 reads must be defined by the `changes` job, and every output a step reads
 must be covered by its own job's gate.
+
+## 2026-11-27 (same day) — pytest-xdist for the reviewer suite, and the two defects the shuffle runs caught (Brandon-approved Nov 26)
+
+Second PR of the gate split, stacked on the job split. `pytest-xdist`
+(MIT, with `execnet`) joins requirements.in/.txt through pip-compile, and
+the reviewer suite's CI step runs `-n auto`: measured locally on 4
+workers, 6m19s serial became ~1m45s. pytest-cov merges coverage across
+the workers, so the same 94% floor is enforced over the whole suite; the
+verification battery (repeated `-n auto` runs plus order-reversed runs
+via a temporary collection-reversing plugin, since pytest-randomly is
+not a dependency here) is what caught two real defects before CI could:
+
+- `test_source_archive.py`'s `test_an_unreadable_archive_is_refused`
+  built one parametrize entry with a collection-time `gzip.compress`,
+  whose header stamps the current time, so the derived id churned every
+  second. Harmless serially, but xdist requires every worker to collect
+  the identical id list, and workers import the module seconds apart —
+  intermittent "Different tests were collected between gw2 and gw3".
+  Fixed with `mtime=0`; collection ids verified stable across a delayed
+  re-collection.
+- `reset_events()` in `call_facts.py` cleared the request-side markers
+  but never the recorded `CallFacts` its own docstring claims it clears.
+  A test that records facts without consuming them left
+  `finish_reason=stop` behind, and the next test on the same worker whose
+  model records no facts took the stale facts in the completion span's
+  `finally`, stamping `llm.finish_reason=stop` over the reply-derived
+  `tool_calls` — observed only as
+  `test_tool_calls_are_the_completion_body_when_bodies_are_on` failing
+  intermittently under xdist (serially an intervening traced turn always
+  consumed the leak first). `reset_events` now also clears `_FACTS`.
+
+The liveness check is path-gated on pull requests: a new `liveness`
+filter group in the `changes` job (the key records and loader, the
+liveness tests and shard selector, the root conftest.py that anchors
+pytest's rootdir, pyproject.toml for future pytest config, the
+dependency set, and ci.yml itself) — the rest of `atlas_reviewer/**` is
+deliberately not gated, because a change there can only touch liveness
+by breaking the parity_key import, which the reviewer suite's own job
+fails on in the same push. Liveness always runs on push to main, on the
+new daily `schedule` (`30 6 * * *`, distinguished from the weekly audit
+cron by `github.event.schedule` so the daily run exercises only the
+liveness job — the weekly audit keeps its forcing and fallback
+behavior), and on `workflow_dispatch`: the anchors are fixed commits, so
+the scheduled runs are what catch environment drift no PR diff carries.
+The liveness run itself stays serial within its shard (a mutant spec
+splices a shared anchor worktree).
