@@ -152,6 +152,7 @@ from atlas_reviewer.head_change import (
     PROGRESS_REVIEW_STEP,
     cap_reading,
 )
+from atlas_reviewer.history_source import HistoryBundle
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import ContractError, Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -722,6 +723,7 @@ def review_lens(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    history: HistoryBundle | None = None,
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
@@ -779,6 +781,7 @@ def review_lens(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=setup,
+            history=history,
             pr_body=pr_body,
             tool_log=tool_log,
         )
@@ -834,6 +837,8 @@ def review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    history: HistoryBundle | None = None,
+    history_source: Callable[[PrEvent], HistoryBundle | None] | None = None,
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
@@ -990,6 +995,13 @@ def review_lenses(
             return error
 
         return _traced_review(event, trace, redactor, refused)
+    # The pull request's real history is built once, before the fan-out:
+    # one controller-side acquisition per review, and every lens's
+    # runner gets the same bundle. A source that acquires nothing -- a
+    # failed fetch, a bundle over the runner's cap, or none configured --
+    # is the named no-history gap on the history tools, exactly as
+    # before the wiring existed.
+    history = history_source(event) if history_source is not None else None
     return _traced_review(
         event,
         trace,
@@ -1027,6 +1039,7 @@ def review_lenses(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=setup,
+            history=history,
             pr_body=pr_body,
         ),
     )
@@ -1066,6 +1079,7 @@ def _review_lenses(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    history: HistoryBundle | None = None,
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
 ) -> AgenticReview:
@@ -1166,6 +1180,7 @@ def _review_lenses(
             run_proposals=run_proposals,
             approval_channel=approval_channel,
             setup=runner_setup,
+            history=history,
             pr_body=pr_body,
             tool_log=tool_log,
         )
@@ -1552,6 +1567,7 @@ def _review_one(
     run_proposals: tuple[CommandProposal, ...] = (),
     approval_channel: ApprovalChannel | None = None,
     setup: SetupSpec | None = None,
+    history: HistoryBundle | None = None,
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
     trace: ReviewTrace,
@@ -1716,7 +1732,11 @@ def _review_one(
             **overrides,
         )  # fmt: skip
 
-    report = run_bridge_call(setup=setup)
+    report = run_bridge_call(
+        setup=setup,
+        history_bundle=history.bundle if history is not None else None,
+        history_base=history.base_sha if history is not None else "",
+    )
     result = replace(
         _result(key, ledger.attempts(key), resolved, scrub(report.note), index),
         lens=lens,

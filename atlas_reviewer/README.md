@@ -953,11 +953,27 @@ and runs in the same runner sandbox as the other tools: deny-all egress,
 the timeout and the byte and line caps. A revision is valid when the
 pull request's head or its base tip reaches it — the PR's range, or
 anything reachable from base — and the exec's rev guard refuses anything
-else before git runs, as a rejected call. A run whose staging carried no
-bundle (the default) reports the named no-history gap: the live
-acquisition of a bundle — a controller-side fetch of the reviewed
-repository into a bundle, capped — is the deploy step this slice leaves
-named for the operator, and the eval's fixtures carry their own.
+else before git runs, as a rejected call.
+
+**The acquisition is wired.** The controller builds the bundle once per
+review, before the lens fan-out, from the pull request's real commits:
+`review_lenses` takes a `history_source` callable (an eval run loads the
+fixture's own bundle; a live review fetches the pull request's head ref
+over HTTPS with the App's credentials), and every lens's runner gets the
+same bundle. The builder verifies the fetched tip is still the head the
+review is about (a push landing between the diff's fetch and the
+acquisition acquires nothing), names it the ref the staging's fetch
+expects, and bases the tools' range on the merge-base the diff was built
+against — so the range resolves inside the bundle even when the base
+branch has moved. A failed fetch, a moved head, or a bundle over the
+runner's cap acquires nothing: the history tools report the named
+no-history gap, and the bash copy's git sees the staging repository's
+synthetic commits until a bundle stages — the prompt's history claims
+are true exactly when a bundle is present. An eval fixture carries its
+own history as `history.bundle` (a git bundle whose ref is
+`refs/heads/atlas-history`, the name the staging fetches) plus
+`history-base.txt` (the merge-base SHA the tools' range is built on);
+a fixture that ships neither is the ordinary no-bundle run.
 
 ## The parity harness's driver: `eval-run` (issue #713's harness-parity slice)
 
