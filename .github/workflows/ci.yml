@@ -1140,6 +1140,11 @@ jobs:
     # main, on either schedule, and on workflow_dispatch, for the same
     # reason the `liveness` job does: main and the schedules are where a
     # planner or dependency change that moves a plan goes unnoticed.
+    # `needs: changes` is what makes the PR arm of the `if` real (the
+    # outputs are empty without it) and what actionlint checks; the daily
+    # liveness schedule skips the `changes` job, which is fine -- the
+    # event arm runs the job there, exactly as `liveness` does.
+    needs: [changes]
     if: >-
       github.event_name == 'push' ||
       github.event_name == 'schedule' ||
