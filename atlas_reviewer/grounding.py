@@ -130,13 +130,18 @@ _FAMILY_OF: Mapping[str, str] = {
 @dataclass(frozen=True)
 class GroundingCommand:
     """One declared check the pass runs: the family its tool belongs to,
-    the shell line exactly as the workflow writes it, the tool token that
-    classified it, and the workflow file it came from."""
+    the shell line exactly as the workflow writes it (the step's own
+    `working-directory` and `env` prefixed), the tool token that
+    classified it, the workflow file it came from, and whether the chain
+    it sits in provisions before it checks -- a chain the sandbox's
+    deny-all egress cannot reproduce, so the pass names it instead of
+    running its provisioning failure as the check's own."""
 
     family: str
     command: str
     tool: str
     workflow: str
+    unreproducible: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,12 +149,14 @@ class GroundingPlan:
     """The pass's parsed inventory: the commands to run, the workflow
     files that did not parse (named, never silently skipped), the distinct
     commands past the command cap (named the same way, in workflow order),
-    and whether the repo's workflows carried any lint/type/test step at
-    all."""
+    the checks a provisioning chain would have run but the sandbox cannot
+    reproduce (named, never run as a failure they are not), and whether
+    the repo's workflows carried any lint/type/test step at all."""
 
     commands: tuple[GroundingCommand, ...]
     unparseable: tuple[str, ...] = ()
     dropped: tuple[GroundingCommand, ...] = ()
+    unreproducible: tuple[GroundingCommand, ...] = ()
 
     @property
     def configured(self) -> bool:
@@ -206,7 +213,7 @@ def _classify(line: str) -> tuple[str, str] | None:
     if head == "make":
         target = tokens[1] if len(tokens) > 1 else ""
         for family in FAMILIES:
-            if family in target:
+            if re.search(rf"\b{family}\b", target):
                 return family, "make"
         return None
     if head in ("python", "python3"):
@@ -222,7 +229,9 @@ def _classify(line: str) -> tuple[str, str] | None:
 def _script_family(tokens: list[str]) -> tuple[str, str] | None:
     """`npm test` / `npm run lint` / `npx markdownlint-cli2`: the script's
     or tool's name classifies, since the documented entry point is what a
-    human would run and the pass runs it under the repo's own config."""
+    human would run and the pass runs it under the repo's own config. The
+    script name matches on a word boundary, so `npm run attest` and
+    `make latest` name no check the pass runs."""
     if len(tokens) < 2:
         return None
     if tokens[0] == "npx":
@@ -233,7 +242,7 @@ def _script_family(tokens: list[str]) -> tuple[str, str] | None:
         return (family, tokens[1]) if family else None
     script = tokens[1] if tokens[1] != "run" else (tokens[2] if len(tokens) > 2 else "")
     for family in FAMILIES:
-        if family in script:
+        if re.search(rf"\b{family}\b", script):
             return family, tokens[0]
     return None
 
@@ -253,6 +262,7 @@ def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
     command cap."""
     commands: list[GroundingCommand] = []
     dropped: list[GroundingCommand] = []
+    unreproducible: list[GroundingCommand] = []
     seen: set[str] = set()
     unparseable: list[str] = []
     workflows = sorted(
@@ -265,11 +275,16 @@ def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
             if command.command in seen:
                 continue
             seen.add(command.command)
+            if command.unreproducible:
+                unreproducible.append(command)
+                continue
             if len(commands) >= GROUNDING_MAX_COMMANDS:
                 dropped.append(command)
                 continue
             commands.append(command)
-    return GroundingPlan(tuple(commands), tuple(unparseable), tuple(dropped))
+    return GroundingPlan(
+        tuple(commands), tuple(unparseable), tuple(dropped), tuple(unreproducible)
+    )
 
 
 def _workflow_commands(
@@ -278,7 +293,11 @@ def _workflow_commands(
     """One workflow file's declared checks, in file order: each `run:`
     step's shell lines, joined across continuations, classified by
     segment, and prefixed with the step's own `working-directory` and
-    `env` so the command that runs is the one the step declares."""
+    `env` so the command that runs is the one the step declares. A line
+    whose chain mixes a provisioning segment with its check -- `pip
+    install x && pytest` -- carries `unreproducible`: the sandbox's
+    deny-all egress fails the provisioning the chain would run first, and
+    the pass will not report that failure as the check's own."""
     try:
         parsed = yaml.safe_load(data.decode("utf-8"))
     except (yaml.YAMLError, UnicodeDecodeError):
@@ -305,18 +324,26 @@ def _workflow_commands(
                 continue
             prefix = _step_prefix(step)
             for line in _joined_lines(step["run"]):
+                segments = _SEGMENT_SPLIT.split(line)
                 classified = next(
-                    (
-                        found
-                        for segment in _SEGMENT_SPLIT.split(line)
-                        if (found := _classify(segment))
-                    ),
+                    (found for segment in segments if (found := _classify(segment))),
                     None,
                 )
                 if classified is None:
                     continue
                 family, tool = classified
-                commands.append(GroundingCommand(family, prefix + line, tool, path))
+                provisions = any(
+                    _provisions(segment) for segment in segments if segment.split()
+                )
+                commands.append(
+                    GroundingCommand(
+                        family,
+                        prefix + line,
+                        tool,
+                        path,
+                        unreproducible=provisions,
+                    )
+                )
     return commands
 
 
@@ -344,6 +371,23 @@ def _step_prefix(step: Mapping[str, object]) -> str:
 
 
 _SEGMENT_SPLIT = re.compile(r"&&|\|\||;")
+
+# The heads whose segment provisions or fetches rather than checks: a
+# chain mixing one of these with a check is a sequence the sandbox cannot
+# reproduce (deny-all egress fails the provisioning first), so the check
+# is named unreproducible instead of run. `cd`, `export`, `echo` and
+# `sleep` are context, not provisioning: a chain of those and a check
+# runs whole. A segment that itself classifies as a check -- `python3 -m
+# pytest`, `npm test` -- is never provisioning, whatever its head.
+_PROVISIONING = _STATE_CHANGING - {"cd", "echo", "export", "sleep"} | {"git"}
+
+
+def _provisions(segment: str) -> bool:
+    """Whether one shell segment of a chain provisions or fetches: its
+    head names a provisioning tool and the segment itself classifies as
+    no check."""
+    tokens = segment.split()
+    return bool(tokens) and tokens[0] in _PROVISIONING and _classify(segment) is None
 
 
 def _joined_lines(run: str) -> list[str]:
@@ -417,6 +461,12 @@ def grounding_evidence(outcome: GroundingOutcome, *, nonce: str) -> str:
             f"Commands past the pass's {GROUNDING_MAX_COMMANDS}-command cap, "
             "not run: " + "; ".join(command.command for command in outcome.plan.dropped)
         )
+    if outcome.plan.unreproducible:
+        lines.append(
+            "Checks the sandbox cannot reproduce (their chain provisions or "
+            "fetches first, under deny-all egress), not run: "
+            + "; ".join(command.command for command in outcome.plan.unreproducible)
+        )
     if outcome.plan.unparseable:
         shown = ", ".join(outcome.plan.unparseable)
         lines.append(f"Workflow files that did not parse, so not read: {shown}")
@@ -478,25 +528,28 @@ def grounding_coverage_lines(
             "nothing."
         )
     not_run = [result for result in outcome.results if not result.ran]
-    dropped_notes = [
-        (command, "past the pass's command cap") for command in outcome.plan.dropped
+    notes = [
+        *[(r.command, r.note) for r in not_run],
+        *[(c, "past the pass's command cap") for c in outcome.plan.dropped],
+        *[
+            (c, "the chain provisions or fetches first, not reproducible here")
+            for c in outcome.plan.unreproducible
+        ],
     ]
-    if not_run or dropped_notes:
+    if notes:
         lines.append(
             "Not run: "
             + "; ".join(
-                f"{quote(command.command)} ({quote(note)})"
-                for command, note in [
-                    *[(r.command, r.note) for r in not_run],
-                    *dropped_notes,
-                ]
+                f"{quote(command.command)} ({quote(note)})" for command, note in notes
             )
             + "."
         )
     if outcome.failure:
         lines.append(f"The pre-pass itself failed: {quote(outcome.failure)}")
     ran_families = {result.command.family for result in outcome.results if result.ran}
-    configured_families = {command.family for command in outcome.plan.commands}
+    configured_families = {command.family for command in outcome.plan.commands} | {
+        command.family for command in outcome.plan.unreproducible
+    }
     parts = []
     for family in FAMILIES:
         if family in ran_families:
@@ -536,8 +589,12 @@ def _uncovered_types(
         return ()
     # A configured command covers its tool's file types whether or not it
     # ran: the reader is telling configured from missing, and a tool the
-    # repo declares is not a gap when its run was skipped.
-    tools = {command.tool for command in outcome.plan.commands}
+    # repo declares is not a gap when its run was skipped or its chain
+    # proved unreproducible here.
+    tools = {
+        command.tool
+        for command in (*outcome.plan.commands, *outcome.plan.unreproducible)
+    }
     covered: set[str] = set()
     for tool in tools:
         covered |= _TOOL_TYPES.get(tool, frozenset())

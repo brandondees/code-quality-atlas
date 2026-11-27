@@ -2186,6 +2186,7 @@ def _grounding_evidence(
         not outcome.plan.configured
         and not outcome.plan.unparseable
         and not outcome.plan.dropped
+        and not outcome.plan.unreproducible
         and not outcome.failure
     ):
         return ""

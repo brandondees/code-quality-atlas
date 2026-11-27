@@ -250,3 +250,62 @@ def test_an_over_cap_evidence_block_names_its_cut():
     )
     text = grounding_evidence(outcome, nonce="f00dfeed")
     assert "[... truncated by atlas_reviewer ...]" in text
+
+
+def test_the_script_and_target_names_match_on_a_word_boundary():
+    """`npm run attest` and `make latest` contain a family's name as a
+    substring but name no check the pass runs; the match is a word
+    boundary, so a script like `test:unit` still classifies."""
+    from atlas_reviewer.grounding import _classify
+
+    assert _classify("npm run attest") is None
+    assert _classify("make latest") is None
+    assert _classify("npm run test:unit") == ("test", "npm")
+    assert _classify("make lint") == ("lint", "make")
+
+
+def test_a_chain_that_provisions_before_its_check_is_named_not_run():
+    """`pip install x && pytest` is what CI runs, but the sandbox's
+    deny-all egress fails the install the chain runs first -- and that
+    failure must not reach a lens as the test run's own. The check is
+    carried as `unreproducible`, named in the evidence block and the
+    coverage lines, and counted as the configured tool it is; a chain of
+    harmless context (`cd`, `export`) and its check still runs whole."""
+    contents = {
+        ".github/workflows/mixed.yml": (
+            b"jobs:\n"
+            b"  gate:\n"
+            b"    steps:\n"
+            b"      - run: pip install -r requirements.txt && python3 -m pytest -q\n"
+            b"      - run: cd package && python3 -m pytest -q\n"
+        )
+    }
+    plan = grounding_plan(contents)
+    assert [c.command for c in plan.commands] == ["cd package && python3 -m pytest -q"]
+    assert [(c.family, c.command) for c in plan.unreproducible] == [
+        (
+            "test",
+            "pip install -r requirements.txt && python3 -m pytest -q",
+        )
+    ]
+    text = grounding_evidence(
+        GroundingOutcome(plan, (GroundingResult(plan.commands[0], exit=0),)),
+        nonce="f00dfeed",
+    )
+    assert (
+        "Checks the sandbox cannot reproduce (their chain provisions or "
+        "fetches first, under deny-all egress), not run: pip install -r "
+        "requirements.txt && python3 -m pytest -q" in text
+    )
+    lines = grounding_coverage_lines(
+        GroundingOutcome(plan, (GroundingResult(plan.commands[0], exit=0),)),
+        set(),
+    )
+    assert any(
+        "pip install -r requirements.txt && python3 -m pytest -q (the chain "
+        "provisions or fetches first, not reproducible here)" in line
+        for line in lines
+    )
+    # The unreproducible check's tool still covers its file types, and
+    # its family is configured: the Not run line carries the why.
+    assert not any(".py" in line for line in lines if "no configured tool" in line)
