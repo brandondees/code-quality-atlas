@@ -3199,6 +3199,35 @@ def test_the_grounding_pass_names_a_missing_guard_interpreter(tmp_path):
     )
 
 
+def test_a_read_after_the_grounding_pass_restages_without_a_staged_pytest(tmp_path):
+    """The grounding pass executes PR code, so every later read re-stages
+    -- on a runner whose staging probe found no pytest-capable
+    interpreter (the shim alone is enough to run the pass), the re-stage
+    must rebuild exactly as the initial staging did and serve the read,
+    instead of the AssertionError the unconditional restage-script assert
+    crashed with (the rebase onto #871 exposed it; revert-check: the
+    unconditional assert dies here)."""
+    ran: list[object] = []
+    read: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        ran.extend(bridge.grounding(plan.commands, clock=FakeClock()))
+        read.append(bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"}))
+        return "done"
+
+    bridge_run(
+        tmp_path,
+        body,
+        source=_grounding_source(),
+        pytest_candidates=(SYSTEM_PYTHON,),
+    )
+    assert any(r.ran for r in ran), "the pass must have executed a command"
+    (document,) = read
+    assert document.status is Status.OK
+    assert "def total" in document.content.text
+
+
 def test_the_grounding_pass_reports_a_failing_commands_hits(tmp_path):
     """A command whose run fails carries its captured output tail -- the
     hits the owning lens confirms, contextualizes or dismisses -- and a

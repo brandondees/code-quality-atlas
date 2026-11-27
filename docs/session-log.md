@@ -6884,3 +6884,15 @@ delimited part and its remainder a connector suffix (`s`, `ing`,
 `check`, `checker`, `er`), so `typecheck`, `tests`, `test_unit` and
 `test:unit` still classify. The script-family docstring names the match
 it actually does. Offline only.
+
+**Fix found by the rebase onto #871 (the grounding pre-pass):** a read
+tool's re-stage after the grounding pass executed a command crashed on
+`restage_script`'s unconditional `staged.pytest is not None` assert on
+a runner whose staging probe found no pytest — the grounding pass needs
+only the no-root guard's interpreter, but it makes the bridge suspect,
+and the next `diff_file`'s rename-map re-stage is a path no caller gate
+covered before #871 existed. The re-stage now asserts the interpreter
+only where it is used (the mutation re-splice, whose call gate
+guarantees it) and rebuilds exactly as the initial staging does
+otherwise; `test_a_read_after_the_grounding_pass_restages_without_a_staged_pytest`
+pins the read-after-grounding flow on a pytest-less runner.
