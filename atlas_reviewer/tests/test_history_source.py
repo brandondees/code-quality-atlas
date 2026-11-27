@@ -211,6 +211,11 @@ def test_the_token_rides_the_environment_and_never_the_command_line(tmp_path):
 
     monkey = pytest.MonkeyPatch()
     monkey.setattr(subprocess, "run", run)
+    # An unrelated controller credential must not reach the git children
+    # (round 2 of #860): the env is an allowlist, not the whole
+    # environment -- and the prompt pin is set, so a credential prompt
+    # can never hang the fetch until its timeout.
+    monkey.setenv("ATLAS_CONTROLLER_SECRET", "do-not-leak")
     try:
         bundle = bundle_from_repository(
             str(origin),
@@ -225,6 +230,9 @@ def test_the_token_rides_the_environment_and_never_the_command_line(tmp_path):
     assert bundle is not None
     for argv, env in seen:
         assert "secret-installation-token" not in " ".join(argv)
+        assert "ATLAS_CONTROLLER_SECRET" not in env
+        assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert "PATH" in env
     fetch = next(env for argv, env in seen if "fetch" in argv)
     assert fetch["GIT_CONFIG_COUNT"] == "1"
     assert fetch["GIT_CONFIG_KEY_0"] == "http.extraHeader"

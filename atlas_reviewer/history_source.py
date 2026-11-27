@@ -52,6 +52,44 @@ BUNDLE_FAILED = "bundle_failed"
 TIMED_OUT = "timed_out"
 OVER_CAP = "over_cap"
 
+# The environment a git child gets (round 2 of #860): an allowlist,
+# not the controller's whole environment -- the controller's env holds
+# every credential the service runs with, and a `git fetch` needs only
+# the path, the locale, and the proxy/CA material its HTTPS transport
+# honors. `GIT_TERMINAL_PROMPT` is pinned to 0: a credential prompt
+# would hang until the timeout, silently.
+_GIT_ENV_PASSTHROUGH = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+    "GIT_SSL_CAINFO",
+    "GIT_SSL_CAPATH",
+    "GIT_SSL_NO_VERIFY",
+)
+
+
+def _git_env(*extra: tuple[str, str]) -> dict[str, str]:
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name in _GIT_ENV_PASSTHROUGH
+    }
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.update(dict(extra))
+    return env
+
+
 # Every git call is bounded (round 1 of #860, resilience): the
 # acquisition runs synchronously before the lens fan-out, so a stalled
 # fetch or a wedged local git must cost the review a bounded wait, not
@@ -111,22 +149,25 @@ def bundle_from_repository(
     repo = workdir / "history"
     # The credential rides `env=`, the documented GIT_CONFIG_* plumbing:
     # argv is readable to anything on the host (`ps`, /proc), the
-    # environment of the one process is not (round 1 of #860).
-    fetch_env = dict(os.environ)
-    if token:
-        fetch_env.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "http.extraHeader",
-                "GIT_CONFIG_VALUE_0": "Authorization: token " + token,
-            }
+    # environment of the one process is not (round 1 of #860). The env
+    # is the allowlist, plus exactly the credential header.
+    credential = (
+        (
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", "http.extraHeader"),
+            ("GIT_CONFIG_VALUE_0", "Authorization: token " + token),
         )
+        if token
+        else ()
+    )
+    fetch_env = _git_env(*credential)
     try:
         init = subprocess.run(
             ["git", "init", "-q", str(repo)],
             capture_output=True,
             check=False,
             timeout=HISTORY_GIT_TIMEOUT_S,
+            env=_git_env(),
         )
     except subprocess.TimeoutExpired:
         note(TIMED_OUT)
@@ -146,6 +187,7 @@ def bundle_from_repository(
                 capture_output=True,
                 check=False,
                 timeout=HISTORY_GIT_TIMEOUT_S,
+                env=_git_env(),
             )
         except subprocess.TimeoutExpired:
             note(TIMED_OUT)
@@ -182,6 +224,7 @@ def bundle_from_repository(
             text=True,
             check=False,
             timeout=HISTORY_GIT_TIMEOUT_S,
+            env=_git_env(),
         )
     except subprocess.TimeoutExpired:
         note(TIMED_OUT)
