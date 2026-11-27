@@ -147,6 +147,11 @@ from atlas_reviewer.domain import (
 )
 from atlas_reviewer.findings import MintedFinding
 from atlas_reviewer.funding import noted_funding_source
+from atlas_reviewer.grounding import (
+    GroundingOutcome,
+    GroundingPlan,
+    grounding_coverage_lines,
+)
 from atlas_reviewer.head_change import (
     FIELD_CALLS,
     FIELD_COMMITTED_USD,
@@ -174,6 +179,7 @@ from atlas_reviewer.lens_loop import (
     LensModel,
     Limits,
     PickerSpend,
+    SharedGrounding,
     SharedSweep,
     Spend,
     TurnRequest,
@@ -453,6 +459,14 @@ class AgenticReview:
     lens ran -- clean with its findings, or partial over the files it
     read -- the review is partial and the headline names what did not
     run. Empty on every review that ran on a served key."""
+    grounding: GroundingOutcome | None = None
+    """The grounding pre-pass's outcome (the protocol's step 4.3), from
+    which the draft's tool-coverage section renders: what ran, what the
+    wall budget never reached, which families carry no configured
+    command, and which changed file types no configured tool covers -- the
+    skill's coverage facts, stated for the report's coverage section.
+    None when the pre-pass never ran (no lens ran, or every lens was
+    reused); the draft omits the section then."""
 
     @property
     def reused_lenses(self) -> frozenset[str]:
@@ -599,6 +613,7 @@ def synthesize(
     other_pull_requests: int = 0,
     ceiling_note: str = "",
     rerank_note: str = "",
+    grounding: GroundingOutcome | None = None,
     endpoint_class: str = "",
     funding_source: str = "",
 ) -> AgenticReview:
@@ -616,6 +631,7 @@ def synthesize(
         other_pull_requests=other_pull_requests,
         ceiling_note=ceiling_note,
         rerank_note=rerank_note,
+        grounding=grounding,
         settle_overruns=tuple(spend.overruns) if spend is not None else (),
         endpoint_class=endpoint_class,
         billed_usd="0" if spend is None else str(spend.billed_usd()),
@@ -1163,12 +1179,13 @@ def _review_lenses(
 
     gate = threading.BoundedSemaphore(resolved.create_concurrency)
     runner_setup = setup
-    # The mutant pre-pass runs once per review, not once per sweep lens:
-    # the first sweep lens to reach it runs the mutants on its own runner
-    # and the others read its verdicts (lens_loop.SharedSweep). Created
-    # here because the memo's scope is the review, across the pool's
-    # lenses and their continuations.
+    # The controller's pre-passes run once per review, not once per lens:
+    # the first lens to reach each runs it on its own runner and the
+    # others read its outcome (lens_loop.SharedSweep / SharedGrounding).
+    # Created here because the memos' scope is the review, across the
+    # pool's lenses and their continuations.
     shared_sweep = SharedSweep()
+    shared_grounding = SharedGrounding()
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         if spend.halted:
@@ -1225,6 +1242,7 @@ def _review_lenses(
             pr_body=pr_body,
             tool_log=tool_log,
             shared_sweep=shared_sweep,
+            shared_grounding=shared_grounding,
         )
 
     with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
@@ -1263,6 +1281,7 @@ def _review_lenses(
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
     reports = tuple(ran.report for ran in runs if ran.report is not None)
+    grounding = shared_grounding.stored()
     review = synthesize(
         [ran.result for ran in runs],
         secrets,
@@ -1273,6 +1292,7 @@ def _review_lenses(
         other_pull_requests=other_pull_requests,
         ceiling_note=derivation.ceiling_note,
         rerank_note=_rerank_note(files, path_ranks, redactor),
+        grounding=grounding,
         endpoint_class=endpoint_class(model),
         funding_source=funding,
     )
@@ -1627,6 +1647,7 @@ def _review_one(
     pr_body: str = "",
     tool_log: Callable[[str], None] | None = None,
     shared_sweep: SharedSweep | None = None,
+    shared_grounding: SharedGrounding | None = None,
     trace: ReviewTrace,
 ) -> _LensRun:
     # The per-call bounds only; the cross-limit relations were checked by
@@ -1774,7 +1795,7 @@ def _review_one(
                 lens_trace.wrap_bridge(bridge), job, traced_model,
                 spend, clock, ledger, key, resolved,
                 deadline, started, session, scrub, evidence_digest,
-                shared_sweep,
+                shared_sweep, shared_grounding,
             )  # fmt: skip
 
     def run_bridge_call(**overrides: Any) -> RunnerReport:
@@ -3405,6 +3426,7 @@ def _attempts(
     scrub: Callable[[str], str],
     evidence_digest: str | None = None,
     shared_sweep: SharedSweep | None = None,
+    shared_grounding: SharedGrounding | None = None,
 ) -> str:
     step = next_step(ledger.attempts(key), limits.retries)
     while isinstance(step, RunAttempt):
@@ -3424,6 +3446,7 @@ def _attempts(
                 attempt=step.number,
                 secrets=secrets_seen,
                 shared_sweep=shared_sweep,
+                shared_grounding=shared_grounding,
             )  # fmt: skip
         except ByokRefusedError as exc:
             # The refusal still leaves the loop, so the runner fails and
@@ -3890,6 +3913,23 @@ def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
     return None if stop is None else stop.as_dict()
 
 
+def _grounding_section(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The grounding pre-pass's coverage section (the protocol's step
+    4.3): the repo-derived values in its lines are quoted as data by the
+    builder against this draft's own scrubber, so the section reads as
+    the controller's coverage statement carrying quoted repo text."""
+    return [
+        "",
+        "## Tool coverage (grounding pre-pass)",
+        "",
+        *grounding_coverage_lines(
+            review.grounding or GroundingOutcome(GroundingPlan((), ())),
+            review.changed if review.changed is not None else frozenset(),
+            quote=lambda text: quote_untrusted(text, QUOTED_CHARS, scrub=scrub),
+        ),
+    ]
+
+
 def render_draft(
     review: AgenticReview,
     redactor: Redactor,
@@ -3982,6 +4022,8 @@ def render_draft(
         # Controller text about the ceiling (D68): no PR data in it, so it
         # needs no quoting.
         lines.append(review.ceiling_note)
+    if review.grounding is not None:
+        lines += _grounding_section(review, scrub)
     if cache:
         lines += ["", "## Prompt cache", ""]
         lines += _cache_lines(cache, scrub)

@@ -80,7 +80,14 @@ from atlas_reviewer.bridge_staging import (
 )
 from atlas_reviewer.diffs import risk_tier, split_files
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.grounding import (
+    GroundingCommand,
+    GroundingPlan,
+    GroundingResult,
+    grounding_plan,
+)
 from atlas_reviewer.guest_unpack import KILL_AFTER_S
+from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -427,7 +434,9 @@ def call_script(
 # timeout and the byte/line caps), and never touch the working copy.
 
 
-def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+def bash_script(
+    staged: Staged, call: Call, limits: ToolLimits, path: str | None = None
+) -> str:
     """One exec for `bash` (D80's bash-tool update): the same disposable
     copy of the head tree `run_tests` builds, a `.git` file that points
     the copy's git at the staged repository -- so git history over the
@@ -438,12 +447,19 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     removed again: nothing the command writes reaches the repository's
     trees, and anything it writes into the staged repository itself is
     discarded by the next call's re-stage -- later calls never read what
-    an earlier command left behind."""
+    an earlier command left behind. `path` replaces the exec's minimal
+    PATH (`/usr/bin:/bin`) inside the copy: the controller's grounding
+    pre-pass passes the setup-provisioned tools' own bin directory, so
+    the repo's declared commands resolve the way the setup environment
+    provides them; the model's bash keeps the minimal env."""
     scratch = quote(staged.scratch)
     root = quote(staged.root)
     assert staged.shim_python is not None  # the caller refuses the call before this
     command = call.get("command")
     guarded = as_nobody(staged.shim_python, f"/bin/sh -c {quote(command)}")
+    env_exports = guarded_env_exports(staged.scratch) + (
+        f" export PATH={quote(path)};" if path else ""
+    )
     return "\n".join(
         (
             f"cd {root}",
@@ -455,7 +471,7 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
-            guarded_env_exports(staged.scratch),
+            env_exports,
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -470,6 +486,17 @@ def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             f"rm -rf {root}/{SCRATCH_DIR} out err shown",
         )
     )
+
+
+def _grounding_path(python: TrustedPython) -> str:
+    """The PATH the grounding pre-pass's commands run under: the trusted
+    interpreter's own bin directory first -- where the setup spec's
+    `pip install --no-user` puts the repo's declared tools' executables,
+    which the runner's minimal env (`/usr/bin:/bin`) does not carry --
+    then the usual system dirs."""
+    bin_dir = python.path.rsplit("/", 1)[0]
+    parts = [bin_dir] if bin_dir != "/usr/bin" else []
+    return ":".join((*parts, "/usr/local/bin", "/usr/bin", "/bin"))
 
 
 def history_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
@@ -2156,6 +2183,14 @@ _SWEEP_OPERATOR_RANK: Mapping[str, int] = MappingProxyType(
 # its guards ranked behind every changed file's own.
 _NO_DIFF_DISTANCE = 1 << 30
 
+# The grounding pre-pass's clocks: one declared command runs at most as
+# long as an execution tool's test process (#843), and the pass's wall
+# budget holds about three of those runs -- a repo whose CI runs a lint, a
+# type check and a test suite fits; a command the remainder cannot start
+# is named, never silently skipped.
+GROUNDING_RUN_BOUND_S = 180
+GROUNDING_BUDGET_S = 3.0 * GROUNDING_RUN_BOUND_S
+
 
 @dataclass
 class Bridge:
@@ -2363,6 +2398,124 @@ class Bridge:
         verdicts = tuple(out)
         self._sweep_cache[key] = verdicts
         return verdicts
+
+    def grounding_plan(self) -> GroundingPlan:
+        """The reviewed repo's declared lint/type/test commands (the
+        grounding pre-pass's inventory): parsed from the controller's own
+        copy of the merge-base tree's CI workflows, the revision the
+        review is anchored to. A workflow that does not parse is named in
+        the plan, never silently skipped."""
+        return grounding_plan(self._contents.get(Rev.BASE, {}))
+
+    def grounding(
+        self,
+        commands: Sequence[GroundingCommand],
+        *,
+        clock: Clock,
+        budget_s: float | None = None,
+    ) -> tuple[GroundingResult, ...]:
+        """The controller's grounding pre-pass (the protocol's step 4.3):
+        runs each declared command in its own disposable copy of the head
+        tree -- the same copy, guard, clock and framing the `bash` tool
+        uses -- without spending the attempt's call budget, because this
+        is the controller's evidence gathering, not the model's. The
+        pass's wall budget bounds the whole sequence: a command the
+        remainder cannot fit at its full per-command budget is named,
+        never started into a clamped exec and never silently skipped.
+        Every
+        command runs PR code, so the bridge stays suspect between
+        commands and the next read re-stages; a command that never
+        started, a copy that could not be made, and a failed exec are
+        all named results, because a gap the report cannot show is a gap
+        the lens reads as a clean run."""
+        budget_s = GROUNDING_BUDGET_S if budget_s is None else budget_s
+        started = clock.monotonic()
+        limits = ToolLimits(16 * 1024, GROUNDING_RUN_BOUND_S)
+        per_command = GROUNDING_RUN_BOUND_S + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
+        out: list[GroundingResult] = []
+        if self.staged.shim_python is None:
+            return tuple(
+                GroundingResult(
+                    command,
+                    note=(
+                        "no interpreter on the runner image runs the no-root "
+                        "guard, so no command could start"
+                    ),
+                )
+                for command in commands
+            )
+        for command in commands:
+            remaining = budget_s - (clock.monotonic() - started)
+            if remaining < per_command:
+                # The sweep's own floor shape: a command the remaining
+                # wall cannot fit at its full per-command budget is named
+                # rather than started into a clamped exec -- a run
+                # truncated by the pass's own budget would read as a
+                # tool hit or a tool failure that CI's run never was.
+                out.append(
+                    GroundingResult(
+                        command,
+                        note=(
+                            "the grounding pass's remaining wall could "
+                            "not fit this command"
+                        ),
+                    )
+                )
+                continue
+            out.append(self._grounding_command(command, limits, per_command))
+        return tuple(out)
+
+    def _grounding_command(
+        self,
+        command: GroundingCommand,
+        limits: ToolLimits,
+        per_command: float,
+    ) -> GroundingResult:
+        """One declared command's exec and its result. A failed exec is a
+        named result -- the pass goes on to the next command -- because
+        one broken command must not cost the review the rest of its
+        inventory."""
+        if self._suspect:
+            self._restage()
+        # The command's own exec runs PR code, whatever its outcome: the
+        # bridge is suspect from the moment the exec starts.
+        self._suspect = True
+        call = Call("bash", (("command", command.command),))
+        assert self.staged.shim_python is not None
+        try:
+            code, text = self.session.exec(
+                "grounding",
+                bash_script(
+                    self.staged,
+                    call,
+                    limits,
+                    path=_grounding_path(self.staged.shim_python),
+                ),
+                stage="bridge",
+                budget_s=per_command,
+            )
+            blocks = parse_run_blocks(text) if code == 0 else None
+            if blocks is None:
+                raise BoundaryError(
+                    f"no run reply (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+                )
+        except StreamTimeoutError as exc:
+            return GroundingResult(command, note=f"the exec failed: {exc}")
+        except BoundaryError as exc:
+            return GroundingResult(command, note=f"the exec failed: {exc}")
+        stage, run = _single_run(blocks)
+        if stage.code != 0:
+            return GroundingResult(
+                command,
+                note=f"the staged copy could not be made (exit {stage.code})",
+            )
+        assert run is not None
+        return GroundingResult(
+            command,
+            exit=run.code,
+            tail=run.content.decode("utf-8", errors="replace"),
+            stderr_tail=run.stderr.decode("utf-8", errors="replace"),
+        )
 
     def begin_attempt(self, lens: str, number: int) -> None:
         """Start one attempt's budget (#693): the call and output counters

@@ -30,6 +30,7 @@ from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
+from atlas_reviewer.grounding import GroundingPlan
 from atlas_reviewer.lens_loop import (
     CALL_RETRY_BACKOFF_S,
     CONTRACT_HEADING,
@@ -44,12 +45,14 @@ from atlas_reviewer.lens_loop import (
     AssistantText,
     LensJob,
     LimitsUnsetError,
+    SharedGrounding,
     SharedSweep,
     Spend,
     ToolResults,
     TurnRequest,
     UserText,
     _DiffPages,
+    _grounding_evidence,
     _Progress,
     _quote_repair_nudge,
     _repair,
@@ -108,10 +111,14 @@ class _NoSweepBridge:
     """The bridge surface `run_attempt` touches before the first turn:
     these tests exercise the model-call mechanics with a stub whose sweep
     plan is empty, so the controller's mutant pre-pass adds no evidence
-    block."""
+    block, and whose grounding inventory is empty, so the pre-pass runs
+    nothing."""
 
     def sweep_plan(self, diff):
         return ()
+
+    def grounding_plan(self):
+        return GroundingPlan((), ())
 
 
 def job(body=BODY, digest=DIGEST):
@@ -1717,6 +1724,9 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
         def sweep_plan(self, diff):
             return ()
 
+        def grounding_plan(self):
+            return GroundingPlan((), ())
+
         def call(self, tool, args):
             clock.advance(12.5)
             raise DeadlineExceededError(
@@ -3316,7 +3326,9 @@ def test_a_lens_outside_the_sweep_set_gets_no_evidence_block(tmp_path):
             tmp_path, [final(finding())],
             the_job=the_job, source=source,
         )  # fmt: skip
-    assert "tool-evidence" not in model.requests[0].messages[0].text
+    # The grounding pass's block is every lens's; what a lens outside the
+    # sweep's set must not carry is the sweep's own block.
+    assert "The controller swept the diff" not in model.requests[0].messages[0].text
 
 
 def test_a_failed_sweep_degrades_to_no_evidence(monkeypatch):
@@ -3331,6 +3343,9 @@ def test_a_failed_sweep_degrades_to_no_evidence(monkeypatch):
         def sweep_plan(self, diff):
             return (SweepSpec("calc.py", 2, "negate-condition"),)
 
+        def grounding_plan(self):
+            return GroundingPlan((), ())
+
         def sweep(self, specs, *, clock, budget_s=None):
             raise BoundaryError("the sweep's exec failed")
 
@@ -3344,10 +3359,15 @@ def _sweep_bridge(runs: list[int], *, block: threading.Event | None = None):
     class SweepBridge:
         """The bridge surface a no-tool-turn attempt touches: a sweep
         plan with one spec, and a sweep that counts its runs, optionally
-        parking until an event releases it (the slow winner)."""
+        parking until an event releases it (the slow winner). The
+        grounding inventory is empty, so these tests exercise the sweep's
+        sharing alone."""
 
         def sweep_plan(self, diff):
             return (SweepSpec("calc.py", 2, "negate-condition"),)
+
+        def grounding_plan(self):
+            return GroundingPlan((), ())
 
         def sweep(self, specs, *, clock, budget_s=None):
             runs.append(1)
@@ -3456,7 +3476,93 @@ def test_a_failed_shared_sweep_degrades_every_lens_to_no_evidence():
                 review_deadline=600, review_started=0, shared_sweep=share,
             )  # fmt: skip
     assert runs == [1]
-    assert "tool-evidence" not in model.requests[1].messages[0].text
+    # The sweep's own block is absent; the grounding pass's block (an
+    # empty inventory here) is every lens's and may be present.
+    assert "The controller swept the diff" not in model.requests[1].messages[0].text
+
+
+def _grounding_bridge(runs: list[int], *, fail: bool = False):
+    from atlas_reviewer.grounding import (
+        GroundingCommand,
+        GroundingPlan,
+        GroundingResult,
+    )
+    from atlas_reviewer.ports import BoundaryError
+
+    class GroundingBridge:
+        """The bridge surface a no-tool-turn attempt touches: a plan with
+        one declared lint command, and a pass that counts its runs."""
+
+        def grounding_plan(self):
+            return GroundingPlan(
+                (
+                    GroundingCommand(
+                        "lint", "ruff check .", "ruff", ".github/workflows/ci.yml"
+                    ),
+                )
+            )
+
+        def grounding(self, commands, *, clock, budget_s=None):
+            runs.append(1)
+            if fail:
+                raise BoundaryError("the grounding exec died")
+            return (GroundingResult(commands[0], exit=1, tail="F401 unused"),)
+
+        def sweep_plan(self, diff):
+            return ()
+
+    return GroundingBridge()
+
+
+def test_the_grounding_pass_reaches_every_lens_as_tool_evidence():
+    """The grounding pre-pass is the protocol's step 4.3: the repo's own
+    declared tooling runs before any lens, and the hits reach EVERY lens
+    as one fenced tool-evidence block -- not only the sweep's two lenses,
+    and not dependent on a lens choosing to call bash."""
+    runs: list[int] = []
+    bridge = _grounding_bridge(runs)
+    text = _grounding_evidence(bridge, job(), FakeClock())
+    assert "tool-evidence" in text
+    assert "lint:" in text
+    assert "ruff check . -- exit 1" in text
+    assert "F401 unused" in text
+
+
+def test_the_grounding_evidence_names_a_failed_pass():
+    """A pass whose exec fails is named in the block -- the review reads
+    'the pre-pass did not run', never an implied clean inventory."""
+    runs: list[int] = []
+    text = _grounding_evidence(_grounding_bridge(runs, fail=True), job(), FakeClock())
+    assert "The pass itself failed: the grounding exec died" in text
+
+
+def test_the_grounding_pass_runs_once_per_review():
+    """Like the mutant sweep, the grounding pass runs the repo's tooling
+    once per review: the first lens's runner executes it and the others
+    read the same evidence block."""
+    runs: list[int] = []
+    share = SharedGrounding()
+    first = _grounding_evidence(_grounding_bridge(runs), job(), FakeClock(), share, 60)
+    second = _grounding_evidence(_grounding_bridge([]), job(), FakeClock(), share, 60)
+    assert runs == [1]
+    assert first == second
+    assert "ruff check . -- exit 1" in second
+
+
+def test_the_grounding_pre_pass_reaches_a_non_sweep_lens_first_turn(tmp_path):
+    """End to end through the attempt: a lens outside the sweep's set
+    still carries the grounding block in its first turn, ahead of the
+    model's first call."""
+    runs: list[int] = []
+    model = ScriptedLensModel([final()])
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(SWEEP_LENSES_ENV, "some-other-lens")
+        run_attempt(
+            job(), _grounding_bridge(runs), model, Spend(LIMITS.resolve()), FakeClock(),
+            review_deadline=600, review_started=0,
+        )  # fmt: skip
+    assert runs == [1]
+    assert "ruff check . -- exit 1" in model.requests[0].messages[0].text
 
 
 def test_a_pull_request_body_finding_verifies_and_reaches_the_draft(tmp_path):
@@ -3664,3 +3770,92 @@ def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
     # The loop's ToolUse records the status NAME; the enum's value names
     # the same state.
     assert run_tests.status == Status.TIMED_OUT.name
+
+
+def test_the_sweeps_wait_is_recomputed_after_the_grounding_pass():
+    """The grounding pass can spend minutes of the review's wall; the
+    sweep's bounded wait is the wall the review has left after the pass
+    returns, not the figure read before it ran -- a stale bound could
+    hold a sweep waiter past the review's real deadline (round-1 review
+    of #871, the stale wait bound)."""
+    from atlas_reviewer.bridge import SweepSpec
+    from atlas_reviewer.grounding import (
+        GroundingCommand,
+        GroundingPlan,
+        GroundingResult,
+    )
+
+    class GroundingThenSweepBridge:
+        def grounding_plan(self):
+            return GroundingPlan(
+                (
+                    GroundingCommand(
+                        "lint", "ruff check .", "ruff", ".github/workflows/ci.yml"
+                    ),
+                )
+            )
+
+        def grounding(self, commands, *, clock, budget_s=None):
+            clock.advance(100.0)
+            return (GroundingResult(commands[0], exit=0),)
+
+        def sweep_plan(self, diff):
+            return (SweepSpec("calc.py", 2, "negate-condition"),)
+
+        def sweep(self, specs, *, clock, budget_s=None):
+            return ()
+
+    class RecordingSweepShare:
+        def __init__(self):
+            self.waits: list[float] = []
+
+        def verdicts(self, specs, run, wait_s):
+            self.waits.append(wait_s)
+            return run()
+
+    share = RecordingSweepShare()
+    model = ScriptedLensModel([final()])
+    clock = FakeClock()
+    run_attempt(
+        job(), GroundingThenSweepBridge(), model, Spend(LIMITS.resolve()), clock,
+        review_deadline=600, review_started=0,
+        shared_sweep=share, shared_grounding=SharedGrounding(),
+    )  # fmt: skip
+    assert share.waits == [500.0]
+
+
+def test_an_unexpected_grounding_failure_is_named_not_fatal():
+    """The pass's failure handling is not a two-exception list: whatever
+    the pass raises -- a staging failure, a lost runner -- is the named
+    pass failure the block shows, never a crash of the lens it serves
+    (round-1 review of #871)."""
+    runs: list[int] = []
+
+    class UnexpectedlyDeadBridge(_grounding_bridge(runs).__class__):
+        def grounding(self, commands, *, clock, budget_s=None):
+            runs.append(1)
+            raise RuntimeError("the re-stage died")
+
+    text = _grounding_evidence(
+        UnexpectedlyDeadBridge(), job(), FakeClock(), SharedGrounding(), 60
+    )
+    assert "The pass itself failed: the re-stage died" in text
+
+
+def test_a_shared_grounding_failure_reaches_the_waiters():
+    """The owner's failure is the waiters': a shared pass that dies with
+    an unexpected exception stores the failure outcome, and every waiting
+    lens reads it instead of tripping over a missing outcome."""
+    runs: list[int] = []
+    share = SharedGrounding()
+
+    class DeadBridge(_grounding_bridge(runs).__class__):
+        def grounding(self, commands, *, clock, budget_s=None):
+            runs.append(1)
+            raise RuntimeError("the runner died")
+
+    first = _grounding_evidence(DeadBridge(), job(), FakeClock(), share, 60)
+    second = _grounding_evidence(DeadBridge(), job(), FakeClock(), share, 60)
+    assert runs == [1]
+    assert "The pass itself failed: the runner died" in first
+    assert first == second

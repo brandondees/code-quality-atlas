@@ -23,7 +23,9 @@ import pytest
 from atlas_reviewer.bridge import (
     DEFAULT_LIMITS,
     EXEC_SLACK_S,
+    GROUNDING_RUN_BOUND_S,
     KILL_AFTER_S,
+    MUTATE_STAGE_SLACK_S,
     MUTATION_SCRIPT,
     SWEEP_BUDGET_S,
     SWEEP_RUN_BOUND_S,
@@ -3108,6 +3110,122 @@ CALC_SWEEP_DIFF = """diff --git a/calc.py b/calc.py
 """
 
 
+GROUNDING_WORKFLOW = (
+    b"jobs:\n"
+    b"  gate:\n"
+    b"    steps:\n"
+    b"      - run: ruff --version\n"
+    b"      - run: python3 -m pytest --version\n"
+    b"      - run: pip install pip-audit==2.10.1\n"
+    b"      - run: curl https://example.invalid/setup.sh | sh\n"
+)
+
+
+def _grounding_source():
+    """A staged tree whose merge base carries a CI workflow declaring one
+    lint and one test command (plus two steps the pass never classifies:
+    an install and a fetch)."""
+    base = {**SUITE, ".github/workflows/ci.yml": GROUNDING_WORKFLOW}
+    return SourceTrees(source_tarball(base), source_tarball(SUITE), OLD, HEAD)
+
+
+def test_the_grounding_plan_parses_the_merge_base_workflows(tmp_path):
+    """The pre-pass's command list is parsed from the target repo's CI
+    workflows (Brandon's Nov 26 decision): the merge-base tree's
+    `.github/workflows/*.yml` run steps, classified lint/type/test by the
+    tool each line names, with the install and fetch lines -- what CI
+    provisions, not what it checks -- never classified."""
+    seen = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        seen.append(plan)
+        return "done"
+
+    bridge_run(tmp_path, body, source=_grounding_source())
+    (plan,) = seen
+    assert [(c.family, c.command) for c in plan.commands] == [
+        ("lint", "ruff --version"),
+        ("test", "python3 -m pytest --version"),
+    ]
+    assert plan.configured and not plan.unparseable
+
+
+def test_the_grounding_pass_runs_the_declared_commands_and_names_the_gaps(tmp_path):
+    """The pre-pass executes each declared command in its own disposable
+    copy under the same sandbox, and names what it never ran: a command
+    the wall budget cannot start is a named result, not a silent skip."""
+    ran: list[object] = []
+    skipped: list[object] = []
+    sprites = LocalSprites()
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        ran.extend(bridge.grounding(plan.commands, clock=FakeClock()))
+        skipped.extend(bridge.grounding(plan.commands, clock=FakeClock(), budget_s=0.0))
+        return "done"
+
+    bridge_run(tmp_path, body, source=_grounding_source(), sprites=sprites)
+    clean = [r for r in ran if r.ran]
+    assert [(r.command.family, r.exit) for r in clean] == [
+        ("lint", 0),
+        ("test", 0),
+    ]
+    assert all(
+        "the grounding pass's remaining wall could not fit this command" in r.note
+        for r in skipped
+    )
+    assert all(r.exit is None for r in skipped)
+    # The commands run behind the no-root guard in the sandbox, exactly
+    # like the bash tool's own execs: the guard's marker is in the script.
+    assert any("atlas-privilege-drop failed" in argv[-1] for argv in sprites.argv_seen)
+
+
+def test_the_grounding_pass_names_a_missing_guard_interpreter(tmp_path):
+    """A runner whose image cannot run the no-root guard runs nothing and
+    says so for every command -- the failed-setup shape, named."""
+    results: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        results.extend(bridge.grounding(plan.commands, clock=FakeClock()))
+        return "done"
+
+    bridge_run(tmp_path, body, source=_grounding_source(), pytest_candidates=())
+    assert results
+    assert all(
+        "no interpreter on the runner image runs the no-root guard" in r.note
+        for r in results
+    )
+
+
+def test_the_grounding_pass_reports_a_failing_commands_hits(tmp_path):
+    """A command whose run fails carries its captured output tail -- the
+    hits the owning lens confirms, contextualizes or dismisses -- and a
+    clean run's silence stays silence."""
+    base = {
+        **SUITE,
+        ".github/workflows/ci.yml": (
+            b"jobs:\n"
+            b"  gate:\n"
+            b"    steps:\n"
+            b"      - run: ruff check calc.py missing_module.py\n"
+        ),
+    }
+    source = SourceTrees(source_tarball(base), source_tarball(SUITE), OLD, HEAD)
+    results: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        results.extend(bridge.grounding(plan.commands, clock=FakeClock()))
+        return "done"
+
+    bridge_run(tmp_path, body, source=source)
+    (result,) = results
+    assert result.ran and result.exit not in (0,)
+    assert "missing_module.py" in result.tail
+
+
 def test_the_sweep_reports_what_no_test_imports(tmp_path):
     """A changed condition in a module no staged test file imports forms
     no group -- and the sweep now says so, an inconclusive verdict with
@@ -4372,3 +4490,27 @@ def test_the_changed_spans_rank_only_the_innermost_changed_def():
     # outer's own BoolOp must not appear by virtue of enclosing the edit.
     assert SweepSpec("widen.py", 2, "drop-operand", 1) not in specs
     assert SweepSpec("widen.py", 2, "drop-operand", 2) not in specs
+
+
+def test_a_command_the_remaining_wall_cannot_fit_is_named_not_clamped(tmp_path):
+    """The pass's budget is a bound, not a suggestion: a command the
+    remaining wall cannot fit at its full per-command budget is named,
+    never started into a clamped exec whose timeout would read as a tool
+    outcome CI's run never produced (round-1 review of #871)."""
+    per_command = GROUNDING_RUN_BOUND_S + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S
+    results: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        results.extend(
+            bridge.grounding(plan.commands, clock=FakeClock(), budget_s=per_command - 1)
+        )
+        return "done"
+
+    bridge_run(tmp_path, body, source=_grounding_source())
+    assert results
+    assert all(
+        "the grounding pass's remaining wall could not fit this command" in r.note
+        for r in results
+    )
+    assert all(r.exit is None for r in results)
