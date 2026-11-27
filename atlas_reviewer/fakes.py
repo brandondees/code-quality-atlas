@@ -31,6 +31,7 @@ from atlas_reviewer.runner import (
     PROBE_TAG,
     START_MARKER,
 )
+from atlas_reviewer.synthesis import MERGE_TARGET_PREFIX
 
 _HANG_LIMIT_S = 10.0
 _FEED_RE = re.compile(r"head -c (\d+) \| \{ ")
@@ -261,6 +262,11 @@ class ScriptedLensModel:
     name: str = "scripted"
     requests: list[TurnRequest] = field(default_factory=list)
     decisions: tuple[Mapping[str, str], ...] = ()
+    merge: Mapping[str, Any] | None = None
+    """The merge/verify call's reply (the plan's step 7), when the test
+    wants one: None answers the merge turn with an empty reply -- every
+    finding stands -- so a script's entries stay aligned with the lens
+    loop's own turns, the way the decision turn is answered."""
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         return self.worst_usd
@@ -276,12 +282,26 @@ class ScriptedLensModel:
                 json.dumps({"decisions": [dict(entry) for entry in self.decisions]}),
                 self.worst_usd,
             )
+        if _is_merge_turn(request.messages):
+            reply = dict(self.merge) if self.merge is not None else {}
+            return FinalReply(json.dumps(reply), self.worst_usd)
         if not self.script:
             raise BoundaryError("the scripted model has no turn left")
         step = self.script.pop(0)
         if isinstance(step, BoundaryError):
             raise step
         return step(request) if callable(step) else step
+
+
+def _is_merge_turn(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the merge/verify call's turn (the
+    plan's step 7): its first message opens with the controller's own
+    merge subject, which no PR-written text can be the first line of."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(MERGE_TARGET_PREFIX)
+    )
 
 
 def _is_decision_turn(messages: tuple[object, ...]) -> bool:

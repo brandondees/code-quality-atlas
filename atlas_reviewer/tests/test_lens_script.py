@@ -26,6 +26,7 @@ from atlas_reviewer.lens_script import (
     load_lens_script,
 )
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.synthesis import MERGE_TARGET_PREFIX
 from atlas_reviewer.tests.helpers import FIXTURE, HEAD
 
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
@@ -96,7 +97,7 @@ def test_an_unknown_top_level_key_is_refused(tmp_path):
     with pytest.raises(
         LensScriptError,
         match=(
-            "keys outside findings, unread, reassessment, carryforward and decisions"
+            "keys outside findings, unread, reassessment, carryforward, decisions and merge"
         ),
     ):
         script(tmp_path, {"findings": {}, "unread": [], "depth": 2})
@@ -287,6 +288,100 @@ def reassess_message():
         + HEAD
         + "\n\nprior findings follow"
     )
+
+
+def test_the_merge_section_loads_and_validates_its_entries(tmp_path):
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {},
+            "unread": [],
+            "merge": {
+                "clusters": [{"ids": ["L1-F1", "L2-F1"], "reason": "one defect"}],
+                "dispositions": [
+                    {
+                        "id": "L3-F1",
+                        "action": "downgrade",
+                        "severity": "nit",
+                        "reason": "cosmetic",
+                    },
+                    {"id": "L4-F1", "action": "drop", "reason": "the quote is wrong"},
+                ],
+            },
+        },
+    )
+    (cluster,) = loaded.merge.clusters
+    assert cluster["ids"] == ["L1-F1", "L2-F1"]
+    downgrade, drop = loaded.merge.dispositions
+    assert downgrade["severity"] == "nit"
+    assert drop["action"] == "drop"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"clusters": [{"ids": ["L1-F1"], "reason": "alone"}]},
+        {"clusters": [{"ids": ["L1-F1", "L9-F9"], "reason": ""}]},
+        {"dispositions": [{"id": "L1-F1", "action": "keep", "reason": "no"}]},
+        {
+            "dispositions": [
+                {
+                    "id": "L1-F1",
+                    "action": "downgrade",
+                    "severity": "huge",
+                    "reason": "r",
+                }
+            ]
+        },
+        {"extra": {}},
+    ],
+    ids=[
+        "lone-cluster",
+        "blank-reason",
+        "unknown-action",
+        "bad-severity",
+        "unknown-key",
+    ],
+)
+def test_a_malformed_merge_entry_is_refused_at_load(tmp_path, raw):
+    with pytest.raises(LensScriptError):
+        script(tmp_path, {"findings": {}, "unread": [], "merge": raw})
+
+
+def test_the_merge_turn_is_answered_from_the_scenario(tmp_path):
+    """The merge/verify turn opens with the controller's merge subject and
+    offers no tools; the scripted reviewer answers it with the scenario's
+    merge reply, not with a tool call -- and an ordinary first turn still
+    starts the coverage walk (the mutant that answers every no-schema
+    turn as a merge fails the second half)."""
+    loaded = script(
+        tmp_path,
+        {
+            "findings": {LENS: []},
+            "unread": [],
+            "merge": {
+                "dispositions": [
+                    {"id": "L1-F1", "action": "drop", "reason": "the quote is wrong"}
+                ]
+            },
+        },
+    )
+    model = LensScriptModel(loaded)
+    reply = model.turn(
+        TurnRequest(
+            "the merge call's system prompt", (UserText(MERGE_TARGET_PREFIX + "x"),), ()
+        )
+    )
+    payload = json.loads(reply.text)
+    assert payload["dispositions"] == [
+        {"id": "L1-F1", "action": "drop", "reason": "the quote is wrong"}
+    ]
+    assert payload["clusters"] == []
+    walk = model.turn(TurnRequest(system(), (base_message(),), ()))
+    # An ordinary first turn is still a lens run: the coverage walk, not
+    # another merge reply.
+    assert isinstance(walk, ToolCalls)
+    assert walk.calls[0].tool == "diff_file"
 
 
 def test_the_reassessment_section_loads_and_validates_its_entries(tmp_path):

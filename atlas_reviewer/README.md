@@ -2726,11 +2726,22 @@ D41 records the 2026-11-12 probe that did.
   - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are
     ranked by severity. Findings from different lenses that name the same
     defect — the same target and the same claim — are one finding whose
-    line names every lens that reported it (issue #822); the merge call
-    (when the review runs one) reconciles what that exact key cannot.
-    The verdict comes from verified, introduced defects
-    only. Unverified findings are listed apart and never counted. Possible
-    committed secrets that the tools read are controller findings.
+    line names every lens that reported it (issue #822), and the
+    per-review merge/verify call reconciles what that exact key cannot
+    (the plan's step 7). The verdict comes from verified, introduced
+    defects only. Unverified findings are listed apart and never counted.
+    Possible committed secrets that the tools read are controller
+    findings.
+  - **Synthesis merge.** A review with findings runs one bounded,
+    tool-less merge/verify call after the lenses (the plan's step 7):
+    the reply's clusters and downgrade/drop proposals are reconciled
+    against the findings the controller holds — a cluster's strongest
+    finding represents it with every lens attribution, and a proposal is
+    an annotation on the finding's line (`Merge: …`), never a deletion
+    and never verdict input. A `## Synthesis merge` section names what
+    the call did; a call the review's limits refused, or a reply that
+    does not reconcile, fails the review closed — REVIEW INCOMPLETE, the
+    findings stand unmerged, and the section names the cause.
   - **Prompt cache.** When the live adapters reported prompt-cache
     sessions (#695, D63), a `## Prompt cache` section follows the model
     calls line: one line per session — a conversation, bounded by its
@@ -2776,6 +2787,7 @@ D41 records the 2026-11-12 probe that did.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); a finding whose severity is unknown is dropped and named with its raw severity, cut to 80 characters (the draft quotes and scrubs it, and the review cannot approve); any other problem refuses the whole reply, and a refusal never echoes model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count, with the ±`quote_tolerance`-line window D64 adds), or the diff's removed lines (`check_quote`) | no |
 | `reassess.py` | the reused settled lens's D73 re-assessment: the evidence-snapshot digest (`snapshot_digest`), the one bounded no-tools call's prompts and reply shape (`reassess_system`, `reassess_turn`, `parse_reassess_reply`, `judge`), and the effective result composed from the settled outcome plus the recorded re-assessments (`effective_outcome`) | no |
+| `synthesis.py` | the per-review merge/verify call (the plan's step 7, issues #822 and #823): one bounded, tool-less call over the deduped findings, the review's context and the prior rounds; the reply's clusters and downgrade/drop dispositions validated (`parse_merge_reply`) and reconciled against the findings the controller holds (`reconcile`) — a cluster's strongest finding represents it with every lens attribution, and a downgrade or drop stays an annotation the verdict is never lowered by; a reply that does not reconcile, and a call the review's limits refuse, fail the review closed (REVIEW INCOMPLETE) with the cause named | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) and the verified-findings merge a settle carries (#691, reused by D64's in-session quote repair) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model; the quote-repair bound and window are D64; the shared diff prefix's share of the input room is D65; D68 adds the per-lens derivation knobs and the ceiling, and the `Derivation` record a derived limit stop reads), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the paged lens system prompt and the shared-prefix builders (`lens_skill`, `shared_system`, `diff_prefix_for`), the spend tracker, one lens attempt (`run_attempt`) with its follow-up turns (D44's contract repair, D58's unread and no-progress nudges, D64's quote repair) | via `Bridge`, `LensModel` |
 | `repo_config.py` | the reviewed repo's merge-base `REVIEW.md` config parse (D81's S1): the D68 ceiling line, the D69 lens-preference lines and the S5 path-ranking lines (`review_path_include:`, `review_path_exclude:`, `review_generated_files:`), read bounded (`MAX_CHECKED_BYTES`, 64 KiB, not parsed cut over the bound) and fail-open with named notes; unknown `review_`-namespaced keys parse as unsupported with a named note that names the key, the condition and the default that stands and never echoes the rejected value; the file name is one constant (`REVIEW_MD`), not a design commitment; the whole-file parse is `read_repo_config`, the per-line reads its windows; the schema also carries the service's two post-window keys (`review_severity_floor:`, `review_post_verbosity:`, S3) parsed by `parse_post_config` from the default-branch text the service fetches at post time, never from the merge-base, and the S7 execution-tool allow-list proposals (`review_test_commands:`) parsed by `parse_run_proposals` from the same default-branch window | no |

@@ -23,6 +23,13 @@ directory, so a new scenario is a new file, not new code:
       "<lens name>": [{"location": "calc.py:4", "revises": "P1", "reason": "...", ...}]
     },
     "withdrawn": {"<lens name>": [{"id": "P1", "reason": "..."}]}
+  },
+  "merge": {
+    "clusters": [{"ids": ["L1-F1", "L2-F1"], "reason": "..."}],
+    "dispositions": [
+      {"id": "L3-F1", "action": "downgrade", "severity": "nit", "reason": "..."},
+      {"id": "L4-F1", "action": "drop", "reason": "..."}
+    ]
   }
 }
 ```
@@ -43,6 +50,14 @@ lens name to the findings it reports then -- an entry's optional
 its reason. Every entry is validated with the real re-assessment parser
 at load. A lens with no entry here confirms every prior finding by
 silence.
+
+`merge` is the scenario's reply to the review's merge/verify call (the
+plan's step 7): `clusters` merges finding ids that are one defect, and
+`dispositions` proposes downgrades (with the severity the evidence
+supports) or drops, each with its reason. The whole section is validated
+with the real merge parser at load; the finding ids resolve at run time
+against the findings the scripted review holds. A section with no entry
+keeps every finding exactly as the controller holds it.
 """
 
 from __future__ import annotations
@@ -54,6 +69,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 from atlas_reviewer.delta import (
     CARRY_TARGET_PREFIX,
@@ -74,6 +90,7 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.reassess import REASSESS_TARGET_PREFIX, parse_reassess_reply
+from atlas_reviewer.synthesis import MERGE_TARGET_PREFIX, parse_merge_reply
 
 COST_PER_TURN = Decimal("0.01")
 
@@ -127,10 +144,24 @@ class DecisionScript:
 
 
 @dataclass(frozen=True)
+class MergeScript:
+    """The scenario's merge/verify reply (the plan's step 7): the
+    clusters of finding ids that are one defect, and the downgrade and
+    drop dispositions with their reasons. The controller-level reply is
+    validated whole at load with the real merge parser; the finding ids
+    resolve at run time, when the turn names the findings the review
+    holds."""
+
+    clusters: tuple[Mapping[str, str], ...] = ()
+    dispositions: tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
 class LensScript:
     """`findings` maps a lens name to the finding objects it reports, in
     reply order. `unread` names changed files no lens ever reads.
-    `reassessment` is the reply a reused lens's D73 re-assessment earns."""
+    `reassessment` is the reply a reused lens's D73 re-assessment earns.
+    `merge` is the reply the review's merge/verify call earns."""
 
     findings: Mapping[str, tuple[Mapping[str, str], ...]]
     unread: frozenset[str]
@@ -139,6 +170,7 @@ class LensScript:
     )
     carryforward: CarryScript = CarryScript()
     decisions: DecisionScript = DecisionScript()
+    merge: MergeScript = MergeScript()
 
     def findings_for(self, lens: str) -> tuple[Mapping[str, str], ...]:
         return self.findings.get(lens, ())
@@ -167,11 +199,12 @@ def load_lens_script(path: Path) -> LensScript:
         "reassessment",
         "carryforward",
         "decisions",
+        "merge",
     }
     if unknown:
         raise LensScriptError(
             f"lens script {path} has keys outside findings, unread, "
-            f"reassessment, carryforward and decisions: "
+            f"reassessment, carryforward, decisions and merge: "
             f"{', '.join(sorted(unknown))}"
         )
     return LensScript(
@@ -180,6 +213,7 @@ def load_lens_script(path: Path) -> LensScript:
         _reassessment(path, raw.get("reassessment", {})),
         _carryforward(path, raw.get("carryforward", {})),
         _decisions(path, raw.get("decisions", [])),
+        _merge(path, raw.get("merge", {})),
     )
 
 
@@ -397,6 +431,42 @@ def _decisions(path: Path, raw: object) -> DecisionScript:
     return DecisionScript(tuple(MappingProxyType(dict(entry)) for entry in raw))
 
 
+def _merge(path: Path, raw: object) -> MergeScript:
+    """The scenario's merge/verify reply (the plan's step 7), validated
+    whole with the real merge parser: an entry that breaks the reply's
+    shape is refused at load, not discovered as a contract refusal
+    mid-run. The finding ids the entries name resolve at run time --
+    against the findings the review being scripted holds -- so the
+    parser is called with a reply whose membership check cannot run:
+    the shape rules are what loads."""
+    if not isinstance(raw, dict):
+        raise LensScriptError(f"lens script {path}: merge must be an object")
+    unknown = set(raw) - {"clusters", "dispositions"}
+    if unknown:
+        raise LensScriptError(
+            f"lens script {path}: merge has keys outside clusters and "
+            f"dispositions: {', '.join(sorted(unknown))}"
+        )
+    clusters = raw.get("clusters", [])
+    dispositions = raw.get("dispositions", [])
+    if not isinstance(clusters, list) or not isinstance(dispositions, list):
+        raise LensScriptError(
+            f"lens script {path}: merge clusters and dispositions must be lists"
+        )
+    try:
+        parse_merge_reply(
+            json.dumps({"clusters": clusters, "dispositions": dispositions})
+        )
+    except ContractError as exc:
+        raise LensScriptError(
+            f"lens script {path}: merge breaks the merge reply's shape: {exc}"
+        ) from exc
+    return MergeScript(
+        tuple(MappingProxyType(dict(entry)) for entry in clusters),
+        tuple(MappingProxyType(dict(entry)) for entry in dispositions),
+    )
+
+
 class LensScriptModel:
     """The scripted reviewer one lens run talks to. Each run gets a fresh
     instance, so a continuation starts with its own coverage state and
@@ -445,6 +515,15 @@ class LensScriptModel:
             # markers: the carry-forward system prompt carries no lens
             # body, because the assessor is the controller's own.
             return self._carry_final()
+        if _is_merge(request.messages):
+            # The review's merge/verify turn (the plan's step 7): the
+            # controller offers no tools and asks for one reply, which
+            # the scenario's `merge` section holds (an empty section
+            # keeps every finding as the controller holds it). Checked
+            # before the body markers: the merge system prompt carries
+            # no lens body, because the coordinator is the controller's
+            # own.
+            return self._merge_final()
         lens, digest = _markers(request.system)
         if _is_reassessment(request.messages):
             # D73's re-assessment turn: the reuse path offers no tools and
@@ -521,6 +600,16 @@ class LensScriptModel:
                 dict(finding) for finding in self._script.carryforward.findings
             ],
             "withdrawn": [dict(entry) for entry in self._script.carryforward.withdrawn],
+        }
+        return FinalReply(json.dumps(payload), self._cost)
+
+    def _merge_final(self) -> FinalReply:
+        """The scenario's merge/verify reply (the plan's step 7): the
+        clusters it merges and the downgrade and drop dispositions it
+        proposes, verbatim."""
+        payload = {
+            "clusters": [dict(entry) for entry in self._script.merge.clusters],
+            "dispositions": [dict(entry) for entry in self._script.merge.dispositions],
         }
         return FinalReply(json.dumps(payload), self._cost)
 
@@ -605,6 +694,20 @@ def _is_reassessment(messages: tuple[object, ...]) -> bool:
         messages
         and isinstance(messages[0], UserText)
         and messages[0].text.startswith(REASSESS_TARGET_PREFIX)
+    )
+
+
+def _is_merge(messages: tuple[object, ...]) -> bool:
+    """Whether the turn to answer is the merge/verify call's turn (the
+    plan's step 7): its first message opens with the controller's own
+    merge subject, which no PR-written text can be the first line of.
+    Checked with the decision and carry-forward turns, before the body
+    markers: the merge system prompt carries no lens body, because the
+    coordinator is the controller's own."""
+    return bool(
+        messages
+        and isinstance(messages[0], UserText)
+        and messages[0].text.startswith(MERGE_TARGET_PREFIX)
     )
 
 
