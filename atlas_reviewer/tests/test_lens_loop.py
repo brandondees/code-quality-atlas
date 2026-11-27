@@ -3771,6 +3771,7 @@ def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
     # the same state.
     assert run_tests.status == Status.TIMED_OUT.name
 
+
 def test_the_sweeps_wait_is_recomputed_after_the_grounding_pass():
     """The grounding pass can spend minutes of the review's wall; the
     sweep's bounded wait is the wall the review has left after the pass
