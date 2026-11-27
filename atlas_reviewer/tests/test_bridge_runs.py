@@ -66,6 +66,7 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     choose_pytest,
     collection_script,
+    guarded_env_exports,
     parse_collection,
     parse_history,
     stage_copy_steps,
@@ -3323,14 +3324,19 @@ def test_probe_content_with_an_unpaired_surrogate_is_a_rejected_call(tmp_path):
     UnicodeEncodeError out of the validator, past the tool boundary's
     RejectedError handler -- a crashed call instead of the rejected one
     the model can re-issue from. The same hole sat in every validator
-    that measured UTF-8 length (paths, patterns, commands, bash), so the
-    fix is one helper all of them share."""
+    that measured UTF-8 length (paths, patterns, commands, the probe's
+    content), so the fix is one helper all of them share -- and the
+    post-merge check of #849 found the bash command's validator had been
+    left on the bare encode: it is driven here through its real entry
+    point, with the unpaired surrogate in the model-written command."""
     surrogate = '"' + chr(0xD800) + '"'
     for tool, args in (
-        # The probe's content and a read's path: two validators on this
-        # layer whose UTF-8 length check used to raise past the boundary.
+        # The probe's content, a read's path, and the bash command: three
+        # validators whose UTF-8 length check used to raise past the
+        # boundary.
         ("run_probe", {"content": surrogate}),
         ("read_file", {"path": surrogate}),
+        ("bash", {"command": surrogate}),
     ):
         refused = one(tmp_path, tool, args)
         assert refused.status is Status.REJECTED, tool
@@ -4023,6 +4029,15 @@ def test_every_guarded_script_declares_the_copy_a_safe_directory():
             "h" * 40,
             TrustedPython(SYSTEM_PYTHON, "3.12.3"),
         ),
+        "sweep": sweep_script(
+            staged,
+            SweepGroup(
+                "calc.py",
+                ("test_calc.py",),
+                (SweepSpec("calc.py", 2, "negate-condition"),),
+            ),
+            ToolLimits(16 * 1024, 60),
+        ),
     }
     for name, script in scripts.items():
         assert "GIT_CONFIG_VALUE_0=" in script, name
@@ -4031,3 +4046,20 @@ def test_every_guarded_script_declares_the_copy_a_safe_directory():
     for name, script in scripts.items():
         assert 'GIT_CONFIG_VALUE_0="*"' not in script, name
         assert "GIT_CONFIG_VALUE_0=*" not in script, name
+
+
+def test_guarded_env_exports_quotes_its_own_path():
+    """The helper takes the raw scratch path and quotes it itself: a
+    caller cannot hand it a pre-quoted word and double-quote the value
+    into the environment (the contract the callers were silently
+    depending on when they passed `shlex.quote`d strings)."""
+    assert guarded_env_exports("/tmp/bridge/scratch/work") == (
+        "export GIT_CONFIG_COUNT=1 "
+        "GIT_CONFIG_KEY_0=safe.directory "
+        "GIT_CONFIG_VALUE_0=/tmp/bridge/scratch/work; "
+    )
+    assert guarded_env_exports("/tmp/a b/work") == (
+        "export GIT_CONFIG_COUNT=1 "
+        "GIT_CONFIG_KEY_0=safe.directory "
+        "GIT_CONFIG_VALUE_0='/tmp/a b/work'; "
+    )

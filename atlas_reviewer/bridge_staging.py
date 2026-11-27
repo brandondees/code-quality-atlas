@@ -385,11 +385,13 @@ def guarded_env_exports(scratch: str) -> str:
     fail there. The copy is declared a safe directory via the
     environment: protected config, honored in the subshell where it is
     set, and unreachable from repo-local config. Scoped to the copy's
-    own path, never `*`; the path is the caller's quoted word."""
+    own path, never `*`. `scratch` is the raw path; the quoting is this
+    helper's own contract, so no caller can hand it a pre-quoted word
+    and double-quote the value."""
     return (
         "export GIT_CONFIG_COUNT=1 "
         "GIT_CONFIG_KEY_0=safe.directory "
-        f"GIT_CONFIG_VALUE_0={scratch}; "
+        f"GIT_CONFIG_VALUE_0={shlex.quote(scratch)}; "
     )
 
 
@@ -524,7 +526,7 @@ def collection_script(
     quoted_scratch = shlex.quote(scratch)
     collect = (
         f"( cd {quoted_scratch}; ulimit -f 16384; "
-        f"{guarded_env_exports(quoted_scratch)}"
+        f"{guarded_env_exports(scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {COLLECTION_BOUND_S} "
         f"{as_nobody(python, python.quoted + ' -I -B -m pytest --co -q')} "
