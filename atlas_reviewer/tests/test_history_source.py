@@ -6,7 +6,14 @@ them into the runner."""
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from atlas_reviewer.history_source import (
+    FETCH_FAILED,
+    FETCH_TIMED_OUT,
+    HEAD_MOVED,
+    OVER_CAP,
+    TIMED_OUT,
     HistoryBundle,
     bundle_from_repository,
     fixture_history,
@@ -137,10 +144,13 @@ def test_a_head_that_does_not_match_the_provenance_acquires_nothing(tmp_path):
     subprocess.run(
         ["git", "push", "-q", str(origin), branch], cwd=tmp_path / "work", check=True
     )
+    reasons = []
     bundle = bundle_from_repository(
-        str(origin), f"refs/heads/{branch}", head, base, tmp_path / "work"
-    )
+        str(origin), f"refs/heads/{branch}", head, base, tmp_path / "work",
+        note=reasons.append,
+    )  # fmt: skip
     assert bundle is None
+    assert reasons == [HEAD_MOVED]
 
 
 def test_an_over_cap_bundle_acquires_nothing(tmp_path):
@@ -153,21 +163,140 @@ def test_an_over_cap_bundle_acquires_nothing(tmp_path):
         ["git", "clone", "-q", "--bare", str(tmp_path / "work"), str(origin)],
         check=True,
     )
+    reasons = []
     bundle = bundle_from_repository(
-        str(origin), "refs/heads/main", head, base, tmp_path / "work", cap=1
-    )
+        str(origin), "refs/heads/main", head, base, tmp_path / "work", cap=1,
+        note=reasons.append,
+    )  # fmt: skip
     assert bundle is None
+    assert reasons == [OVER_CAP]
 
 
 def test_a_failed_fetch_acquires_nothing(tmp_path):
     origin = tmp_path / "missing.git"
     _base, head, _branch = _repo_with_history(tmp_path / "work")
+    reasons = []
     assert (
         bundle_from_repository(
-            str(origin), "refs/heads/main", head, head, tmp_path / "work"
+            str(origin),
+            "refs/heads/main",
+            head,
+            head,
+            tmp_path / "work",
+            note=reasons.append,
         )
         is None
     )
+    assert reasons == [FETCH_FAILED]
+
+
+def test_the_token_rides_the_environment_and_never_the_command_line(tmp_path):
+    """The fetch's credential is process-environment config
+    (GIT_CONFIG_COUNT extra-header plumbing): no git call's argv carries
+    the token, and the authenticated fetch still succeeds against a real
+    local origin -- the plumbing works, not just the redaction (round 1
+    of #860, security)."""
+    origin = tmp_path / "origin.git"
+    base, head, _branch = _repo_with_history(tmp_path / "work")
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(tmp_path / "work"), str(origin)],
+        check=True,
+    )
+    seen: list[tuple[tuple[str, ...], dict | None]] = []
+    real_run = subprocess.run
+
+    def run(argv, **kw):
+        seen.append((tuple(argv), kw.get("env")))
+        return real_run(argv, **kw)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(subprocess, "run", run)
+    try:
+        bundle = bundle_from_repository(
+            str(origin),
+            "refs/heads/main",
+            head,
+            base,
+            tmp_path / "work",
+            token="secret-installation-token",
+        )
+    finally:
+        monkey.undo()
+    assert bundle is not None
+    for argv, env in seen:
+        assert "secret-installation-token" not in " ".join(argv)
+    fetch = next(env for argv, env in seen if "fetch" in argv)
+    assert fetch["GIT_CONFIG_COUNT"] == "1"
+    assert fetch["GIT_CONFIG_KEY_0"] == "http.extraHeader"
+    assert fetch["GIT_CONFIG_VALUE_0"] == (
+        "Authorization: token secret-installation-token"
+    )
+
+
+def test_a_timed_out_fetch_acquires_nothing(tmp_path, monkeypatch):
+    """Every git call is bounded: a fetch that runs past its bound is
+    killed and acquires nothing, with the coarse reason noted -- a
+    stalled network costs the review a bounded wait, never an indefinite
+    one (round 1 of #860, resilience)."""
+    import atlas_reviewer.history_source as hs
+
+    _base, head, _branch = _repo_with_history(tmp_path / "work")
+    real_run = subprocess.run
+
+    def run(argv, **kw):
+        if "fetch" in argv:
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=1.0)
+        return real_run(argv, **kw)
+
+    monkeypatch.setattr(hs.subprocess, "run", run)
+    reasons = []
+    assert (
+        bundle_from_repository(
+            str(tmp_path / "missing.git"),
+            "refs/heads/main",
+            head,
+            head,
+            tmp_path / "work",
+            note=reasons.append,
+        )
+        is None
+    )
+    assert reasons == [FETCH_TIMED_OUT]
+
+
+def test_a_timed_out_local_git_call_acquires_nothing(tmp_path, monkeypatch):
+    """The local calls -- the bundle build among them -- are bounded the
+    same way: a wedged git that never finishes is killed and acquires
+    nothing, noted."""
+    import atlas_reviewer.history_source as hs
+
+    origin = tmp_path / "origin.git"
+    base, head, _branch = _repo_with_history(tmp_path / "work")
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(tmp_path / "work"), str(origin)],
+        check=True,
+    )
+    real_run = subprocess.run
+
+    def run(argv, **kw):
+        if "bundle" in argv:
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=1.0)
+        return real_run(argv, **kw)
+
+    monkeypatch.setattr(hs.subprocess, "run", run)
+    reasons = []
+    assert (
+        bundle_from_repository(
+            str(origin),
+            "refs/heads/main",
+            head,
+            base,
+            tmp_path / "work",
+            note=reasons.append,
+        )
+        is None
+    )
+    assert reasons == [TIMED_OUT]
 
 
 def test_the_fixture_loader_reads_the_bundle_and_its_base(tmp_path):

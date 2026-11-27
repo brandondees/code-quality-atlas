@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import TextIO, cast
 
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
 from atlas_reviewer.approval import CommandProposal
@@ -122,6 +122,7 @@ from atlas_reviewer.github_auth import (
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.history_source import (
+    HISTORY_PHASE,
     HistoryBundle,
     bundle_from_repository,
     fixture_history,
@@ -228,7 +229,7 @@ from atlas_reviewer.runner import (
 )
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
-from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.telemetry import ERROR, JsonlSink, Telemetry
 from atlas_reviewer.tenant_provider import (
     ENV_TENANT_BASE_URL,
     ENV_TENANT_MODEL,
@@ -992,7 +993,8 @@ def _history_wiring(
     args: argparse.Namespace,
     env: Mapping[str, str],
     trees: SourceTrees,
-    claims: Any,
+    claims: ExitStack,
+    note: Callable[[str], None],
 ) -> tuple[
     HistoryBundle | None,
     Callable[[PrEvent], HistoryBundle | None] | None,
@@ -1003,7 +1005,10 @@ def _history_wiring(
     review's provenance, or an over-cap bundle acquires nothing, and the
     history tools report the named gap -- never a failed review. The
     tools' range is based on the merge-base the trees' provenance
-    carries."""
+    carries. Every failure path notes one coarse reason through `note`
+    (module constants, never error text: round 1 of #860 -- a permanently
+    broken acquisition, a bad credential or an auth scheme the remote
+    rejects, must be distinguishable from an ordinary no-history run)."""
     if getattr(args, "dry_run", False):
         fixture_dir = Path(args.fixtures) if args.fixtures else Path(args.event).parent
         return fixture_history(fixture_dir), None
@@ -1018,7 +1023,8 @@ def _history_wiring(
         # acquires nothing, and the history tools report the named gap.
         # The broad catch is that contract, not a swallowed error: the
         # runner's staging treats absent history exactly as it did
-        # before the wiring existed.
+        # before the wiring existed, and the coarse reason lands in the
+        # run's events file through `note`.
         try:
             return bundle_from_repository(
                 f"https://github.com/{event.repo}.git",
@@ -1027,11 +1033,25 @@ def _history_wiring(
                 trees.base_sha,
                 workdir,
                 token=_review_tokens(env, event, False, transport).token(),
+                note=note,
             )
         except Exception:  # noqa: BLE001 -- the acquisition's contract (see above)
+            note("acquisition_failed")
             return None
 
     return None, source
+
+
+def _history_note(telemetry: Telemetry) -> Callable[[str], None]:
+    """The sink for the coarse reasons a failed acquisition leaves behind
+    (round 1 of #860): a phase of its own, never the service's progress
+    records, which the keep-or-cancel reader parses as cumulative lens
+    state. The reason is a module constant, never error text."""
+
+    def note(reason: str) -> None:
+        telemetry.record(HISTORY_PHASE, "acquisition", {"reason": reason}, status=ERROR)
+
+    return note
 
 
 def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
@@ -1130,7 +1150,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         # bundle comes from the fixture; a live review's from one
         # controller-side fetch of the PR head, with the tools' range
         # based on the merge-base the trees' provenance carries.
-        history, history_source = _history_wiring(args, env, trees, claims)
+        history, history_source = _history_wiring(
+            args, env, trees, claims, _history_note(telemetry)
+        )
         diff, delta = _delta_input(event, github, diff)
         # S1: the merge-base REVIEW.md is parsed once, against the closed
         # schema -- the ceiling, the lens preference, the path ranking,

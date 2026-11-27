@@ -5874,3 +5874,24 @@ def test_review_lenses_acquires_the_history_once_for_the_whole_review(
         bridge_root=str(tmp_path / "bridge"), history_source=source,
     )  # fmt: skip
     assert len(calls) == 1
+
+
+def test_a_directly_passed_bundle_reaches_the_runner_without_a_source(tmp_path):
+    """The eval path hands the fixture's own bundle straight to
+    `review_lenses` with no source configured; the parameter must not be
+    clobbered with None (round 1 of #860, correctness -- the first cut's
+    assignment did exactly that, and the eval run silently staged no
+    history)."""
+    bundle = HistoryBundle(bundle=b"bundle-bytes", base_sha="a" * 40)
+    sprites = _staged_sprites()
+    review_lenses(
+        EVENT, (LENS,), DIFF, trees(),
+        library=StubLibrary({LENS: BODY}),
+        model=ScriptedLensModel([READ_DIFF, final()]),
+        limits=LIMITS, ledger=ledger(tmp_path), sprites=sprites,
+        runner_ledger=MemoryLedger(), redactor=Redactor(), clock=FakeClock(),
+        bridge_root=str(tmp_path / "bridge"), history=bundle,
+    )  # fmt: skip
+    assert [c for c in sprites.calls if len(c) > 2 and "history.bundle.part" in c[2]], (
+        "the directly passed bundle never reached the runner"
+    )

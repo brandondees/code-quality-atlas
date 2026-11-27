@@ -1000,8 +1000,13 @@ def review_lenses(
     # runner gets the same bundle. A source that acquires nothing -- a
     # failed fetch, a bundle over the runner's cap, or none configured --
     # is the named no-history gap on the history tools, exactly as
-    # before the wiring existed.
-    history = history_source(event) if history_source is not None else None
+    # before the wiring existed. A bundle passed in directly (the eval
+    # path) is left alone: the source, when there is one, replaces it
+    # only by acquiring (round 1 of #860: the assignment used to clobber
+    # the parameter with None whenever no source was configured, which
+    # silently dropped the fixture's bundle on the eval path).
+    if history_source is not None:
+        history = history_source(event)
     return _traced_review(
         event,
         trace,
