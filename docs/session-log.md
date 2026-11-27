@@ -6409,8 +6409,9 @@ on them — with the schedule special case folded into the
 `python`-family outputs rather than repeated as
 `github.event_name == 'schedule' ||` on every step — then `lint` (the
 audit/lint/type-check/structure gates and the non-Python linters, keeping
-their per-step `if:` gates since their input sets stay genuinely disjoint,
-#339), `tests` (tooling + atlas_settings, the two fast coverage runs),
+their per-step `if:` gates since their input sets stay genuinely
+disjoint, per #339), `tests` (tooling + atlas_settings, the two fast
+coverage runs),
 `reviewer-tests` (the slow ~4,600-test suite), `liveness-shards` +
 `liveness` (a matrix with one shard per mutant spec, selected by a
 `LIVENESS_SHARD=i/n` env var the test module reads at collection), and a
