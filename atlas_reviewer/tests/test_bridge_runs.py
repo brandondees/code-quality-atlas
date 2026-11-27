@@ -3255,6 +3255,54 @@ def test_the_sweep_reports_what_no_test_imports(tmp_path):
     assert all("no test file imports this module" in v.note for v in verdicts)
 
 
+def test_the_sweep_without_a_staged_pytest_is_inconclusive_by_name(tmp_path):
+    """A runner whose staging resolved no pytest-capable interpreter (and
+    no no-root guard) cannot start the sweep's scoped runs: every spec
+    comes back inconclusive with the named environment gap -- the same
+    verdict a `run_tests` or `mutate` call on that runner reports --
+    instead of the AssertionError the exec used to die on (revert-check:
+    the unguarded script build crashes the bridge here)."""
+    source = SourceTrees(
+        source_tarball({**SUITE, "clamp.py": SWEEP_MODULE}),
+        source_tarball({**SUITE, "clamp.py": SWEEP_MODULE}),
+        OLD,
+        HEAD,
+    )
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: "atlas-git:/usr/bin/git\ngit version 2.43.0\n",
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.append(
+            bridge.sweep(bridge.sweep_plan(CALC_SWEEP_DIFF), clock=FakeClock())
+        )
+        results.append(bridge.call("run_tests", {}))
+        return "done"
+
+    report, *_ = bridge_run(tmp_path, body, source=source, sprites=sprites)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    verdicts, run_tests = results
+    assert verdicts
+    assert all(v.outcome == "inconclusive" for v in verdicts)
+    assert all(
+        "no pytest-capable interpreter was staged for the runner" in v.note
+        for v in verdicts
+    )
+    assert run_tests.status is Status.UNAVAILABLE
+
+
 def _sweep_sprites(answer):
     return FakeSprites(
         rules=(

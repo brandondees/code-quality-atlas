@@ -2330,6 +2330,24 @@ class Bridge:
         cached = self._sweep_cache.get(key)
         if cached is not None:
             return cached
+        if self.staged.pytest is None or self.staged.shim_python is None:
+            # No pytest-capable interpreter (and no no-root guard) was
+            # staged for this runner: the sweep's scoped runs cannot
+            # start, so every spec is inconclusive with the named
+            # environment gap -- the same verdict a `run_tests` or
+            # `mutate` call on this runner reports -- never the
+            # AssertionError the exec would otherwise die on.
+            return tuple(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    note=(
+                        "no pytest-capable interpreter was staged for the "
+                        "runner, so the sweep could not run it"
+                    ),
+                )
+                for spec in specs
+            )
         contents = self._contents.get(Rev.HEAD, {})
         groups = sweep_groups(specs, contents)
         grouped: set[SweepSpec] = {spec for group in groups for spec in group.specs}
