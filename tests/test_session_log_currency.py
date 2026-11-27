@@ -207,9 +207,12 @@ def test_ci_yml_wires_the_pr_diff_gate_env_vars():
     than erroring loudly.
     """
     ci = _load_ci_yml()
-    steps = ci["jobs"]["gate"]["steps"]
+    # The filters live in the shared `changes` job since the gate split;
+    # the `tests` step lives in the `tests` job.
     filter_step = next(
-        s for s in steps if s.get("uses", "").startswith("dorny/paths-filter@")
+        s
+        for s in ci["jobs"]["changes"]["steps"]
+        if s.get("uses", "").startswith("dorny/paths-filter@")
     )
     filters = yaml.safe_load(filter_step["with"]["filters"])
     assert "session_log_substantive" in filters, (
@@ -218,17 +221,19 @@ def test_ci_yml_wires_the_pr_diff_gate_env_vars():
         "CI_FILTER_SESSION_LOG_SUBSTANTIVE"
     )
 
-    tests_step = next(s for s in steps if s.get("name") == "tests")
+    tests_step = next(
+        s for s in ci["jobs"]["tests"]["steps"] if s.get("name") == "tests"
+    )
     env = tests_step.get("env", {})
     assert env.get("CI_EVENT_NAME") == "${{ github.event_name }}", (
         "ci.yml's `tests` step must export CI_EVENT_NAME from github.event_name"
     )
     assert (
         env.get("CI_FILTER_SESSION_LOG_SUBSTANTIVE")
-        == "${{ steps.filter.outputs.session_log_substantive }}"
+        == "${{ needs.changes.outputs.session_log_substantive }}"
     ), (
         "ci.yml's `tests` step must export CI_FILTER_SESSION_LOG_SUBSTANTIVE "
-        "from steps.filter.outputs.session_log_substantive -- a renamed "
+        "from the `changes` job's session_log_substantive output -- a renamed "
         "filter key here must be updated in lockstep"
     )
 
@@ -256,9 +261,10 @@ def test_session_log_substantive_filter_tracks_python_filter():
     hand-maintained lists to stay in sync.
     """
     ci = _load_ci_yml()
-    steps = ci["jobs"]["gate"]["steps"]
     filter_step = next(
-        s for s in steps if s.get("uses", "").startswith("dorny/paths-filter@")
+        s
+        for s in ci["jobs"]["changes"]["steps"]
+        if s.get("uses", "").startswith("dorny/paths-filter@")
     )
     filters = yaml.safe_load(filter_step["with"]["filters"])
     expected = [

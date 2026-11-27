@@ -1,20 +1,25 @@
 name: ci
 
-# No `paths:` filter here (#339): a path-filtered `on:` trigger means the
-# workflow never RUNS at all for a push/PR that touches none of the listed
-# paths, which leaves any branch-protection-required check on this workflow
-# stuck permanently pending instead of reporting a conclusion. Gate individual
-# steps below instead (via one dorny/paths-filter step + per-step `if:`), so
-# the workflow always reports a real conclusion -- success or a fast
-# `skipped` step (which branch protection treats as passing) -- never
-# silence. This job's steps have genuinely disjoint input sets (Python code
-# vs. requirements.in/.txt vs. shell scripts vs. Markdown), so per-step
-# gating is used rather than an all-or-nothing job-level gate (the
-# `changes`-job pattern used on another repo in this org): a single
-# job-level gate can't let e.g. markdownlint run on a docs-only change while
-# skipping the Python pipeline, without also either pulling every Markdown
-# change into the expensive path or dropping Markdown lint coverage
-# entirely -- see #339 for the fuller reasoning.
+# No `paths:` filter on the triggers (#339): a path-filtered `on:` trigger
+# means the workflow never RUNS at all for a push/PR that touches none of the
+# listed paths, which leaves any branch-protection-required check on this
+# workflow stuck permanently pending instead of reporting a conclusion --
+# success or a fast `skipped` step (which branch protection treats as
+# passing) -- never silence. The shape this comment used to describe was one
+# `gate` job with per-step gating; the job's median wall clock was ~23
+# minutes (Nov 26, 12 latest successful runs), dominated by the parity-key
+# liveness anchor suites, so it is split now: one `changes` job computes the
+# path filters once, each downstream job gates itself on those outputs, and
+# a final aggregator still named `gate` fails if any of them failed or was
+# cancelled while a skipped one counts as passing -- which is #339's
+# skipped-steps-pass property carried up to job granularity. Inside `lint`
+# the steps keep their per-step `if:` gates on top of the job gate, because
+# that job's steps still have genuinely disjoint input sets (Python code vs.
+# requirements.in/.txt vs. shell scripts vs. Markdown): a single job-level
+# gate can't let e.g. markdownlint run on a docs-only change while skipping
+# the Python pipeline, without also either pulling every Markdown change
+# into the expensive path or dropping Markdown lint coverage entirely -- see
+# #339 for the fuller reasoning.
 on:
   pull_request:
   push:
@@ -61,83 +66,90 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    # Every event now runs on a GitHub-hosted runner (D78). #471's concern --
-    # arbitrary fork code executing on this repo's persistent, personally-
-    # owned self-hosted hardware, which no in-tree gate could structurally
-    # prevent -- dissolves with the hardware: there is no persistent fleet
-    # left to expose, and `push`/`schedule` lose their "safe because they
-    # can't be forged by a PR branch" rationale for staying behind.
+  # Every job below runs on a GitHub-hosted runner (D78). #471's concern --
+  # arbitrary fork code executing on this repo's persistent, personally-
+  # owned self-hosted hardware, which no in-tree gate could structurally
+  # prevent -- dissolves with the hardware: there is no persistent fleet
+  # left to expose, and `push`/`schedule` lose their "safe because they
+  # can't be forged by a PR branch" rationale for staying behind.
+  #
+  # What #471's corrected analysis established still holds, unchanged:
+  # for plain `pull_request`, GitHub evaluates this workflow file as it
+  # exists in the PR's own head (confirmed against GitHub's own
+  # "Approving workflow runs from forks" guidance, which would be
+  # meaningless if such changes never took effect), so a hostile PR
+  # editing THIS `runs-on:` back to a persistent-runner label gets that
+  # edit evaluated for its own run -- an editable in-tree condition can
+  # never structurally stop the PR that is editing it. Real protection
+  # against that needs a mechanism GitHub enforces independently of this
+  # file's content (the Settings value "Require approval for all outside
+  # collaborators", or a required-reviewers Environment) -- still tracked
+  # in #471, still unverifiable from a checkout, and not changed by this
+  # file.
+  #
+  # `ubuntu-latest` is left floating rather than pinned to a dated image:
+  # every tool these jobs gate on is version-pinned independently of the
+  # runner OS (the hash-pinned requirements.txt, exact-version pip-tools/
+  # pip-audit/pip-licenses, and the checksum-verified upstream shellcheck
+  # and actionlint tarballs below -- the apt-pin breakage those two
+  # replaced was itself caused by coupling to a runner OS archive), so an
+  # image refresh changes the VM, not what the gates enforce.
+  #
+  # Nothing below is arch-specific either way: the only steps that fetch a
+  # prebuilt binary are `shellcheck` and `actionlint` in the `lint` job,
+  # which already select their asset and checksum from `uname -m` and error
+  # loudly on an unrecognized arch rather than downloading the wrong one.
+  # Everything else is Python, actions/setup-python (which publishes both
+  # arches), or pure-Node actions.
+
+  changes:
+    # One shared paths-filter job: every downstream job gates itself on
+    # these outputs instead of each re-detecting (and re-paying) the same
+    # diff.
     #
-    # What #471's corrected analysis established still holds, unchanged:
-    # for plain `pull_request`, GitHub evaluates this workflow file as it
-    # exists in the PR's own head (confirmed against GitHub's own
-    # "Approving workflow runs from forks" guidance, which would be
-    # meaningless if such changes never took effect), so a hostile PR
-    # editing THIS `runs-on:` back to a persistent-runner label gets that
-    # edit evaluated for its own run -- an editable in-tree condition can
-    # never structurally stop the PR that is editing it. Real protection
-    # against that needs a mechanism GitHub enforces independently of this
-    # file's content (the Settings value "Require approval for all outside
-    # collaborators", or a required-reviewers Environment) -- still tracked
-    # in #471, still unverifiable from a checkout, and not changed by this
-    # file.
+    # The schedule special case is folded into the `python`-family outputs
+    # rather than repeated as `github.event_name == 'schedule' ||` on every
+    # downstream step: on a `schedule` event dorny/paths-filter has no
+    # `before` SHA to diff against and falls back to the single last
+    # commit, so if that commit happens to touch neither `python` nor
+    # `requirements`, the Python pipeline -- including
+    # tests/test_session_log_currency.py -- would silently skip on that
+    # week's scheduled run, defeating the point of a periodic, diff-
+    # independent currency check (CodeRabbit finding on PR #522). Forcing
+    # those three outputs true on a schedule keeps every schedule-eligible
+    # step running; the `shell`/`markdown`/`workflows` outputs stay
+    # filter-faithful because markdownlint, shellcheck and actionlint never
+    # had a schedule override in the single-job shape either.
     #
-    # `ubuntu-latest` is left floating rather than pinned to a dated image:
-    # every tool this job gates on is version-pinned independently of the
-    # runner OS (the hash-pinned requirements.txt, exact-version pip-tools/
-    # pip-audit/pip-licenses, and the checksum-verified upstream shellcheck
-    # and actionlint tarballs below -- the apt-pin breakage those two
-    # replaced was itself caused by coupling to a runner OS archive), so an
-    # image refresh changes the VM, not what the gates enforce.
-    #
-    # Nothing in this job is arch-specific either way: the only steps that
-    # fetch a prebuilt binary are `shellcheck` and `actionlint` below, which
-    # already select their asset and checksum from `uname -m` and error
-    # loudly on an unrecognized arch rather than downloading the wrong one.
-    # Everything else is Python, actions/setup-python (which publishes both
-    # arches), or pure-Node actions.
-    runs-on: ubuntu-latest
-    # 15 minutes bounded this job until the parity-key liveness step
-    # landed. That step runs five anchor-suite passes -- three liveness
-    # mutants plus the two cached baselines, each pass the anchor
-    # commit's whole suite -- and two consecutive runs were cancelled at
-    # exactly 15m20s with the liveness step still inside its first suite.
-    # One pass measured 1m52s locally (2,999 tests at the round-5
-    # anchor); the hosted runner runs this repo's suites about twice as
-    # slow as this machine (the reviewer-service step: 10m21s there,
-    # ~6.5 minutes here), so five passes land around 15-25 minutes on
-    # top of the ~13 minutes the steps before it take. 90 bounds the job
-    # with headroom for runner variance without letting a hung run eat
-    # hours; the liveness test's own per-suite subprocess bound (20
-    # minutes) still fails a hanging suite rather than the job clock.
-    timeout-minutes: 90
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
     # but the permission must be granted unconditionally at the job level
     # since job-level `permissions:` replaces rather than merges with the
     # workflow-level default above.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
+    outputs:
+      python: ${{ github.event_name == 'schedule' || steps.filter.outputs.python == 'true' }}
+      requirements: ${{ github.event_name == 'schedule' || steps.filter.outputs.requirements == 'true' }}
+      session_log_substantive: ${{ github.event_name == 'schedule' || steps.filter.outputs.session_log_substantive == 'true' }}
+      shell: ${{ steps.filter.outputs.shell == 'true' }}
+      markdown: ${{ steps.filter.outputs.markdown == 'true' }}
+      workflows: ${{ steps.filter.outputs.workflows == 'true' }}
     steps:
-      # persist-credentials: false -- this job never pushes anything (read-
-      # only lint/test/audit), so there's no reason for the checked-out
-      # working tree to retain the job's GITHUB_TOKEN in its git config for
-      # the rest of the job. Narrows what a compromised dependency pulled in
-      # by the steps below (pip installs, markdownlint-cli2-action) could
-      # exfiltrate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
           persist-credentials: false
-      # Four independent outputs, matched to this job's genuinely disjoint
-      # step input sets (see the `on:` comment above for why this is
-      # per-step rather than one job-level gate). `python`/`requirements`
+      # Four independent outputs, matched to the genuinely disjoint input
+      # sets downstream (see the workflow header for why skipped jobs and
+      # steps report success rather than silence). `python`/`requirements`
       # jointly gate the whole pip-install-through-generated-tree-check
-      # sequence below (cheap enough, and interdependent enough via the
-      # shared Python env, that splitting them further isn't worth the
-      # complexity); `shell` and `markdown` each gate their own single step
+      # sequence (cheap enough, and interdependent enough via the shared
+      # Python env, that splitting them further isn't worth the complexity);
+      # `shell` and `markdown` each gate their own single step
       # independently, since shellcheck and markdownlint need no Python
       # setup at all.
       #
@@ -308,8 +320,47 @@ jobs:
             # actionlint step below.
             workflows:
               - ".github/**"
+
+  lint:
+    # Everything the old single `gate` job ran except the suites: the
+    # dependency audit, lint/format/type check, the offline dry run, the
+    # structure gates (eval, drift, generated trees, license, requirements
+    # sync), and the non-Python linters.
+    #
+    # The job-level gate has to cover EVERY trigger class any step inside
+    # uses -- `python`/`requirements` for the Python pipeline, and
+    # `markdown`/`shell`/`workflows` for markdownlint/shellcheck/actionlint,
+    # which are this job alone's responsibility and have no other home: a
+    # narrower job gate would skip the whole job on a markdown-only or
+    # workflows-only PR, silently dropping that linter from its only
+    # remaining trigger (tests/test_ci_job_gates_cover_step_gates.py pins
+    # the reachability). The expensive steps keep their per-step `if:` gates
+    # because their input sets are genuinely disjoint (see the workflow
+    # header) -- a Markdown-only change still gets markdownlint here while
+    # the Python-prefixed steps (setup-python, pip install, everything
+    # downstream of it) skip.
+    needs: changes
+    if: >-
+      needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.requirements == 'true' ||
+      needs.changes.outputs.markdown == 'true' ||
+      needs.changes.outputs.shell == 'true' ||
+      needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # persist-credentials: false -- this job never pushes anything (read-
+      # only lint/test/audit), so there's no reason for the checked-out
+      # working tree to retain the job's GITHUB_TOKEN in its git config for
+      # the rest of the job. Narrows what a compromised dependency pulled in
+      # by the steps below (pip installs, markdownlint-cli2-action) could
+      # exfiltrate.
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         with:
           python-version: "3.12"
           # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
@@ -337,24 +388,29 @@ jobs:
       # setup-python already puts this exact interpreter's pip/python on
       # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
       # tooling.cli included).
-      - if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+      - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: pip install --require-hashes --ignore-installed -r requirements.txt
       - name: dependency vulnerability audit
         # Also runs on the weekly `schedule` trigger above (#379), independent
         # of the path filter, so a CVE against an unchanged pin doesn't wait
-        # for the next python/requirements-touching push to be caught.
+        # for the next python/requirements-touching push to be caught. (The
+        # schedule forcing lives in the `changes` job's outputs -- see that
+        # job's comment; on a scheduled run those outputs are true, so this
+        # step runs.)
         #
         # Placed immediately after the hash-verified dependency install --
-        # the only thing it needs -- and deliberately ahead of every other
-        # schedule-eligible step
-        # (`tests` included) in this fail-fast job: a security scan must run
-        # regardless of whether an unrelated later step (e.g. a stale
-        # session-log currency check on a quiet week) fails and aborts the
-        # rest of the job. Moved here from after `requirements.txt is in
+        # the only thing it needs -- and deliberately ahead of the other
+        # schedule-eligible, potentially-failing steps in this fail-fast
+        # job: a security scan must run regardless of whether an unrelated
+        # later step (an eval, drift or generated-tree failure, say) fails
+        # and aborts the rest of the job. Moved here from after
+        # `requirements.txt is in
         # sync` (atlas review round 2, PR #522) after #513/#516's fix put a
         # second schedule-eligible, potentially-failing step ahead of it —
-        # which would have silently skipped this scan on any quiet week.
-        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # which would have silently skipped this scan on any quiet week;
+        # the split makes the guarantee stronger still, since the suites
+        # that could fail now cannot even hold this job's slot.
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: |
           # pip-audit IS the CI vulnerability gate this repo relies on — unlike
           # requirements.txt's deps (hash-pinned, resolved once and committed),
@@ -377,86 +433,17 @@ jobs:
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
       - name: lint (ruff)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: ruff check .
       - name: format (ruff)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: ruff format --check .
       - name: type-check (mypy)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         # Scoped to tooling/, atlas_reviewer/ and atlas_settings/ via
         # pyproject.toml's [tool.mypy] files list -- this repo's fully
         # type-annotated Python packages.
         run: mypy
-      - name: tests
-        # `schedule` runs unconditionally (like the dependency-install and
-        # pip-audit steps above/below) rather than relying on the path
-        # filter: on a
-        # `schedule` event dorny/paths-filter has no `before` SHA to diff
-        # against and falls back to the single last commit, so if that
-        # commit happens to touch neither `python` nor `requirements`, this
-        # step -- including tests/test_session_log_currency.py -- would
-        # silently skip on that week's scheduled run, defeating the point
-        # of a periodic, diff-independent currency check (CodeRabbit finding
-        # on PR #522).
-        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        # Coverage settings (branch mode, the fail-under floor) live in
-        # pyproject.toml's [tool.coverage] tables so a contributor running
-        # `pytest --cov=tooling` locally gets the same gate CI enforces.
-        #
-        # The two CI_* vars are read only by
-        # tests/test_session_log_currency.py's pull_request gate (#548): a
-        # PR whose own diff doesn't touch a `session_log_substantive`-filtered
-        # path (a dependency bump -- Python *or* a `github-actions` pin --, a
-        # shell-only change, ...) can't be the cause of calendar staleness, so
-        # that one test skips the assertion instead of failing an unrelated
-        # PR. A PR that DOES touch a substantive path still enforces even if
-        # it also edits docs/session-log.md in the same diff -- touching the
-        # file proves nothing about whether the edit added a *current* entry,
-        # only the existing `last <= today`/`not stale` assertions can tell
-        # (atlas + Copilot review round 1 on #550). Both vars are unset
-        # (hence unconditional, original behaviour) for `push`/`schedule` and
-        # for a contributor's local `pytest` run -- there's no single PR diff
-        # to reason about there, which is exactly the "many small innocent
-        # merges left the log stale" case the calendar check still needs to
-        # catch.
-        env:
-          CI_EVENT_NAME: ${{ github.event_name }}
-          CI_FILTER_SESSION_LOG_SUBSTANTIVE: ${{ steps.filter.outputs.session_log_substantive }}
-        run: python -m pytest tests/ -q --cov=tooling
-      - name: reviewer service tests (atlas_reviewer)
-        # A separate service boundary with its own suite and its own
-        # coverage run against the same [tool.coverage.report] floor
-        # (docs/plans/2026-11-06-manual-reviewer-service.md). Fully offline:
-        # GitHub is a fixture directory, the Sprites runner is the in-memory
-        # fake, the model provider is the offline one (OpenRouter, GitHub
-        # App minting and Sprites are driven only through recorded fakes) --
-        # no credentials and no network calls beyond a loopback HTTP server.
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
-      - name: settings page tests (atlas_settings)
-        # The BYOK settings page (config slice S10, part B1) is its own
-        # top-level package with its own suite and its own coverage run
-        # against the same [tool.coverage.report] floor, the way the
-        # reviewer service's suite is. Fully offline: GitHub is a
-        # scripted fake transport, the store is the real one over temp
-        # files with an obviously fake Fernet key, and the egress
-        # refusals run against numeric and loopback addresses that
-        # resolve without any network.
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m pytest atlas_settings/tests -q --cov=atlas_settings
-      - name: parity-key liveness (anchor suites)
-        # The parity key's liveness checks (D71's re-anchor update): each
-        # liveness-carrying record is verified against its own anchor
-        # commit -- a mutant splice must survive the anchor's own full test
-        # suite, and a quote or absence must hold in the anchor's files --
-        # so a span that drifts from the anchor tree fails the gate instead
-        # of grading a finding a reviewer cannot honestly raise. The anchor
-        # suites cost minutes each, which is why this runs as its own step
-        # rather than inside the coverage steps; the round-5 anchor is not
-        # on any branch, so the step fetches it by SHA from origin.
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m pytest atlas_reviewer/liveness -q
       - name: reviewer service dry run (offline fixture PR event)
         # The offline provider reviews no file, so the dry run must report
         # incomplete coverage: exit 4 and a non-approving status line (D36).
@@ -464,7 +451,7 @@ jobs:
         # Exit codes: 0 complete and approved or commented, 5 complete and
         # changes requested, 4 coverage incomplete, 2 usage error or review
         # lock held, 3 boundary error.
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: |
           draft="$RUNNER_TEMP/atlas-reviewer-draft.md"
           code=0
@@ -483,16 +470,16 @@ jobs:
           grep -q '"coverage_complete": false' <<<"$status"
           ! grep -q '"review_event": "APPROVE"' <<<"$status"
       - name: eval structure (all skills)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: python -m tooling.cli eval
       - name: eval structure (collapsed entrypoints)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: python -m tooling.cli eval --skills-root collapsed/skills
       - name: provenance drift
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: python -m tooling.cli drift
       - name: Generated trees are in sync
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: |
           python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
           ok=1
@@ -575,7 +562,7 @@ jobs:
         # already allows on their own. MIT-0 is MIT without the attribution
         # clause, strictly more permissive than MIT. Neither is vendored;
         # both are runtime dependencies of the controller only.
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
           # protobuf 7.36.2 reports the trove classifier "3-Clause BSD License",
@@ -586,13 +573,13 @@ jobs:
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
       # this job's Python environment, on top of the hash-verified
       # `requirements.txt`
-      # install above. Every trusted gate above them (lint, format, tests,
-      # eval structure, drift, generated-tree sync, license compatibility)
-      # has already run and passed against the hash-verified install alone
-      # by the time either of these unpinned tools lands in the same
-      # interpreter.
+      # install above. Every trusted gate this job runs above them (lint,
+      # format, type-check, the dry run, eval structure, drift,
+      # generated-tree sync, license compatibility) has already run and
+      # passed against the hash-verified install alone by the time either
+      # of these unpinned tools lands in the same interpreter.
       - name: requirements.txt is in sync with requirements.in
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
         run: |
           # pip-tools 7.6.0 crashed under pip 26.2 (RequirementCommand's
           # make_requirement_preparer gained a required `allow_editables`
@@ -683,7 +670,7 @@ jobs:
             exit 1
           }
       - name: markdownlint
-        if: steps.filter.outputs.markdown == 'true'
+        if: needs.changes.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34 # v25.0.0
         with:
           globs: '**/*.md'
@@ -695,7 +682,7 @@ jobs:
         # .github/dependabot.yml) would set workflows=true/shell=false and
         # run actionlint with shellcheck nowhere on PATH, silently skipping
         # its embedded-script checks (dees-bot round-2 review on #379).
-        if: steps.filter.outputs.shell == 'true' || steps.filter.outputs.workflows == 'true'
+        if: needs.changes.outputs.shell == 'true' || needs.changes.outputs.workflows == 'true'
         # timeout-minutes is a backstop, not the primary fix: normal runtime here
         # is a few seconds, so 3 minutes only bounds a hang, never a real run.
         timeout-minutes: 3
@@ -777,7 +764,7 @@ jobs:
           shopt -s nullglob globstar dotglob
           "$RUNNER_TEMP/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh atlas_reviewer/**/*.sh
       - name: actionlint
-        if: steps.filter.outputs.workflows == 'true'
+        if: needs.changes.outputs.workflows == 'true'
         # timeout-minutes is a backstop, not the primary fix -- see the
         # shellcheck step's own comment above for the reasoning.
         timeout-minutes: 3
@@ -802,3 +789,306 @@ jobs:
           chmod +x "$RUNNER_TEMP/bin/actionlint"
           "$RUNNER_TEMP/bin/actionlint" -version
           "$RUNNER_TEMP/bin/actionlint" -color
+
+  tests:
+    # tooling's suite plus the atlas_settings suite -- the two fast
+    # coverage runs (52s and 15s hosted against ~8 minutes for the reviewer
+    # suite), split into their own job so they stop queueing behind it.
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # persist-credentials: false -- this job never pushes anything (read-
+      # only lint/test/audit), so there's no reason for the checked-out
+      # working tree to retain the job's GITHUB_TOKEN in its git config for
+      # the rest of the job. Narrows what a compromised dependency pulled in
+      # by the pip install below could exfiltrate.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        with:
+          python-version: "3.12"
+          # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
+          # so `cache: 'pip'` buys a real speedup unconditionally. It is
+          # arch-safe regardless: setup-python's `pip-cache.ts`
+          # `computeKeys()` includes `process.arch` in both the primary and
+          # restore keys (verified directly against the pinned SHA's source,
+          # #475), so one architecture can never silently restore the other's
+          # incompatible wheels.
+          cache: 'pip'
+      # #366's fresh-venv dance is retired (D78): it existed because the
+      # persistent self-hosted runner's shared interpreter accumulated
+      # site-packages across jobs, letting an already-installed pin report
+      # "Requirement already satisfied" and skip its hash check entirely
+      # (reproduced during that audit: ruff preinstalled, a forged hash of 64
+      # zeros, exit 0). A per-run hosted VM removes the cross-job
+      # accumulation -- but the interpreter this installs into is still the
+      # image-baked setup-python tool-cache Python, whose contents GitHub
+      # controls, so an image refresh could in principle ship a package
+      # matching one of this repo's pins at the pinned version and reopen
+      # the same skip. `--ignore-installed` closes that corner
+      # unconditionally: pip resolves and downloads every pin regardless of
+      # what the interpreter already holds, so every hash is verified on
+      # every run. No venv and no $GITHUB_PATH export are needed --
+      # setup-python already puts this exact interpreter's pip/python on
+      # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
+      # tooling.cli included).
+      - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        run: pip install --require-hashes --ignore-installed -r requirements.txt
+      - name: tests
+        # Coverage settings (branch mode, the fail-under floor) live in
+        # pyproject.toml's [tool.coverage] tables so a contributor running
+        # `pytest --cov=tooling` locally gets the same gate CI enforces.
+        #
+        # The schedule special case that used to be spelled on this step
+        # (a scheduled run must exercise the session-log currency check even
+        # when the newest commit touches no filtered path) now lives in the
+        # `changes` job's outputs -- see that job's comment.
+        #
+        # The two CI_* vars are read only by
+        # tests/test_session_log_currency.py's pull_request gate (#548): a
+        # PR whose own diff doesn't touch a `session_log_substantive`-filtered
+        # path (a dependency bump -- Python *or* a `github-actions` pin --, a
+        # shell-only change, ...) can't be the cause of calendar staleness, so
+        # that one test skips the assertion instead of failing an unrelated
+        # PR. A PR that DOES touch a substantive path still enforces even if
+        # it also edits docs/session-log.md in the same diff -- touching the
+        # file proves nothing about whether the edit added a *current* entry,
+        # only the existing `last <= today`/`not stale` assertions can tell
+        # (atlas + Copilot review round 1 on #550). Both vars are unset for
+        # `push` and for a contributor's local `pytest` run -- there's no
+        # single PR diff to reason about there, which is exactly the "many
+        # small innocent merges left the log stale" case the calendar check
+        # still needs to catch; on a scheduled run CI_EVENT_NAME is
+        # `schedule`, which enforces unconditionally regardless of the
+        # filter var (which the `changes` job forces true there anyway).
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        env:
+          CI_EVENT_NAME: ${{ github.event_name }}
+          CI_FILTER_SESSION_LOG_SUBSTANTIVE: ${{ needs.changes.outputs.session_log_substantive }}
+        run: python -m pytest tests/ -q --cov=tooling
+      - name: settings page tests (atlas_settings)
+        # The BYOK settings page (config slice S10, part B1) is its own
+        # top-level package with its own suite and its own coverage run
+        # against the same [tool.coverage.report] floor, the way the
+        # reviewer service's suite is. Fully offline: GitHub is a
+        # scripted fake transport, the store is the real one over temp
+        # files with an obviously fake Fernet key, and the egress
+        # refusals run against numeric and loopback addresses that
+        # resolve without any network.
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        run: python -m pytest atlas_settings/tests -q --cov=atlas_settings
+
+  reviewer-tests:
+    # The reviewer service's suite is the slow one (~4,600 tests, ~8 minutes
+    # hosted with coverage), so it gets its own job instead of queueing the
+    # fast suites behind it. A separate service boundary with its own suite
+    # and its own coverage run against the same [tool.coverage.report] floor
+    # (docs/plans/2026-11-06-manual-reviewer-service.md). Fully offline:
+    # GitHub is a fixture directory, the Sprites runner is the in-memory
+    # fake, the model provider is the offline one (OpenRouter, GitHub
+    # App minting and Sprites are driven only through recorded fakes) --
+    # no credentials and no network calls beyond a loopback HTTP server.
+    needs: changes
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # persist-credentials: false -- this job never pushes anything (read-
+      # only lint/test/audit), so there's no reason for the checked-out
+      # working tree to retain the job's GITHUB_TOKEN in its git config for
+      # the rest of the job. Narrows what a compromised dependency pulled in
+      # by the pip install below could exfiltrate.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        with:
+          python-version: "3.12"
+          # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
+          # so `cache: 'pip'` buys a real speedup unconditionally. It is
+          # arch-safe regardless: setup-python's `pip-cache.ts`
+          # `computeKeys()` includes `process.arch` in both the primary and
+          # restore keys (verified directly against the pinned SHA's source,
+          # #475), so one architecture can never silently restore the other's
+          # incompatible wheels.
+          cache: 'pip'
+      # #366's fresh-venv dance is retired (D78): it existed because the
+      # persistent self-hosted runner's shared interpreter accumulated
+      # site-packages across jobs, letting an already-installed pin report
+      # "Requirement already satisfied" and skip its hash check entirely
+      # (reproduced during that audit: ruff preinstalled, a forged hash of 64
+      # zeros, exit 0). A per-run hosted VM removes the cross-job
+      # accumulation -- but the interpreter this installs into is still the
+      # image-baked setup-python tool-cache Python, whose contents GitHub
+      # controls, so an image refresh could in principle ship a package
+      # matching one of this repo's pins at the pinned version and reopen
+      # the same skip. `--ignore-installed` closes that corner
+      # unconditionally: pip resolves and downloads every pin regardless of
+      # what the interpreter already holds, so every hash is verified on
+      # every run. No venv and no $GITHUB_PATH export are needed --
+      # setup-python already puts this exact interpreter's pip/python on
+      # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
+      # tooling.cli included).
+      - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        run: pip install --require-hashes --ignore-installed -r requirements.txt
+      - name: reviewer service tests (atlas_reviewer)
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+
+  liveness-shards:
+    # Computes the liveness matrix from the parity key itself, so a new
+    # liveness-carrying key record is picked up automatically -- the
+    # workflow never lists test ids or a hardcoded shard count. The
+    # grouping (one shard per mutant, cheap quote/absent reads in the
+    # first) and the selection contract live in
+    # atlas_reviewer/liveness/sharding.py, whose import chain is
+    # stdlib-only, so this job needs no dependency install.
+    #
+    # Runs unconditionally: it is seconds of Python, and the `liveness`
+    # job below reads its outputs even on a run where that job skips.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      shards: ${{ steps.shards.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Compute the liveness shard list
+        id: shards
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+
+          from atlas_reviewer.liveness.sharding import shard_specs
+
+          print(f"shards={json.dumps(shard_specs())}")
+          PY
+
+  liveness:
+    # The parity key's liveness checks (D71's re-anchor update), fanned out
+    # over the `liveness-shards` matrix: each liveness-carrying record is
+    # verified against its own anchor commit -- a mutant splice must survive
+    # the anchor's own full test suite, and a quote or absence must hold in
+    # the anchor's files -- so a span that drifts from the anchor tree fails
+    # the gate instead of grading a finding a reviewer cannot honestly
+    # raise. The anchor suites cost minutes each and are why these checks
+    # never ran inside the coverage steps; they were also what made the old
+    # single `gate` job take ~23 minutes (three mutants plus two cached
+    # baselines, five full suites serially), which is what this split
+    # parallelizes: each shard runs its own mutant's suite plus that
+    # anchor's baseline, instead of every suite queueing behind one job.
+    # The round-5 anchor is not on any branch, so the step fetches it by
+    # SHA from origin.
+    needs: [changes, liveness-shards]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+    runs-on: ubuntu-latest
+    # 90 minutes bounded the old single job because five anchor suites ran
+    # serially behind ~13 minutes of other steps, and two runs were killed
+    # at exactly 15m20s back when the job was bounded at 15. A shard runs at
+    # most its own mutant's suite plus that anchor's baseline -- two suite
+    # passes, ~160s each on the hosted runner per the measurement that set
+    # the old bound -- plus the ~2-minute install, so 30 bounds the job
+    # with headroom for runner variance without letting a hung run eat
+    # hours; the liveness test's own per-suite subprocess bound (20
+    # minutes) still fails a hanging suite rather than the job clock.
+    timeout-minutes: 30
+    strategy:
+      # One shard failing must not cancel the others: each shard's result
+      # is independent evidence, and the aggregator below reads the
+      # combined result either way.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.liveness-shards.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      # persist-credentials: false -- this job never pushes anything (read-
+      # only lint/test/audit), so there's no reason for the checked-out
+      # working tree to retain the job's GITHUB_TOKEN in its git config for
+      # the rest of the job. Narrows what a compromised dependency pulled in
+      # by the pip install below could exfiltrate.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        with:
+          python-version: "3.12"
+          # Every run lands on a fresh hosted VM (D78) with a cold pip cache,
+          # so `cache: 'pip'` buys a real speedup unconditionally. It is
+          # arch-safe regardless: setup-python's `pip-cache.ts`
+          # `computeKeys()` includes `process.arch` in both the primary and
+          # restore keys (verified directly against the pinned SHA's source,
+          # #475), so one architecture can never silently restore the other's
+          # incompatible wheels.
+          cache: 'pip'
+      # #366's fresh-venv dance is retired (D78): it existed because the
+      # persistent self-hosted runner's shared interpreter accumulated
+      # site-packages across jobs, letting an already-installed pin report
+      # "Requirement already satisfied" and skip its hash check entirely
+      # (reproduced during that audit: ruff preinstalled, a forged hash of 64
+      # zeros, exit 0). A per-run hosted VM removes the cross-job
+      # accumulation -- but the interpreter this installs into is still the
+      # image-baked setup-python tool-cache Python, whose contents GitHub
+      # controls, so an image refresh could in principle ship a package
+      # matching one of this repo's pins at the pinned version and reopen
+      # the same skip. `--ignore-installed` closes that corner
+      # unconditionally: pip resolves and downloads every pin regardless of
+      # what the interpreter already holds, so every hash is verified on
+      # every run. No venv and no $GITHUB_PATH export are needed --
+      # setup-python already puts this exact interpreter's pip/python on
+      # PATH for every later step (pip-tools, pip-audit, ruff, pytest,
+      # tooling.cli included).
+      - if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        run: pip install --require-hashes --ignore-installed -r requirements.txt
+      - name: parity-key liveness (anchor suites, sharded)
+        # LIVENESS_SHARD=i/n (set by the matrix above) selects this job's
+        # shard at collection time; the value is validated against the key
+        # itself, so a matrix/key disagreement fails loudly rather than
+        # silently skipping specs.
+        if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
+        env:
+          LIVENESS_SHARD: ${{ matrix.shard }}
+        run: python -m pytest atlas_reviewer/liveness -q
+
+  gate:
+    # The final aggregator, still named `gate` so every consumer of that
+    # check name (branch protection included) is unaffected by the split.
+    # `if: always()` makes it report even when an upstream job failed; a
+    # failed or cancelled needed job fails the gate, while a skipped one
+    # counts as passing -- the skipped-means-passing semantics that
+    # preserves #339's per-step gating at job granularity (a docs-only PR
+    # skips the Python jobs and the gate still goes green).
+    needs: [changes, lint, tests, reviewer-tests, liveness-shards, liveness]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fail if any needed job failed or was cancelled
+        # `changes` and `liveness-shards` carry no `if:` of their own, so
+        # anything but success there is already a real failure; the four
+        # gated jobs may legitimately be skipped, and only a failure or a
+        # cancellation fails the gate.
+        if: >-
+          needs.changes.result != 'success' ||
+          needs.lint.result == 'failure' || needs.lint.result == 'cancelled' ||
+          needs.tests.result == 'failure' || needs.tests.result == 'cancelled' ||
+          needs.reviewer-tests.result == 'failure' || needs.reviewer-tests.result == 'cancelled' ||
+          needs.liveness-shards.result != 'success' ||
+          needs.liveness.result == 'failure' || needs.liveness.result == 'cancelled'
+        run: |
+          echo "::error::gate failed: changes=${{ needs.changes.result }} lint=${{ needs.lint.result }} tests=${{ needs.tests.result }} reviewer-tests=${{ needs.reviewer-tests.result }} liveness-shards=${{ needs.liveness-shards.result }} liveness=${{ needs.liveness.result }}"
+          exit 1
+      - name: Report the gate green
+        run: echo "gate green -- every needed job passed or was (deliberately) skipped"
