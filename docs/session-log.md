@@ -6577,22 +6577,6 @@ stays out of the plan. The bare-name call matching stays as
 documented: narrowing it needs an import graph, and the loose match is
 what puts the anchors' called-function guards in scope. Offline only.
 
-## 2026-11-27 (same day) — the sweep-plan pins fire on a parity-key change too (the r1b fix round on #859)
-
-The r1b review's Major: the `sweep-plan-pins` job's filter did not list
-the parity key's fixtures while the pins are skipped inside the sharded
-liveness job — so the one PR that moves a span or re-anchors a finding,
-the event the pins exist to re-prove the plan against, ran no pins under
-a green gate. The key's fixture glob is in the filter now, and
-`tests/test_ci_sweep_plan_pins_filter_covers_the_key.py` keeps it there
-mechanically: the pins and liveness filters must both list the key's
-glob, and the pins filter must keep naming `bridge.py` and `diffs.py`
-(the modules the `liveness` filter deliberately does not cover), so
-dropping any of those lines fails a test instead of silencing the pins
-on the pull request that needs them. The r1 count Nit is applied the
-owner's way — the "four" is dropped rather than corrected, from the PR
-body and the D80 update and the session log's own entry. Offline only.
-
 ## 2026-11-27 (same day) — the cheap fixes' round-1/round-2 review fixes (on the stacked #861)
 
 Round 1's still-open Major, re-checked in round 2: `_edits_existing`
@@ -6613,3 +6597,19 @@ nothing instead of sweeping on a runner whose evidence nothing would
 read (the test that pinned the old fallback now pins this). The failed
 sweep shared as the review's no-evidence outcome stays as documented
 and intended. Offline only.
+
+## 2026-11-27 (same day) — the sweep-plan pins fire on a parity-key change too (the r1b fix round on #859)
+
+The r1b review's Major: the `sweep-plan-pins` job's filter did not list
+the parity key's fixtures while the pins are skipped inside the sharded
+liveness job — so the one PR that moves a span or re-anchors a finding,
+the event the pins exist to re-prove the plan against, ran no pins under
+a green gate. The key's fixture glob is in the filter now, and
+`tests/test_ci_sweep_plan_pins_filter_covers_the_key.py` keeps it there
+mechanically: the pins and liveness filters must both list the key's
+glob, and the pins filter must keep naming `bridge.py` and `diffs.py`
+(the modules the `liveness` filter deliberately does not cover), so
+dropping any of those lines fails a test instead of silencing the pins
+on the pull request that needs them. The r1 count Nit is applied the
+owner's way — the "four" is dropped rather than corrected, from the PR
+body and the D80 update and the session log's own entry. Offline only.

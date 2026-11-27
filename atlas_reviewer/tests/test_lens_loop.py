@@ -3388,11 +3388,13 @@ def test_the_shared_sweep_runs_once_per_review_not_once_per_lens():
     assert waiter_text == winner_text
 
 
-def test_a_shared_sweep_waiter_that_times_out_runs_its_own():
+def test_a_shared_sweep_waiter_that_times_out_dispatches_nothing():
     """A winner that does not finish inside the review's remaining wall
-    cannot hold the waiter past it: the waiter's wait expires and it runs
-    the sweep on its own runner -- the one case where the duplication is
-    cheaper than starting without the evidence."""
+    gets the waiter no evidence, and the waiter dispatches nothing: the
+    wait is the review's whole remaining wall, so expiry means the review
+    deadline has passed and the lens stops at its first clock check -- a
+    sweep run now is runner time nothing would ever read (round-2 review
+    of this PR)."""
     from atlas_reviewer.bridge import SweepSpec, SweepVerdict
 
     specs = (SweepSpec("calc.py", 2, "negate-condition"),)
@@ -3421,8 +3423,8 @@ def test_a_shared_sweep_waiter_that_times_out_runs_its_own():
         release.set()
         owner.join()
     assert winner == [1]
-    assert waiter == [1]
-    assert verdicts == (SweepVerdict(specs[0], "survived"),)
+    assert waiter == []
+    assert verdicts is None
 
 
 def test_a_failed_shared_sweep_degrades_every_lens_to_no_evidence():

@@ -456,16 +456,18 @@ def _edits_existing(path: str, diff: str) -> bool:
     """Whether the diff shows the path existed before the change: a
     context or removed line, a rename record, or a deletion -- what
     distinguishes editing an existing decision record from authoring a
-    new one. A path the diff carries no section for reads as existing:
-    the caller's paths come from that diff, and the cost of a false
-    existing here is one more lens, not a missed one."""
+    new one. A `new file` section is the authored shape and says the
+    opposite (the round-1 review's Major on this PR: it sat in the
+    existing-marker list, so a newly authored record pulled in the
+    currency audit). A path the diff carries no section for reads as
+    existing: the caller's paths come from that diff, and the cost of a
+    false existing here is one more lens, not a missed one."""
     for section in split_files(diff):
         if section.path != path:
             continue
-        if any(
-            marker in section.text
-            for marker in ("rename to ", "deleted file", "new file")
-        ):
+        if "new file" in section.text:
+            return False
+        if any(marker in section.text for marker in ("rename to ", "deleted file")):
             return True
         return any(
             not line.startswith("+")
@@ -595,20 +597,7 @@ def select_lenses(
     if isinstance(picked, LensSelection):
         return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
-    covered = {
-        *applied.kept,
-        *CRITICAL_TIER,
-        *(choice.name for choice in applied.hygiene),
-    }
-    auto = tuple(
-        choice
-        for choice in _auto_choices(auto_includes, preferences)
-        if choice.name not in covered
-    )
-    covered |= {choice.name for choice in auto}
-    includes = tuple(
-        choice for choice in applied.includes if choice.name not in covered
-    )
+    auto, includes = _dedupe_auto_and_includes(applied, auto_includes, preferences)
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -625,6 +614,34 @@ def select_lenses(
     return LensSelection(
         _with_critical(applied.kept, applied.hygiene, auto) + includes, note, True
     )
+
+
+def _dedupe_auto_and_includes(
+    applied: _Applied,
+    auto_includes: tuple[str, ...],
+    preferences: LensPreferences | None,
+) -> tuple[tuple[LensChoice, ...], tuple[LensChoice, ...]]:
+    """The shape auto-includes and the repo-preference includes after
+    deduping, the one block both selection paths share so they cannot
+    drift: an auto-include the picks, the critical tier or the kept
+    hygiene already carries is dropped (a repeated name would be planned
+    NOT RUN as already chosen), an include an auto-include now covers is
+    dropped the same way, and both respect a preference's exclude."""
+    covered = {
+        *applied.kept,
+        *CRITICAL_TIER,
+        *(choice.name for choice in applied.hygiene),
+    }
+    auto = tuple(
+        choice
+        for choice in _auto_choices(auto_includes, preferences)
+        if choice.name not in covered
+    )
+    covered |= {choice.name for choice in auto}
+    includes = tuple(
+        choice for choice in applied.includes if choice.name not in covered
+    )
+    return auto, includes
 
 
 def _order_note(hygiene: tuple[LensChoice, ...]) -> str:
@@ -687,20 +704,7 @@ def _agentic_selection(
     if isinstance(picked, LensSelection):
         return _preferenced_fallback(picked, preferences, depth, shapes, auto_includes)
     applied = _apply_preferences(picked, hygiene, preferences)
-    covered = {
-        *applied.kept,
-        *CRITICAL_TIER,
-        *(choice.name for choice in applied.hygiene),
-    }
-    auto = tuple(
-        choice
-        for choice in _auto_choices(auto_includes, preferences)
-        if choice.name not in covered
-    )
-    covered |= {choice.name for choice in auto}
-    includes = tuple(
-        choice for choice in applied.includes if choice.name not in covered
-    )
+    auto, includes = _dedupe_auto_and_includes(applied, auto_includes, preferences)
     with_body = sum(has_body(n) for n in picked)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "

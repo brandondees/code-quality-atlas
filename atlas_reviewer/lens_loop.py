@@ -2038,8 +2038,11 @@ class SharedSweep:
     runner; the others wait for its verdicts instead of re-running the
     mutants on theirs, bounded by the review's remaining wall so a slow
     winner cannot hold a lens past its own start. A waiter whose wait
-    expires runs its own sweep -- duplication only in the case where the
-    winner's evidence would not have arrived in time anyway."""
+    expires gets no evidence rather than running its own sweep: the wait
+    is the review's whole remaining wall, so expiry means the review
+    deadline has passed and the lens stops at its first clock check --
+    a sweep it could run now is evidence nothing would ever read
+    (round-2 review of this PR)."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _entries: dict[tuple[SweepSpec, ...], _SweepEntry] = field(default_factory=dict)
@@ -2053,7 +2056,8 @@ class SharedSweep:
         """The shared sweep's verdicts, run once per review: `run` executes
         the sweep on the caller's own bridge and returns None when it
         fails. The first caller owns the run; the rest wait `wait_s` for
-        it, then fall back to running their own."""
+        it, and a waiter the wait expires on gets None -- the review's
+        wall is spent, so the lens it serves stops before any turn."""
         key = tuple(specs)
         with self._lock:
             entry = self._entries.get(key)
@@ -2071,10 +2075,9 @@ class SharedSweep:
             return entry.verdicts
         if not entry.done.wait(wait_s):
             # The winner has not finished inside the review's remaining
-            # wall: run this lens's own sweep rather than start without
-            # the evidence -- duplication only in the case where the
-            # winner's verdicts would not have arrived in time anyway.
-            return run()
+            # wall: there is no evidence to hand the lens and no review
+            # left to read it.
+            return None
         return entry.verdicts
 
 

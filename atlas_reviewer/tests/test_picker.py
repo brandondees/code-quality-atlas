@@ -1211,8 +1211,12 @@ def test_the_shape_auto_includes_detect_the_guidelines_mandates():
         DECISION_LENS,
         DECISION_CURRENCY_LENS,
     )
+    # The section carries git's own new-file header, the exact shape a
+    # newly authored record's diff serves (the round-1 Major's repro).
     authored = (
         "diff --git a/docs/rfc/007-new.md b/docs/rfc/007-new.md\n"
+        "new file mode 100644\n"
+        "index 0000000..3b18e512dba79e2c8b3b0b8e6c9f1a2d3e4f5a6b\n"
         "--- /dev/null\n"
         "+++ b/docs/rfc/007-new.md\n"
         "@@ -0,0 +1,2 @@\n"
