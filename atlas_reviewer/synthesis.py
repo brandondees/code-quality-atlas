@@ -31,10 +31,13 @@ and the composition fails closed (D31, D54):
   can lower a finding's visibility but never lower the verdict, and
   nothing is deleted on model say-so.
 - A reply that cites an unknown finding id, names a finding twice,
-  downgrades to a severity that is not strictly lower, or drops or
-  downgrades without a stated reason is refused whole: the merge is
-  then **not applied**, the review fails closed with REVIEW INCOMPLETE,
-  and the draft keeps the unmerged findings with the refusal named.
+  downgrades to a severity that is not strictly lower, drops or
+  downgrades without a stated reason, or clusters findings that do not
+  share the claim's shape -- the same verification standing, valence
+  and attribution the mechanical dedupe requires -- is refused whole:
+  the merge is then **not applied**, the review fails closed with
+  REVIEW INCOMPLETE, and the draft keeps the unmerged findings with the
+  refusal named.
 
 The call spends against the review's shared `Spend` (D68's derived
 limits and dollar ceiling) like every other call, reserved at its worst
@@ -104,7 +107,11 @@ your dispositions:
   defect, and a `reason` naming what makes them one. The controller
   keeps the strongest of them and names the rest on it. Merge on a
   shared root cause, never on file proximity alone: two findings at
-  nearby lines that describe different defects stay apart.
+  nearby lines that describe different defects stay apart. The
+  controller refuses a cluster whose findings do not share the same
+  verification standing, valence and attribution -- a verified finding
+  and one whose quote failed, an introduced defect and a pre-existing
+  one -- so only restatements of the same claim can merge.
 - When two findings conflict -- they read the same lines opposite ways
   -- judge which reading the evidence supports and downgrade or drop
   the one that does not hold, with the conflict named in the reason.
@@ -358,6 +365,28 @@ def reconcile(
     for cluster in reply.clusters:
         for identifier in cluster.ids:
             _named_once(held, named, identifier, "a cluster")
+        # A cluster's members must share the claim's shape -- the same
+        # verification standing, valence and attribution -- exactly what
+        # the mechanical dedupe requires before it clusters. Without the
+        # check, `stronger`'s severity-only ranking can seat an
+        # unverified member over a verified one (or a pre-existing or
+        # improvement member over the defect it claims to duplicate),
+        # and the verified finding the verdict reads is merged away on
+        # model say-so. The refusal is the whole reply, fail closed.
+        first = held[cluster.ids[0]]
+        for identifier in cluster.ids[1:]:
+            member = held[identifier]
+            if (
+                member.verified != first.verified
+                or member.finding.valence is not first.finding.valence
+                or member.finding.attribution is not first.finding.attribution
+            ):
+                raise ContractError(
+                    f"cluster ids {first.id} and {identifier} do not share "
+                    "the claim's shape -- the same verification standing, "
+                    "valence and attribution -- so the controller cannot "
+                    "tell which reading the reply merged"
+                )
     for disposition in reply.dispositions:
         _named_once(held, named, disposition.id, "a disposition")
         if disposition.severity is not None:

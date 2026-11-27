@@ -250,6 +250,75 @@ def test_a_downgrade_that_is_not_strictly_lower_refuses_the_reply():
             )
 
 
+def test_a_cluster_mixing_verified_and_unverified_refuses_the_reply():
+    """A cluster's members must share the claim's shape, the mechanical
+    dedupe's own identity rule (round-1 review of #863, Major 1): the
+    reply's severity-only ranking would otherwise seat an unverified
+    Blocker over the verified Major it claims to duplicate, and the
+    verified finding the verdict reads is merged away on model say-so.
+    Mutant: the shape check dropped, which loses the verified Major and
+    can approve."""
+
+    unverified_blocker = MintedFinding(
+        "L2-F1", "naming", a_finding(severity=Severity.BLOCKER), False, "not at that range"
+    )  # fmt: skip
+    with pytest.raises(ContractError, match="do not share the claim's shape"):
+        reconcile(
+            parse_merge_reply(
+                reply(clusters=[{"ids": ["L2-F1", "L1-F1"], "reason": "one defect"}])
+            ),
+            [minted("L1-F1", "tracing"), unverified_blocker],
+        )
+
+
+def test_a_cluster_mixing_a_defect_and_an_improvement_refuses_the_reply():
+    """A merged-away member loses its own standing entirely, so a praise
+    entry must not be clustered under the defect it sits beside: the
+    reply that merged them names one reading, and the controller cannot
+    keep both. Mutant: the valence check dropped, which deletes the
+    improvement finding from the report."""
+    wish = minted("L2-F1", "naming", valence=Valence.IMPROVEMENT)
+    with pytest.raises(ContractError, match="do not share the claim's shape"):
+        reconcile(
+            parse_merge_reply(
+                reply(clusters=[{"ids": ["L1-F1", "L2-F1"], "reason": "r"}])
+            ),
+            [minted("L1-F1", "tracing"), wish],
+        )
+
+
+def test_a_cluster_mixing_introduced_and_pre_existing_refuses_the_reply():
+    """The verdict treats an introduced defect and a pre-existing one
+    differently (D55); a cluster over both would keep whichever reads
+    stronger and lose the other's standing. Mutant: the attribution
+    check dropped, which reports a pre-existing defect as introduced --
+    or drops it -- on the reply's say-so."""
+    older = minted("L2-F1", "naming", attribution=Attribution.PRE_EXISTING)
+    with pytest.raises(ContractError, match="do not share the claim's shape"):
+        reconcile(
+            parse_merge_reply(
+                reply(clusters=[{"ids": ["L1-F1", "L2-F1"], "reason": "r"}])
+            ),
+            [minted("L1-F1", "tracing"), older],
+        )
+
+
+def test_a_cluster_over_same_shape_members_of_different_severity_still_merges():
+    """Severity is the one axis a cluster may span: the strongest
+    severity represents the defect, which is the merge's point."""
+    kept, result = reconcile(
+        parse_merge_reply(
+            reply(clusters=[{"ids": ["L1-F1", "L2-F1"], "reason": "one defect"}])
+        ),
+        [
+            minted("L1-F1", "tracing"),
+            minted("L2-F1", "naming", severity=Severity.MAJOR),
+        ],
+    )
+    assert [f.id for f in kept] == ["L2-F1"]
+    assert result.applied
+
+
 def test_an_empty_reply_applies_as_a_no_op():
     kept, result = reconcile(parse_merge_reply(reply()), [minted("L1-F1", "tracing")])
     assert [f.id for f in kept] == ["L1-F1"]
