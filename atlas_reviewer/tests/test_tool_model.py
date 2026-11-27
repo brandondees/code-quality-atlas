@@ -172,6 +172,7 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
         "read_file",
         "grep",
         "run_tests",
+        "run_probe",
         "mutate",
     ]
     assert fake.chat_requests()[0][2]["Authorization"] == f"Bearer {KEY}"
@@ -234,6 +235,7 @@ def test_a_finalize_turn_keeps_the_tools_alongside_the_tool_history():
         "read_file",
         "grep",
         "run_tests",
+        "run_probe",
         "mutate",
     ]
     assert body["messages"][-1]["role"] == "tool"
@@ -1547,6 +1549,7 @@ def test_the_shared_prefix_is_byte_identical_across_lenses_and_a_retry():
         "read_file",
         "grep",
         "run_tests",
+        "run_probe",
         "mutate",
     ]
     # The lens-specific text sits after the breakpoint: the retry's own

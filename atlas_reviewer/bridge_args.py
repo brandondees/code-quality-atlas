@@ -15,6 +15,7 @@ sent.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -85,7 +86,7 @@ def _string(value: Any) -> str:
 
 def _path(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_PATH_BYTES:
+    if _utf8_byte_length(text) > MAX_PATH_BYTES:
         raise RejectedError(INVALID, f"is over {MAX_PATH_BYTES} bytes")
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
         raise RejectedError(INVALID, "contains a control character")
@@ -111,7 +112,7 @@ def _prefix(value: Any, revs: frozenset[Rev]) -> str:
 
 def _pattern(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if not text or len(text.encode("utf-8")) > MAX_PATTERN_BYTES:
+    if not text or _utf8_byte_length(text) > MAX_PATTERN_BYTES:
         raise RejectedError(INVALID, f"must be 1 to {MAX_PATTERN_BYTES} bytes")
     if any(c in text for c in "\n\r\0"):
         raise RejectedError(INVALID, "may not contain a newline or NUL")
@@ -150,11 +151,29 @@ _LINE = _int_in(1, 10_000_000)
 # a proposal's canonical name by the same value, pinned equal by a test.
 # A longer name matches nothing and is refused here, before any lookup.
 MAX_COMMAND_CHARS = 600
+# The probe file's cap (D80's probe-tool update): a focused probe test is
+# a few dozen lines; 16 KiB is generous headroom over that and matches the
+# run tools' output cap's order.
+MAX_PROBE_CHARS = 16 * 1024
+PROBE_ALLOWED_CONTROLS = frozenset("\n\t\r")
+
+
+def _utf8_byte_length(text: str) -> int:
+    """The text's UTF-8 byte length, as a rejected call when it cannot
+    encode: Python's JSON decoder accepts unpaired surrogates, which no
+    UTF-8 encoder will -- and the exception escaping the tool boundary
+    would end the call without the structured rejection the model can
+    re-issue from. Raised as the fixed invalid shape; the caller adds
+    its own cap's message."""
+    try:
+        return len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise RejectedError(INVALID, "is not encodable as UTF-8 text") from None
 
 
 def _command(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
-    if len(text.encode("utf-8")) > MAX_COMMAND_CHARS:
+    if _utf8_byte_length(text) > MAX_COMMAND_CHARS:
         raise RejectedError(INVALID, f"is over {MAX_COMMAND_CHARS} characters")
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
         raise RejectedError(INVALID, "contains a control character")
@@ -199,6 +218,40 @@ def _operand_index(value: Any, _revs: frozenset[Rev]) -> int:
     return value
 
 
+def _probe_content(value: Any, _revs: frozenset[Rev]) -> str:
+    """The probe file's source, as the model wrote it: UTF-8 text within
+    the size cap, no control characters beyond newline, tab and carriage
+    return. The content is code the guard runs -- the same trust level as
+    the PR's own tests -- and it is never written back: it dies with the
+    disposable copy it ran in."""
+    text = _string(value)
+    if _utf8_byte_length(text) > MAX_PROBE_CHARS:
+        raise RejectedError(INVALID, f"is over {MAX_PROBE_CHARS} bytes")
+    if any(
+        ord(c) < 0x20 and c not in PROBE_ALLOWED_CONTROLS or ord(c) == 0x7F
+        for c in text
+    ):
+        raise RejectedError(INVALID, "contains a control character")
+    return text
+
+
+_PROBE_SELECTOR = re.compile(r"::[A-Za-z0-9_.:\[\]/-]{1,200}")
+
+
+def _probe_selector(value: Any, _revs: frozenset[Rev]) -> str:
+    """`run_probe`'s optional selection: a `::node-id` suffix appended to
+    the probe file's own path -- the model never names the file, whose
+    name is the controller's. Empty runs the whole probe file."""
+    text = _string(value)
+    if text == "":
+        return ""
+    if not _PROBE_SELECTOR.fullmatch(text):
+        raise RejectedError(
+            INVALID, "must be a ::node-id suffix (for example ::test_x)"
+        )
+    return text
+
+
 def _operator(value: Any, _revs: frozenset[Rev]) -> str:
     if not isinstance(value, str) or value not in MUTANT_OPERATORS:
         names = ", ".join(MUTANT_OPERATORS)
@@ -237,6 +290,16 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
         # with no selector, and `mutate` never takes it (its verdict
         # needs pytest's own summary line).
         "run_tests": (_Arg("path", _prefix, ""), _Arg("command", _command, "")),
+        # The probe tool (D80's 2026-11-26 update, Brandon's decision): the
+        # model writes one throwaway test file into the disposable copy and
+        # the bridge runs it under the same sandbox as run_tests -- the
+        # no-root guard, the same clock, output caps and deny-all egress.
+        # The file is never written back and dies with the copy; its name
+        # is the controller's (a fixed `test_atlas_probe_` prefix the model
+        # never needs), so `selector` is only a `::node-id` suffix appended
+        # to that path -- `::test_x`, or `::TestX::test_y` -- and empty runs
+        # the whole probe file.
+        "run_probe": (_Arg("content", _probe_content), _Arg("selector", _probe_selector, "")),
         "mutate": (
             _Arg("path", _path),
             _Arg("line", _LINE),

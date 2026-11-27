@@ -589,6 +589,7 @@ def test_the_model_sees_exactly_the_bridges_tools_and_arguments():
             "pattern": "total",
             "line": 1,
             "operator": "negate-condition",
+            "content": "def test_x():\n    assert True\n",
         }
         validate(name, {a: sample[a] for a in required}, frozenset(Rev))
         for arg in required:
@@ -2497,8 +2498,9 @@ def test_the_prefix_instructions_and_the_paged_ones_agree_where_they_share():
             "Every quote is checked, and a finding whose quote is not found is "
             "not reported."
         ),
-        "Two tools execute, on a disposable copy of the head tree",
+        "Three tools execute, on a disposable copy of the head tree",
         "run_tests runs the copy's pytest suite or the selector",
+        "run_probe writes one throwaway test file you supply",
         "a surviving mutant at a line you are citing is exactly",
         "counts the same way",
         "an inconclusive run is a gap, not evidence",
@@ -3397,3 +3399,32 @@ def test_the_tool_log_carries_every_result_as_the_model_saw_it(tmp_path):
     second = _json.loads(lines[1])
     assert second["tool"] == "read_file"
     assert "return sum" in second["text"]
+
+
+def test_a_probe_call_counts_as_a_run_and_is_evidence(tmp_path):
+    """The probe tool (D80's 2026-11-26 update, Brandon's decision): the
+    model-written throwaway test runs under the same sandbox, its result
+    counts as a run, and the model sees it as evidence at the head."""
+    source, the_job = exec_source(CALC_ROUND)
+    outcome, model, _ = attempt(
+        tmp_path,
+        [
+            tools(
+                (
+                    "run_probe",
+                    {
+                        "content": (
+                            "from calc import total\n\n"
+                            "def test_probe_total():\n"
+                            "    assert total([2, 2]) == 3\n"
+                        )
+                    },
+                )
+            ),
+            final(finding()),
+        ],
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.test_runs == 1
+    (probe_turn,) = model.requests[1].messages[-1].results
+    assert "1 failed" in probe_turn or "failed" in probe_turn

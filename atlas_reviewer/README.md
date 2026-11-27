@@ -916,7 +916,15 @@ environment once per review: `pytest --co -q` runs in a disposable copy
 of HEAD as that same user, and a failed collection becomes the named
 `the test environment is broken` gap on the execution tools instead of
 surfacing as silent INCONCLUSIVE mutants and red baselines the lens
-cannot read as evidence. One test process's wall clock is 180 seconds
+cannot read as evidence. The lenses also gain the **probe tool** (`run_probe`, D80's
+2026-11-26 update): the model writes one throwaway test file's source,
+the bridge writes it into its own fresh disposable copy of the head tree
+(base64-decoded, at the copy's root under a controller-chosen name no
+repo file can shadow) and runs it under the same sandbox as `run_tests`
+-- the no-root guard, the same clock and output caps, deny-all egress --
+and the copy is thrown away, so the file never reaches the repository or
+any later call. The call shares `run_tests`'s per-attempt cap and counts
+as a run when it produces one. One test process's wall clock is 180 seconds
 (was 60: the repo's own full suite takes about 74 seconds, so a
 whole-suite baseline under `mutate` — two processes, one call — could
 not fit), overridable with `ATLAS_TEST_TIMEOUT_S` (30 to 600).
