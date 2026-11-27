@@ -6613,3 +6613,18 @@ dropping any of those lines fails a test instead of silencing the pins
 on the pull request that needs them. The r1 count Nit is applied the
 owner's way — the "four" is dropped rather than corrected, from the PR
 body and the D80 update and the session log's own entry. Offline only.
+
+## 2026-11-27 (same day) — the new-file detection reads git's headers, not the body (round-3 fix on #861)
+
+Round 3's Major on the round-1 fix: `"new file" in section.text`
+searched the section's body lines too, so an edited decision record
+whose changed prose says "new file" — realistic in this repo, the
+decisions log says it often — was misread as newly authored and lost
+the `auditing-decision-record-currency` include; the same body-text
+match applied to the rename and deletion markers. The shape is now read
+off git's own extended-header lines (the lines before the first `@@`):
+`new file mode` says authored, `deleted file mode` and a
+`rename to`/`copy to` record say existing, and the content lines decide
+only when git names no shape at all. Pinned by the reviewer's own repro
+as a test: an edited record whose added line says "add a new file" keeps
+the currency include. Offline only.

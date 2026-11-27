@@ -453,22 +453,27 @@ _AUTO_WHY = {
 
 
 def _edits_existing(path: str, diff: str) -> bool:
-    """Whether the diff shows the path existed before the change: a
-    context or removed line, a rename record, or a deletion -- what
-    distinguishes editing an existing decision record from authoring a
-    new one. A `new file` section is the authored shape and says the
-    opposite (the round-1 review's Major on this PR: it sat in the
-    existing-marker list, so a newly authored record pulled in the
-    currency audit). A path the diff carries no section for reads as
-    existing: the caller's paths come from that diff, and the cost of a
-    false existing here is one more lens, not a missed one."""
+    """Whether the diff shows the path existed before the change, read
+    off git's own extended-header lines -- `new file mode` says authored,
+    `deleted file mode` and a `rename to`/`copy to` record say existing
+    -- and, when git names no shape at all, the section's context or
+    removed lines. The headers are the lines before the first `@@`, so a
+    record whose changed prose says "new file" is not misread as
+    authored, which would drop the currency lens a mandated include was
+    meant to add (the round-3 review's Major on this PR: the markers
+    matched the body too). A path the diff carries no section for reads
+    as existing: the caller's paths come from that diff, and the cost of
+    a false existing here is one more lens, not a missed one."""
     for section in split_files(diff):
         if section.path != path:
             continue
-        if "new file" in section.text:
-            return False
-        if any(marker in section.text for marker in ("rename to ", "deleted file")):
-            return True
+        for line in section.text.split("\n"):
+            if line.startswith("@@"):
+                break
+            if line.startswith("new file mode"):
+                return False
+            if line.startswith(("deleted file mode", "rename to ", "copy to ")):
+                return True
         return any(
             not line.startswith("+")
             for line in section.text.split("\n")

@@ -1225,6 +1225,22 @@ def test_the_shape_auto_includes_detect_the_guidelines_mandates():
     assert shape_auto_includes(("docs/rfc/007-new.md",), diff=authored) == (
         DECISION_LENS,
     )
+    # An edited record whose changed PROSE says "new file" is still an
+    # edit: the new-file shape is git's header line, not the body's words
+    # (the round-3 Major's repro -- the body-text match dropped the
+    # currency lens for exactly this record).
+    edited_prose = (
+        "diff --git a/docs/open-questions.md b/docs/open-questions.md\n"
+        "--- a/docs/open-questions.md\n"
+        "+++ b/docs/open-questions.md\n"
+        "@@ -1,2 +1,3 @@\n"
+        " old line\n"
+        "+Decision: add a new file for the loader.\n"
+    )
+    assert shape_auto_includes(("docs/open-questions.md",), diff=edited_prose) == (
+        DECISION_LENS,
+        DECISION_CURRENCY_LENS,
+    )
     assert shape_auto_includes(("README.md", "docs/other.md")) == (DOCS_HEALTH_LENS,)
     renamed = "diff --git a/a.py b/b.py\nrename from a.py\nrename to b.py\n"
     assert shape_auto_includes(("b.py",), diff=renamed) == (
