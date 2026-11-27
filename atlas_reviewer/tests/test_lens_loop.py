@@ -3004,11 +3004,11 @@ EXEC_TEST = (
 )
 
 
-def exec_source(head_calc):
+def exec_source(head_calc, test_file=EXEC_TEST):
     head = {
         "calc.py": head_calc,
         "config/keys.py": EXEC_TOKEN_LINE,
-        "test_calc.py": EXEC_TEST,
+        "test_calc.py": test_file,
     }
     base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
     head_tarball = source_tarball(head, TOP)
@@ -3430,3 +3430,111 @@ def test_a_probe_call_counts_as_a_run_and_is_evidence(tmp_path):
     assert outcome.test_runs == 1
     (probe_turn,) = model.requests[1].messages[-1].results
     assert "1 failed" in probe_turn or "failed" in probe_turn
+
+
+# ------------------------------------------------- the timeout policy
+
+
+def _bash_timeout_attempt(tmp_path, tool="bash"):
+    """One attempt whose model makes one guarded-exec call whose WORK runs
+    past its own clock: the bridge answers TIMED_OUT for the tool. The
+    sleep runs inside the guarded exec -- the copy's build is outside it
+    and must not be what the clock kills."""
+    from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
+
+    content = "import time\ntime.sleep(30)\n\n\ndef test_x():\n    assert True\n"
+    turn = tools(
+        (tool, {"command": "sleep 30"} if tool == "bash" else {"content": content})
+    )
+    model = ScriptedLensModel([READ_ALL, turn, final()])
+    extra = {}
+    if tool == "run_probe":
+        # The probe is refused before any exec unless the staging carries
+        # a pytest-capable interpreter; the sleep rides inside the probe
+        # file the copy's pytest imports.
+        source, the_job = exec_source(CALC_ROUND)
+        extra = {"source": source, "the_job": the_job,
+                 "pytest_candidates": (sys.executable,)}  # fmt: skip
+    return attempt(
+        tmp_path,
+        [],
+        model=model,
+        tool_limits={**DEFAULT_LIMITS, tool: ToolLimits(16 * 1024, 3)},
+        **extra,
+    )
+
+
+def test_a_bash_timeout_is_noted_and_never_partial(tmp_path):
+    """The timeout policy (Brandon's Nov 26 decision): a model-chosen bash
+    command that ran past its own clock is the cost of exploring -- the
+    attempt is CLEAN (the lens can approve), the draft notes the timed-out
+    call, and no TOOL_GAP cause exists. Revert-check: without the
+    policy's branch the attempt is PARTIAL with TOOL_GAP."""
+    outcome, _, _ = _bash_timeout_attempt(tmp_path, "bash")
+    assert outcome.state is LensState.CLEAN
+    assert Cause.TOOL_GAP not in outcome.causes
+    assert outcome.noted_tools == ("bash",)
+
+
+def test_a_probe_timeout_is_noted_and_never_partial(tmp_path):
+    """The same policy for the probe: a probe that ran past its clock is
+    noted, never partial."""
+    outcome, _, _ = _bash_timeout_attempt(tmp_path, "run_probe")
+    assert outcome.state is LensState.CLEAN
+    assert Cause.TOOL_GAP not in outcome.causes
+    assert outcome.noted_tools == ("run_probe",)
+
+
+def test_the_draft_renders_exactly_what_the_loop_counted(tmp_path):
+    """The pin round 1 of #867 asked for: the draft renders the
+    loop-produced outcome's own `noted_tools` -- one source of truth,
+    from the classification through the ledger to the lens line, never a
+    recount."""
+    from atlas_reviewer.coordinator import LensResult, render_draft, synthesize
+
+    outcome, _, _ = _bash_timeout_attempt(tmp_path, "bash")
+    assert outcome.noted_tools == ("bash",)
+    draft = render_draft(
+        synthesize([LensResult(LENS, 1, DIGEST, outcome, attempts=1)]),
+        Redactor(),
+    )
+    line = next(line for line in draft.splitlines() if line.startswith(f"- L1 {LENS}:"))
+    assert (
+        "bash exploration call(s) timed out (noted; the tool stayed available)" in line
+    )
+
+
+SLEEPING_SUITE = b"import time\n\n\ndef test_two_values():\n    time.sleep(30)\n"
+
+
+def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
+    """Real unavailability stays fail-closed: the run tools' clock bounds
+    the suite the verdicts are read from, so its timeout is an execution
+    gap that holds the review at COMMENT -- the policy names only the
+    guarded execs. The suite genuinely runs past the tool's own clock
+    (the sleep rides inside the guarded exec, as in the sibling tests;
+    the interpreter is staged, so the call reaches the timeout machinery
+    instead of the pre-exec refusal -- round 1 of the fix review: the
+    first cut pinned the refusal, and a mutant noting every timeout
+    passed the file)."""
+    from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
+
+    source, the_job = exec_source(CALC_ROUND, test_file=SLEEPING_SUITE)
+    turn = tools(("run_tests", {}))
+    model = ScriptedLensModel([READ_ALL, turn, final()])
+    outcome, _, _ = attempt(
+        tmp_path,
+        [],
+        model=model,
+        tool_limits={**DEFAULT_LIMITS, "run_tests": ToolLimits(16 * 1024, 3)},
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
+    assert outcome.state is LensState.PARTIAL
+    assert Cause.TOOL_GAP in outcome.causes
+    assert outcome.noted_tools == ()
+    # It was a timeout, not the pre-exec refusal the first cut pinned:
+    # the tool ran and was killed by its own clock.
+    (run_tests,) = [tool for tool in outcome.tools if tool.tool == "run_tests"]
+    # The loop's ToolUse records the status NAME; the enum's value names
+    # the same state.
+    assert run_tests.status == Status.TIMED_OUT.name

@@ -1543,6 +1543,12 @@ HALTED_CALL = (
 GAP_STATUSES = frozenset(
     {Status.TIMED_OUT, Status.UNAVAILABLE, Status.OVER_SESSION_LIMIT}
 )
+# The tools whose own timeout is the cost of exploring (Brandon's Nov 26
+# decision): a model-chosen bash command or probe that ran past its
+# clock is noted in the draft, never a partial-lens cause. The run
+# tools' timeout stays a gap -- their clock bounds the suite the
+# verdicts are read from.
+NOTED_TIMEOUT_TOOLS = frozenset({"bash", "run_probe"})
 
 
 @dataclass(frozen=True)
@@ -1623,6 +1629,13 @@ class _Progress:
     repair_sent: bool = False
     head_reads: set[str] = field(default_factory=set)
     nudges: list[str] = field(default_factory=list)
+    # The guarded-exec timeouts the timeout policy notes instead of
+    # holding the lens partial (Brandon's Nov 26 decision): a bash
+    # command or a probe that ran past its own clock. The tool names,
+    # not a count -- the draft names what timed out, and this one
+    # collection is the attestation's whole truth about it (round 1 of
+    # #867: a recounted copy in the renderer diverged from the ledger).
+    noted_tools: list[str] = field(default_factory=list)
     unread_nudged: bool = False
     stall_nudged: bool = False
     # The no-progress detector's window (D58, D66): consecutive turns that
@@ -1734,6 +1747,7 @@ class _Progress:
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
+                noted_tools=tuple(self.noted_tools),
             )
         best = held if held is not None and held.findings else self.finding_hold
         if best is not None and best.findings:
@@ -1755,6 +1769,7 @@ class _Progress:
                 detail=both,
                 limit_hit=limit_hit,
                 nudges=tuple(self.nudges),
+                noted_tools=tuple(self.noted_tools),
             )
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
@@ -1768,6 +1783,7 @@ class _Progress:
             mutants_survived=self.mutants_survived,
             limit_hit=limit_hit,
             nudges=tuple(self.nudges),
+            noted_tools=tuple(self.noted_tools),
             diff_prefix=self.prefix_note,
         )
 
@@ -2483,7 +2499,19 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
     p.tools.append(ToolUse(result.tool, result.args, result.status.name))
     p.secrets.extend(result.secrets)
     if result.status in GAP_STATUSES:
-        p.causes.add(Cause.TOOL_GAP)
+        if result.status is Status.TIMED_OUT and result.tool in NOTED_TIMEOUT_TOOLS:
+            # The timeout policy (Brandon's Nov 26 decision): a
+            # model-chosen exec that ran past its own clock -- a bash
+            # command or a probe the lens aimed too wide -- is the cost
+            # of exploring, not a coverage gap. The tool is available
+            # (the next call can be shorter), the lens's coverage is
+            # unchanged, and the attempt is noted in the draft instead
+            # of held partial. Genuine unavailability -- every other
+            # status, and a timeout on the run tools, whose whole-suite
+            # clock is the review's own budget -- stays fail-closed.
+            p.noted_tools.append(result.tool)
+        else:
+            p.causes.add(Cause.TOOL_GAP)
     if result.outcome is MutantOutcome.INCONCLUSIVE:
         # D80: the run proved nothing either way -- an execution gap like
         # any other tool gap, so a review with one open cannot approve.
@@ -2879,6 +2907,7 @@ def _final(job: LensJob, text: str, p: _Progress, limits: Limits) -> AttemptOutc
             test_runs=p.runs_executed,
             mutants_survived=p.mutants_survived,
             nudges=tuple(p.nudges),
+            noted_tools=tuple(p.noted_tools),
             diff_prefix=p.prefix_note,
             **kw,
         )

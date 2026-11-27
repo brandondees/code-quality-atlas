@@ -4336,6 +4336,17 @@ def _lens_line_parts(r: LensResult, scrub: Callable[[str], str]) -> list[str]:
         parts.append("its retry did not run before the review ended")
     if r.reassess_note:
         parts.append(f"re-assessment: {r.reassess_note}")
+    if o.noted_tools:
+        # The timeout policy (Brandon's Nov 26 decision): a model-chosen
+        # exec that ran past its own clock is the cost of exploring --
+        # named here, never a partial-lens cause. The attestation's own
+        # tuple is the one source of truth (round 1 of #867): the draft
+        # renders exactly what the ledger carries, never a recount of
+        # the tool log.
+        names = " and ".join(sorted(set(o.noted_tools)))
+        parts.append(
+            f"{names} exploration call(s) timed out (noted; the tool stayed available)"
+        )
     repairs = o.nudges.count("quote-repair")
     if repairs:
         parts.append(f"{repairs} quote-repair turn(s)")

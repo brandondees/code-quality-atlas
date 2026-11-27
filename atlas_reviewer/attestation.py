@@ -217,6 +217,13 @@ class AttemptOutcome:
     # text: that the prefix was inlined and at what size, or why the diff
     # pages through `diff_file` instead. Empty when the prefix is off.
     diff_prefix: str = ""
+    # The guarded-exec timeouts the timeout policy notes instead of
+    # holding the lens partial (Brandon's Nov 26 decision): the names of
+    # the model-chosen tools that ran past their own clock -- the draft
+    # renders exactly this tuple, so the ledger carries the attestation's
+    # whole truth about the note (round 1 of #867). Empty on a ledger
+    # line from before the field existed.
+    noted_tools: tuple[str, ...] = ()
     # The re-assessment's recorded references (D73), on a `#reassess` key's
     # outcome only: `withdrawn` is each `(prior label, stated reason)` the
     # reply withdrew, and `revises` each `(finding index from 1, prior
@@ -482,6 +489,7 @@ def _outcome_json(
         "limit": _limit_json(outcome.limit_hit, scrub),
         "dropped": [scrub(note) for note in outcome.dropped],
         "nudges": [scrub(nudge) for nudge in outcome.nudges],
+        "noted_tools": [scrub(name) for name in outcome.noted_tools],
         "diff_prefix": scrub(outcome.diff_prefix),
         "withdrawn": [
             [scrub(prior), scrub(reason)] for prior, reason in outcome.withdrawn
@@ -540,6 +548,11 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
     nudges = data.get("nudges", [])
     if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
         raise TypeError("nudges must be a list of strings")
+    noted_tools = data.get("noted_tools", [])
+    if not isinstance(noted_tools, list) or not all(
+        isinstance(name, str) and name for name in noted_tools
+    ):
+        raise TypeError("noted_tools must be a list of non-empty strings")
     diff_prefix = data.get("diff_prefix", "")
     if not isinstance(diff_prefix, str):
         raise TypeError("diff_prefix must be a string")
@@ -558,6 +571,7 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _dropped_from(data.get("dropped", ())),
         tuple(nudges),
         diff_prefix,
+        tuple(noted_tools),
         _withdrawn_from(data.get("withdrawn", ())),
         _revises_from(data.get("revises", ())),
     )
