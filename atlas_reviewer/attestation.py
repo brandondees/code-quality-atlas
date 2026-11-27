@@ -548,9 +548,7 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
     nudges = data.get("nudges", [])
     if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
         raise TypeError("nudges must be a list of strings")
-    noted_tools = data.get("noted_tools", ())
-    if isinstance(noted_tools, tuple):
-        noted_tools = list(noted_tools)
+    noted_tools = data.get("noted_tools", [])
     if not isinstance(noted_tools, list) or not all(
         isinstance(name, str) and name for name in noted_tools
     ):
