@@ -36,7 +36,6 @@ from atlas_reviewer.redact import RedactedText, Redactor, tail
 from atlas_reviewer.runner import ToolAbsent, ToolResult
 
 DETAIL_CHARS = 2_000
-BODY_CHARS = 16_384
 NAME_CHARS = 300
 LOG_TAIL_CHARS = 6_000
 ARTIFACT_EXCERPT_CHARS = 4_000
@@ -103,8 +102,13 @@ class PullInfo:
 
 
 def parse_pull(
-    data: Json, redactor: Redactor, body_chars: int = BODY_CHARS
+    data: Json, redactor: Redactor, body_chars: int | None = None
 ) -> PullInfo:
+    """`body_chars` caps the body's characters; None keeps it whole. The
+    cap is the owner's lifted-context decision (2026-11-26): the full body
+    is what Claude Code sees, and the model's input room -- which the
+    agentic path sizes the block against and names when it binds -- is
+    the only remaining bound."""
     head = _field(data, "head", dict)
     body = _optional_str(data, "body")
     changed = data.get("changed_files")

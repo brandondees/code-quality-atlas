@@ -1570,12 +1570,19 @@ same-named branch elsewhere adds nothing; head-SHA runs are listed by SHA
 too. Check runs are listed at the head SHA and at up to 20 other commits
 of the PR, newest first (D38), each item keeping the SHA GitHub reported, so
 a failure at an earlier commit that was never re-run stays visible as
-stale. A list cut off there, a per-review count cap (5 runs, 20 other
-commits, 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
+stale. A list cut off there, a per-review count cap (5 head-SHA runs
+whose jobs are listed, 20 other commits whose runs' jobs are listed --
+the bound counts commits, never runs, because one commit usually carries
+several runs -- 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
 artifact ZIP), or a rejected or partly skipped archive each appear in the
 draft's **Omissions and limits hit** table. Whatever they left unread is
-UNKNOWN. Logs and artifacts are fetched only for jobs and runs at the head
-SHA. Artifact ZIPs are read in memory with stdlib `zipfile` and never
+UNKNOWN. Job logs are fetched for every ingested run's jobs, whatever
+commit they ran at, failing jobs first within the count cap -- one
+shared budget spent once against the whole branch, so an earlier
+run's passing jobs cannot crowd a later run's failing job out of it
+(the lifted-context decision, 2026-11-26); artifact ZIPs are fetched only for
+runs at the head SHA, and only the head SHA's runs have their artifacts
+listed. Artifact ZIPs are read in memory with stdlib `zipfile` and never
 extracted to disk. An entry is skipped if it has an unsafe path
 (absolute, drive, `..`), is a symlink or special file, is encrypted, is
 compressed with anything but STORED or DEFLATED, is not on the text-type
@@ -2001,14 +2008,17 @@ are listed there, highest risk first. The second pilot's 412,078-character
 diff would still be PARTIAL, with the unseen files being the lowest-risk
 tiers.
 
-The model gets the PR conversation as one `pull-request` block of at most
-65,536 characters (`conversation.py`, D38): title, author, branches, draft
-flag, labels, requested reviewers and teams, the body (up to 16,384
-characters), every commit subject (200 each, 8,192 in all), and every
-review, review comment and conversation comment (4,000 each), each labelled
-with its id, author, time and the commit it was made at. Commit subjects
-and remarks keep the newest that fit; every older one dropped, every cut,
-and every list that failed, hit the page cap or held an entry that did not
+The model gets the PR conversation as one `pull-request` block, unbounded
+by default (the lifted-context decision, 2026-11-26, on #821: the full body
+and the full conversation, where D38's 65,536/16,384/4,000-character
+working caps stood): title, author, branches, draft flag, labels,
+requested reviewers and teams, the body whole, every commit subject (200
+each, 8,192 in all), and every review, review comment and conversation
+comment whole, each labelled
+with its id, author, time and the commit it was made at. With a named
+budget, commit subjects and remarks keep the newest that fit and every
+older one dropped is an omissions row; unbounded, nothing is dropped or
+cut. Every list that failed, hit the page cap or held an entry that did not
 parse is an omissions row, with dropped remark ids listed; the fit is
 checked after the final redaction pass, and a pending review counts as the
 newest remark. Commits are ordered by their parents and committer date, not
@@ -2599,7 +2609,7 @@ D41 records the 2026-11-12 probe that did.
   abandoned attempt that counts as used. A lens already settled for this
   head and body is reused without a runner, and (D73) the reused result
   keeps its findings while a moved evidence-snapshot digest -- the
-  gathered head-SHA CI items and the PR's remarks, fetch times excluded,
+  gathered CI items and the PR's remarks, fetch times excluded,
   stored with the finished attempt -- earns it one bounded no-tools
   re-assessment call against the review's shared spend: its reply may add
   findings, revise or propose withdrawing prior ones, a withdrawal or
@@ -2812,7 +2822,7 @@ D41 records the 2026-11-12 probe that did.
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
-| `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, head-SHA job logs and artifact contents, omissions | via `GitHubReader` |
+| `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, job logs for every ingested run's jobs, artifact contents at the head, omissions | via `GitHubReader` |
 | `controller.py` | one event in, one draft and its review verdict out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
 | `providers.py` | `OfflineProvider` (the default) | no |

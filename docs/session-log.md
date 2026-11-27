@@ -6396,6 +6396,52 @@ pins the eleven ids, spans, encloses and echo evidence, and
 partial and lost boundaries per site. Offline only: recorded JSON and the
 span grader; no model call, network call or secret read.
 
+## 2026-11-27 — the context caps are lifted: full body, full conversation, whole-branch CI with logs (D96)
+
+The parity-validation brief's caps slice (Brandon's 2026-11-26 calls,
+recorded as D96 with updates on D38 and D73): `ConversationBudget`'s
+defaults are unbounded — the `pull-request` block carries the whole PR
+body and every remark whole where D38's 65,536/16,384/4,000-character
+working caps stood, and `parse_pull`'s body-cap default is gone with
+them; the commit-subject caps stay (full commit messages are the
+git-history slice's subject). The one bound left is the model's input
+room, and nothing truncates silently: the room-fitted builds cut with a
+named omission that holds approval at COMMENT (D42), and a model that
+names no room gets everything whole. The agentic first turn's
+`ci-evidence` block now runs `gather_ci` itself — the other commits'
+check runs, the branch-name listing's runs at this PR's commits, and the
+job logs of every ingested run's jobs, failing first — replacing the
+head-only `gather_head_ci`, which is removed; the ingest caps stay as
+fetch bounds, artifact ZIPs stay out of the agentic block and head-only
+in the one-shot path, and stale evidence is still labelled by its SHA
+and never a result for the head.
+
+**Round-1 review fix on #858:** the shared job-log budget is now spent
+once against the whole branch, ordered failing-first (`_branch_log_order`
+feeds `_gather_job_logs`'s stable sort), so an earlier-visited run's
+passing jobs cannot crowd a later run's failing job out of the cap —
+and the branch's earlier commits' runs get their jobs listed at all
+(bounded by D38's 20-other-commits cap), which is what puts a never
+re-run earlier failure's log in reach. The sample fixture carries the
+other runs' empty jobs/artifacts listings, and
+`test_failing_jobs_first_across_the_whole_branch` pins both halves of
+the fix.
+
+**Round-3 review fix on #858:** the other-commits bound now counts
+commits, never runs — `gather_ci` groups the non-head runs by commit and
+lists jobs for every run at the newest `max_ci_commits` other commits,
+the same list and cap the other commits' check-run listing uses
+(`max_ci_commits` is D38's commit count; a commit usually carries
+several runs, so a run-count reading tripped at a handful of commits on
+a multi-workflow PR and held the review at COMMENT for evidence the
+bound was meant to admit). The other commits' artifact listings are
+skipped outright — the downloads stay head-only, so a non-head listing
+was only ever discarded. Pinned by
+`test_multi_workflow_commits_do_not_trip_a_run_count` (30 runs over 3
+commits, all listed) and
+`test_other_commit_runs_past_the_commit_cap_are_named_unknown` (22
+commits, the two oldest named UNKNOWN per commit).
+
 ## 2026-11-27 — the CI gate splits into parallel jobs behind a `gate` aggregator (Brandon-approved Nov 26)
 
 The single `gate` job's median wall clock was ~23 minutes (23.4 median, 26.9
