@@ -25,6 +25,7 @@ from atlas_reviewer.bridge import (
     EXEC_SLACK_S,
     KILL_AFTER_S,
     MUTATION_SCRIPT,
+    SWEEP_BUDGET_S,
     SWEEP_RUN_BOUND_S,
     MutantOutcome,
     SessionLimits,
@@ -4233,3 +4234,141 @@ def test_guarded_env_exports_quotes_its_own_path():
         "GIT_CONFIG_KEY_0=safe.directory "
         "GIT_CONFIG_VALUE_0='/tmp/a b/work'; "
     )
+
+
+RANK_ORDER_SUITE = {
+    "aa_slow.py": b"def slow(n):\n    if n > 9:\n        return 0\n    return n\n",
+    "test_aa_slow.py": (
+        b"from aa_slow import slow\n\ndef test_slow():\n    assert slow(5) == 5\n"
+    ),
+    "zz_auth.py": (
+        b"def top(n):\n    if n < 0 or n > 9:\n        return 0\n    return n\n"
+    ),
+    "test_zz_auth.py": (
+        b"from zz_auth import top\n\ndef test_top():\n    assert top(5) == 5\n"
+    ),
+}
+RANK_ORDER_DIFF = (
+    "diff --git a/aa_slow.py b/aa_slow.py\n"
+    "--- a/aa_slow.py\n"
+    "+++ b/aa_slow.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " def slow(n):\n"
+    "+    if n > 9:\n"
+    "+        return 0\n"
+    "     return n\n"
+    "diff --git a/zz_auth.py b/zz_auth.py\n"
+    "--- a/zz_auth.py\n"
+    "+++ b/zz_auth.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " def top(n):\n"
+    "+    if n < 0 or n > 9:\n"
+    "+        return 0\n"
+    "     return n\n"
+)
+
+
+def test_the_sweep_spends_its_wall_on_the_best_ranked_groups_first(tmp_path):
+    """The plan is ranked by relevance, but the groups ran alphabetically
+    by module against the one shared wall budget -- the #846 defect moved
+    from plan time back to run time: the alphabetically first module's
+    slow scoped runs spent the wall, and the top-ranked spec's group, in
+    a later module, came back inconclusive named. The groups now run in
+    the plan's own rank order -- a group's place is its best spec's
+    place -- so a slow low-ranked module cannot starve the spec the plan
+    put first. The clock the first group's exec advances is the fake
+    clock the loop reads between groups."""
+    clock = FakeClock()
+    budget = SWEEP_BUDGET_S
+
+    def answer(script):
+        module = "aa_slow" if "aa_slow.py" in script else "zz_auth"
+        if "aa_slow" in module:
+            # The low-ranked module's scoped runs are slow: its group's
+            # exec consumes more than the pass's whole wall.
+            clock.advance(budget + 1.0)
+        return f"atlas-baseline:{module}.py:0:\natlas-sweep:0:0:\n"
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ReplyRule("atlas-baseline", answer),
+            ReplyRule(
+                "__ATLAS_RUN__",
+                lambda _script: staged() + framed(0, b"1 passed in 0.01s\n"),
+            ),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.append(bridge.sweep(bridge.sweep_plan(RANK_ORDER_DIFF), clock=clock))
+        return "done"
+
+    run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(RANK_ORDER_SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-sweep-rank-order",
+        deadline_s=60,
+        clock=clock,
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    (verdicts,) = results
+    by_spec = {(v.spec.path, v.spec.operator, v.spec.operand): v for v in verdicts}
+    top = by_spec[("zz_auth.py", "drop-operand", 1)]
+    assert top.outcome == "survived", (
+        f"the top-ranked spec's group was starved: {top.note}"
+    )
+
+
+def test_the_changed_spans_rank_only_the_innermost_changed_def():
+    """A line added inside a nested def changes the nested def, not
+    every function that encloses it: the outer function's own
+    pre-existing guards do not rank as changed-function guards because
+    an inner def they contain was edited."""
+    module = (
+        b"def outer(n):\n"
+        b"    if n < 0 or n > 9:\n"  # the outer's own guard, pre-existing
+        b"        return 0\n"
+        b"    def inner(v):\n"
+        b"        probe(v)\n"  # the added line lives here
+        b"        return v\n"
+        b"    return inner(n)\n"
+    )
+    diff = (
+        "diff --git a/widen.py b/widen.py\n"
+        "--- a/widen.py\n"
+        "+++ b/widen.py\n"
+        "@@ -1,6 +1,7 @@\n"
+        " def outer(n):\n"
+        "     if n < 0 or n > 9:\n"
+        "         return 0\n"
+        "     def inner(v):\n"
+        "+        probe(v)\n"
+        "         return v\n"
+        "     return inner(n)\n"
+    )
+    specs = sweep_specs(diff, {"widen.py": module})
+    # The nested def carries no guard, so nothing ranks tier 1 here; the
+    # outer's own BoolOp must not appear by virtue of enclosing the edit.
+    assert SweepSpec("widen.py", 2, "drop-operand", 1) not in specs
+    assert SweepSpec("widen.py", 2, "drop-operand", 2) not in specs

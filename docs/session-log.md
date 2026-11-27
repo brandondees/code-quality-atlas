@@ -6527,3 +6527,28 @@ fail on the old planner — verified by revert — and hermetic unit tests
 pin the widening, the ranking and the round-robin. Offline only: no
 model call, Sprite, Fly or network call beyond the anchors' own fetch
 the liveness step already makes.
+
+## 2026-11-27 (same day) — the sweep's round-1 Major and the nested-def precision fix (on the stacked #859)
+
+The round-1 review's Major: the plan is relevance-ranked but the groups
+still ran alphabetically by module against the one shared wall budget,
+so the #846 defect moved from plan time back to run time — the
+alphabetically first module's slow scoped runs could starve the
+top-ranked spec's group into inconclusive, and the anchor pins (which
+assert plan membership, not verdicts) stayed green while it happened.
+`sweep_groups` now orders each group by its best spec's place in the
+plan, so the wall spends on the most relevant module's runs first; a
+hermetic fake-clock test runs the alphabetically first, low-ranked
+module slow and asserts the top-ranked spec still gets its verdict
+(fails on the old ordering by revert). Within one risk tier the plan's
+own round-robin interleaves the files, so the execution order there is
+the plan's own file order — the docstring states that residual, and the
+wall budget names whatever did not run. The round's Minor on
+`_changed_spans` is fixed too: a line added inside a nested def changes
+the nested def, not every function enclosing it, so an outer function's
+own guards no longer rank as changed-function guards by virtue of
+enclosing the edit (the innermost def holding the added line claims
+it); pinned by a test asserting the enclosing function's own BoolOp
+stays out of the plan. The bare-name call matching stays as
+documented: narrowing it needs an import graph, and the loose match is
+what puts the anchors' called-function guards in scope. Offline only.

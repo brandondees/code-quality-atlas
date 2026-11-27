@@ -3488,14 +3488,37 @@ def _def_spans(tree: ast.AST) -> list[tuple[str, int, int]]:
 def _changed_spans(
     spans: Sequence[tuple[str, int, int]], added: frozenset[int]
 ) -> list[tuple[str, int, int]]:
-    """The definitions whose body the diff adds a line to: the functions
-    the diff changes, whose every guard -- added or pre-existing -- is
-    sweep-relevant, because the change is what moved their behavior."""
+    """The definitions whose OWN body the diff adds a line to: the
+    functions the diff changes, whose every guard -- added or
+    pre-existing -- is sweep-relevant, because the change is what moved
+    their behavior. A line inside a nested def changes the nested def,
+    not every function that encloses it, so an outer function's own
+    guards do not rank as changed just because it contains one -- only
+    the innermost def holding the added line claims it."""
     return [
         (name, start, end)
         for name, start, end in spans
-        if any(start <= line <= end for line in added)
+        if any(_owned_by(line, (name, start, end), spans) for line in added)
     ]
+
+
+def _owned_by(
+    line: int,
+    span: tuple[str, int, int],
+    spans: Sequence[tuple[str, int, int]],
+) -> bool:
+    """Whether the line sits in the span and in no nested def inside it --
+    the innermost def holding the line is the one the line changes."""
+    _name, start, end = span
+    if not start <= line <= end:
+        return False
+    return not any(
+        inner_start >= start
+        and inner_end <= end
+        and (inner_start, inner_end) != (start, end)
+        and inner_start <= line <= inner_end
+        for _inner_name, inner_start, inner_end in spans
+    )
 
 
 def _call_names(
@@ -3688,14 +3711,24 @@ def sweep_groups(
     specs: Sequence[SweepSpec], contents: Mapping[str, bytes]
 ) -> tuple[SweepGroup, ...]:
     """Groups the specs by the module they mutate, with the test files
-    that import it as each group's scoped selector. A module no test file
-    imports forms no group: its mutants would run nothing, and the report
-    says so instead of running exit-5 suites."""
-    groups: list[SweepGroup] = []
+    that import it as each group's scoped selector, in the plan's own
+    rank order: a group's place is its best spec's place in the plan, so
+    the sweep's shared wall budget spends on the most relevant module's
+    runs before a lower-ranked one, and an alphabetical module prefix
+    cannot starve the top-ranked spec's group into inconclusive (the
+    #846 defect, moved from plan time back to run time, dies here for
+    every plan whose files do not share a risk tier). Within one tier
+    the plan's own round-robin interleaves the files, so the best ranks
+    ascend in path order and the execution order is the plan's own
+    file order; the wall budget names whatever did not run, never
+    silently. A module no test file imports forms no group: its mutants
+    would run nothing, and the report says so instead of running exit-5
+    suites."""
     by_module: dict[str, list[SweepSpec]] = {}
     for spec in specs:
         by_module.setdefault(spec.path, []).append(spec)
     tests = sorted(path for path in contents if _is_test_path(path))
+    built: list[tuple[int, SweepGroup]] = []
     for module in sorted(by_module):
         dotted = module.removesuffix(".py").replace("/", ".")
         importers = [
@@ -3704,10 +3737,11 @@ def sweep_groups(
             if _imports_module(contents[path].decode("utf-8", errors="replace"), dotted)
         ]
         if importers:
-            groups.append(
-                SweepGroup(module, tuple(importers), tuple(by_module[module]))
-            )
-    return tuple(groups)
+            group = SweepGroup(module, tuple(importers), tuple(by_module[module]))
+            best = min(specs.index(spec) for spec in group.specs)
+            built.append((best, group))
+    built.sort(key=lambda pair: pair[0])
+    return tuple(group for _best, group in built)
 
 
 def sweep_script(
