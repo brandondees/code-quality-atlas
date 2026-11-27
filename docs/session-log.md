@@ -6496,3 +6496,75 @@ behavior), and on `workflow_dispatch`: the anchors are fixed commits, so
 the scheduled runs are what catch environment drift no PR diff carries.
 The liveness run itself stays serial within its shard (a mutant spec
 splices a shared anchor worktree).
+
+## 2026-11-27 — the controller's sweep plan reaches the parity key's mutation-class mutants (the #846 gap's fix, harness slice S2)
+
+The Nov 26 gap audit (harness-gap-audit-2026-11-26) recorded that the
+controller's mutant pre-pass could not reach any of the
+mutation-class key Minors at their anchors: the plan filled its cap of 24
+alphabetically in `ast.walk` order over added lines only, so #640's
+`service_post.py` (128 candidates) and `service_queue.py` (7) got nothing
+behind `github_auth.py`'s 24, and #661's `rounds.py` guard lines 182 and
+207 sat behind the walk's first picks. `sweep_specs` now ranks by
+relevance — a dropped BoolOp operand or a break/continue first, then the
+comparison flips and the guard negations; within a class, an added line
+over a changed function's other guards over a function the changed code
+calls one hop away, then nearest to the diff — and spends the cap
+round-robin over the changed files (risk-tier then path order), so every
+changed file's most relevant guards are in the plan before any file gets
+a second pick. Eligibility is widened to the guards of the functions the
+diff changes or calls one hop away (call sites read off the changed
+functions themselves, plain and attribute calls alike), which is what
+puts #640's pre-existing `begin_post` cancel check — line 329, untouched
+by the diff — into a plan the sweep can aim. The sweep's per-run clock
+rises from 60s to the execution tools' 180s (#843's own raise, same
+whole-suite reason), and the pass's wall budget is now derived from that
+bound (`5 × 180s`) instead of carried beside it, so the two cannot
+silently desync again and leave every group inconclusive. The anchor
+pins (`atlas_reviewer/liveness/test_sweep_plan_anchors.py`) run the plan
+as a review does at both anchors against the committed parity key and
+fail on the old planner — verified by revert — and hermetic unit tests
+pin the widening, the ranking and the round-robin. Offline only: no
+model call, Sprite, Fly or network call beyond the anchors' own fetch
+the liveness step already makes.
+
+## 2026-11-27 (same day) — the sweep's round-1 Major and the nested-def precision fix (on the stacked #859)
+
+The round-1 review's Major: the plan is relevance-ranked but the groups
+still ran alphabetically by module against the one shared wall budget,
+so the #846 defect moved from plan time back to run time — the
+alphabetically first module's slow scoped runs could starve the
+top-ranked spec's group into inconclusive, and the anchor pins (which
+assert plan membership, not verdicts) stayed green while it happened.
+`sweep_groups` now orders each group by its best spec's place in the
+plan, so the wall spends on the most relevant module's runs first; a
+hermetic fake-clock test runs the alphabetically first, low-ranked
+module slow and asserts the top-ranked spec still gets its verdict
+(fails on the old ordering by revert). Within one risk tier the plan's
+own round-robin interleaves the files, so the execution order there is
+the plan's own file order — the docstring states that residual, and the
+wall budget names whatever did not run. The round's Minor on
+`_changed_spans` is fixed too: a line added inside a nested def changes
+the nested def, not every function enclosing it, so an outer function's
+own guards no longer rank as changed-function guards by virtue of
+enclosing the edit (the innermost def holding the added line claims
+it); pinned by a test asserting the enclosing function's own BoolOp
+stays out of the plan. The bare-name call matching stays as
+documented: narrowing it needs an import graph, and the loose match is
+what puts the anchors' called-function guards in scope. Offline only.
+
+## 2026-11-27 (same day) — the sweep-plan pins fire on a parity-key change too (the r1b fix round on #859)
+
+The r1b review's Major: the `sweep-plan-pins` job's filter did not list
+the parity key's fixtures while the pins are skipped inside the sharded
+liveness job — so the one PR that moves a span or re-anchors a finding,
+the event the pins exist to re-prove the plan against, ran no pins under
+a green gate. The key's fixture glob is in the filter now, and
+`tests/test_ci_sweep_plan_pins_filter_covers_the_key.py` keeps it there
+mechanically: the pins and liveness filters must both list the key's
+glob, and the pins filter must keep naming `bridge.py` and `diffs.py`
+(the modules the `liveness` filter deliberately does not cover), so
+dropping any of those lines fails a test instead of silencing the pins
+on the pull request that needs them. The r1 count Nit is applied the
+owner's way — the "four" is dropped rather than corrected, from the PR
+body and the D80 update and the session log's own entry. Offline only.

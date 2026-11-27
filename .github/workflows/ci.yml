@@ -157,6 +157,7 @@ jobs:
       markdown: ${{ steps.filter.outputs.markdown == 'true' }}
       workflows: ${{ steps.filter.outputs.workflows == 'true' }}
       liveness: ${{ steps.filter.outputs.liveness == 'true' }}
+      sweep_plan_pins: ${{ steps.filter.outputs.sweep_plan_pins == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -331,6 +332,35 @@ jobs:
               - "atlas_reviewer/liveness/**"
               - "atlas_reviewer/parity_key.py"
               - "atlas_reviewer/__init__.py"
+              - "conftest.py"
+              - "pyproject.toml"
+              - "requirements.in"
+              - "requirements.txt"
+              - ".github/workflows/ci.yml"
+            # The sweep-plan anchor pins (the `sweep-plan-pins` job) test
+            # `bridge.sweep_specs`' ranking, eligibility and round-robin and
+            # `diffs.risk_tier` directly -- the #846 regression they exist to
+            # catch touches only those two modules, which the parity-key
+            # `liveness` filter above deliberately does not list (a change
+            # there was read as only able to touch liveness by breaking the
+            # parity_key import, which stopped being true once the pins
+            # imported bridge). The key's own fixtures are listed too: a
+            # re-anchor or a moved span changes the anchor tree and the
+            # `base..anchor` diff the plan is built from, which is exactly
+            # when the plan-reach relationship must be re-proven -- and the
+            # pins are skipped inside the sharded `liveness` job, so this
+            # filter is the only place a key-only change can trigger them
+            # (tests/test_ci_sweep_plan_pins_filter_covers_the_key.py keeps
+            # the two filters and the key path in sync). Gated on the modules
+            # the pins exercise plus the same environment shape the anchor
+            # suites run under; a `sweep_specs` regression would otherwise
+            # skip its own PR's CI and fail main on the push or the daily
+            # schedule.
+            sweep_plan_pins:
+              - "atlas_reviewer/bridge.py"
+              - "atlas_reviewer/diffs.py"
+              - "atlas_reviewer/fixtures/parity-key/**"
+              - "atlas_reviewer/liveness/test_sweep_plan_anchors.py"
               - "conftest.py"
               - "pyproject.toml"
               - "requirements.in"
@@ -1104,6 +1134,48 @@ jobs:
           LIVENESS_SHARD: ${{ matrix.shard }}
         run: python -m pytest atlas_reviewer/liveness -q
 
+  sweep-plan-pins:
+    # The controller sweep plan's anchor pins (the #846 gap's fix): the plan
+    # must name 640-m1 and 661-m3/m4 at their committed parity-key anchors.
+    # The pins test `bridge.sweep_specs` and `diffs.risk_tier` directly, so
+    # they are path-gated on those two modules (`sweep_plan_pins` in the
+    # `changes` job) rather than riding the parity-key `liveness` filter: a
+    # `sweep_specs` regression touches only bridge.py, and would otherwise
+    # skip these pins on its own PR and fail main on the push or the daily
+    # schedule. They are their own job rather than part of the sharded
+    # `liveness` job because they need only the anchors' objects -- seconds
+    # of parsing after a by-SHA fetch, no anchor suite -- which the shard
+    # matrix would otherwise repeat once per shard. Always runs on push to
+    # main, on either schedule, and on workflow_dispatch, for the same
+    # reason the `liveness` job does: main and the schedules are where a
+    # planner or dependency change that moves a plan goes unnoticed.
+    # `needs: changes` is what makes the PR arm of the `if` real (the
+    # outputs are empty without it) and what actionlint checks; the daily
+    # liveness schedule skips the `changes` job, which is fine -- the
+    # event arm runs the job there, exactly as `liveness` does.
+    needs: [changes]
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.sweep_plan_pins == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+      - run: pip install --require-hashes --ignore-installed -r requirements.txt
+      - name: sweep-plan anchor pins
+        # The anchors are fetched by SHA from origin inside the test module
+        # (the checkout is shallow); no anchor suite runs here.
+        run: python -m pytest atlas_reviewer/liveness/test_sweep_plan_anchors.py -q
+
   gate:
     # The final aggregator, still named `gate` so every consumer of that
     # check name (branch protection included) is unaffected by the split.
@@ -1112,15 +1184,15 @@ jobs:
     # counts as passing -- the skipped-means-passing semantics that
     # preserves #339's per-step gating at job granularity (a docs-only PR
     # skips the Python jobs and the gate still goes green).
-    needs: [changes, lint, tests, reviewer-tests, liveness-shards, liveness]
+    needs: [changes, lint, tests, reviewer-tests, liveness-shards, liveness, sweep-plan-pins]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Fail if any needed job failed or was cancelled
         # `changes` and `liveness-shards` carry no `if:` of their own, so
-        # anything but success there is already a real failure; the four
-        # gated jobs may legitimately be skipped, and only a failure or a
+        # anything but success there is already a real failure; the gated
+        # jobs may legitimately be skipped, and only a failure or a
         # cancellation fails the gate.
         if: >-
           needs.changes.result != 'success' ||
@@ -1128,9 +1200,10 @@ jobs:
           needs.tests.result == 'failure' || needs.tests.result == 'cancelled' ||
           needs.reviewer-tests.result == 'failure' || needs.reviewer-tests.result == 'cancelled' ||
           needs.liveness-shards.result != 'success' ||
-          needs.liveness.result == 'failure' || needs.liveness.result == 'cancelled'
+          needs.liveness.result == 'failure' || needs.liveness.result == 'cancelled' ||
+          needs.sweep-plan-pins.result == 'failure' || needs.sweep-plan-pins.result == 'cancelled'
         run: |
-          echo "::error::gate failed: changes=${{ needs.changes.result }} lint=${{ needs.lint.result }} tests=${{ needs.tests.result }} reviewer-tests=${{ needs.reviewer-tests.result }} liveness-shards=${{ needs.liveness-shards.result }} liveness=${{ needs.liveness.result }}"
+          echo "::error::gate failed: changes=${{ needs.changes.result }} lint=${{ needs.lint.result }} tests=${{ needs.tests.result }} reviewer-tests=${{ needs.reviewer-tests.result }} liveness-shards=${{ needs.liveness-shards.result }} liveness=${{ needs.liveness.result }} sweep-plan-pins=${{ needs.sweep-plan-pins.result }}"
           exit 1
       - name: Report the gate green
         run: echo "gate green -- every needed job passed or was (deliberately) skipped"
