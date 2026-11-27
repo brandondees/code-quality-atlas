@@ -3004,11 +3004,11 @@ EXEC_TEST = (
 )
 
 
-def exec_source(head_calc):
+def exec_source(head_calc, test_file=EXEC_TEST):
     head = {
         "calc.py": head_calc,
         "config/keys.py": EXEC_TOKEN_LINE,
-        "test_calc.py": EXEC_TEST,
+        "test_calc.py": test_file,
     }
     base = {"calc.py": b"def total(xs):\n    return sum(xs)\n"}
     head_tarball = source_tarball(head, TOP)
@@ -3504,21 +3504,37 @@ def test_the_draft_renders_exactly_what_the_loop_counted(tmp_path):
     )
 
 
+SLEEPING_SUITE = b"import time\n\n\ndef test_two_values():\n    time.sleep(30)\n"
+
+
 def test_a_run_tests_timeout_is_still_a_gap(tmp_path):
     """Real unavailability stays fail-closed: the run tools' clock bounds
     the suite the verdicts are read from, so its timeout is an execution
     gap that holds the review at COMMENT -- the policy names only the
-    guarded execs."""
+    guarded execs. The suite genuinely runs past the tool's own clock
+    (the sleep rides inside the guarded exec, as in the sibling tests;
+    the interpreter is staged, so the call reaches the timeout machinery
+    instead of the pre-exec refusal -- round 1 of the fix review: the
+    first cut pinned the refusal, and a mutant noting every timeout
+    passed the file)."""
     from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
 
+    source, the_job = exec_source(CALC_ROUND, test_file=SLEEPING_SUITE)
     turn = tools(("run_tests", {}))
     model = ScriptedLensModel([READ_ALL, turn, final()])
     outcome, _, _ = attempt(
         tmp_path,
         [],
         model=model,
-        tool_limits={**DEFAULT_LIMITS, "run_tests": ToolLimits(16 * 1024, 1)},
-    )
+        tool_limits={**DEFAULT_LIMITS, "run_tests": ToolLimits(16 * 1024, 3)},
+        the_job=the_job, source=source, pytest_candidates=(sys.executable,),
+    )  # fmt: skip
     assert outcome.state is LensState.PARTIAL
     assert Cause.TOOL_GAP in outcome.causes
     assert outcome.noted_tools == ()
+    # It was a timeout, not the pre-exec refusal the first cut pinned:
+    # the tool ran and was killed by its own clock.
+    (run_tests,) = [tool for tool in outcome.tools if tool.tool == "run_tests"]
+    # The loop's ToolUse records the status NAME; the enum's value names
+    # the same state.
+    assert run_tests.status == Status.TIMED_OUT.name
