@@ -22,7 +22,7 @@ from atlas_reviewer.attestation import (
     LensState,
     body_digest,
 )
-from atlas_reviewer.bridge import BridgeSecret
+from atlas_reviewer.bridge import BridgeSecret, Status
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.budget import BudgetRefusedError
 from atlas_reviewer.cache_stats import CacheSession, CacheTurn
@@ -55,6 +55,7 @@ from atlas_reviewer.lens_loop import (
     AssistantText,
     LimitsUnsetError,
     Spend,
+    ToolUse,
     UserText,
 )
 from atlas_reviewer.ports import (
@@ -404,6 +405,38 @@ def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
     assert "REVIEW INCOMPLETE" in draft
     assert "runner failed" in draft
     assert "DELETE failed" in draft
+
+
+def test_a_noted_timeout_names_itself_in_the_lens_line():
+    """The timeout policy (Brandon's Nov 26 decision): a bash or probe
+    call that ran past its own clock is noted in the draft's lens line --
+    and a run_tests timeout is not, it stays a gap the status carries."""
+    noted = AttemptOutcome(
+        Attestation.ATTESTED,
+        changed_files=1,
+        tools=(
+            ToolUse("bash", "{}", Status.TIMED_OUT.value),
+            ToolUse("run_probe", "{}", Status.TIMED_OUT.value),
+            ToolUse("run_tests", "{}", Status.TIMED_OUT.value),
+            ToolUse("diff_file", "{}", Status.OK.value),
+        ),
+    )
+    line = next(
+        line
+        for line in render_draft(
+            synthesize([lens_result(noted)]), Redactor()
+        ).splitlines()
+        if line.startswith(f"- L1 {LENS}:")
+    )
+    assert "2 exploration call(s) timed out" in line
+    assert "the tool stayed available" in line
+    plain = AttemptOutcome(Attestation.ATTESTED, changed_files=1)
+    assert not any(
+        "exploration call(s) timed out" in line
+        for line in render_draft(
+            synthesize([lens_result(plain)]), Redactor()
+        ).splitlines()
+    )
 
 
 def test_the_ledger_records_each_attempt_with_its_head_and_body(tmp_path):

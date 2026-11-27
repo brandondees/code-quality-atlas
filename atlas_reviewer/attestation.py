@@ -217,6 +217,11 @@ class AttemptOutcome:
     # text: that the prefix was inlined and at what size, or why the diff
     # pages through `diff_file` instead. Empty when the prefix is off.
     diff_prefix: str = ""
+    # The guarded-exec timeouts the timeout policy notes instead of
+    # holding the lens partial (Brandon's Nov 26 decision): a model-chosen
+    # bash command or probe that ran past its own clock. Zero on a ledger
+    # line from before the field existed.
+    noted_timeouts: int = 0
     # The re-assessment's recorded references (D73), on a `#reassess` key's
     # outcome only: `withdrawn` is each `(prior label, stated reason)` the
     # reply withdrew, and `revises` each `(finding index from 1, prior
@@ -482,6 +487,7 @@ def _outcome_json(
         "limit": _limit_json(outcome.limit_hit, scrub),
         "dropped": [scrub(note) for note in outcome.dropped],
         "nudges": [scrub(nudge) for nudge in outcome.nudges],
+        "noted_timeouts": outcome.noted_timeouts,
         "diff_prefix": scrub(outcome.diff_prefix),
         "withdrawn": [
             [scrub(prior), scrub(reason)] for prior, reason in outcome.withdrawn
@@ -540,6 +546,13 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
     nudges = data.get("nudges", [])
     if not isinstance(nudges, list) or not all(isinstance(n, str) for n in nudges):
         raise TypeError("nudges must be a list of strings")
+    noted_timeouts = data.get("noted_timeouts", 0)
+    if (
+        isinstance(noted_timeouts, bool)
+        or not isinstance(noted_timeouts, int)
+        or noted_timeouts < 0
+    ):
+        raise TypeError("noted_timeouts must be a non-negative integer")
     diff_prefix = data.get("diff_prefix", "")
     if not isinstance(diff_prefix, str):
         raise TypeError("diff_prefix must be a string")
@@ -558,6 +571,7 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _dropped_from(data.get("dropped", ())),
         tuple(nudges),
         diff_prefix,
+        noted_timeouts,
         _withdrawn_from(data.get("withdrawn", ())),
         _revises_from(data.get("revises", ())),
     )
