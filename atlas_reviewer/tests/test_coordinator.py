@@ -1838,6 +1838,76 @@ def test_no_lens_selected_is_not_complete_coverage():
     assert not synthesize([]).coverage_complete
 
 
+def test_cross_lens_duplicates_are_one_finding_with_every_lens_named():
+    """#822: two isolated lenses that report the same defect reach the
+    synthesis as two minted findings; the dedupe keeps one representative
+    that names both lenses, in the draft and on the finding. Mutant: the
+    dedupe dropped, which reports the defect twice and counts it twice
+    in the status line."""
+    one = LensResult(
+        "tracing-correctness-and-invariants", 1, DIGEST, clean(checked(Severity.MINOR)),
+        attempts=1,
+    )  # fmt: skip
+    two = LensResult(
+        "naming-and-readability", 2, DIGEST, clean(checked(Severity.MINOR)), attempts=1
+    )
+    result = synthesize([one, two])
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.verified[0].lenses == (
+        "tracing-correctness-and-invariants",
+        "naming-and-readability",
+    )
+    draft = render_draft(result, Redactor())
+    assert "(tracing-correctness-and-invariants, naming-and-readability)" in draft
+    assert parse_status(draft)["verified_findings"] == 1
+
+
+def test_findings_from_two_lenses_that_word_alike_but_differ_stay_separate():
+    """The dedupe's claim key is exact: two findings at the same span that
+    say different things are two findings, whatever their other
+    similarities. Mutant: a similarity-threshold key, which merges the
+    pair the helper's texts share most words with."""
+    one = LensResult(LENS, 1, DIGEST, clean(checked(Severity.MINOR)), attempts=1)
+    two = LensResult(
+        OTHER,
+        2,
+        DIGEST,
+        clean(
+            checked(
+                Severity.MINOR,
+                attribution=Attribution.PRE_EXISTING,
+                valence=Valence.IMPROVEMENT,
+            )
+        ),
+        attempts=1,
+    )  # fmt: skip
+    result = synthesize([one, two])
+    assert [f.id for f in result.verified] == ["L1-F1", "L2-F1"]
+
+
+def test_a_cross_lens_duplicate_keeps_the_strongest_finding():
+    """The representative is the cluster's strongest finding: a Blocker
+    one lens reported is not represented by a Minor restating it, and the
+    verdict still blocks. Mutant: first-wins restored, which reads a
+    standing Blocker as a Minor and approves with changes."""
+
+    def claim(severity: Severity) -> object:
+        finding = Finding(
+            LineRange("calc.py", 2, 2), severity, Valence.DEFECT, Route.ENG,
+            Attribution.INTRODUCED, "the sum is computed before rounding", "fix it",
+            "return sum(round(x, 2) for x in xs)",
+        )  # fmt: skip
+        return CheckedFinding(finding, QuoteSource.HEAD)
+
+    one = LensResult(LENS, 1, DIGEST, clean(claim(Severity.MINOR)), attempts=1)
+    two = LensResult(OTHER, 2, DIGEST, clean(claim(Severity.BLOCKER)), attempts=1)
+    result = synthesize([one, two])
+    assert len(result.verified) == 1
+    assert result.verified[0].finding.severity is Severity.BLOCKER
+    assert result.verdict is Verdict.BLOCK
+    assert result.verified[0].lenses == (LENS, OTHER)
+
+
 def not_run_result(lens=LENS, index=1):
     return LensResult(lens, index, DIGEST, None, reason="Sprites HTTP 502 for POST")
 

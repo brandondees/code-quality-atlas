@@ -6,10 +6,14 @@ ledger, verify their output and synthesize one draft (D31, D34, D44).
 up to the configured pool, then gives each lens a continuation of its
 own for the files it left unread while a call and the review clock
 remain. The synthesis is mechanical: the controller mints
-`L<lens>-F<n>` IDs, ranks the verified findings by severity and sets
-the verdict from them (D55). An introduced Blocker requests changes.
-An introduced Major or Minor means approve with changes. Only nits, or
-nothing, means approve. There is no model merge call yet.
+`L<lens>-F<n>` IDs, dedupes the findings that name the same defect --
+the same target and the same claim -- into one representative that
+carries every lens attribution (issue #822), ranks the verified
+findings by severity and sets the verdict from them (D55). An
+introduced Blocker requests changes. An introduced Major or Minor means
+approve with changes. Only nits, or nothing, means approve. The
+per-review merge/verify model call the plan's step 7 names is not here
+yet; the mechanical dedupe is.
 
 Coverage is complete only when every lens read every changed file's
 diff in full, through its own attempts or its own continuations (D42:
@@ -101,6 +105,7 @@ from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.budget import valid_cost
 from atlas_reviewer.cache_stats import CacheSession, by_label, session_lines
 from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
+from atlas_reviewer.dedupe import dedupe
 from atlas_reviewer.delta import (
     DELTA_DIFF_CHARS,
     CarryResult,
@@ -135,6 +140,7 @@ from atlas_reviewer.domain import (
     RunnerReport,
     RunnerStatus,
 )
+from atlas_reviewer.findings import MintedFinding
 from atlas_reviewer.funding import noted_funding_source
 from atlas_reviewer.head_change import (
     FIELD_CALLS,
@@ -284,24 +290,6 @@ class LensResult:
     @property
     def state(self) -> LensState:
         return LensState.NOT_RUN if self.outcome is None else self.outcome.state
-
-
-@dataclass(frozen=True)
-class MintedFinding:
-    id: str
-    lens: str
-    finding: Finding
-    verified: bool
-    source: str
-    problem: str = ""
-    # A verified window match's line distance from the citation (D64); 0
-    # otherwise. The draft builds the source tag from it.
-    drift: int = 0
-    carried: bool = False
-    """True for a prior finding the delta review carried forward (#702):
-    `id` is the carry-forward label (`P1`, ...), `lens` is the earlier
-    record's lens attribution, and the finding was quote-verified against
-    this head like any other."""
 
 
 class Verdict(StrEnum):
@@ -582,7 +570,7 @@ def synthesize(
     endpoint_class: str = "",
     funding_source: str = "",
 ) -> AgenticReview:
-    findings = rank(mint(lenses))
+    findings = rank(dedupe(mint(lenses)))
     return AgenticReview(
         tuple(lenses),
         findings,
@@ -2762,31 +2750,27 @@ def _compose_carry(
     become an approval -- and the carry's buckets, raw lines and notes
     land on the review for the draft and the round record."""
     lens_labels = {identifier: lens for identifier, _finding, lens in prior}
-    # The duplicate pairs' representatives (round-5 review of #748): a
-    # verdict-setting finding beats one that does not set the verdict,
-    # then the stronger severity, ties keeping the incumbent. The
-    # first-match rule this replaces dropped a verified Blocker under a
-    # carried Major restating the same text -- and the same loss between
-    # two carried copies -- and flipped a BLOCK to an
-    # approve-with-changes.
-    representatives: dict[tuple[str, str], MintedFinding] = {}
-    for identifier, checked in result.carried:
-        _keep_stronger(
-            representatives,
-            MintedFinding(
-                identifier,
-                lens_labels.get(identifier, ""),
-                checked.finding,
-                True,
-                "" if checked.source is None else checked.source.value,
-                "",
-                checked.drift,
-                True,
-            ),
+    # The candidates in composition order -- the carried restatements
+    # first, then this review's own findings -- so the dedupe's
+    # first-incumbent-wins tie keeps a carried copy over a new duplicate
+    # (round-5 review of #748), and one cluster pass dedupes carried
+    # copies, this review's findings and the duplicates between them
+    # exactly as `synthesize` dedupes across lenses (issue #822).
+    candidates = [
+        MintedFinding(
+            identifier,
+            lens_labels.get(identifier, ""),
+            checked.finding,
+            True,
+            "" if checked.source is None else checked.source.value,
+            "",
+            checked.drift,
+            True,
         )
-    for minted in review.findings:
-        _keep_stronger(representatives, minted)
-    combined = rank(tuple(representatives.values()))
+        for identifier, checked in result.carried
+    ]
+    candidates.extend(review.findings)
+    combined = rank(dedupe(candidates))
     notes = list(result.notes)
     if raw_lines:
         notes.append(
@@ -3151,26 +3135,6 @@ def _scope_digest(scope: frozenset[str]) -> str:
     """The scope's short digest, the suffix that makes a lens ledger
     entry scope-specific (round-5 review of #748)."""
     return hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
-
-
-def _keep_stronger(
-    representatives: dict[tuple[str, str], MintedFinding], candidate: MintedFinding
-) -> None:
-    """Keep the stronger of the candidate and the finding already keyed
-    by the same (location, text) pair, in place; the first incumbent
-    wins a tie. The composition's dedupe runs through this, so a
-    duplicate pair is one finding whose severity and verdict eligibility
-    are the pair's strongest (round-5 review of #748)."""
-    key = (str(candidate.finding.location), candidate.finding.finding)
-    kept = representatives.get(key)
-    if kept is None:
-        representatives[key] = candidate
-        return
-    if candidate.finding.sets_verdict != kept.finding.sets_verdict:
-        representatives[key] = candidate if candidate.finding.sets_verdict else kept
-        return
-    if candidate.finding.severity.rank < kept.finding.severity.rank:
-        representatives[key] = candidate
 
 
 def _attempts(
@@ -4267,7 +4231,7 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         return (
             f"- **{f.id}** [carried, {x.severity.value}] "
             f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "
-            f"({quote_untrusted(f.lens, QUOTED_CHARS, scrub=scrub)}): "
+            f"({quote_untrusted(_attribution(f), QUOTED_CHARS, scrub=scrub)}): "
             f"{quote_untrusted(x.finding, QUOTED_CHARS, scrub=scrub)}"
         )
     if f.source == QuoteSource.REMOVED.value:
@@ -4277,7 +4241,7 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
     text = (
         f"- **{f.id}** [{', '.join(tags)}] "
         f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "
-        f"({f.lens}): {quote_untrusted(x.finding, QUOTED_CHARS, scrub=scrub)}. "
+        f"({_attribution(f)}): {quote_untrusted(x.finding, QUOTED_CHARS, scrub=scrub)}. "
         f"Fix: {quote_untrusted(x.fix, QUOTED_CHARS, scrub=scrub)}"
     )
     if x.evidence:
@@ -4287,6 +4251,13 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
     if x.siblings:
         text += f". Siblings: {quote_untrusted(x.siblings, QUOTED_CHARS, scrub=scrub)}"
     return text
+
+
+def _attribution(f: MintedFinding) -> str:
+    """The finding's lens attribution as the draft shows it: its own
+    lens, or every lens a dedupe cluster carries (issue #822), so a
+    defect two lenses reported reads as reported by two."""
+    return ", ".join(f.lenses) if f.lenses else f.lens
 
 
 def _secret_line(s: BridgeSecret, scrub: Callable[[str], str]) -> str:
