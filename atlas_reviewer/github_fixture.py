@@ -17,7 +17,11 @@ copy, distinct from the source trees; absent means the repo carries none),
 and a `source/` tree served as the
 tarball at any SHA (the head tree); a `source-<first 7 hex of the SHA>/`
 directory, when the fixture ships one, is served at that SHA instead, so
-a fixture can give the merge base the tree the diff is against.
+a fixture can give the merge base the tree the diff is against. The
+recorded-snapshot fixtures ship the trees as the tarball bytes GitHub
+itself served instead — `source.tar.gz` (the head tree's, served at any
+SHA a `source-<first 7 hex>.tar.gz` does not name) and
+`source-<first 7 hex>.tar.gz` — and those bytes are served verbatim.
 Each list file is one page (`truncated` is never set). A file that is
 absent behaves like a GitHub 404; a download over its byte cap raises
 `ResponseTooLargeError`, as the live client does.
@@ -159,6 +163,18 @@ class FixtureGitHub:
 
     def get_tarball(self, repo: str, sha: str) -> bytes:
         self.calls.append(("get_tarball", repo, sha))
+        # A fixture that ships the recorded tarballs as files serves the
+        # exact bytes the live review would fetch: `source.tar.gz` is the
+        # head tree's, and a `source-<first 7 hex of the SHA>.tar.gz`
+        # names one other revision's (the merge base the diff is
+        # against). The directory forms below are the older shape, built
+        # into a tarball on read.
+        override = self._root / f"source-{sha[:7]}.tar.gz"
+        if override.is_file():
+            return override.read_bytes()
+        prebuilt = self._root / "source.tar.gz"
+        if prebuilt.is_file():
+            return prebuilt.read_bytes()
         source = self._tree(sha)
         if source is None:
             raise NotFoundError("fixture source/ not found")

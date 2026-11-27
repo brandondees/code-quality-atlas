@@ -4,7 +4,7 @@
  "head_sha": "28854775e5965eb554b368cc3a543969a635b681",
  "base_sha": "f82b4bf18b252daf76759f21d2b09ed4f09d39c9",
  "branch": "cursor/full-pr-context-rounds-218c",
- "cutoff": "2026-11-13T19:59:56+00:00",
+ "cutoff": "2026-11-13T19:59:56Z",
  "commits_source": "git-reconstructed",
  "counts": {
   "commits": 5,

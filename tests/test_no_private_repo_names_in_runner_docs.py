@@ -28,14 +28,19 @@ frozen, provenance-documented snapshots of specific commits that are
 already public in this repo's own git history -- both anchor heads are
 fetchable from origin by SHA, so the strings they carry add no exposure
 the history does not already have -- and whose content must not be
-re-genericized, because a snapshot that differs from the anchor tree it
-records would falsify the eval the fixture exists for (quote checks and
-liveness checks grade the anchor's own bytes). The rebuild source is the
-public anchor (``gh api`` reads plus ``git archive``/``git bundle`` of
-public commits), never the private canonical, so the regression this
-guard exists to catch -- a fresh verbatim re-copy -- cannot come through
-this path. The exemption is scoped to those two snapshot directories; a
-new fixture needs its own entry here, deliberate each time.
+re-genericized, because a snapshot that differs from the anchor it
+records would falsify the eval the fixture exists for (the history
+bundle must carry the anchor's own commits and their bytes; quote and
+liveness checks grade the anchor's own tree). The trees ship as the
+tarball bytes GitHub serves, so no loose anchor file is scanned; what
+the scan still flags inside a snapshot is the compressed `history.bundle`,
+whose git objects carry the anchor era's own copies of these strings.
+The rebuild source is the public anchor (``gh api`` reads plus ``git
+bundle`` of public commits), never the private canonical, so the
+regression this guard exists to catch -- a fresh verbatim re-copy --
+cannot come through this path. The exemption is scoped to those two
+snapshot directories; a new fixture needs its own entry here, deliberate
+each time.
 """
 
 import subprocess

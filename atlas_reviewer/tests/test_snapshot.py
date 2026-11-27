@@ -139,10 +139,6 @@ def test_resolve_commits_prefers_the_listing_and_rebuilds_what_it_lost(tmp_path)
 
 
 def _write(tmp_path: Path, spec: SnapshotSpec, **overrides) -> object:
-    def stage_tree(sha: str, dest: Path) -> None:
-        dest.mkdir(parents=True, exist_ok=True)
-        (dest / "f.txt").write_text(sha)
-
     pull = {
         "number": spec.pr_number,
         "title": "t",
@@ -173,7 +169,10 @@ def _write(tmp_path: Path, spec: SnapshotSpec, **overrides) -> object:
         "agents_md": b"guidelines",
         "diff_paths": 1,
         "commits_source": "github-listing",
-        "stage_tree": stage_tree,
+        "trees": {
+            "source.tar.gz": b"head tarball",
+            f"source-{spec.base_sha[:7]}.tar.gz": b"base tarball",
+        },
         "bundle": b"bundle",
     }
     kwargs.update(overrides)
@@ -196,8 +195,9 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
         "issue-comments.json", "reviews.json", "review-comments.json",
         "check-runs.json", "workflow-runs.json", "jobs-5.json",
         "artifacts-5.json", "job-log-7.txt", "repository.json",
-        "compare.json", "REVIEW.md", "agents-md.txt", "source",
-        "source-bbbbbbb", "history.bundle", "snapshot.json",
+        "compare.json", "REVIEW.md", "agents-md.txt",
+        "source.tar.gz", "source-bbbbbbb.tar.gz",
+        "history.bundle", "snapshot.json",
     ):  # fmt: skip
         assert name in names, names
     pull = json.loads((tmp_path / "fx" / "pull.json").read_text())
@@ -219,8 +219,8 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
     )
     assert (tmp_path / "fx" / "job-log-7.txt").read_bytes() == b"log"
     assert (tmp_path / "fx" / "history.bundle").read_bytes() == b"bundle"
-    assert (tmp_path / "fx" / "source" / "f.txt").read_text() == spec.head_sha
-    assert (tmp_path / "fx" / "source-bbbbbbb" / "f.txt").read_text() == spec.base_sha
+    assert (tmp_path / "fx" / "source.tar.gz").read_bytes() == b"head tarball"
+    assert (tmp_path / "fx" / "source-bbbbbbb.tar.gz").read_bytes() == b"base tarball"
     manifest = json.loads((tmp_path / "fx" / "snapshot.json").read_text())
     assert manifest["counts"]["commits"] == 1
     assert manifest["commits_source"] == "github-listing"
@@ -287,9 +287,10 @@ def test_the_committed_anchor_fixture_carries_the_documented_snapshot(
     pull = json.loads((fixture_dir / "pull.json").read_text())
     assert pull["head"]["sha"] == head
     assert (fixture_dir / "pull.diff").read_text().startswith("diff --git ")
-    assert (fixture_dir / "source").is_dir() and any((fixture_dir / "source").iterdir())
-    base_tree = fixture_dir / f"source-{base[:7]}"
-    assert base_tree.is_dir() and any(base_tree.iterdir())
+    head_tarball = fixture_dir / "source.tar.gz"
+    base_tarball = fixture_dir / f"source-{base[:7]}.tar.gz"
+    assert head_tarball.is_file() and head_tarball.stat().st_size > 1_000_000
+    assert base_tarball.is_file() and base_tarball.stat().st_size > 1_000_000
     assert (fixture_dir / "REVIEW.md").is_file()
     assert (fixture_dir / "agents-md.txt").is_file()
     bundle_heads = subprocess.run(
@@ -304,20 +305,24 @@ def test_the_committed_anchor_fixture_carries_the_documented_snapshot(
 def test_the_640_fixture_serves_the_anchor_through_the_loader():
     """The fixture reads as GitHub would answer at the anchor: the check
     runs listed at the anchor SHA are the snapshot's, the remarks carry
-    the prior rounds, and the merge-base compare resolves to the base
-    the diff is against."""
+    the prior rounds, the merge-base compare resolves to the base the
+    diff is against, and the trees are the tarball bytes GitHub served,
+    served verbatim at their SHAs."""
+    repo = "brandondees/code-quality-atlas"
     gh = FixtureGitHub(PR640)
-    listing = gh.list_check_runs("brandondees/code-quality-atlas", HEAD_640)
+    listing = gh.list_check_runs(repo, HEAD_640)
     assert any(
         run.get("name") == "gate" and run.get("conclusion") == "success"
         for run in listing.items
     )
-    reviews = gh.list_reviews("brandondees/code-quality-atlas", 640)
+    reviews = gh.list_reviews(repo, 640)
     assert reviews.items
-    compare = gh.get_compare("brandondees/code-quality-atlas", "main", HEAD_640)
+    compare = gh.get_compare(repo, "main", HEAD_640)
     assert compare["merge_base_commit"]["sha"] == BASE_640
-    tarball = gh.get_tarball("brandondees/code-quality-atlas", HEAD_640)
-    assert len(tarball) > 1000
+    assert gh.get_tarball(repo, HEAD_640) == (PR640 / "source.tar.gz").read_bytes()
+    assert gh.get_tarball(repo, BASE_640) == (
+        PR640 / f"source-{BASE_640[:7]}.tar.gz"
+    ).read_bytes()
 
 
 # --- the builder command, offline through a fake reader ---
@@ -383,6 +388,8 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
                 f"repos/{spec_repo}/contents/AGENTS.md?ref=main": b"guide",
                 f"repos/{spec_repo}/commits/": {"check_runs": []},
                 f"repos/{spec_repo}/actions/runs": {"workflow_runs": []},
+                f"repos/{spec_repo}/tarball/{head}": b"head tarball bytes",
+                f"repos/{spec_repo}/tarball/{base}": b"base tarball bytes",
             }
         ),
     )
@@ -427,8 +434,10 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
         check=True,
     ).stdout
     assert f"{head} refs/heads/atlas-history" in bundle_heads
-    assert (out / "source" / "b.txt").is_file()
-    assert (out / f"source-{base[:7]}" / "a.txt").is_file()
+    assert (out / "source.tar.gz").read_bytes() == b"head tarball bytes"
+    assert (
+        out / f"source-{base[:7]}.tar.gz"
+    ).read_bytes() == b"base tarball bytes"
 
 
 # --- the stage-0 runs: the real driver over the committed anchors ---

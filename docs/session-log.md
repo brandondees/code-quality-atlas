@@ -6721,8 +6721,9 @@ read-only `snapshot-build` CLI command builds a fixture at a PR's anchor
 head — the anchor's lineage commits (rebuilt from the commit objects
 when the branch rebased away), the remarks posted strictly before the
 anchor push, the CI at the retained commits with the jobs' logs where
-GitHub still serves them, the head and merge-base trees, the diff, and
-the self-contained `history.bundle` the staging's history fetch reads.
+GitHub still serves them, the head and merge-base trees as the exact
+tarball bytes GitHub serves, the diff, and the self-contained
+`history.bundle` the staging's history fetch reads.
 Two committed fixtures, `atlas_reviewer/fixtures/pr640/` (#640 at
 `0fe45e5e`) and `pr661/` (#661 at the re-anchored round-5 head
 `28854775`, its body the parity key's reconstructed round-5 text), each

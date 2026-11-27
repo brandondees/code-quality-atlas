@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -190,12 +189,17 @@ def write_snapshot(
     agents_md: bytes,
     diff_paths: int,
     commits_source: str,
-    stage_tree: Callable[[str, Path], None],
+    trees: dict[str, bytes],
     bundle: bytes,
 ) -> SnapshotReport:
-    """Assemble and write the fixture directory. `stage_tree(rev, dest)`
-    materializes one tree; the shipped builder extracts `git archive`.
-    Everything else is the caller-fetched record, already filtered."""
+    """Assemble and write the fixture directory. `trees` maps the
+    recorded tarball file names to the exact bytes GitHub serves for
+    that revision (`source.tar.gz` for the head tree,
+    `source-<base7>.tar.gz` for the merge base's) — the bytes the live
+    review's `get_tarball` would fetch, committed verbatim so the
+    fixture carries no loose tree for the repo-wide content gates to
+    re-lint. Everything else is the caller-fetched record, already
+    filtered."""
     out.mkdir(parents=True, exist_ok=True)
     anchor_pull = dict(pull)
     head = dict(anchor_pull.get("head") or {})
@@ -241,8 +245,8 @@ def write_snapshot(
     (out / "REVIEW.md").write_bytes(review_md)
     (out / "agents-md.txt").write_bytes(agents_md)
     (out / "history.bundle").write_bytes(bundle)
-    stage_tree(spec.head_sha, out / "source")
-    stage_tree(spec.base_sha, out / f"source-{spec.base_sha[:7]}")
+    for name, data in trees.items():
+        (out / name).write_bytes(data)
     _write_json(
         out / "snapshot.json",
         {
@@ -297,13 +301,17 @@ class FetchedSnapshot:
     default_branch: str
     review_md: bytes
     agents_md: bytes
+    head_tree: bytes
+    base_tree: bytes
 
 
 def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapshot:
     """Read everything the fixture carries from GitHub, read-only. The
     default-branch `REVIEW.md` and `AGENTS.md` come from the default
     branch as it stands today (the owner's setup decision: setup uses
-    today's default-branch REVIEW.md), not the anchor-time one."""
+    today's default-branch REVIEW.md), not the anchor-time one; the two
+    trees come as the exact tarball bytes GitHub serves for those
+    revisions, which is what a live review's `get_tarball` fetches."""
     pull = reader.get(f"repos/{spec.repo}/pulls/{spec.pr_number}")
     commits_all = reader.items(f"repos/{spec.repo}/pulls/{spec.pr_number}/commits")
     issue_comments = reader.items(f"repos/{spec.repo}/issues/{spec.pr_number}/comments")
@@ -327,6 +335,8 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
             f"repos/{spec.repo}/contents/AGENTS.md?ref={default_branch}",
             accept=_RAW_ACCEPT,
         ),
+        head_tree=reader.raw(f"repos/{spec.repo}/tarball/{spec.head_sha}"),
+        base_tree=reader.raw(f"repos/{spec.repo}/tarball/{spec.base_sha}"),
     )
 
 
@@ -484,17 +494,6 @@ def git_cutoff(repo_root: Path, head_sha: str) -> str:
     format."""
     instant = _git(repo_root, "show", "-s", "--format=%cI", head_sha).strip()
     return instant[:-6] + "Z" if instant.endswith("+00:00") else instant
-
-
-def git_stage_tree(repo_root: Path, sha: str, dest: Path) -> None:
-    """One tree's files into `dest`, straight from the commit."""
-    dest.mkdir(parents=True, exist_ok=True)
-    archive = subprocess.run(
-        ["git", "-C", str(repo_root), "archive", sha],
-        capture_output=True,
-        check=True,
-    )
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
 
 
 def git_bundle(repo_root: Path, head_sha: str, dest: Path) -> None:

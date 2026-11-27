@@ -4,7 +4,7 @@
  "head_sha": "0fe45e5ea79f3abd8e07488a01b623186df96692",
  "base_sha": "771925a538d6744b6017175e8fe5f170abf27a6d",
  "branch": "cursor/comment-posting-1b42",
- "cutoff": "2026-11-13T19:33:07+00:00",
+ "cutoff": "2026-11-13T19:33:07Z",
  "commits_source": "github-listing",
  "counts": {
   "commits": 15,

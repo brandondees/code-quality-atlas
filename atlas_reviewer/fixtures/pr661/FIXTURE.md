@@ -34,10 +34,12 @@ involves — everything here is committed and the runs over it are offline.
   PR's lineage, so they are not the snapshot's evidence — which is
   exactly the situation 661-m1 grades: the body cites a run
   (`61273b4f`, run 43429340358) the snapshot's evidence does not back.
-- **Trees** — `source/` is the head tree, `source-f82b4bf/` the merge
-  base's, both extracted with `git archive` (the same export-ignore and
-  export-subst semantics GitHub's own tarballs apply, D39's recorded
-  fidelity limit).
+- **Trees** — `source.tar.gz` is the head tree and
+  `source-f82b4bf.tar.gz` the merge base's, each the **exact tarball
+  bytes GitHub serves** for that revision — what a live review's
+  tarball fetch receives, committed verbatim (the loader serves them at
+  their SHAs; no loose anchor file ships for the repo's content gates to
+  re-lint).
 - **History** — `history.bundle` is the self-contained git bundle the
   staging's history fetch reads: `refs/heads/atlas-history` at the
   anchor head, no prerequisite (the staged repository's git is

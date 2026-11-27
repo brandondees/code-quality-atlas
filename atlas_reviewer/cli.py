@@ -240,7 +240,6 @@ from atlas_reviewer.snapshot import (
     git_diff,
     git_diff_path_count,
     git_ensure_commit,
-    git_stage_tree,
     resolve_commits,
     select_before,
     write_snapshot,
@@ -2617,7 +2616,10 @@ def _cmd_snapshot_build(args: argparse.Namespace, run: _Run) -> int:
             default_branch=data.default_branch,
             review_md=data.review_md,
             agents_md=data.agents_md,
-            stage_tree=lambda sha, dest: git_stage_tree(repo_root, sha, dest),
+            trees={
+                "source.tar.gz": data.head_tree,
+                f"source-{spec.base_sha[:7]}.tar.gz": data.base_tree,
+            },
             bundle=_history_bundle(repo_root, spec.head_sha),
         )
     except (subprocess.CalledProcessError, SnapshotFetchError) as exc:

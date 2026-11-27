@@ -30,10 +30,12 @@ offline.
   gate run 43493645208 at the anchor), each run's jobs and artifact
   listing, and the jobs' logs where GitHub still serves them
   (`job-log-*.txt`, the anchor run's and the previous commit's).
-- **Trees** — `source/` is the head tree, `source-771925a/` the merge
-  base's, both extracted with `git archive` (the same export-ignore and
-  export-subst semantics GitHub's own tarballs apply, D39's recorded
-  fidelity limit).
+- **Trees** — `source.tar.gz` is the head tree and
+  `source-771925a.tar.gz` the merge base's, each the **exact tarball
+  bytes GitHub serves** for that revision — what a live review's
+  tarball fetch receives, committed verbatim (the loader serves them at
+  their SHAs; no loose anchor file ships for the repo's content gates to
+  re-lint).
 - **History** — `history.bundle` is the self-contained git bundle the
   staging's history fetch reads: `refs/heads/atlas-history` at the
   anchor head, no prerequisite (the staged repository's git is
