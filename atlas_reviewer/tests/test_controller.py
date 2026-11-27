@@ -1277,6 +1277,45 @@ def test_an_explicit_smaller_part_size_is_still_honoured():
 # --- lens selection by the repo's own picker ---------------------------------
 
 
+def test_the_shape_facts_read_every_changed_path_at_the_controller_call_site(
+    tmp_path,
+):
+    """The r2 Minor's pin at the controller's call site: the shape facts
+    are computed from EVERY changed path, not the picker prompt's capped
+    slice -- the decision record past the cap (the 501st) must still
+    reach the picker's instructions. Restoring the call site's slice
+    fails this test (verified)."""
+    import shutil
+
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    diff = (fixtures / "pull.diff").read_text(encoding="utf-8")
+    diff += "".join(
+        f"diff --git a/src/module_{i}.py b/src/module_{i}.py\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        f"+++ b/src/module_{i}.py\n"
+        "@@ -0,0 +1 @@\n"
+        f"+value = {i}\n"
+        for i in range(500)
+    )
+    diff += (
+        "diff --git a/docs/open-questions.md b/docs/open-questions.md\n"
+        "new file mode 100644\n"
+        "index 0000000..3b18e512dba79e2c8b3b0b8e6c9f1a2d3e4f5a6b\n"
+        "--- /dev/null\n"
+        "+++ b/docs/open-questions.md\n"
+        "@@ -0,0 +1 @@\n"
+        "+Decision: the decisions log gains an entry past the picker's cap.\n"
+    )
+    (fixtures / "pull.diff").write_text(diff, encoding="utf-8")
+    s = Setup(github=FixtureGitHub(fixtures), lenses=ROOMY)
+    s.run()
+    (pick,) = s.provider.picks
+    assert "a decision record or the decisions log is touched" in pick.system
+    assert "docs/open-questions.md" in pick.system
+
+
 def test_the_picker_runs_the_repos_skill_over_fenced_paths_and_pr_text():
     s = Setup(lenses=ROOMY)
     s.run()

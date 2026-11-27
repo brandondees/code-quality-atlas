@@ -6652,3 +6652,18 @@ now signals a readiness event (running at all means it claimed the
 entry), and the main thread asserts a bounded wait for it before
 invoking the waiter — the race the fixed sleep carried is gone.
 Offline only.
+
+## 2026-11-27 (same day) — the shape-facts call sites are pinned where the fix lives (the r2 fix round on #861)
+
+The r2 review's Minor: the every-path shape-facts test called the
+helper directly, so restoring the `[:500]` slice at the CLI call site —
+or the controller's — left the whole suite passing; the property the
+commit exists to enforce was unpinned where it matters. Two wired tests
+now pin the call sites themselves: the CLI one drives `_cmd_agentic_review`
+over a fixture whose diff carries 500 filler modules with the decision
+record as the 501st path and asserts the decision shape fact reaches the
+picker's instructions; the controller one does the same through the
+controller's own picker path over a copied fixture. Each call-site
+revert-mutant (the slice restored) kills its own test, verified. The
+helper-level test is reframed as the helper's own contract, complementary
+to the call-site pins. Offline only.

@@ -1421,12 +1421,12 @@ def test_an_auto_include_keeps_its_priority_over_a_pick_that_names_it():
     assert names.index("reviewing-module-design") < names.index("checking-restraint")
 
 
-def test_the_shape_facts_read_every_changed_path_not_a_capped_slice():
-    """Shape enforcement reads EVERY changed path: a decision record past
-    a picker prompt's 500-path cap is exactly the record the lenses must
-    be enforced for, and a docs-heavy head of the list must not read
-    docs-only while source follows it (the CodeRabbit finding on the
-    sliced callers)."""
+def test_the_shape_facts_helper_reads_what_it_is_given():
+    """The helper's own contract, complementary to the call-site pins
+    (test_cli's and test_controller's every-changed-path tests, which
+    kill a restored slice where the fix lives): given an uncapped path
+    tuple the helper states the decision shape and no docs-only shape
+    for a list whose head is documentation but whose tail is source."""
     from atlas_reviewer.picker import shape_facts
 
     paths = tuple(f"src/module_{i}.py" for i in range(500)) + (
