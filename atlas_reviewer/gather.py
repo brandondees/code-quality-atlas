@@ -17,11 +17,12 @@ this PR's evidence; how many were set aside is noted. Runs at earlier
 commits of the PR stay, labelled by their SHA, and only head-SHA evidence
 can count as a current result (`classify`).
 
-Downloads (job logs, artifact ZIPs) happen only for runs, jobs and
-artifacts at the reviewed head SHA, each under a byte cap, within
-per-review count caps. Anything a cap or a page limit leaves unread is
-recorded twice: as an `Omission` (listed in the draft) and, where it could
-have held evidence, as `Missing` (UNKNOWN, never a pass).
+Downloads (job logs, artifact ZIPs) happen for every job of every ingested
+run -- the whole branch, failing jobs first, within per-review count caps,
+each under a byte cap -- and for artifacts at the head SHA. Anything a cap
+or a page limit leaves unread is recorded twice: as an `Omission` (listed
+in the draft) and, where it could have held evidence, as `Missing`
+(UNKNOWN, never a pass).
 """
 
 from __future__ import annotations
@@ -123,13 +124,22 @@ class _Ctx:
 
 def gather_ci(
     event: PrEvent,
-    head_ref: str,
+    head_ref: str | None,
     github: GitHubReader,
     now: Callable[[], datetime],
     redactor: Redactor,
     config: IngestConfig,
     out: Collected,
+    artifacts: bool = True,
 ) -> None:
+    """`head_ref` is the pull request's head branch name, the listing the
+    branch's own workflow runs are read under; None skips that listing
+    (the caller could not resolve the branch name -- the head SHA's runs
+    still arrive). `artifacts` gates the artifact listing and downloads.
+    The agentic CI block passes False -- the lifted-context decision names
+    the logs, not the ZIPs, and a skipped archive entry there would be an
+    omission that holds the whole review at COMMENT for evidence no lens
+    asked for; the one-shot path keeps the default."""
     left = _Left(config.max_job_logs, config.max_artifacts)
     ctx = _Ctx(event, github, now, redactor, config, out, left)
     repo, sha = event.repo, event.head_sha
@@ -157,7 +167,7 @@ def gather_ci(
             SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
         ),
     ):
-        _gather_run(ctx, run)
+        _gather_run(ctx, run, artifacts)
 
 
 def _runs(
@@ -172,7 +182,7 @@ def _runs(
     )
 
 
-def _pr_runs(ctx: _Ctx, head_ref: str) -> list[WorkflowRun]:
+def _pr_runs(ctx: _Ctx, head_ref: str | None) -> list[WorkflowRun]:
     repo, sha = ctx.event.repo, ctx.event.head_sha
     at_head = _runs(
         ctx,
@@ -180,9 +190,11 @@ def _pr_runs(ctx: _Ctx, head_ref: str) -> list[WorkflowRun]:
         lambda: ctx.github.list_workflow_runs_at(repo, sha),
     )
     commits = {sha, *(c.sha for c in _pr_commits(ctx))}
-    on_branch = _runs(
-        ctx, "workflow runs", lambda: ctx.github.list_workflow_runs(repo, head_ref)
-    )
+    on_branch = (
+        _runs(ctx, "workflow runs", lambda: ctx.github.list_workflow_runs(repo, head_ref))
+        if head_ref is not None
+        else ()
+    )  # fmt: skip
     outside = [r for r in on_branch if r.item.head_sha not in commits]
     if outside:
         ctx.out.notes.append(
@@ -333,56 +345,6 @@ def _capped[T](
     return found[: max(left, 0)]
 
 
-def gather_head_ci(
-    event: PrEvent,
-    github: GitHubReader,
-    now: Callable[[], datetime],
-    redactor: Redactor,
-    config: IngestConfig,
-    out: Collected,
-) -> None:
-    """The head SHA's own CI results, for a caller that builds an agentic
-    first turn's CI evidence block (D73): the check runs at the head SHA,
-    the workflow runs at the head SHA, and the jobs of those runs, under
-    the same caps as `gather_ci`. Only the head SHA's own results are
-    fetched (D25's scoping): no other commit's checks, no listing under
-    the head branch's name, no job-log or artifact download -- the block
-    summarizes what ran at the head, and what was never fetched is simply
-    not in it. The fetch, parse and cap bookkeeping is `gather_ci`'s, so
-    a failed, malformed or cut-off listing is recorded in `out` the same
-    way."""
-    ctx = _Ctx(event, github, now, redactor, config, out, _Left(0, 0))
-    repo, sha = event.repo, event.head_sha
-    checks = _listing(ctx, "check runs", lambda: github.list_check_runs(repo, sha))
-    out.items.extend(
-        _parse_each(
-            ctx,
-            SourceKind.CHECK_RUN,
-            "check runs",
-            checks,
-            lambda e: parse_check_runs(e, now(), redactor),
-        )
-    )
-    runs = _runs(
-        ctx,
-        "head-SHA workflow runs",
-        lambda: github.list_workflow_runs_at(repo, sha),
-    )
-    at_head = [r for r in runs if r.item.head_sha == sha]
-    out.items.extend(r.item for r in at_head)
-    for run in _capped(
-        ctx,
-        "workflow runs at the head SHA",
-        at_head,
-        config.max_runs,
-        config.max_runs,
-        lambda r: SourceKey(
-            SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
-        ),
-    ):
-        _gather_jobs(ctx, run)
-
-
 def _gather_jobs(ctx: _Ctx, run: WorkflowRun) -> tuple[Job, ...]:
     repo, name = ctx.event.repo, run.item.provenance.key.name
     jobs = _parse_each(
@@ -401,10 +363,16 @@ def _gather_jobs(ctx: _Ctx, run: WorkflowRun) -> tuple[Job, ...]:
     return jobs
 
 
-def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
+def _gather_run(ctx: _Ctx, run: WorkflowRun, with_artifacts: bool = True) -> None:
     repo, name = ctx.event.repo, run.item.provenance.key.name
     jobs = _gather_jobs(ctx, run)
-    _gather_job_logs(ctx, [j for j in jobs if j.item.head_sha == ctx.event.head_sha])
+    # The whole branch's logs, failing jobs first, within the count cap:
+    # the owner's lifted-context decision (2026-11-26) -- a failure at an
+    # earlier commit that was never re-run is exactly the log the review
+    # needs, so the head-only download gate is gone.
+    _gather_job_logs(ctx, list(jobs))
+    if not with_artifacts:
+        return
     artifacts = _parse_each(
         ctx,
         SourceKind.ARTIFACT,
@@ -467,6 +435,9 @@ def _gather_job_log(ctx: _Ctx, job: Job) -> None:
 
 
 def _gather_artifacts(ctx: _Ctx, artifacts: tuple[ArtifactRef, ...]) -> None:
+    # Artifacts stay head-only: they are not the logs the lifted-context
+    # decision names, an earlier commit's artifact is usually expired, and
+    # the ZIP downloads are the gather's most expensive reads.
     live = [
         a for a in artifacts if a.item.head_sha == ctx.event.head_sha and not a.expired
     ]

@@ -6396,6 +6396,26 @@ pins the eleven ids, spans, encloses and echo evidence, and
 partial and lost boundaries per site. Offline only: recorded JSON and the
 span grader; no model call, network call or secret read.
 
+## 2026-11-27 — the context caps are lifted: full body, full conversation, whole-branch CI with logs (D96)
+
+The parity-validation brief's caps slice (Brandon's 2026-11-26 calls,
+recorded as D96 with updates on D38 and D73): `ConversationBudget`'s
+defaults are unbounded — the `pull-request` block carries the whole PR
+body and every remark whole where D38's 65,536/16,384/4,000-character
+working caps stood, and `parse_pull`'s body-cap default is gone with
+them; the commit-subject caps stay (full commit messages are the
+git-history slice's subject). The one bound left is the model's input
+room, and nothing truncates silently: the room-fitted builds cut with a
+named omission that holds approval at COMMENT (D42), and a model that
+names no room gets everything whole. The agentic first turn's
+`ci-evidence` block now runs `gather_ci` itself — the other commits'
+check runs, the branch-name listing's runs at this PR's commits, and the
+job logs of every ingested run's jobs, failing first — replacing the
+head-only `gather_head_ci`, which is removed; the ingest caps stay as
+fetch bounds, artifact ZIPs stay out of the agentic block and head-only
+in the one-shot path, and stale evidence is still labelled by its SHA
+and never a result for the head.
+
 ## 2026-11-27 — the CI gate splits into parallel jobs behind a `gate` aggregator (Brandon-approved Nov 26)
 
 The single `gate` job's median wall clock was ~23 minutes (23.4 median, 26.9

@@ -861,7 +861,7 @@ def _input_room_chars(
     characters against a token room, which is the conservative direction:
     content that passes here cannot overflow the per-call token check
     later. None: the model names no input room -- the dry run's scripted
-    reviewer never does -- so D52's fixed caps stand and the per-call
+    reviewer never does -- so the unbounded budget stands and the per-call
     token check stays the only bound, as before this wiring.
     """
     room = input_room_tokens(model)
@@ -896,9 +896,11 @@ def _conversation_block(
     the block's own.
 
     `fit` is the characters the model's input room holds for the context
-    blocks, or None when the model names no room and D52's fixed caps
-    stand. Under a fit the block is first built at the room's own size,
-    not D38's cap. A truncated build appends `TRUNCATION_MARKER` after
+    blocks, or None when the model names no room and the unbounded budget
+    stands (the owner's lifted-context decision, 2026-11-26: the full
+    body and the full conversation; the room is the only bound left).
+    Under a fit the block is first built at the room's own size,
+    not the budget's. A truncated build appends `TRUNCATION_MARKER` after
     its cap, so its bytes are at most four per content character plus the
     ASCII marker's 39: building at `fit - 39` characters makes an
     ASCII-truncated build exactly the room's size, and a multi-byte build
@@ -936,7 +938,7 @@ def _conversation_block(
     collected = Collected()
     commits = pr_commits(event, github, collected)
 
-    def build(size: int) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
+    def build(size: int | None) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
         conversation = build_conversation(
             pull_info, commits, remarks, event.head_sha, redactor,
             replace(budget, total_chars=size),
@@ -946,7 +948,10 @@ def _conversation_block(
     if fit is None:
         block, omissions = build(budget.total_chars)
         return block, (*collected.omissions, *omissions)
-    block, omissions = build(min(budget.total_chars, fit - _MARKER_CHARS))
+    first = budget.total_chars
+    if first is None or first > fit - _MARKER_CHARS:
+        first = fit - _MARKER_CHARS
+    block, omissions = build(first)
     size = len(block.content.text.encode("utf-8"))
     if size > fit:
         block, omissions = build((fit - _MARKER_CHARS) // 4)
@@ -1297,6 +1302,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 ci_collected = Collected()
                 ci, ci_omissions = ci_block(
                     event,
+                    _maybe_head_ref(pull),
                     github,
                     redactor,
                     clock,
@@ -1664,6 +1670,15 @@ def _require_head(pull: object, event: PrEvent, why: str) -> None:
     sha = head.get("sha") if isinstance(head, dict) else None
     if sha != event.head_sha:
         raise BoundaryError(f"{why}; no model call was made")
+
+
+def _maybe_head_ref(pull: object) -> str | None:
+    """The pull request's head branch name from the raw pull object, or
+    None when it does not parse -- the branch-name listing is skipped,
+    never the review (the unparseable-pull path keeps its one omission)."""
+    head = pull.get("head") if isinstance(pull, dict) else None
+    ref = head.get("ref") if isinstance(head, dict) else None
+    return ref if isinstance(ref, str) and ref else None
 
 
 def _live_github(

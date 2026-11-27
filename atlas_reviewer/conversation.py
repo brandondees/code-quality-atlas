@@ -11,11 +11,12 @@ branches, labels, commit subjects) is a JSON string and every free-text body
 is quoted with `> ` line by line, so no PR-written text can begin an
 unquoted line and forge a remark's heading.
 
-Nothing is cut silently. The body, each commit subject and each remark have
-their own cap, commit subjects and remarks keep the newest that fit their
-budget, and the block as a whole is held to `total_chars`. Every cut and
-everything left out is an `Omission`, which the draft lists and the model is
-told about.
+Nothing is cut silently. A budget's caps (the defaults keep only the
+commit-subject section's; the body and the remarks are whole) cut their own
+section with every cut and drop an `Omission`, which the draft lists and
+the model is told about. The block as a whole is held to `total_chars`
+when the budget names one; the agentic path builds at the model's input
+room instead when it names none, and that cut is named the same way.
 
 This module also builds the reviewed repo's coding-guidelines block
 (config slice S6): the default-branch `AGENTS.md` as one more bounded
@@ -33,7 +34,6 @@ from typing import Protocol
 
 from atlas_reviewer.domain import Omission, PrEvent
 from atlas_reviewer.evidence import (
-    BODY_CHARS,
     PrCommit,
     PullInfo,
     Remark,
@@ -60,9 +60,7 @@ from atlas_reviewer.redact import (
     Redactor,
 )
 
-CONVERSATION_CHARS = 65_536
 COMMIT_CHARS = 8_192
-REMARK_CHARS = 4_000
 SUBJECT_CHARS = 200
 MAX_LISTED_IDS = 20
 SOURCE = "pull request conversation"
@@ -70,14 +68,21 @@ SOURCE = "pull request conversation"
 
 @dataclass(frozen=True)
 class ConversationBudget:
-    """Characters, not bytes. Working defaults pending the owner (D38):
-    about 64 KiB in all, at most 16 KiB of it body and 8 KiB commit
-    subjects, the rest for remarks."""
+    """Characters, not bytes. Unbounded by default (the owner's
+    lifted-context decision, 2026-11-26, on #821 and the parity brief):
+    the full PR body and the full conversation -- no per-remark and no
+    whole-block cap. A budget may still name positive integer caps for a
+    caller that wants one; `commit_chars` keeps its cap, because full
+    commit *messages* are the git-history slice's subject, not this
+    one. The only bound the unbounded budget leaves is the model's input
+    room, which the agentic path sizes the block against; a build the
+    room cannot hold is cut to the room with the cut named, never
+    silently."""
 
-    total_chars: int = CONVERSATION_CHARS
-    body_chars: int = BODY_CHARS
+    total_chars: int | None = None
+    body_chars: int | None = None
     commit_chars: int = COMMIT_CHARS
-    remark_chars: int = REMARK_CHARS
+    remark_chars: int | None = None
 
     def __post_init__(self) -> None:
         sizes = (
@@ -86,7 +91,10 @@ class ConversationBudget:
             self.commit_chars,
             self.remark_chars,
         )
-        if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
+        if any(
+            n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 1)
+            for n in sizes
+        ):
             raise ValueError("conversation budgets must be positive integers")
 
 
@@ -231,12 +239,17 @@ def build_conversation(
 
 
 def _fit(
-    fixed: str, blocks: Sequence[str], redactor: Redactor, total: int
+    fixed: str, blocks: Sequence[str], redactor: Redactor, total: int | None
 ) -> tuple[RedactedText, int]:
     """The block with the most of the newest remarks whose final redacted
-    text fits `total`. Sizes before the final pass only pick where to start,
-    since that pass can lengthen the text; when even no remark fits, the
-    fixed part is cut to `total` (a named omission)."""
+    text fits `total`, or the whole block when `total` is None (the
+    unbounded budget; the caller that has a model input room to respect
+    builds at the room instead, the same named-cut path). Sizes before the
+    final pass only pick where to start, since that pass can lengthen the
+    text; when even no remark fits, the fixed part is cut to `total` (a
+    named omission)."""
+    if total is None:
+        return redactor("\n\n".join((fixed, *blocks))), len(blocks)
     start = _newest_that_fit(
         [len(b) + 2 for b in reversed(blocks)], max(total - len(fixed), 0)
     )
@@ -297,7 +310,7 @@ def _body(body: RedactedText) -> str:
     return f"Body:\n{_quote_lines(body.text)}" if body.text else "Body: (empty)"
 
 
-def _body_omission(body: RedactedText, cap: int) -> tuple[Omission, ...]:
+def _body_omission(body: RedactedText, cap: int | None) -> tuple[Omission, ...]:
     if body.truncated_from is None:
         return ()
     detail = f"kept {cap} of {body.truncated_from} characters"
@@ -364,7 +377,7 @@ class _Prepared:
 
 
 def _prepare_remarks(
-    remarks: Sequence[Remark], redactor: Redactor, cap: int
+    remarks: Sequence[Remark], redactor: Redactor, cap: int | None
 ) -> _Prepared:
     """A pending review has no time yet; it is the newest remark there is."""
     ordered = tuple(sorted(remarks, key=lambda r: (r.at == "", r.at, r.source_id)))
@@ -408,8 +421,10 @@ def _ids(remarks: Sequence[Remark]) -> str:
 
 
 def _dropped_omission(
-    dropped: Sequence[Remark], total: int, budget: int
+    dropped: Sequence[Remark], total: int, budget: int | None
 ) -> tuple[Omission, ...]:
+    """Drops only happen under a whole-block cap, so an unbounded budget
+    never reaches the message below."""
     if not dropped:
         return ()
     detail = (
@@ -420,8 +435,10 @@ def _dropped_omission(
 
 
 def _cut_omission(
-    cut: Sequence[tuple[Remark, RedactedText]], cap: int
+    cut: Sequence[tuple[Remark, RedactedText]], cap: int | None
 ) -> tuple[Omission, ...]:
+    """A cut body only exists under a per-remark cap, so an unbounded
+    budget never reaches the message below."""
     if not cut:
         return ()
     listed = ", ".join(
@@ -433,7 +450,7 @@ def _cut_omission(
     return (Omission(SOURCE, f"{cap}-character cap per review or comment", detail),)
 
 
-def _total_omission(text: RedactedText, cap: int) -> tuple[Omission, ...]:
+def _total_omission(text: RedactedText, cap: int | None) -> tuple[Omission, ...]:
     if text.truncated_from is None:
         return ()
     detail = f"kept {cap} of {text.truncated_from} characters; the end was cut"

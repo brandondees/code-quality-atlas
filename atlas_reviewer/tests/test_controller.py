@@ -869,7 +869,10 @@ def test_files_dropped_before_the_model_calls_are_omissions_and_coverage_is_part
     assert "2 file(s) were dropped from the diff before any model call" in notes
 
 
-def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
+def test_a_long_pr_body_reaches_the_block_whole_and_the_issue_body_is_still_capped():
+    """The lifted-context decision (2026-11-26): the full PR body, no cap
+    row for it; the issue body's own 2,000-character cap is untouched
+    (revert-check: a reinstated body cap puts its omission row back)."""
     pull = json.loads((FIXTURE / "pull.json").read_text())
     pull["body"] = "Fixes #7\n\n" + "word " * 4_000
 
@@ -882,11 +885,12 @@ def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
 
     draft = Setup(github=LongBodies(FIXTURE)).run(include_issues=True)
     omissions = section(draft, "Omissions and limits hit")
-    assert (
-        f"| pull request body | 16384-character cap | kept 16384 of {len(pull['body'])} characters |"
-        in omissions
-    )
+    assert "pull request body" not in omissions
     assert "| issue #7 | 2000-character cap | kept 2000 of " in omissions
+    # The full body is what the model was shown, quoted line by line.
+    shown = Setup(github=LongBodies(FIXTURE))
+    shown.run(include_issues=True)
+    assert ("word " * 4_000).strip() in shown.user_prompt()
 
 
 def test_lens_bodies_from_the_skill_bundle_reach_the_prompt():

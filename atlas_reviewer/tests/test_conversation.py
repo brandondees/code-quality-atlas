@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""The PR conversation block (D38): everything the PR says, held to a
-budget, with every cut and every dropped remark named as an omission."""
+"""The PR conversation block (D38, lifted by the owner's 2026-11-26
+decision): everything the PR says, whole by default, with every cut and
+every dropped remark named as an omission."""
 
 import json
 
@@ -142,8 +143,31 @@ def test_remarks_the_final_redaction_pushes_out_are_dropped_by_name():
     assert "issue_comment:5" in c.text.text
 
 
-def test_the_default_total_is_64_kib_of_characters():
-    assert ConversationBudget().total_chars == 65_536
+def test_the_default_budget_is_unbounded():
+    """The owner's lifted-context decision (2026-11-26): the full body and
+    the full conversation -- the only bound left is the model's input
+    room, which the agentic path sizes the block against and names when
+    it binds (revert-check: reintroducing any default cap fails here)."""
+    budget = ConversationBudget()
+    assert budget.total_chars is None
+    assert budget.body_chars is None
+    assert budget.remark_chars is None
+
+
+def test_the_default_budget_keeps_every_remark_and_the_whole_body():
+    """An unbounded build keeps every remark whole and the body whole, no
+    matter how long, with no cap omission of its own (revert-check: a
+    reinstated per-remark or whole-block cap drops or cuts one)."""
+    long_body = "word " * 5_000
+    info = parse_pull(pull(body=long_body), R)
+    remarks = [remark(n, "z" * 6_000) for n in range(1, 41)]
+    c = build_conversation(info, (), remarks, HEAD, R, ConversationBudget())
+    assert c.text.truncated_from is None
+    assert long_body in c.text.text
+    assert all(f"issue_comment:{n}" in c.text.text for n in range(1, 41))
+    assert all("z" * 6_000 in c.text.text for n in range(1, 41))
+    assert c.omissions == ()
+    assert (c.remarks_shown, c.remarks_total) == (40, 40)
 
 
 def test_remarks_are_in_time_order_and_the_oldest_are_dropped_by_name():

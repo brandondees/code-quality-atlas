@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: MIT
-"""The head SHA's CI evidence as one bounded block for an agentic first
-turn (D73).
+"""The pull request's branch CI evidence as one bounded block for an
+agentic first turn (D73, lifted by the owner's 2026-11-26 decision).
+
+The block was the head SHA's own results only (D73, under D25's scoping);
+the lifted-context decision widens it to the whole branch -- the check
+runs and workflow runs at every commit of the PR the listings reach, and
+the jobs' logs wherever they are available -- labelled by SHA, the same
+gather the one-shot path runs (`gather_ci`). A failure at an earlier
+commit that was never re-run is exactly the evidence a review needs, and
+it was invisible to the agentic lenses before.
 
 `gather.py` has collected check runs, workflow runs and jobs since the
 one-shot path was built, but only that path consumed them; the agentic
 lenses' first turn carried none, so no lens could name a real CI run.
 This module builds the summary the agentic path passes: the one-shot
-path's own evidence rendering (`render_evidence` over `classify`), scoped
-to the head SHA's own results, fenced as one more untrusted block next to
-the pull-request, conversation and round-log blocks (D52's assembly,
-wired by D67).
+path's own evidence rendering (`render_evidence` over `classify`), fenced
+as one more untrusted block next to the pull-request, conversation and
+round-log blocks (D52's assembly, wired by D67).
 
 The design points carried over from D52's rules:
 
@@ -21,19 +28,19 @@ The design points carried over from D52's rules:
   omissions here, so `coverage_complete` goes false and the review holds
   at COMMENT (D42) -- CI evidence can never make a review approvable
   that the omission gate would not.
-- Only the head SHA's own results are fetched (D25's scoping), paginated
-  to the one-shot path's hard caps (`IngestConfig`).
+- Bounded fetches, not a bounded block: the per-review ingest caps
+  (`IngestConfig`) bound what is read, and every cut read is an omission;
+  the block itself carries what was read whole.
 - Sized within D67's model-aware input-room budgeting: the caller passes
   what the conversation block left of the room, so the two blocks
   together cannot exceed it, and the prior rounds take what remains. A
-  block whose content does not fit its cap is truncated with the marker
-  and the cut is named; one whose bytes still overflow the room is
-  omitted whole and named -- never silently truncated, never sent to
-  overflow the per-call token check. Unlike the conversation block, which
-  rebuilds once smaller on that overflow, this block omits whole:
-  `build_conversation` can produce a smaller complete block by dropping
-  the oldest remarks, while `render_evidence` has no refit, so a smaller
-  build here would only be a shorter truncated table.
+  block whose content does not fit the room is omitted whole and named --
+  never silently truncated, never sent to overflow the per-call token
+  check. Unlike the conversation block, which rebuilds once smaller on
+  that overflow, this block omits whole: `build_conversation` can produce
+  a smaller complete block by dropping the oldest remarks, while
+  `render_evidence` has no refit, so a smaller build here would only be a
+  shorter truncated table.
 
 Nothing here reaches the draft except through the existing paths: the
 omissions travel as `context_omissions`, and anything a lens reports
@@ -45,7 +52,7 @@ from __future__ import annotations
 from atlas_reviewer.classify import classify
 from atlas_reviewer.domain import Omission, PrEvent
 from atlas_reviewer.draft import render_evidence
-from atlas_reviewer.gather import Collected, IngestConfig, gather_head_ci
+from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
 from atlas_reviewer.ports import Clock, GitHubReader
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.redact import (
@@ -57,18 +64,11 @@ from atlas_reviewer.redact import (
 
 SOURCE = "CI evidence"
 LABEL = "ci-evidence"
-CI_EVIDENCE_CHARS = 16_384
-"""The block's own cap, the same size D52 gives the prior-round blocks:
-a working default pending the owner. Under a model-named room the cap
-shrinks to what the room holds, minus the truncation marker.
-
-The sizing figures themselves live beside `redact.TRUNCATION_MARKER`
-(`TRUNCATION_MARKER_CHARS`, `MIN_FIT_CHARS`), the one home both this
-module and `cli`'s conversation sizing derive from."""
 
 
 def ci_block(
     event: PrEvent,
+    head_ref: str | None,
     github: GitHubReader,
     redactor: Redactor,
     clock: Clock,
@@ -76,8 +76,15 @@ def ci_block(
     config: IngestConfig | None = None,
     collected: Collected | None = None,
 ) -> tuple[UntrustedBlock | None, tuple[Omission, ...]]:
-    """The head SHA's CI evidence block and every omission, for an agentic
+    """The branch's CI evidence block and every omission, for an agentic
     first turn.
+
+    `head_ref` is the pull request's head branch name, the listing the
+    branch's own workflow runs are read under (the same figure the
+    one-shot path passes `gather_ci`; runs at commits outside this PR are
+    set aside and noted there, never used). None skips that listing, the
+    way a pull whose fields did not parse keeps its own omission without
+    dying.
 
     `room` is the characters of the model's input room the context blocks
     still hold after the conversation block is spent: the caller passes
@@ -86,9 +93,9 @@ def ci_block(
     the invariant holds by construction, the way D67's holds. A room below
     `MIN_FIT_CHARS` -- the conversation left almost nothing -- omits the
     block whole and names it. None: the model names no input room, so the
-    fixed cap stands and the per-call token check stays the only bound.
-    The gather runs first, so a failed or partial fetch is recorded even
-    when no block is built.
+    block is built whole and the per-call token check stays the only
+    bound. The gather runs first, so a failed or partial fetch is
+    recorded even when no block is built.
 
     `collected`, when given, is the caller-owned `Collected` the gather
     fills (D73): the caller keeps the gathered items, failures and notes
@@ -98,7 +105,10 @@ def ci_block(
         config = IngestConfig()
     if collected is None:
         collected = Collected()
-    gather_head_ci(event, github, clock.now, redactor, config, collected)
+    gather_ci(
+        event, head_ref, github, clock.now, redactor, config, collected,
+        artifacts=False,
+    )  # fmt: skip
     # Every gather failure is an omission (D42), whatever else was read:
     # a check-run listing that could not be fetched is CI evidence nobody
     # saw, and the review cannot approve on a partial picture of the head.
@@ -108,11 +118,6 @@ def ci_block(
     )
     if room is not None and room < MIN_FIT_CHARS:
         return None, (*collected.omissions, *failures, _left_out(room))
-    budget = (
-        CI_EVIDENCE_CHARS
-        if room is None
-        else min(CI_EVIDENCE_CHARS, room - TRUNCATION_MARKER_CHARS)
-    )
     evidence = classify(event.head_sha, collected.items, (), collected.failures)
     text = render_evidence(
         evidence, tuple(collected.omissions), tuple(collected.links), ()
@@ -121,8 +126,15 @@ def ci_block(
     # evidence was gathered at (D25's tag), so the block cannot be read
     # against another commit later in the same conversation.
     text = f"CI evidence for the reviewed head SHA {event.head_sha}:\n\n{text}"
+    if room is None:
+        content = redactor(text)
+        return UntrustedBlock(LABEL, content), (
+            *collected.omissions,
+            *failures,
+        )
+    budget = room - TRUNCATION_MARKER_CHARS
     content = redactor(text, budget)
-    if room is not None and len(content.text.encode("utf-8")) > room:
+    if len(content.text.encode("utf-8")) > room:
         return None, (*collected.omissions, *failures, _left_out(room))
     return UntrustedBlock(LABEL, content), (
         *collected.omissions,
@@ -146,7 +158,7 @@ def _truncation_omissions(content: RedactedText, cap: int) -> tuple[Omission, ..
     return (
         Omission(
             SOURCE,
-            f"{cap}-character cap",
-            f"kept {cap} of {content.truncated_from} characters",
+            "model input room",
+            f"kept {cap} of {content.truncated_from} characters; the end was cut",
         ),
     )

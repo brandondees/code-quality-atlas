@@ -79,7 +79,13 @@ def test_page_cap_hit_is_an_omission_and_the_remainder_is_unknown():
     assert outcome(beyond) is Outcome.UNKNOWN
 
 
-def test_logs_and_artifacts_are_fetched_only_for_the_head_sha():
+def test_job_logs_are_fetched_whatever_commit_they_ran_at_and_artifacts_stay_head_only():
+    """The lifted-context decision (2026-11-26): the whole branch's logs,
+    failing jobs first, within the count cap -- a failure at an earlier
+    commit that was never re-run is exactly the log the review needs. The
+    artifact downloads stay head-only: they are not the logs the decision
+    names, and an earlier commit's artifact is usually expired."""
+
     class Mixed(FixtureGitHub):
         def list_run_jobs(self, repo, run_id):
             jobs = list(super().list_run_jobs(repo, run_id).items)
@@ -93,10 +99,13 @@ def test_logs_and_artifacts_are_fetched_only_for_the_head_sha():
             return Listing((art, stale, expired), False, 1)
 
     gh = Mixed(FIXTURE)
-    gather(gh)
-    assert {c[2] for c in calls(gh, "get_job_logs")} == {"7001", "7002"}
+    out = gather(gh)
+    assert {c[2] for c in calls(gh, "get_job_logs")} == {"7001", "7002", "7999"}
     assert {c[2] for c in calls(gh, "download_artifact")} == {"9001"}
     assert all(c[2] == "5001" for c in calls(gh, "list_run_jobs"))
+    # The stale job's own log is absent from the fixture, so the download
+    # is a named UNKNOWN failure, never a silent skip.
+    assert any("7999" in f.reason for f in out.failures)
 
 
 def test_job_log_cap_reads_failing_jobs_first_and_notes_the_rest():

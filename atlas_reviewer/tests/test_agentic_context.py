@@ -26,16 +26,15 @@ from typing import ClassVar
 import pytest
 
 from atlas_reviewer import cli
-from atlas_reviewer.ci_block import CI_EVIDENCE_CHARS, ci_block
 from atlas_reviewer.ci_block import (
     LABEL as CI_LABEL,
 )
 from atlas_reviewer.ci_block import (
     SOURCE as CI_SOURCE,
 )
+from atlas_reviewer.ci_block import ci_block
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.conversation import (
-    CONVERSATION_CHARS,
     GUIDELINE_CHARS,
     ConversationBudget,
 )
@@ -44,7 +43,7 @@ from atlas_reviewer.conversation import (
 )
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.evidence import parse_pull
-from atlas_reviewer.gather import Collected, IngestConfig, gather_head_ci
+from atlas_reviewer.gather import Collected, IngestConfig
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.lens_script import _BODY_MARKER, LensScriptModel
 from atlas_reviewer.ports import BoundaryError, Listing
@@ -497,14 +496,14 @@ def test_prior_rounds_that_no_longer_fit_the_room_are_omitted_by_name(tmp_path):
     assert records["head_sha"] == HEAD_SHA
 
 
-def test_a_conversation_over_its_d38_budget_shrinks_with_recorded_omissions(
+def test_the_whole_conversation_reaches_the_first_turn_no_matter_how_long(
     tmp_path,
 ):
-    """The assembly the first turn now carries is the one-shot path's, cap
-    included: a conversation that does not fit D38's budget keeps the
-    newest remarks and records every cut, and the shrunken block still
-    reaches every lens (the mutant that hard-slices the text leaves no
-    recorded omission and fails here)."""
+    """The lifted-context decision (2026-11-26): the full conversation --
+    no per-remark and no whole-block cap -- so forty long drive-by
+    comments all reach every lens's fenced first turn, and no budget
+    omission is recorded for them (revert-check: a reinstated D38 cap
+    drops the oldest and puts its omission row back)."""
     fixtures = tmp_path / "fixtures"
     shutil.copytree(FIXTURE, fixtures)
     comments = json.loads((fixtures / "issue-comments.json").read_text())
@@ -523,23 +522,22 @@ def test_a_conversation_over_its_d38_budget_shrinks_with_recorded_omissions(
     ]
     (fixtures / "issue-comments.json").write_text(json.dumps(comments))
     code, draft, err = _run(tmp_path, "--depth", "review", "--fixtures", str(fixtures))
-    assert code == cli.EXIT_INCOMPLETE, err
+    assert code == cli.EXIT_CHANGES_REQUESTED, err
     assert Recording.first_turns
     for turn in Recording.first_turns:
         fenced = re.search(
             r'label="pull-request">\n(.*)\n</untrusted-data', turn, re.DOTALL
         )
         assert fenced is not None
-        assert len(fenced.group(1)) <= CONVERSATION_CHARS
         assert "Fix discount rounding for multi-item carts" in fenced.group(1)
-    lines = "\n".join(_context_omission_lines(draft))
-    assert f"{CONVERSATION_CHARS}-character budget" in lines
-    assert "oldest review(s) and comment(s) not shown" in lines
+        assert all(f"issue_comment:{9000 + i}" in fenced.group(1) for i in range(40))
+    lines = _context_omission_lines(draft)
+    assert all("budget" not in line and "not shown" not in line for line in lines)
 
 
 def _oversized_conversation_fixtures(tmp_path: Path, *, filler: str) -> Path:
-    """The shipped fixture plus enough large conversation comments that the
-    conversation block alone overflows D38's budget by a wide margin."""
+    """The shipped fixture plus enough large conversation comments that a
+    capped build could not hold them whole."""
     fixtures = tmp_path / "fixtures"
     shutil.copytree(FIXTURE, fixtures)
     comments = json.loads((fixtures / "issue-comments.json").read_text())
@@ -613,10 +611,10 @@ def test_a_room_that_fits_a_shrunken_conversation_sizes_the_first_build_to_it(
 ):
     """The positive-fit path (M-2): with a room that holds a shrunken but
     oversized conversation, the first build is already sized to the room
-    -- not to D38's cap -- so the block reaches every lens smaller than
-    the D38 build would be, the cuts are recorded, and the prior rounds
+    -- not to any budget -- so the block reaches every lens smaller than
+    the whole conversation, the cuts are recorded, and the prior rounds
     take what the conversation left (mutant N7 sizes the first build to
-    D38's cap alone and needs a second, discarded build here)."""
+    a fixed cap alone and needs a second, discarded build here)."""
     fixtures = _oversized_conversation_fixtures(
         tmp_path, filler="please also round the shipping fees " * 120
     )
@@ -664,7 +662,7 @@ def test_a_room_that_fits_a_shrunken_conversation_sizes_the_first_build_to_it(
         assert fenced is not None
         blocks.append(fenced.group(1))
         assert "Fix discount rounding for multi-item carts" in fenced.group(1)
-    assert all(len(block) < CONVERSATION_CHARS for block in blocks)
+    assert all(len(block) < 120_000 for block in blocks)
     lines = "\n".join(_context_omission_lines(draft))
     assert "oldest review(s) and comment(s) not shown" in lines
     prior = re.search(r"prior atlas reviews.*?(\d+)-character budget", lines, re.DOTALL)
@@ -754,7 +752,7 @@ def test_multi_byte_conversation_content_is_rebuilt_to_its_byte_budget(body):
     block, omissions = _block_at_fit(56_000, body)
     assert block is not None
     assert len(block.content.text.encode("utf-8")) <= 56_000
-    assert len(block.content.text) < CONVERSATION_CHARS
+    assert len(block.content.text) < 56_000
     assert omissions
     assert any(o.source == CONVERSATION_SOURCE for o in omissions)
 
@@ -837,9 +835,10 @@ def _emoji_ci_fixtures(tmp_path: Path) -> Path:
 
 def test_the_ci_block_reaches_every_lens_tagged_with_the_head_sha(tmp_path):
     """The head SHA's CI evidence reaches every lens run's fenced first
-    turn, tagged with that SHA, and only that SHA's runs are in it -- the
-    mutant that drops the block from `context=` (M1) or fetches every
-    commit's checks (M4) fails here."""
+    turn, tagged with that SHA; the earlier commit's checks arrive too
+    (the lifted-context decision) but only in the stale table, labelled
+    by their SHA -- the mutant that drops the block from `context=` (M1)
+    or drops the tag line (M7) fails here."""
     code, draft, err = _run(tmp_path, "--depth", "review")
     assert code == cli.EXIT_CHANGES_REQUESTED, err
     count = _lens_count(draft)
@@ -853,9 +852,12 @@ def test_the_ci_block_reaches_every_lens_tagged_with_the_head_sha(tmp_path):
         assert "check_run:7002" in block
         assert "workflow_run:5001" in block
         assert "ci / test" in block
+        # The other commit's evidence is in the stale table, labelled by
+        # its SHA; it is never a result for the head.
         assert OTHER_SHA not in block
-        assert "check_run:6001" not in block
-        assert "workflow_run:4001" not in block
+        assert OTHER_SHA[:12] in block
+        assert "check_run:6001" in block
+        assert "workflow_run:4001" in block
 
 
 def test_a_ci_fetch_failure_is_an_omission_and_holds_the_review_at_comment(
@@ -923,29 +925,86 @@ class _CallCountingGitHub(FixtureGitHub):
         return super().list_check_runs(repo, sha)
 
 
-def test_only_the_head_shas_results_are_fetched(tmp_path):
-    """D25's scoping at the gather: one check-run listing, at the head SHA
-    only -- no other commit's checks, no listing under the head branch's
-    name, no job-log or artifact download -- and every item gathered is at
-    the head SHA (the mutant that reuses the one-shot `gather_ci`'s
-    wider reach, M4, asks for the other commits and fails here)."""
-    gh = _CallCountingGitHub(FIXTURE)
+def test_the_branchs_results_are_fetched_not_just_the_heads(tmp_path):
+    """The lifted-context decision (2026-11-26) at the gather: the check
+    runs at the PR's other commits, the listing under the head branch's
+    name, and the job logs -- whatever commit they ran at -- are all
+    fetched for the block, beside the head SHA's own results (revert
+    M4, the head-only gather, fails here)."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    gh = _CallCountingGitHub(fixtures)
     out = Collected()
-    gather_head_ci(EVENT_OBJ, gh, SystemClock().now, Redactor(), IngestConfig(), out)
-    assert gh.check_run_shas == [HEAD_SHA]
+    ci_block(
+        EVENT_OBJ,
+        "fix/discount-rounding",
+        gh,
+        Redactor(),
+        SystemClock(),
+        None,
+        IngestConfig(),
+        out,
+    )
+    assert HEAD_SHA in gh.check_run_shas
+    assert OTHER_SHA in gh.check_run_shas
     calls = [call[0] for call in gh.calls]
-    assert "list_workflow_runs" not in calls
-    assert "get_job_logs" not in calls
-    assert "download_artifact" not in calls
+    assert "list_workflow_runs" in calls
+    assert "get_job_logs" in calls
+    # Artifact ZIPs stay the one-shot path's read: the decision names the
+    # logs, and a skipped archive entry here would be an omission that
+    # holds the whole review at COMMENT for evidence no lens asked for.
     assert "list_run_artifacts" not in calls
+    assert "download_artifact" not in calls
     assert out.items
-    assert all(item.head_sha == HEAD_SHA for item in out.items)
-    assert any(item.provenance.key.kind.value == "job" for item in out.items)
+    # Head evidence and earlier-commit evidence both arrive, each still
+    # labelled with the SHA GitHub gave it.
+    assert all(item.head_sha for item in out.items)
+
+
+def test_the_whole_branchs_ci_reaches_the_first_turn(tmp_path):
+    """The agentic first turn's CI block carries the branch's evidence:
+    a check run at an earlier commit -- stale by `classify`, labelled by
+    its SHA -- is in the fenced block every lens sees (revert-check: the
+    head-only block never carried it)."""
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    runs = json.loads((fixtures / "check-runs.json").read_text())
+    runs["check_runs"].append(
+        {
+            "id": 9101,
+            "name": "integration",
+            "head_sha": OTHER_SHA,
+            "status": "completed",
+            "conclusion": "failure",
+            "app": {"slug": "github-actions"},
+            "output": {"title": "2 failed", "summary": "the old run failed"},
+        }
+    )
+    (fixtures / "check-runs.json").write_text(json.dumps(runs))
+    Recording.room = None
+    try:
+        code, _draft, err = _run(
+            tmp_path,
+            "--depth", "review",
+            "--fixtures", str(fixtures),
+            "--lens-script", str(FIXTURE / "scenarios" / "approve.json"),
+        )  # fmt: skip
+    finally:
+        Recording.room = None
+    assert code == cli.EXIT_OK, err
+    assert Recording.first_turns
+    for turn in Recording.first_turns:
+        fenced = _ci_fence(turn)
+        assert fenced is not None
+        # The stale table labels the earlier commit by its SHA.
+        assert OTHER_SHA[:12] in fenced.group(1)
+        assert "| failure | check_run | integration |" in fenced.group(1)
 
 
 def _ci_block_at(fixtures: Path, fit: int | None):
     return ci_block(
         EVENT_OBJ,
+        "fix/discount-rounding",
         FixtureGitHub(fixtures),
         Redactor(),
         SystemClock(),
@@ -978,11 +1037,11 @@ def test_a_ci_block_within_the_room_is_built_whole(tmp_path):
     assert not any(omission.source == CI_SOURCE for omission in omissions)
 
 
-def test_a_ci_block_over_its_cap_is_truncated_with_a_named_omission(tmp_path):
-    """Content past the block's own cap is cut at the cap with the marker
-    and the cut is named -- a model that names no room keeps the fixed cap
-    and the per-call token check as its only bound, exactly as the
-    conversation block does under D67."""
+def test_a_model_that_names_no_room_gets_the_whole_evidence(tmp_path):
+    """The lifted-context decision (2026-11-26): no fixed cap on the CI
+    block -- a model that names no room gets everything the gather read,
+    whole, with the per-call token check as its only bound (revert-check:
+    a reinstated fixed cap truncates and puts its omission row back)."""
     fixtures = tmp_path / "fixtures"
     shutil.copytree(FIXTURE, fixtures)
     runs = json.loads((fixtures / "check-runs.json").read_text())
@@ -1001,12 +1060,9 @@ def test_a_ci_block_over_its_cap_is_truncated_with_a_named_omission(tmp_path):
     (fixtures / "check-runs.json").write_text(json.dumps(runs))
     block, omissions = _ci_block_at(fixtures, None)
     assert block is not None
-    assert len(block.content.text) <= CI_EVIDENCE_CHARS + 39
-    assert len(block.content.text.encode("utf-8")) <= CI_EVIDENCE_CHARS + 39
-    assert any(
-        omission.source == CI_SOURCE and "16384-character cap" in omission.limit
-        for omission in omissions
-    )
+    assert len(block.content.text) > 24_000
+    assert "x" * 600 in block.content.text
+    assert not any(omission.source == CI_SOURCE for omission in omissions)
 
 
 def test_a_ci_truncated_build_fits_the_room_in_one_build(tmp_path):
@@ -1021,7 +1077,7 @@ def test_a_ci_truncated_build_fits_the_room_in_one_build(tmp_path):
     assert block is not None
     assert len(block.content.text.encode("utf-8")) <= 1_000
     assert any(
-        omission.source == CI_SOURCE and "character cap" in omission.limit
+        omission.source == CI_SOURCE and omission.limit == "model input room"
         for omission in omissions
     )
 
@@ -1149,9 +1205,13 @@ def test_the_ci_block_takes_the_room_the_conversation_leaves(
         seen["fit"] = real_fit(*args, **kwargs)
         return seen["fit"]
 
-    def ci_spy(event, github, redactor, clock, room, config=None, collected=None):
+    def ci_spy(
+        event, head_ref, github, redactor, clock, room, config=None, collected=None
+    ):
         seen["room"] = room
-        return real_ci(event, github, redactor, clock, room, config, collected)
+        return real_ci(
+            event, head_ref, github, redactor, clock, room, config, collected
+        )
 
     monkeypatch.setattr(cli, "_input_room_chars", fit_spy)
     monkeypatch.setattr(cli, "ci_block", ci_spy)
@@ -1175,7 +1235,9 @@ def test_the_ci_block_takes_the_room_the_conversation_leaves(
     ci = _ci_fence(turn)
     if ci is not None:
         assert conv_bytes + len(ci.group(1).encode("utf-8")) <= seen["fit"]
-        assert "model input room" not in lines
+        # A room-truncated build is named; an omitted-whole block ("cannot
+        # hold") must not sit beside a block that shipped.
+        assert all("cannot hold" not in line for line in lines)
     else:
         assert code == cli.EXIT_INCOMPLETE, err
         assert '"review_event": "COMMENT"' in draft
