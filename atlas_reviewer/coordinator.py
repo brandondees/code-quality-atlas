@@ -11,9 +11,14 @@ the same target and the same claim -- into one representative that
 carries every lens attribution (issue #822), ranks the verified
 findings by severity and sets the verdict from them (D55). An
 introduced Blocker requests changes. An introduced Major or Minor means
-approve with changes. Only nits, or nothing, means approve. The
-per-review merge/verify model call the plan's step 7 names is not here
-yet; the mechanical dedupe is.
+approve with changes. Only nits, or nothing, means approve. After the
+mechanical synthesis, one bounded merge/verify model call (the plan's
+step 7, `atlas_reviewer/synthesis.py`) judges the findings the exact
+dedupe could not -- merging what is one defect in different words,
+recording the tensions, checking the conversation and the prior rounds,
+verifying each finding's line-numbered evidence -- and every downgrade
+or drop it proposes is recorded as an annotation: the verdict is never
+lowered by model output.
 
 Coverage is complete only when every lens read every changed file's
 diff in full, through its own attempts or its own continuations (D42:
@@ -227,6 +232,17 @@ from atlas_reviewer.runner import (
     event_runner_name,
     lens_runner_name,
 )
+from atlas_reviewer.synthesis import (
+    MERGE_PRIORS_CHARS,
+    MergeResult,
+    findings_block,
+    merge_system,
+    merge_turn,
+    merged_away,
+    parse_merge_reply,
+    proposals_on,
+    reconcile,
+)
 from atlas_reviewer.telemetry import ERROR, Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.tracing import (
@@ -345,6 +361,15 @@ class AgenticReview:
     worst case reserved for them (D82's tripwire, round-1 review of
     #757), carried into the draft's cost line: the observable signal
     that a provider billed past the priced worst case."""
+    merge: MergeResult | None = None
+    """The per-review merge/verify call's outcome (the plan's step 7,
+    issues #822 and #823), when the review ran one: a review with no
+    minted findings runs none, and None keeps those drafts exactly as
+    they were. `applied` False fails the review closed -- REVIEW
+    INCOMPLETE -- with the cause named in `note`; `applied` True carries
+    the merge clusters, the downgrade and drop proposals (annotations
+    the draft appends to their findings' lines, never verdict input) and
+    the counts the draft's section reads."""
     endpoint_class: str = ""
     """Which endpoint class served the review's calls (config slice S10):
     `operator` for the operator's key, `tenant` for the installation's
@@ -465,6 +490,12 @@ class AgenticReview:
         its other entries -- an earlier NOT RUN, a later NOT RUN -- ended;
         the failures stay in the draft, marked recovered."""
         if _lens_gap(self):
+            return False
+        if self.merge is not None and not self.merge.applied:
+            # The merge/verify call could not run or did not reconcile
+            # (the plan's step 7): the synthesis the review claims is
+            # then not the synthesis it ran, so the review fails closed
+            # with the refusal named, exactly as a lens gap does.
             return False
         return self.runner is None or self.runner.status is RunnerStatus.COMPLETED
 
@@ -912,7 +943,17 @@ def review_lenses(
     re-anchored and quote-checked against this head, the new commits'
     fixes marked resolved on evidence the delta removed their cited
     code, everything else carried as it was recorded, never silently
-    dropped."""
+    dropped.
+
+    After the mechanical synthesis, one bounded merge/verify call (the
+    plan's step 7, `synthesis.py`) judges the findings the exact dedupe
+    could not: merging what is one defect in different words, recording
+    lens tensions, checking the conversation and the prior rounds, and
+    verifying each finding's line-numbered evidence. Every downgrade or
+    drop it proposes is an annotation -- the verdict is computed over
+    the findings as the controller verified them -- and a call the
+    limits refuse, or a reply that does not reconcile, fails the review
+    closed with the findings standing unmerged."""
     funding = noted_funding_source()
     read = review_md_ceiling(trees.base)
     effective, clamp_note = clamp_repo_ceiling(read.value, operator_ceiling_max)
@@ -1226,6 +1267,20 @@ def _review_lenses(
         rerank_note=_rerank_note(files, path_ranks, redactor),
         endpoint_class=endpoint_class(model),
         funding_source=funding,
+    )
+    review = _with_merge(
+        review,
+        event,
+        blocks,
+        round_log,
+        model,
+        spend,
+        resolved,
+        clock,
+        deadline,
+        fence_nonce,
+        trace,
+        redactor,
     )
     if decisions:
         review = replace(review, lens_decisions=decisions)
@@ -2577,6 +2632,95 @@ def _records_at(
     return tuple(record for record in mine if record.head_sha == delta_from), ""
 
 
+class BoundedCallRefused(Exception):
+    """A controller-level call the review's own limits refused before it
+    was sent -- the wall clock, the call cap or the dollar reservation.
+    The caller composes its own fail-closed fallback and names the
+    refusal; the reservation, when one had committed, is already
+    released."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+
+
+def _reserved_turn(
+    model: LensModel,
+    request: TurnRequest,
+    spend: Spend,
+    clock: Clock,
+    deadline: float,
+    *,
+    fit: bool,
+    what: str,
+) -> FinalReply:
+    """One bounded controller-level call -- the carry-forward's, the
+    merge call's -- sent and settled exactly as a lens turn is: the wall
+    check before the reservation (round-5 review of #748), the
+    worst-case reservation against the review's shared spend (D68), the
+    settle paths D92's fix round settled, and the FinalReply contract
+    check. Raises `BoundedCallRefused` when the review's own limits
+    refused the call before it was sent; every other failure re-raises
+    after its settle, so the caller's fallback can name what happened
+    while the spend stays honest."""
+    if clock.monotonic() >= deadline:
+        raise BoundedCallRefused(
+            f"the review's deadline passed before {what} could run"
+        )
+    reserved = _reserve_call(model, request, spend, clock, deadline, fit=fit)
+    if not isinstance(reserved, _Reserved):
+        raise BoundedCallRefused(reserved[1])
+    worst = reserved.worst
+    if clock.monotonic() >= deadline:
+        # The reservation fits immediately and never consults the clock,
+        # so the wall check is ours (round-5 review of #748): the lens
+        # loop ended at the deadline, and a billable call sent after it
+        # spends past the wall the review respects. The reservation is
+        # released (D92): the call was never sent, so nothing was held
+        # in flight and nothing was billed.
+        spend.settle_failure(worst, None)
+        raise BoundedCallRefused(
+            f"the review's deadline passed while {what} reserved; the call was not sent"
+        )
+    try:
+        reply = model.turn(request)
+    except KeyRefusedError as exc:
+        # A refused key is a review error, not a spend (D92): the review's
+        # spend halts with the fixed cause; the caller's fallback composes
+        # its own default, and the finalized review carries the cause as
+        # its review error.
+        spend.fail_and_halt(worst, None, exc.review_error)
+        raise
+    except ByokRefusedError:
+        spend.settle(worst, None)
+        spend.halt()
+        raise
+    except TransportError:
+        # A written request may still have been billed (D58 item 5,
+        # restored by D92's fix round): the reservation is kept, and it
+        # is a hold, not a bill (D93).
+        spend.hold(worst)
+        raise
+    except BoundaryError as exc:
+        # The settle reads what the exception carries (D92's fix round):
+        # a priced 200 the turn rejected settles at the parsed cost, a
+        # served response with no usable usage keeps the reservation
+        # (D43), and anything that never served a response releases at $0.
+        reported = exc.reported_cost
+        if reported is not None and valid_cost(reported):
+            spend.settle(worst, reported)
+        elif reported is not None:
+            spend.settle(worst, None)
+        else:
+            spend.settle_failure(worst, None)
+        raise
+    spend.settle(worst, reply.cost_usd)
+    if not isinstance(reply, FinalReply):
+        raise ContractError(
+            f"the {what}'s reply was a tool call, and the turn has none"
+        )
+    return reply
+
+
 def _carry_call(
     event: PrEvent,
     prior: Sequence[tuple[str, Finding]],
@@ -2633,69 +2777,18 @@ def _carry_call(
         (),
         None,
     )  # fmt: skip
-    if clock.monotonic() >= deadline:
-        # The wall check before the reservation (round-5 review of
-        # #748): a carry call that starts after the lens loop's deadline
-        # must not reserve -- let alone send -- a billable request; the
-        # carry fallback carries every prior finding as recorded.
-        raise CarryCallRefused(
-            "the review's deadline passed before the carry-forward could run"
-        )
-    reserved = _reserve_call(traced_model, request, spend, clock, deadline, fit=False)
-    if not isinstance(reserved, _Reserved):
-        raise CarryCallRefused(reserved[1])
-    worst = reserved.worst
-    if clock.monotonic() >= deadline:
-        # The reservation fits immediately and never consults the clock,
-        # so the wall check is ours (round-5 review of #748): the lens
-        # loop ended at the deadline, and a billable call sent after it
-        # spends past the wall the review respects. The reservation is
-        # released (D92): the call was never sent, so nothing was held
-        # in flight and nothing was billed. The carry fallback carries
-        # every prior finding as recorded.
-        spend.settle_failure(worst, None)
-        raise CarryCallRefused(
-            "the review's deadline passed while the carry-forward "
-            "reserved; the call was not sent"
-        )
     try:
-        reply = traced_model.turn(request)
-    except KeyRefusedError as exc:
-        # A refused key is a review error, not a spend (D92): the review's
-        # spend halts with the fixed cause; the carry fallback composes the
-        # priors as recorded, and the finalized review carries the cause
-        # as its review error -- the posted result is the error or the
-        # partial record it names, never an ordinary review.
-        spend.fail_and_halt(worst, None, exc.review_error)
-        raise
-    except ByokRefusedError:
-        spend.settle(worst, None)
-        spend.halt()
-        raise
-    except TransportError:
-        # A written request may still have been billed (D58 item 5,
-        # restored by D92's fix round): the reservation is kept, and it
-        # is a hold, not a bill (D93).
-        spend.hold(worst)
-        raise
-    except BoundaryError as exc:
-        # The settle reads what the exception carries (D92's fix round):
-        # a priced 200 the turn rejected settles at the parsed cost, a
-        # served response with no usable usage keeps the reservation
-        # (D43), and anything that never served a response releases at $0.
-        reported = exc.reported_cost
-        if reported is not None and valid_cost(reported):
-            spend.settle(worst, reported)
-        elif reported is not None:
-            spend.settle(worst, None)
-        else:
-            spend.settle_failure(worst, None)
-        raise
-    spend.settle(worst, reply.cost_usd)
-    if not isinstance(reply, FinalReply):
-        raise ContractError(
-            "the carry-forward reply was a tool call, and the turn has none"
+        reply = _reserved_turn(
+            traced_model,
+            request,
+            spend,
+            clock,
+            deadline,
+            fit=False,
+            what="the carry-forward",
         )
+    except BoundedCallRefused as exc:
+        raise CarryCallRefused(str(exc)) from None
     parsed = parse_carry_reply(reply.text)
     checked, revises = judged_carry(
         parsed, prior, sources, trees.head, resolved.quote_tolerance
@@ -2815,6 +2908,156 @@ def _compose_carry(
         # of #757) -- an overrun on a post-synthesis settle is counted in
         # committed spend and must reach the draft's cost line too.
         settle_overruns=tuple(spend.overruns),
+    )
+
+
+def _with_merge(
+    review: AgenticReview,
+    event: PrEvent,
+    blocks: Sequence[UntrustedBlock],
+    round_log: RoundLog | None,
+    model: LensModel,
+    spend: Spend,
+    resolved: Limits,
+    clock: Clock,
+    deadline: float,
+    fence_nonce: str,
+    trace: ReviewTrace,
+    redactor: Redactor,
+) -> AgenticReview:
+    """The per-review merge/verify call (the plan's step 7, issues #822
+    and #823), composed after the lenses settle and before the delta
+    review's carry-forward: one bounded, tool-less call over the
+    deduped findings, the review's own context blocks and the prior
+    rounds' recorded findings, whose dispositions the controller
+    reconciles against the findings it holds (`synthesis.reconcile`).
+
+    A review with no minted findings runs no merge call: there is
+    nothing to merge, verify or reconcile, and its draft is exactly what
+    the mechanical synthesis wrote. A call the review's limits refuse,
+    one that fails, or a reply that does not reconcile leaves the
+    findings unmerged and fails the review closed -- `coverage_complete`
+    False, REVIEW INCOMPLETE, the cause named -- never a silent pass."""
+    findings = review.findings
+    if not findings:
+        return review
+    scrubber = Redactor(
+        redactor.known_secrets, redactor.sources, (*redactor.flagged, *review.flagged)
+    )
+    lens_trace = trace.with_scrub(lambda text: scrubber(text).text)
+    request = TurnRequest(
+        merge_system(fence_nonce),
+        (
+            UserText(
+                merge_turn(
+                    event,
+                    findings_block(findings),
+                    _priors_block(round_log, event),
+                    blocks,
+                    fence_nonce,
+                )
+            ),
+        ),
+        (),
+        None,
+    )  # fmt: skip
+    try:
+        reply = _reserved_turn(
+            lens_trace.wrap_model(model),
+            request,
+            spend,
+            clock,
+            deadline,
+            fit=False,
+            what="the merge call",
+        )
+    except BoundedCallRefused as exc:
+        return _merge_not_applied(review, spend, str(exc))
+    except Exception as exc:  # noqa: BLE001 -- a failed merge leaves the findings standing
+        return _merge_not_applied(
+            review, spend, f"{type(exc).__name__}: {scrubber(str(exc)).text}"
+        )
+    try:
+        kept, result = reconcile(parse_merge_reply(reply.text), findings)
+    except ContractError as exc:
+        return _merge_not_applied(
+            review,
+            spend,
+            f"the merge reply did not reconcile ({scrubber(str(exc)).text}); "
+            "the findings stand unmerged",
+        )
+    note = _merge_section_note(result)
+    return replace(
+        review,
+        findings=rank(kept),
+        merge=replace(result, note=note),
+        model_calls=spend.calls,
+        committed_usd=str(spend.committed_usd),
+        billed_usd=str(spend.billed_usd()),
+        held_usd=str(spend.held_usd),
+        settle_overruns=tuple(spend.overruns),
+    )
+
+
+def _merge_not_applied(
+    review: AgenticReview, spend: Spend, detail: str
+) -> AgenticReview:
+    """The review with the merge call not applied: the findings stand
+    unmerged, the spend the call's attempt settled (a hold for a written
+    request, $0 for a refused one) is read back like any post-synthesis
+    settle, and the review fails closed with the cause named."""
+    return replace(
+        review,
+        merge=MergeResult(False, note=f"the merge call was not applied: {detail}"),
+        model_calls=spend.calls,
+        committed_usd=str(spend.committed_usd),
+        billed_usd=str(spend.billed_usd()),
+        held_usd=str(spend.held_usd),
+        settle_overruns=tuple(spend.overruns),
+    )
+
+
+def _merge_section_note(result: MergeResult) -> str:
+    """The applied merge's one-line note, for the draft's section: what
+    the call did, or that it kept everything."""
+    if not result.clusters and not result.proposals:
+        return "the merge call kept every finding as the controller holds it"
+    parts = []
+    if result.clusters:
+        parts.append(f"{result.clusters} cluster{_plural(result.clusters)} merged")
+    if result.downgrades:
+        parts.append(
+            f"{result.downgrades} downgrade{_plural(result.downgrades)} proposed"
+        )
+    if result.drops:
+        parts.append(f"{result.drops} drop{_plural(result.drops)} proposed")
+    return "the merge call: " + ", ".join(parts)
+
+
+def _plural(n: int) -> str:
+    return "" if n == 1 else "s"
+
+
+def _priors_block(round_log: RoundLog | None, event: PrEvent) -> UntrustedBlock | None:
+    """The pull request's prior rounds' recorded findings, as one fenced
+    block the merge call checks disputes and repeat findings against.
+    An unreadable log or a pull request with no records carries no
+    block: the call then judges against the conversation alone, and no
+    prior round is claimed that the log cannot show."""
+    if round_log is None:
+        return None
+    loaded = round_log.read()
+    if loaded.file_unreadable:
+        return None
+    mine, _others = records_for(loaded.records, event.repo, event.pr_number)
+    lines = []
+    for record in mine:
+        lines.append(f"round at {record.head_sha[:12]}: {record.event}")
+        lines.extend(f"  {line}" for line in record.findings)
+    if not lines:
+        return None
+    return UntrustedBlock(
+        "prior-rounds", RepoText(capped("\n".join(lines), MERGE_PRIORS_CHARS))
     )
 
 
@@ -3581,6 +3824,12 @@ def status_line(review: AgenticReview) -> str:
         fields["reused"] = len(review.reused_lenses)
         if review.delta_note:
             fields["delta_note"] = _status_log_note(review.delta_note)
+    if review.merge is not None:
+        # The merge/verify call's standing (the plan's step 7): a
+        # pipeline gating on the status line can tell a review whose
+        # synthesis ran from one where it did not, the way it reads the
+        # lens states.
+        fields["merge"] = "applied" if review.merge.applied else "not_applied"
     if review.trace_id:
         fields["trace_id"] = review.trace_id
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
@@ -3664,7 +3913,7 @@ def render_draft(
         lines += _reassess_sections(review, scrub)
         lines += _delta_sections(review, scrub)
         lines += ["", "## Findings (verified quotes only)", ""]
-        lines += [_finding_line(f, scrub) for f in review.verified] or [
+        lines += [_finding_line(f, scrub, review.merge) for f in review.verified] or [
             "No verified findings."
         ]
         if review.unverified:
@@ -3672,19 +3921,11 @@ def render_draft(
             lines += [
                 f"- {f.id} {quote_untrusted(str(f.finding.location), QUOTED_CHARS, scrub=scrub)}: "
                 f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
+                f"{_merge_annotation(f, review.merge, scrub)}"
                 for f in review.unverified
             ]
-    if review.context_omissions:
-        lines += ["", "## Context omissions", ""]
-        lines += [
-            f"- {quote_untrusted(item.source, scrub=scrub)} "
-            f"({quote_untrusted(item.limit, scrub=scrub)}): "
-            f"{quote_untrusted(item.detail, scrub=scrub)}"
-            for item in review.context_omissions
-        ]
-    if review.secrets:
-        lines += ["", "## Possible committed secrets (controller findings)", ""]
-        lines += [_secret_line(s, scrub) for s in review.secrets]
+        lines += _merge_section(review, scrub)
+    lines += _omission_and_secret_lines(review, scrub)
     lines += ["", "## Lens coverage (attestation ledger)", ""]
     clean = _clean_runs(review.lenses)
     lines += [
@@ -3897,6 +4138,20 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
         if review.proposed_event is not review.event
         else ""
     )
+    if review.merge is not None and not review.merge.applied:
+        # The merge/verify call could not run or did not reconcile: the
+        # headline names the cause ahead of the lens states, because a
+        # review whose synthesis never happened is not a review whose
+        # lenses were short -- the note in the Synthesis merge section
+        # says which and why.
+        merge_head = (
+            "> **REVIEW INCOMPLETE -- not approvable.** "
+            f"Review event: {review.event.value}{proposed}. The synthesis "
+            "merge was not applied, so this review cannot approve."
+        )
+        if short:
+            merge_head += f" Lens coverage is also not complete ({named})."
+        return merge_head + _unread_clause(review, scrub)
     return (
         "> **REVIEW INCOMPLETE -- not approvable.** "
         f"Review event: {review.event.value}{proposed}. Lens coverage is not "
@@ -4216,7 +4471,11 @@ def _delta_sections(review: AgenticReview, scrub: Callable[[str], str]) -> list[
     return lines
 
 
-def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
+def _finding_line(
+    f: MintedFinding,
+    scrub: Callable[[str], str],
+    merge: MergeResult | None = None,
+) -> str:
     x = f.finding
     tags = [
         x.severity.value,
@@ -4233,6 +4492,7 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
             f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "
             f"({quote_untrusted(_attribution(f), QUOTED_CHARS, scrub=scrub)}): "
             f"{quote_untrusted(x.finding, QUOTED_CHARS, scrub=scrub)}"
+            f"{_merge_annotation(f, merge, scrub)}"
         )
     if f.source == QuoteSource.REMOVED.value:
         tags.append(f.source)
@@ -4250,7 +4510,83 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         )
     if x.siblings:
         text += f". Siblings: {quote_untrusted(x.siblings, QUOTED_CHARS, scrub=scrub)}"
-    return text
+    return text + _merge_annotation(f, merge, scrub)
+
+
+def _merge_section(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The draft's Synthesis merge section, when the review ran a
+    merge/verify call; empty otherwise, so a review with no findings (no
+    call) reads exactly as it did before the step existed."""
+    if review.merge is None:
+        return []
+    return _merge_lines(review, scrub)
+
+
+def _omission_and_secret_lines(
+    review: AgenticReview, scrub: Callable[[str], str]
+) -> list[str]:
+    """The controller's own findings sections: the context the review
+    could not gather whole, and the committed secrets the tools read."""
+    lines: list[str] = []
+    if review.context_omissions:
+        lines += ["", "## Context omissions", ""]
+        lines += [
+            f"- {quote_untrusted(item.source, scrub=scrub)} "
+            f"({quote_untrusted(item.limit, scrub=scrub)}): "
+            f"{quote_untrusted(item.detail, scrub=scrub)}"
+            for item in review.context_omissions
+        ]
+    if review.secrets:
+        lines += ["", "## Possible committed secrets (controller findings)", ""]
+        lines += [_secret_line(s, scrub) for s in review.secrets]
+    return lines
+
+
+def _merge_annotation(
+    f: MintedFinding, merge: MergeResult | None, scrub: Callable[[str], str]
+) -> str:
+    """What the merge call recorded against one finding, appended to its
+    draft line and quoted as data: the ids merged away under it -- the
+    merged findings' defect stands represented here -- and every
+    downgrade or drop proposal with its stated reason. A proposal never
+    removes a finding or lowers the verdict (D73's rule); it is the
+    reviewer's stated judgment, readable beside the finding it judges.
+    Empty when the review ran no merge call, or its reply did not
+    reconcile -- an unmerged set carries no annotations to mistrust."""
+    if merge is None or not merge.applied:
+        return ""
+    parts = []
+    away = merged_away(f, merge)
+    if away:
+        parts.append(f"merged: {', '.join(away)}")
+    parts.extend(proposals_on(f, merge))
+    if not parts:
+        return ""
+    return f" Merge: {quote_untrusted('; '.join(parts), QUOTED_CHARS, scrub=scrub)}"
+
+
+def _merge_lines(review: AgenticReview, scrub: Callable[[str], str]) -> list[str]:
+    """The draft's Synthesis merge section: the applied call's note, or
+    the refusal or mismatch that left the findings unmerged, quoted as
+    data -- a reply the controller could not reconcile is model output,
+    and its text never travels as prose."""
+    merge = review.merge
+    assert merge is not None
+    if not merge.applied:
+        return [
+            "",
+            "## Synthesis merge",
+            "",
+            (
+                "NOT applied: "
+                + quote_untrusted(merge.note, QUOTED_CHARS, scrub=scrub)
+                + " The findings stand unmerged, and the review is incomplete."
+            ),
+        ]
+    # The applied note is controller text -- the counts the reply's
+    # reconciled proposals produced -- so it reads as prose, like the
+    # ceiling note does.
+    return ["", "## Synthesis merge", "", merge.note]
 
 
 def _attribution(f: MintedFinding) -> str:

@@ -75,6 +75,7 @@ from atlas_reviewer.runner import (
     lens_runner_name,
 )
 from atlas_reviewer.sprites_api import parse_retry_after
+from atlas_reviewer.synthesis import MERGE_TARGET_PREFIX
 from atlas_reviewer.verdict import ReviewEvent, parse_status
 
 from .agentic import (
@@ -1908,6 +1909,224 @@ def test_a_cross_lens_duplicate_keeps_the_strongest_finding():
     assert result.verified[0].lenses == (LENS, OTHER)
 
 
+# ------------------------------------------------------- the merge call
+
+
+def merge_model(script=(), merge=None, decisions=()):
+    """The shared model a one-lens review runs: the script carries the
+    lens's own turns, and `merge` is the reply the review's merge/verify
+    call earns (the plan's step 7)."""
+
+    return ScriptedLensModel(list(script), merge=merge, decisions=decisions)
+
+
+def test_the_merge_call_merges_two_lenses_paraphrased_findings(tmp_path):
+    """The plan's step 7, issue #794's evidence: two isolated lenses
+    report one defect in different words; the exact dedupe keeps both,
+    and the merge call -- one bounded tool-less call over the deduped
+    findings -- merges them into one finding that names both lenses.
+    Mutant: the merge call dropped, which posts the defect twice."""
+    first = finding()
+    second = finding(
+        finding="totals drift because every item is rounded before the sum",
+    )
+    model = merge_model(
+        merge={
+            "clusters": [{"ids": ["L1-F1", "L2-F1"], "reason": "one rounding defect"}]
+        }
+    )
+    result, _sprites = _lenses(
+        tmp_path,
+        [LENS, OTHER],
+        model,
+        models=[
+            ScriptedLensModel([READ_ALL, final(first)]),
+            ScriptedLensModel(
+                [READ_ALL, final(second, lens=OTHER, digest=body_digest(OTHER_BODY))]
+            ),
+        ],
+        pool=2,
+        limits=replace(LIMITS, pool_size=2),
+    )
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.verified[0].lenses == (LENS, OTHER)
+    assert result.merge is not None and result.merge.applied
+    assert result.merge.merged == (("L1-F1", ("L2-F1",)),)
+    draft = render_draft(result, Redactor())
+    assert """Merge: `"merged: L2-F1"`""" in draft
+    assert "## Synthesis merge" in draft
+    assert "the merge call: 1 cluster merged" in draft
+
+
+def test_the_merge_call_downgrades_by_annotation_and_never_lowers_the_verdict(
+    tmp_path,
+):
+    """A downgrade is the D73 rule at the review level: the proposal and
+    its reason are recorded on the finding's line, the finding stays
+    reported at its verified severity, and the verdict is computed over
+    the full verified set -- model output never lowers a verdict.
+    Mutant: the downgrade applied to the finding, which approves a
+    review whose verified Minor stands."""
+    model = merge_model(
+        [READ_ALL, final(finding())],
+        merge={
+            "dispositions": [
+                {
+                    "id": "L1-F1",
+                    "action": "downgrade",
+                    "severity": "nit",
+                    "reason": "cosmetic",
+                }
+            ]
+        },
+    )
+    result, _sprites = _lenses(tmp_path, [LENS], model)
+    assert result.verified[0].finding.severity is Severity.MAJOR
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.merge.downgrades == 1
+    draft = render_draft(result, Redactor())
+    assert """Merge: `"merge proposal: downgrade to nit -- cosmetic"`""" in draft
+
+
+def test_the_merge_call_drop_is_an_annotation_that_keeps_the_finding(tmp_path):
+    """A drop proposal is recorded with its stated reason; the finding
+    stays reported and verdict-setting -- an injected reply cannot
+    delete a verified defect. Mutant: the drop applied, which removes
+    the verified Major and approves."""
+    model = merge_model(
+        [READ_ALL, final(finding())],
+        merge={
+            "dispositions": [
+                {
+                    "id": "L1-F1",
+                    "action": "drop",
+                    "reason": "the cited lines say otherwise",
+                }
+            ]
+        },
+    )
+    result, _sprites = _lenses(tmp_path, [LENS], model)
+    assert [f.id for f in result.verified] == ["L1-F1"]
+    assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.merge.drops == 1
+    assert (
+        """Merge: `"merge proposal: drop -- the cited lines say otherwise"`"""
+        in render_draft(result, Redactor())
+    )
+
+
+def test_a_merge_reply_that_names_an_unknown_id_leaves_the_review_incomplete(
+    tmp_path,
+):
+    """The reconciliation is fail-closed (the plan's merge-mismatch
+    rule): a reply that cites a finding no lens reported leaves the
+    findings unmerged and the review incomplete -- never a verdict the
+    unverified merge text suggested. Mutant: the unknown-id check
+    dropped, which applies a reply an injected comment wrote."""
+    model = merge_model(
+        [READ_ALL, final(finding())],
+        merge={"clusters": [{"ids": ["L1-F1", "L9-F9"], "reason": "one defect"}]},
+    )
+    result, _sprites = _lenses(tmp_path, [LENS], model)
+    assert not result.coverage_complete
+    assert result.merge is not None and not result.merge.applied
+    assert result.proposed_event is ReviewEvent.COMMENT
+    assert result.event is ReviewEvent.COMMENT
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft.splitlines()[2]
+    assert "NOT applied" in draft
+    assert "L9-F9" in draft
+    assert parse_status(draft)["merge"] == "not_applied"
+
+
+def test_a_merge_call_the_review_limits_refuse_is_not_sent_and_fails_closed():
+    """The merge call is reserved at its worst case against the review's
+    shared spend like any turn; a review whose budget cannot fund it
+    fails closed with the refusal named, never a synthesized review
+    nobody ran, and the refused call leaves the spend exactly as it was.
+    Mutant: the reservation skipped, which sends a call the budget
+    refused and spends past the ceiling."""
+    from atlas_reviewer.coordinator import _with_merge
+    from atlas_reviewer.lens_loop import Spend
+    from atlas_reviewer.tracing import trace_from_env
+
+    review = synthesize([lens_result(clean(checked(Severity.MINOR)))])
+    spend = Spend(LIMITS.resolve(cross_limits=False))
+    clock = FakeClock()
+
+    class Refusing:
+        name = "refusing"
+
+        def worst_case_usd(self, request):
+            raise BudgetRefusedError("refusing inference: no eligible endpoint")
+
+        def turn(self, request):
+            raise AssertionError("a refused call is not sent")
+
+    result = _with_merge(
+        review,
+        EVENT,
+        (),
+        None,
+        Refusing(),
+        spend,
+        LIMITS.resolve(cross_limits=False),
+        clock,
+        clock.monotonic() + 600.0,
+        "f00dfeed",
+        trace_from_env({}, scrub=str),
+        Redactor(),
+    )
+    assert not result.coverage_complete
+    assert result.merge is not None and not result.merge.applied
+    assert "merge call was not applied" in result.merge.note
+    assert spend.calls == 0
+    assert spend.committed_usd == 0
+    assert result.proposed_event is ReviewEvent.COMMENT
+    assert result.event is ReviewEvent.COMMENT
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft.splitlines()[2]
+    assert "NOT applied" in draft
+
+
+def test_a_review_with_no_findings_runs_no_merge_call(tmp_path):
+    """There is nothing to merge, verify or reconcile: the review runs
+    no merge call, and its draft is exactly what the mechanical
+    synthesis wrote. Mutant: the call made anyway, which bills a turn
+    that can change nothing."""
+    model = merge_model([READ_ALL, final()])
+    result, _sprites = _lenses(tmp_path, [LENS], model)
+    assert result.verified == ()
+    assert result.merge is None
+    assert len(model.requests) == 2
+    assert not any(
+        r.messages and MERGE_TARGET_PREFIX in r.messages[0].text for r in model.requests
+    )
+
+
+def test_the_merge_call_is_reserved_and_settled_like_any_turn(tmp_path):
+    """The call's worst case is reserved before it is sent and settled at
+    its reported cost: the cost line counts the call, and the held and
+    billed figures move with it. Mutant: the settle dropped, which
+    keeps the whole worst case on the cost line."""
+    model = merge_model(
+        [READ_ALL, final(finding())],
+        merge={
+            "dispositions": [
+                {"id": "L1-F1", "action": "drop", "reason": "the quote is wrong"}
+            ]
+        },
+    )
+    result, _sprites = _lenses(tmp_path, [LENS], model)
+    line = next(
+        line
+        for line in render_draft(result, Redactor()).splitlines()
+        if line.startswith("Model calls:")
+    )
+    assert line.startswith("Model calls: 3; settled: $0.14; held at reservation: $0.")
+    assert result.merge.applied
+
+
 def not_run_result(lens=LENS, index=1):
     return LensResult(lens, index, DIGEST, None, reason="Sprites HTTP 502 for POST")
 
@@ -3258,7 +3477,7 @@ def test_both_lenses_share_one_byte_identical_prefix(tmp_path):
     result, _sprites = _lenses(
         tmp_path,
         [LENS, OTHER],
-        None,
+        RoomModel([]),
         models=models,
         pool=2,
         limits=replace(LIMITS, pool_size=2),
@@ -4471,8 +4690,9 @@ def test_a_followup_whose_changes_affect_a_lens_concern_re_runs_it(tmp_path):
         tmp_path, [LENS], model, round_log=log, delta=_delta_scope()
     )
     # The lens ran: its tool turn and final reply after the decision
-    # call, and its entry is in the review's lens list.
-    assert len(model.requests) == 4
+    # call, and its entry is in the review's lens list. The review's own
+    # merge/verify call follows the lens, before the carry-forward.
+    assert len(model.requests) == 5
     assert [r.lens for r in result.lenses] == [LENS]
     assert [(d.lens, d.reuse) for d in result.lens_decisions] == [(LENS, False)]
     assert result.lens_decisions[0].reason == "the delta rewrites the rounding"

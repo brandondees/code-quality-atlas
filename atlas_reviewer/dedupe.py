@@ -141,17 +141,19 @@ def dedupe(findings: Sequence[MintedFinding]) -> tuple[MintedFinding, ...]:
 def _representative(cluster: list[MintedFinding], _index: int) -> MintedFinding:
     kept = cluster[0]
     for candidate in cluster[1:]:
-        kept = _stronger(kept, candidate)
+        kept = stronger(kept, candidate)
     lenses = tuple(dict.fromkeys(item.lens for item in cluster))
     if len(lenses) > 1:
         kept = _with_lenses(kept, lenses)
     return kept
 
 
-def _stronger(kept: MintedFinding, candidate: MintedFinding) -> MintedFinding:
-    """The stronger of two findings, on the carry-forward composition's
-    rule (round-5 review of #748): verdict-setting over not, then the
-    more severe, ties keeping the incumbent."""
+def stronger(kept: MintedFinding, candidate: MintedFinding) -> MintedFinding:
+    """The stronger of two findings, on the synthesis's rule (round-5
+    review of #748): verdict-setting over not, then the more severe,
+    ties keeping the incumbent. The dedupe's representatives and the
+    merge call's cluster representatives resolve through this, so the
+    two passes cannot pick different findings for the same defect."""
     if candidate.finding.sets_verdict != kept.finding.sets_verdict:
         return candidate if candidate.finding.sets_verdict else kept
     if candidate.finding.severity.rank < kept.finding.severity.rank:
