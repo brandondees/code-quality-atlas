@@ -40,6 +40,7 @@ from atlas_reviewer.bridge import (
     _RunBlock,
     _splice,
     added_lines,
+    bash_script,
     mutant_outcome,
     mutate_script,
     mutation_refusal,
@@ -56,7 +57,7 @@ from atlas_reviewer.bridge import (
     sweep_script,
     sweep_specs,
 )
-from atlas_reviewer.bridge_args import Rev, validate
+from atlas_reviewer.bridge_args import MAX_BASH_CHARS, Rev, validate
 from atlas_reviewer.bridge_staging import (
     DROP_SHIM,
     NOBODY_UID,
@@ -64,6 +65,7 @@ from atlas_reviewer.bridge_staging import (
     SourceTrees,
     Staged,
     choose_pytest,
+    collection_script,
     parse_collection,
     parse_history,
     stage_copy_steps,
@@ -3723,3 +3725,309 @@ def test_a_bundle_carrying_a_different_head_is_a_named_staging_failure(
     assert log.status is Status.UNAVAILABLE
     assert "not the pull request's" in log.error.text
     assert read.status is Status.OK
+
+
+# ------------------------------------------------- the sandboxed bash tool
+
+
+def test_the_bash_script_carries_the_no_root_guard():
+    """The guard is structural, not incidental: the probe tool's test
+    pins its guard by the shim's markers in the script, because an
+    assertion on the command's printed euid cannot distinguish the guard
+    on a runner whose test user is already non-root (the round-1 review's
+    mutant -- as_nobody dropped from bash_script -- survived the suite
+    for exactly that reason). The same structural pin here: the bash
+    command runs wrapped in the guard shim, so dropping it fails."""
+    staged = Staged(
+        "/tmp/bridge",
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    script = bash_script(
+        staged,
+        validate("bash", {"command": "echo hi"}, frozenset(Rev)),
+        ToolLimits(16 * 1024, 60),
+    )
+    assert "atlas-privilege-drop failed" in script  # the guard wraps the run
+    assert "timeout -k 2 60" in script  # the same clock the run tools use
+
+
+def test_a_bash_command_runs_in_the_copy_as_the_non_root_user(tmp_path):
+    """The sandboxed bash tool (D80's bash-tool update): the command runs
+    in the lens's own disposable copy, as the non-root user, and sees the
+    copy's files; nothing it writes reaches the repository or a later
+    call."""
+    (run, check, grep) = calls(
+        tmp_path,
+        (
+            "bash",
+            {"command": "id -u; ls; echo marker-written > bash_wrote_this.txt"},
+        ),
+        ("bash", {"command": "test ! -e bash_wrote_this.txt && echo gone"}),
+        ("grep", {"pattern": "bash_wrote_this"}),
+    )[0]  # fmt: skip
+    assert run.status is Status.OK
+    # The non-root user's id, not root's.
+    assert run.content.text.splitlines()[0] != "0"
+    assert "calc.py" in run.content.text
+    # The file the first command wrote died with its copy.
+    assert check.status is Status.OK
+    assert "gone" in check.content.text
+    assert grep.status is Status.OK
+    assert grep.content.text.strip() in ("", "no match")
+
+
+def test_a_bash_command_reads_the_staged_history_in_the_copy(tmp_path):
+    """Git history over the pull request's range is readable inside the
+    copy: the copy's .git file points at the staged repository, whose
+    real history the bundle brought, so the model's own `git log` works
+    without knowing where anything is staged."""
+    _repo, base, head, bundle = _seed_history(tmp_path)
+    head_content = {
+        "calc.py": b"def total(xs):\n    return sum(xs)  # rounded later\n",
+        "test_calc.py": b"from calc import total\n\ndef test_total():\n    assert total([1]) == 1\n",
+    }
+    source = SourceTrees(
+        source_tarball(head_content), source_tarball(head_content), base, head
+    )
+    (result,) = calls(
+        tmp_path,
+        (
+            "bash",
+            {
+                "command": (
+                    "git log --oneline --no-decorate "
+                    f"{base}..refs/atlas-history/head"
+                )
+            },
+        ),
+        source=source,
+        history_bundle=bundle,
+        history_base=base,
+    )[0]  # fmt: skip
+    assert result.status is Status.OK
+    assert "the change under review" in result.content.text
+
+
+def test_a_bash_command_runs_under_verified_deny_all(tmp_path):
+    """The egress rule the sandbox rests on: the bash exec runs after the
+    verified deny-all flip, like every other exec of the review."""
+    sprites = LocalSprites()
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "echo marker-in-the-bash-script"}),
+        sprites=sprites,
+    )[0]  # fmt: skip
+    assert result.status is Status.OK
+    scripts = [argv[-1] for argv in sprites.argv_seen]
+    bash_index = next(
+        i for i, script in enumerate(scripts) if "marker-in-the-bash-script" in script
+    )
+    denied = [flag for _name, flag in sprites.policy_deny_named]
+    assert denied[bash_index] is True
+
+
+def test_a_bash_command_past_its_clock_times_out(tmp_path):
+    limits = {**DEFAULT_LIMITS, "bash": ToolLimits(16 * 1024, 1)}
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "sleep 5"}),
+        limits=limits,
+    )[0]  # fmt: skip
+    assert result.status is Status.TIMED_OUT
+
+
+def test_a_bash_command_is_refused_without_the_guard_interpreter(tmp_path):
+    (result,) = calls(
+        tmp_path,
+        ("bash", {"command": "echo hi"}),
+        pytest_candidates=(),
+    )[0]  # fmt: skip
+    assert result.status is Status.UNAVAILABLE
+    assert "no interpreter on the runner image runs the no-root guard" in (
+        result.error.text
+    )
+
+
+def test_a_bash_write_into_the_staged_repository_does_not_survive(tmp_path):
+    """The copy's .git file points at the staged repository itself, so the
+    model's command can write into repo.git -- a ref, a loose object, a
+    config edit -- as the non-root user. The re-stage discipline that
+    guards every other exec tool guards bash too: the next call's copy is
+    built from the controller-held tarballs' repository, so nothing an
+    earlier command left in repo.git reaches a later call."""
+    (make, read) = calls(
+        tmp_path,
+        (
+            "bash",
+            {"command": 'echo tampered > "$(git rev-parse --git-dir)/marker"'},
+        ),
+        (
+            "bash",
+            {
+                "command": (
+                    'test ! -e "$(git rev-parse --git-dir)/marker" '
+                    "&& echo wiped || echo survived"
+                )
+            },
+        ),
+    )[0]  # fmt: skip
+    assert make.status is Status.OK
+    # The file the first command wrote into repo.git is gone: the second
+    # call's repository was rebuilt from the tarballs.
+    assert read.status is Status.OK
+    assert "wiped" in read.content.text
+
+
+def test_a_bash_command_over_its_cap_is_refused(tmp_path):
+    refused = one(tmp_path, "bash", {"command": "x" * (MAX_BASH_CHARS + 1)})
+    assert refused.status is Status.REJECTED
+    assert "over" in refused.error.text
+
+
+def test_a_failed_bash_exec_still_marks_the_bridge_suspect(tmp_path):
+    """The same invariant the base pinned for the run tools and the sweep,
+    for the bash tool's own exec: the command's code runs during the
+    exec, whatever the exec's outcome -- and the command's `.git` file
+    points at the staged repository, so what it leaves behind reaches the
+    next call's copy unless the bridge is marked suspect. An exec that
+    raises -- here the machinery losing the reply mid-command -- leaves
+    the bridge suspect, and the next call re-stages from the
+    controller-held tarballs."""
+    import atlas_reviewer.bridge as bridge_module
+
+    class ExplodingBashRule:
+        match = 'echo "gitdir:'
+
+        def handler(self, script, _stdin):
+            raise bridge_module.BoundaryError("the bash exec died mid-command")
+
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: (
+                    "atlas-git:/usr/bin/git\ngit version 2.43.0\n"
+                    f"atlas-pytest:{PYENV_PYTHON}:3.13.7\n"
+                    f"atlas-shim:{PYENV_PYTHON}:3.13.7\n"
+                ),
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+            ReplyRule("atlas-collect", lambda _script: "atlas-collect:0:\n"),
+            ExplodingBashRule(),
+            ExecRule("__ATLAS_BRIDGE__", "__ATLAS_BRIDGE__ 0 0 9 0 0\n", 0),
+        )
+    )
+    uploads = lambda: [
+        c
+        for c in sprites.calls
+        if c[0] == "exec" and "cat >" in c[2] and ".tar.gz" in c[2]
+    ]
+    results = []
+
+    def body(bridge):
+        try:
+            bridge.call("bash", {"command": "echo hi"})
+        except BoundaryError:
+            pass
+        assert bridge._suspect is True
+        # A runner-side read (the regex grep) is what re-stages; the
+        # content reads serve the controller's own copy and never touch
+        # the runner. The count starts at the read, for the same
+        # collection-probe reason the base's suspect tests name.
+        before = len(uploads())
+        results.append(bridge.call("grep", {"pattern": "total", "regex": True}))
+        assert len(uploads()) - before == 2
+        return "done"
+
+    report = run_bridge(
+        sprites,
+        MemoryLedger(),
+        trees(SUITE),
+        body,
+        redactor=Redactor(),
+        changed=frozenset(),
+        name="cqa-bash-suspect",
+        deadline_s=60,
+        clock=FakeClock(),
+        root=str(tmp_path / "bridge"),
+        pytest_candidates=(PYENV_PYTHON,),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert results[0].status is Status.OK
+
+
+def test_every_guarded_script_declares_the_copy_a_safe_directory():
+    """On a root runner the guarded execs run as the no-root guard's
+    user, which is not the user that built the copy, its `.git` file or
+    the staged repository -- and git (>= 2.35.2) refuses that ownership
+    mismatch outright (`detected dubious ownership`), so every git call
+    PR code makes in the copy would die. Each guarded script declares
+    the copy a safe directory via the environment (protected config,
+    honored in the subshell, unreachable from repo-local config),
+    scoped to the copy's own path -- never `*` (the round-5 review's
+    Major on #851; local tests run without the drop and cannot see
+    this, so the pin is structural)."""
+    staged = Staged(
+        "/tmp/bridge",
+        "/usr/bin/git",
+        MappingProxyType({Rev.HEAD: "h" * 40}),
+        pytest=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        shim_python=TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+    )
+    expected = (
+        "GIT_CONFIG_COUNT=1 "
+        "GIT_CONFIG_KEY_0=safe.directory "
+        "GIT_CONFIG_VALUE_0=/tmp/bridge/scratch/work"
+    )
+    scripts = {
+        "bash": bash_script(
+            staged,
+            validate("bash", {"command": "echo hi"}, frozenset(Rev)),
+            ToolLimits(16 * 1024, 60),
+        ),
+        "run_tests": run_test_script(
+            staged,
+            validate("run_tests", {}, frozenset(Rev)),
+            ToolLimits(16 * 1024, 180),
+        ),
+        "run_probe": run_probe_script(
+            staged,
+            validate(
+                "run_probe",
+                {"content": "def test_x():\n    assert True\n"},
+                frozenset(Rev),
+            ),
+            ToolLimits(16 * 1024, 180),
+        ),
+        "mutate": mutate_script(
+            staged,
+            validate(
+                "mutate",
+                {"path": "calc.py", "line": 2, "operator": "negate-condition"},
+                frozenset(Rev),
+            ),
+            ToolLimits(16 * 1024, 180),
+        ),
+        "collection": collection_script(
+            "/tmp/bridge",
+            "/usr/bin/git",
+            "/tmp/bridge/scratch/work",
+            "h" * 40,
+            TrustedPython(SYSTEM_PYTHON, "3.12.3"),
+        ),
+    }
+    for name, script in scripts.items():
+        assert "GIT_CONFIG_VALUE_0=" in script, name
+        assert expected in script, name
+    # Scoped to the copy's own path: never the wildcard.
+    for name, script in scripts.items():
+        assert 'GIT_CONFIG_VALUE_0="*"' not in script, name
+        assert "GIT_CONFIG_VALUE_0=*" not in script, name

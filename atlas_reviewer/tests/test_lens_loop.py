@@ -590,6 +590,7 @@ def test_the_model_sees_exactly_the_bridges_tools_and_arguments():
             "line": 1,
             "operator": "negate-condition",
             "content": "def test_x():\n    assert True\n",
+            "command": "sh run.sh",
             "rev": "a" * 40,
         }
         validate(name, {a: sample[a] for a in required}, frozenset(Rev))
@@ -2499,7 +2500,7 @@ def test_the_prefix_instructions_and_the_paged_ones_agree_where_they_share():
             "Every quote is checked, and a finding whose quote is not found is "
             "not reported."
         ),
-        "Three tools execute, on a disposable copy of the head tree",
+        "Four tools execute, on a disposable copy of the head tree",
         "run_tests runs the copy's pytest suite or the selector",
         "run_probe writes one throwaway test file you supply",
         "a surviving mutant at a line you are citing is exactly",

@@ -66,6 +66,7 @@ from atlas_reviewer.bridge_staging import (
     Staged,
     as_nobody,
     check_sizes,
+    guarded_env_exports,
     history_fetch_script,
     mutant_commit_steps,
     parse_history,
@@ -149,6 +150,7 @@ _CONTINUATION = bytes(range(0x80, 0xC0))
 # and each call's script runs its processes to completion before it
 # returns.
 RUN_TOOLS = frozenset({"run_tests", "mutate", "run_probe"})
+BASH_TOOLS = frozenset({"bash"})
 HISTORY_TOOLS = frozenset({"git_log", "git_show", "git_blame"})
 
 # The file-content tools answered from the controller's own copy of the
@@ -276,6 +278,10 @@ DEFAULT_LIMITS: Mapping[str, ToolLimits] = MappingProxyType(
         "git_log": ToolLimits(16 * 1024, 15, 200),
         "git_show": ToolLimits(16 * 1024, 15),
         "git_blame": ToolLimits(16 * 1024, 15, 200),
+        # The bash tool (D80's bash-tool update): one bounded command in
+        # the copy, the same output cap and a line cap like a read, and a
+        # clock like the execution tools'.
+        "bash": ToolLimits(16 * 1024, 60, 200),
     }
 )
 
@@ -418,6 +424,51 @@ def call_script(
 # before git runs. The tools are read-only: log, show and blame write
 # nothing, run under the same runner sandbox (deny-all egress, the
 # timeout and the byte/line caps), and never touch the working copy.
+
+
+def bash_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+    """One exec for `bash` (D80's bash-tool update): the same disposable
+    copy of the head tree `run_tests` builds, a `.git` file that points
+    the copy's git at the staged repository -- so git history over the
+    pull request's range is readable inside the copy, the way the
+    history tools read it -- then the model's one command run as the
+    non-root user through the same guard, under the same clock and
+    output caps and the runner's verified deny-all policy. The copy is
+    removed again: nothing the command writes reaches the repository's
+    trees, and anything it writes into the staged repository itself is
+    discarded by the next call's re-stage -- later calls never read what
+    an earlier command left behind."""
+    scratch = quote(staged.scratch)
+    root = quote(staged.root)
+    assert staged.shim_python is not None  # the caller refuses the call before this
+    command = call.get("command")
+    guarded = as_nobody(staged.shim_python, f"/bin/sh -c {quote(command)}")
+    return "\n".join(
+        (
+            f"cd {root}",
+            *stage_copy_steps(
+                staged.root, staged.git, staged.scratch, staged.commits[Rev.HEAD]
+            ),
+            "stage=$?",
+            f'echo "{STAGE_HEADER} $stage"',
+            'if [ "$stage" = 0 ]; then',
+            f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
+            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
+            "  export PYTHONDONTWRITEBYTECODE=1;",
+            (
+                f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
+                f"{guarded} ) > out 2> err"
+            ),
+            "  s=$?",
+            f"  tail -c {limits.max_bytes} out > shown",
+            f'  echo "{RUN_HEADER} $s $(wc -c < out) $(wc -l < out) $(wc -c < shown)"',
+            "  base64 -w0 < shown; echo",
+            f"  head -c {STDERR_BYTES} err | base64 -w0; echo",
+            "fi",
+            f"rm -rf {root}/{SCRATCH_DIR} out err shown",
+        )
+    )
 
 
 def history_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
@@ -1338,6 +1389,7 @@ def run_test_script(
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1393,6 +1445,7 @@ def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             'if [ "$stage" = 0 ]; then',
             f"  printf %s {quote(content)} | base64 -d > {scratch}/{quote(probe_path)}",
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            guarded_env_exports(scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
                 f"  exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -1428,6 +1481,7 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     assert staged.shim_python is not None  # the caller refuses the call before this
     run = (
         f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+        f"{guarded_env_exports(scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
         f"{as_nobody(staged.shim_python, _pytest_argv(staged, call.get('tests')))} )"
@@ -2410,6 +2464,11 @@ class Bridge:
         started = self.clock.monotonic()
         if call.tool in RUN_TOOLS:
             return self._run_exec(call, limits, started)
+        if call.tool in BASH_TOOLS:
+            refused = self._bash_refusal(call, started)
+            if refused is not None:
+                return refused
+            return self._exec_bash(call, limits, started)
         if call.tool in HISTORY_TOOLS:
             if not self.staged.history_head or self._history_lost:
                 return self._history_gap(call, started)
@@ -2904,6 +2963,87 @@ class Bridge:
                 "fetch and the re-fetch failed: " + why
             )
         return self._failed(call, Status.UNAVAILABLE, why, started)
+
+    def _bash_refusal(self, call: Call, started: float) -> BridgeResult | None:
+        """The bash tool's one gate (D80's bash-tool update): the no-root
+        guard's interpreter. The test environment's own refusals -- a
+        missing pytest, a failed collection -- are not its gates: a broken
+        pytest collection does not stop a ruff run or a git log."""
+        if self.staged.shim_python is None:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                "no interpreter on the runner image runs the no-root "
+                "guard, so the execution tools cannot start",
+                started,
+            )
+        return None
+
+    def _exec_bash(
+        self, call: Call, limits: ToolLimits, started: float
+    ) -> BridgeResult:
+        """The bash tool's exec (D80's bash-tool update): the same
+        disposable copy, guard, clock, output caps and framing the run
+        tools use; the reply parses as one run block, and the exit maps
+        through the same statuses. No run slot is spent: the bash call is
+        bounded by the attempt's call budget and the lens's wall clocks,
+        not by the test-run cap. The re-stage discipline applies as
+        everywhere: the copy's `.git` file points at the staged
+        repository itself, so the command can write into `repo.git` -- a
+        later call's copy and git reads are built from the re-staged
+        repository, never from what an earlier command left there."""
+        try:
+            # Since the last execution could have rewritten anything it
+            # could reach -- the staged repository included, which the
+            # copy's git points at -- the copy is built from a re-staged,
+            # digest-checked repository. And the command's own exec runs
+            # PR code, whatever its outcome: the bridge is suspect from
+            # the moment the exec starts, so an exec that raises -- a
+            # lost connection mid-command -- still leaves every later
+            # read re-staging instead of serving what the failed command
+            # left behind.
+            if self._suspect:
+                self._restage()
+            self._suspect = True
+            code, text = self.session.exec(
+                "bridge bash",
+                bash_script(self.staged, call, limits),
+                stage="bridge",
+                budget_s=limits.timeout_s + EXEC_SLACK_S + MUTATE_STAGE_SLACK_S,
+            )
+            blocks = parse_run_blocks(text) if code == 0 else None
+            if blocks is None:
+                raise BoundaryError(
+                    f"no run reply (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+                )
+            for block in blocks:
+                if isinstance(block, _RunBlock) and (problem := block.problem()):
+                    raise _LostOutputError(problem)
+        except StreamTimeoutError as exc:
+            return self._failed(call, Status.TIMED_OUT, str(exc), started)
+        except _LostOutputError as exc:
+            return self._failed(call, Status.FAILED, str(exc), started)
+        except BoundaryError as exc:
+            return self._failed(call, Status.UNAVAILABLE, str(exc), started)
+        stage, run = _single_run(blocks)
+        if stage.code != 0:
+            return self._failed(
+                call,
+                Status.UNAVAILABLE,
+                f"the staged copy could not be made (exit {stage.code})",
+                started,
+            )
+        assert run is not None  # the script runs the copy only when staging succeeded
+        return self._exec_result(
+            call,
+            _run_status(run.code),
+            (RunRecord(run.code, _summary_of(run)),),
+            None,
+            None,
+            "",
+            run,
+            self.clock.monotonic() - started,
+        )
 
     def _run_history(
         self, call: Call, limits: ToolLimits, started: float
@@ -3421,6 +3561,7 @@ def sweep_script(
     def run_line(name: str) -> str:
         return (
             f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+            f"{guarded_env_exports(scratch)}"
             "export PYTHONDONTWRITEBYTECODE=1; "
             f"exec timeout -k {KILL_AFTER_S} {run_limit.timeout_s} {guarded} ) "
             f"> {name}_out 2> {name}_err"
