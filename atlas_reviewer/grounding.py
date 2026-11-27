@@ -230,8 +230,8 @@ def _script_family(tokens: list[str]) -> tuple[str, str] | None:
     """`npm test` / `npm run lint` / `npx markdownlint-cli2`: the script's
     or tool's name classifies, since the documented entry point is what a
     human would run and the pass runs it under the repo's own config. The
-    script name matches on a word boundary, so `npm run attest` and
-    `make latest` name no check the pass runs."""
+    script name matches through `_name_declares`'s delimited stem, so
+    `npm run attest` and `make latest` name no check the pass runs."""
     if len(tokens) < 2:
         return None
     if tokens[0] == "npx":
@@ -248,13 +248,18 @@ def _script_family(tokens: list[str]) -> tuple[str, str] | None:
 
 
 def _name_declares(name: str, family: str) -> bool:
-    """Whether a script or make target's name declares the family: some
-    delimited part of the name starts with the family -- `typecheck`,
-    `tests`, `test_unit` and `test:unit` all declare test/type families,
-    the stems the usual script names are built from -- while a family
-    name buried inside another word (`attest`, `latest`) does not, which
-    is the whole difference from a substring match."""
-    return any(part.startswith(family) for part in re.split(r"[:_\-./]", name))
+    """Whether a script or make target's name declares the family: its
+    FIRST delimited part starts with the family and the rest of that
+    part is a known connector suffix -- `typecheck` (check), `tests`
+    (s), `test_unit` (the `test` part itself), `test:unit` and
+    `type-check` all declare, while a family name buried inside another
+    word (`attest`, `latest`) or after a first part that names something
+    else (`testdata`, `build:types`, `install-test-deps`) does not --
+    each of those runs a generator or an installer, not a check."""
+    parts = re.split(r"[:_\-./]", name)
+    if not parts or not parts[0].startswith(family):
+        return False
+    return parts[0][len(family) :] in ("", "s", "ing", "check", "checker", "er")
 
 
 def grounding_plan(contents: Mapping[str, bytes]) -> GroundingPlan:
@@ -392,7 +397,13 @@ _PROVISIONING_HEADS = frozenset(
     {"pip", "pip3", "apt", "apt-get", "brew", "curl", "wget", "docker", "sudo"}
 )  # fmt: skip
 _INSTALL_SUBCOMMANDS = frozenset(
-    {"install", "ci", "add", "update", "upgrade", "fetch", "pull", "link"}
+    {"install", "ci", "add", "i", "update", "upgrade", "fetch", "pull", "link"}
+)
+# The git verbs that reach the network -- a fetch, a clone, a pull, a
+# submodule update, an LFS fetch -- versus the read-only plumbing a
+# check chain may legitimately run offline (`git diff --exit-code`).
+_GIT_FETCH_VERBS = frozenset(
+    {"clone", "fetch", "pull", "lfs", "submodule", "remote", "push"}
 )
 
 
@@ -410,10 +421,16 @@ def _provisions(segment: str) -> bool:
     head = tokens[0]
     if head in _PROVISIONING_HEADS:
         return True
-    if head in ("npm", "yarn", "pnpm"):
-        return len(tokens) > 1 and tokens[1] in _INSTALL_SUBCOMMANDS
+    if head in ("npm", "pnpm"):
+        return len(tokens) == 1 or tokens[1] in _INSTALL_SUBCOMMANDS
+    if head == "yarn":
+        # A bare `yarn` IS the install (the no-argument default), and so
+        # is `yarn install`.
+        return len(tokens) == 1 or tokens[1] in _INSTALL_SUBCOMMANDS | {"install"}
     if head in ("python", "python3"):
         return len(tokens) >= 3 and tokens[1:3] == ["-m", "pip"]
+    if head == "git":
+        return len(tokens) > 1 and tokens[1] in _GIT_FETCH_VERBS
     if head == "go":
         return len(tokens) > 1 and tokens[1] in ("get", "install", "download")
     if head == "cargo":

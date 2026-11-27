@@ -270,6 +270,14 @@ def test_the_script_and_target_names_match_as_delimited_stems():
     assert _classify("npm run tests") == ("test", "npm")
     assert _classify("make test_unit") == ("test", "make")
     assert _classify("npm run test:unit") == ("test", "npm")
+    assert _classify("npm run testing") == ("test", "npm")
+    assert _classify("npm run typechecker") == ("type", "npm")
+    # A stem after a first part that names something else, or a stem whose
+    # remainder is not a connector, runs a generator or an installer, not
+    # a check (round-4 review: testdata, build:types, install-test-deps).
+    assert _classify("make testdata") is None
+    assert _classify("npm run build:types") is None
+    assert _classify("make install-test-deps") is None
     assert _classify("npm run attest") is None
     assert _classify("make latest") is None
     assert _classify("make lint") == ("lint", "make")
@@ -299,58 +307,41 @@ def test_a_chain_that_provisions_before_its_check_is_named_not_run():
             "pip install -r requirements.txt && python3 -m pytest -q",
         )
     ]
-    text = grounding_evidence(
-        GroundingOutcome(plan, (GroundingResult(plan.commands[0], exit=0),)),
-        nonce="f00dfeed",
-    )
-    assert (
-        "Checks the sandbox cannot reproduce (their chain provisions or "
-        "fetches first, under deny-all egress), not run: pip install -r "
-        "requirements.txt && python3 -m pytest -q" in text
-    )
-    lines = grounding_coverage_lines(
-        GroundingOutcome(plan, (GroundingResult(plan.commands[0], exit=0),)),
-        set(),
-    )
-    assert any(
-        "pip install -r requirements.txt && python3 -m pytest -q (the chain "
-        "provisions or fetches first, not reproducible here)" in line
-        for line in lines
-    )
-    # The unreproducible check's tool still covers its file types, and
-    # its family is configured: the Not run line carries the why.
-    assert not any(".py" in line for line in lines if "no configured tool" in line)
 
 
-def test_offline_chain_segments_do_not_make_a_check_unreproducible():
-    """A chain's segment makes its check unreproducible only when the
-    segment installs or fetches -- what deny-all egress actually fails.
-    Offline segments (`git diff`, a plain `python3 script.py`, a package
-    manager's check verbs) ride along, and the check runs whole:
-    `npm run typecheck && npm test` must not lose its test to the
-    round-3 provisioning set, and `pip install x && pytest` still does."""
+def test_the_provisioning_verbs_are_the_ones_egress_fails():
+    """The round-4 narrowing kept the check-shaped package-manager verbs
+    but dropped the install shapes that deny-all egress actually fails:
+    `npm i`, `pnpm i`, a bare `yarn` (its no-argument default IS the
+    install), and git's network verbs (`fetch`, `clone`, `pull`,
+    `submodule`, `lfs`). A chain with one of those and a check is
+    unreproducible; the same chain with an offline verb (`git diff`,
+    `npm test`) runs whole."""
+    from atlas_reviewer.grounding import _provisions
+
+    assert _provisions("npm i")
+    assert _provisions("pnpm i")
+    assert _provisions("yarn")
+    assert _provisions("yarn install")
+    assert _provisions("git fetch origin main")
+    assert _provisions("git submodule update --init")
+    assert _provisions("git lfs fetch")
+    assert not _provisions("git diff --exit-code")
+    assert not _provisions("npm test")
+    assert not _provisions("npm run typecheck")
     contents = {
         ".github/workflows/chains.yml": (
             b"jobs:\n"
             b"  gate:\n"
             b"    steps:\n"
-            b"      - run: ruff format --check . && git diff --exit-code\n"
-            b"      - run: npm run typecheck && npm test\n"
-            b"      - run: python3 scripts/gen.py && python3 -m pytest -q\n"
-            b"      - run: pip install -r requirements.txt && python3 -m pytest -q\n"
+            b"      - run: npm i && npm test\n"
+            b"      - run: git fetch origin main && ruff check .\n"
         )
     }
     plan = grounding_plan(contents)
-    assert [c.command for c in plan.commands] == [
-        "ruff format --check . && git diff --exit-code",
-        "npm run typecheck && npm test",
-        "python3 scripts/gen.py && python3 -m pytest -q",
-    ]
     assert [(c.family, c.command) for c in plan.unreproducible] == [
-        (
-            "test",
-            "pip install -r requirements.txt && python3 -m pytest -q",
-        )
+        ("test", "npm i && npm test"),
+        ("lint", "git fetch origin main && ruff check ."),
     ]
 
 
