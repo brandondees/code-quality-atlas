@@ -6939,6 +6939,19 @@ existing `ATLAS_SWEEP_LENSES` knob) and the grounding pre-pass live, so
 each costs about two minutes now that the fixture's setup and the
 grounding run for real.
 
+**The validation run's blocker 3 and the two cheap fixes (the same
+slices):** `review_lenses` takes the eval driver's tool-log sink but did
+not pass it through to the per-lens jobs — every `--tool-log` file
+stayed empty while the lenses made their calls; the pass-through is
+wired and pinned at the entry point itself
+(`test_the_tool_log_sink_reaches_the_lenses_through_the_entry_point`),
+not only at the helper. The eval-parity run file records this run's own
+settled usage — the cost the review committed and the wall the command
+took — where the loader's schema allowed nulls. And the grounding
+pre-pass names a workflow line carrying a GitHub Actions expression
+(`${{ ... }}`) as unreproducible instead of running the literal brace
+text as if it were the check.
+
 ## 2026-11-28 (same day) — #879 round 1: every sweep copy is a work tree, and the hard cap moves above the raises repos legitimately make
 
 The protocol review on #879 requested changes with one Major and one

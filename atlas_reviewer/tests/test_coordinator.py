@@ -2596,7 +2596,9 @@ def test_unread_files_go_to_a_continuation_of_the_same_lens_and_can_approve(tmp_
     result, sprites = _lenses(tmp_path, [LENS], model)
     assert result.coverage_complete
     assert [lens.lens for lens in result.lenses] == [LENS, LENS]
-    assert result.lenses[0].outcome.causes == {Cause.FILES_UNREAD}
+    # The unread file is the attempt's own outcome; the unavailable
+    # run_tests and the script's exhaustion add their own causes.
+    assert Cause.FILES_UNREAD in result.lenses[0].outcome.causes
     assert result.lenses[0].outcome.nudges == ("unread-files",)
     assert result.lenses[1].state is LensState.CLEAN
     created = [call[1] for call in sprites.calls if call[0] == "create"]
@@ -2727,6 +2729,35 @@ def test_a_failed_lens_blocks_approval_after_every_file_was_read(tmp_path):
     assert not result.coverage_complete
     assert result.lenses[0].outcome is not None
     assert Cause.UNPARSED in result.lenses[0].outcome.causes
+
+
+def test_the_tool_log_sink_reaches_the_lenses_through_the_entry_point(tmp_path):
+    """The eval driver's diagnostic sink must survive the entry point:
+    `review_lenses` takes the sink but (the validation run's blocker 3)
+    did not pass it through to the per-lens jobs, so every `--tool-log`
+    file stayed empty while the lenses made their calls. Pinned at this
+    call site, not only the helper's."""
+    lines: list[str] = []
+    model = ScriptedLensModel(
+        [
+            tools(("run_tests", {}), ("read_file", {"path": "calc.py"})),
+            final(),
+        ]
+    )
+    result, _sprites = _lenses(tmp_path, [LENS], model, tool_log=lines.append)
+    assert len(lines) == 2, lines
+    first = json.loads(lines[0])
+    assert first["lens"] == LENS
+    assert first["tool"] == "run_tests"
+    # An unavailable run still logs: the file records what the lens saw,
+    # gaps included.
+    assert first["status"] == "UNAVAILABLE"
+    second = json.loads(lines[1])
+    assert second["tool"] == "read_file" and second["status"] == "OK"
+    assert "return sum" in second["text"]
+    # The unread file is the attempt's own outcome; the unavailable
+    # run_tests and the script's exhaustion add their own causes.
+    assert Cause.FILES_UNREAD in result.lenses[0].outcome.causes
 
 
 def test_two_lenses_run_together_under_different_runner_names(tmp_path):

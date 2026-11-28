@@ -1096,6 +1096,11 @@ def review_lenses(
             python_candidates=python_candidates,
             history=history,
             pr_body=pr_body,
+            # The eval run's diagnostic sink reaches the lenses only
+            # through this pass-through; dropping it here made every
+            # --tool-log file empty while the lenses made their calls
+            # (the validation run's blocker 3).
+            tool_log=tool_log,
         ),
     )
 

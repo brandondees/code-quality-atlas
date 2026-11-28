@@ -2817,11 +2817,14 @@ def _run_file_from(
     event: PrEvent,
     model: str,
     repetition: int,
+    wall_seconds: float,
 ) -> dict[str, object]:
     """The eval-parity run file (the loader's schema) built from the
     completed review: the lenses' states in the loader's own run/not-run
     reading, and the verified findings with the locations the grader
-    matches. The comparison fields stay null: this file is one run, not a
+    matches. The cost and the wall are this run's own settled usage (the
+    spend the review committed, the wall the command took); the
+    comparison fields stay null: this file is one run, not a
     measurement."""
     lenses_run, lenses_not_run, lenses_failed = [], [], []
     for lens in review.lenses:
@@ -2871,8 +2874,8 @@ def _run_file_from(
         "false_positive_majors": None,
         "lenses_clean": None,
         "lenses_planned": None,
-        "cost_usd": None,
-        "wall_seconds": None,
+        "cost_usd": float(review.committed_usd),
+        "wall_seconds": round(wall_seconds, 1),
         "cache_read_tokens": None,
         "cache_write_tokens": None,
         "previous_turn_misses": None,
@@ -2948,8 +2951,13 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
         # the fixture's declared setup (the pip install that stages
         # pytest) runs with a pip that can drive it.
         args.staged_python = sys.executable
+    # The run file's cost and wall come from this review's own settled
+    # usage: the spend the review committed and the wall the command
+    # took, measured here around the review itself.
+    started = time.perf_counter()
     code = _cmd_agentic_review(args, run)
-    _write_eval_run_file(args, run)
+    wall_seconds = time.perf_counter() - started
+    _write_eval_run_file(args, run, wall_seconds)
     return code
 
 
@@ -2961,7 +2969,9 @@ def _run_file_limit_stops(review: AgenticReview) -> list[str]:
     return [] if stop is None else [stop.message()]
 
 
-def _write_eval_run_file(args: argparse.Namespace, run: _Run) -> None:
+def _write_eval_run_file(
+    args: argparse.Namespace, run: _Run, wall_seconds: float
+) -> None:
     """`eval-run --run-file`'s output: the completed review as the
     eval-parity loader's run file. Nothing is written when no run file
     was asked for, or when the review did not complete -- the draft and
@@ -2978,7 +2988,7 @@ def _write_eval_run_file(args: argparse.Namespace, run: _Run) -> None:
         return
     model = args.model or run.env.get("ATLAS_MODEL", "recorded-fixture")
     payload = _run_file_from(
-        review, load_event(Path(args.event)), model, args.repetition
+        review, load_event(Path(args.event)), model, args.repetition, wall_seconds
     )
     run_path = Path(args.run_file)
     run_path.parent.mkdir(parents=True, exist_ok=True)

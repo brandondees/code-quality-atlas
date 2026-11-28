@@ -988,7 +988,11 @@ type checkers, pytest/jest-style runners, and a package manager's or
 `make` target's own `lint`/`type`/`test` entry point). Lines that
 install, fetch or change state are never classified: the pass reproduces
 what CI checks, not what it provisions, and nothing is installed that
-the repo has not adopted. At most 12 commands run per pass, and the rest
+the repo has not adopted. A line carrying a GitHub Actions expression
+(`${{ ... }}`) is named the same way and never run: the Actions runner
+fills those in before the step runs, and the sandbox has no such
+fill-in, so the literal brace text is not executed as if it were the
+check. At most 12 commands run per pass, and the rest
 are named past the cap in the evidence block and the coverage lines.
 
 Each command runs in its own disposable copy of the head tree — the same
@@ -1041,8 +1045,10 @@ Nov 25 analysis found missing.
 `--lenses owners` runs exactly the parity key's owner lenses for the
 fixture's pull request, no picker call; a comma-separated list fixes the
 set by name. `--run-file PATH` writes the eval-parity run file from the
-completed review — the loader's own schema, with the comparison fields
-null — and `--tool-log PATH` logs every tool result, as the model saw it
+completed review — the loader's own schema, with this run's own settled
+usage recorded (the cost the review committed and the wall it took) and
+the comparison fields null — and `--tool-log PATH` logs every tool
+result, as the model saw it
 (rendered and capped), one JSON line each naming the lens that served the
 call (the pooled lenses' lines interleave in one file), so a diagnosis
 reads what happened instead of inferring it from statuses.
