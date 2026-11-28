@@ -56,7 +56,6 @@ offline.
   stages the eval's own interpreter for the setup and the pytest probe
   (`eval-run --staged-python`, D98).
 
-
 ## The body
 
 `pull.json`'s body is GitHub's **current** body for #640. GitHub does

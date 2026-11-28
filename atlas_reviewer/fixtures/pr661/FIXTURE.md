@@ -60,7 +60,6 @@ involves — everything here is committed and the runs over it are offline.
   stages the eval's own interpreter for the setup and the pytest probe
   (`eval-run --staged-python`, D98).
 
-
 ## The body
 
 `pull.json`'s body is **the round-5 body**, taken from
