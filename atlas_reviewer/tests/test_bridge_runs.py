@@ -3078,6 +3078,14 @@ def test_the_sweep_script_stages_copy_edit_run_and_cleans_up(tmp_path):
     assert "drop-operand 2" in script  # the operand rides the edit argv
     assert script.count("rm -rf") >= 3  # the copies die after their runs
 
+    # The sweep's copies are work trees of the staged repository (the
+    # validation run's blocker: the anchor's repository test shelled
+    # `git archive` in a copy without a `.git` and every mutant read
+    # "baseline did not pass"): every copy build echoes the gitdir file
+    # into the copy, one per copy build -- the baseline's and each
+    # mutant's.
+    assert script.count("gitdir:") == 3
+
 
 def test_added_lines_counts_a_line_whose_content_starts_with_plus():
     # The old `not startswith("+++")` guard dropped a genuinely added
@@ -3303,6 +3311,7 @@ def test_a_raise_within_the_hard_cap_writes_past_the_soft_limit(tmp_path):
                 "command": (
                     'python3 -c "import resource\n'
                     "soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)\n"
+                    "print('limits', soft, hard)\n"
                     "resource.setrlimit(resource.RLIMIT_FSIZE, "
                     "(17 * 1024 * 1024, hard))\n"
                     "data = b'x' * (17 * 1024 * 1024)\n"
@@ -3318,7 +3327,7 @@ def test_a_raise_within_the_hard_cap_writes_past_the_soft_limit(tmp_path):
                     'python3 -c "import resource\n'
                     "try:\n"
                     "    resource.setrlimit(resource.RLIMIT_FSIZE, "
-                    "(70 * 1024 * 1024, 70 * 1024 * 1024))\n"
+                    "(600 * 1024 * 1024, 600 * 1024 * 1024))\n"
                     "    print('RAISED PAST THE CAP')\n"
                     "except (ValueError, PermissionError, OSError) as exc:\n"
                     "    print('REFUSED:', exc)\""
@@ -3327,6 +3336,10 @@ def test_a_raise_within_the_hard_cap_writes_past_the_soft_limit(tmp_path):
         ),
     )
     assert within.status is Status.OK
+    # The cap is enforced inside the exec on the local runner too: the
+    # guest inherits soft 8 MiB / hard 512 MiB and cannot raise its own
+    # hard above the cap (the second command's refusal pins that).
+    assert "limits 8388608 536870912" in within.content.text, within.content.text
     assert "wrote 17825792" in within.content.text, within.content.text
     assert past.status is Status.OK
     assert "REFUSED" in past.content.text, past.content.text

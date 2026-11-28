@@ -120,23 +120,38 @@ STDERR_BYTES = 2_000
 STDERR_CHARS = 1_000
 # 512-byte blocks under dash (8 MiB); a shell counting 1 KiB blocks allows 16.
 RAW_OUTPUT_BLOCKS = 16_384
-# The hard limit's own cap, in the same 512-byte blocks (64 MiB). Under
+# The hard limit's own cap, in the same 512-byte blocks (512 MiB). Under
 # dash a plain `ulimit -f` sets BOTH limits, which made every later
 # raise-permitted attempt fail with EPERM -- the reviewed repo's own test
 # suite raises its soft file-size limit when its tests stage bridges and
 # write their fixtures, and under a hard limit pinned at the soft one
 # every such raise is refused. The exec sets the soft limit at today's
-# bound first (leaving the inherited hard) and then the hard cap: on the
-# live runner the exec's user is root and the raise always takes; on the
-# local runner it is skipped when the session's hard is lower, and the
-# soft limit keeps the bound either way. The trade-off the cap buys: PR
-# code running inside the runner can raise its own file-size limit up to
-# the cap before the kernel stops it, so a PR test can write up to 64 MiB
-# per stream where the soft limit would have stopped it at 8 -- bounded,
-# documented, and far above what the repo's own tests legitimately raise
-# to, while the run's own output stays bounded by the soft limit and the
-# read caps.
-HARD_OUTPUT_BLOCKS = 131_072
+# bound first (leaving the inherited hard) and then the hard cap; the
+# measured result inside a bounded exec on the local runner is exactly
+# soft 8388608 / hard 536870912, and on the live runner the exec's user is
+# root, so the raise always takes before the guard drops to nobody. The
+# cap sits at 512 MiB because the raises a reviewed repo legitimately
+# makes reach 256 MiB: the #661 anchor's own guest unpack sets
+# `ulimit -f 524288` (256 MiB, both limits) when its tests stage nested
+# bridges, and a cap below that refuses the raise, collapses those
+# suites, and turns the sweep's scoped runs for their modules
+# inconclusive -- measured on the anchor, baseline exit 1, before the
+# cap moved above it. The cap is enforced inside the exec on both
+# executors: the guest inherits the 512 MiB hard and cannot raise its
+# own hard above it (the raise test pins the refusal), and the only case
+# the hard-set itself skips is an inherited hard already BELOW the cap --
+# a raise the executor may not make -- where that lower inherited hard is
+# the bound. Outside a bounded exec nothing here applies: a bare process
+# on a host whose inherited hard is unlimited can raise as it likes,
+# which is the host's own posture, not the exec's. The trade-off the cap
+# buys: PR code running inside the runner can raise its own file-size
+# limit up to the cap before the kernel stops it, so a PR test can write
+# up to 512 MiB per stream where the soft limit would have stopped it at
+# 8 -- bounded, documented, and above what the repo's own tests
+# legitimately raise to, while the run's own output stays bounded by the
+# soft limit and the read caps, and the writes land in the disposable
+# copy `rm -rf` reclaims.
+HARD_OUTPUT_BLOCKS = 1_048_576
 # The two ulimit commands every bounded exec opens with (see
 # HARD_OUTPUT_BLOCKS for why there are two).
 FILE_LIMIT_CMDS = (
@@ -492,7 +507,6 @@ def bash_script(
             "stage=$?",
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
-            f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
             f"  ( cd {scratch}; {FILE_LIMIT_CMDS};",
             env_exports,
             "  export PYTHONDONTWRITEBYTECODE=1;",
