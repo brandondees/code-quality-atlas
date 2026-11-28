@@ -3078,6 +3078,14 @@ def test_the_sweep_script_stages_copy_edit_run_and_cleans_up(tmp_path):
     assert "drop-operand 2" in script  # the operand rides the edit argv
     assert script.count("rm -rf") >= 3  # the copies die after their runs
 
+    # The sweep's copies are work trees of the staged repository (the
+    # validation run's blocker: the anchor's repository test shelled
+    # `git archive` in a copy without a `.git` and every mutant read
+    # "baseline did not pass"): every copy build echoes the gitdir file
+    # into the copy, one per copy build -- the baseline's and each
+    # mutant's.
+    assert script.count("gitdir:") == 3
+
 
 def test_added_lines_counts_a_line_whose_content_starts_with_plus():
     # The old `not startswith("+++")` guard dropped a genuinely added
@@ -3282,6 +3290,81 @@ def test_the_sweep_reports_what_no_test_imports(tmp_path):
     assert verdicts
     assert all(v.outcome == "inconclusive" for v in verdicts)
     assert all("no test file imports this module" in v.note for v in verdicts)
+
+
+def test_a_raise_within_the_hard_cap_writes_past_the_soft_limit(tmp_path):
+    """The exec's file-size limit keeps its bound and permits the
+    reviewed repo's own raises (the validation run's blocker 2): under
+    dash a plain `ulimit -f` sets BOTH limits, so a test that raises its
+    own soft file-size limit -- what the repo's own bridge-staging tests
+    do -- failed with EPERM and the anchor's suites collapsed under the
+    runner's bound. The exec now sets the soft limit at today's bound
+    (leaving the inherited hard) and the hard cap above it: a raise
+    within the cap writes past the soft bound and succeeds; a raise past
+    the cap is still refused -- both limits together, and the soft limit
+    alone against the capped hard, the shape a raise experiment run
+    outside any bounded exec cannot see (revert-check: the single plain
+    `ulimit -f` fails the first command here)."""
+    ((within, past, soft_only), *_rest) = calls(
+        tmp_path,
+        (
+            "bash",
+            {
+                "command": (
+                    'python3 -c "import resource\n'
+                    "soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)\n"
+                    "print('limits', soft, hard)\n"
+                    "resource.setrlimit(resource.RLIMIT_FSIZE, "
+                    "(17 * 1024 * 1024, hard))\n"
+                    "data = b'x' * (17 * 1024 * 1024)\n"
+                    "open('within.bin', 'wb').write(data)\n"
+                    "print('wrote', len(data))\""
+                )
+            },
+        ),
+        (
+            "bash",
+            {
+                "command": (
+                    'python3 -c "import resource\n'
+                    "try:\n"
+                    "    resource.setrlimit(resource.RLIMIT_FSIZE, "
+                    "(600 * 1024 * 1024, 600 * 1024 * 1024))\n"
+                    "    print('RAISED PAST THE CAP')\n"
+                    "except (ValueError, PermissionError, OSError) as exc:\n"
+                    "    print('REFUSED:', exc)\""
+                )
+            },
+        ),
+        (
+            "bash",
+            {
+                "command": (
+                    'python3 -c "import resource\n'
+                    "soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)\n"
+                    "try:\n"
+                    "    resource.setrlimit(resource.RLIMIT_FSIZE, "
+                    "(600 * 1024 * 1024, hard))\n"
+                    "    print('RAISED SOFT PAST THE CAP')\n"
+                    "except (ValueError, PermissionError, OSError) as exc:\n"
+                    "    print('REFUSED:', exc)\""
+                )
+            },
+        ),
+    )
+    assert within.status is Status.OK
+    # The cap is enforced inside the exec on the local runner too: the
+    # guest inherits soft 8 MiB / hard 512 MiB and cannot raise its own
+    # hard above the cap (the second command's refusal pins that), nor
+    # its soft limit past the capped hard (the third command's refusal
+    # pins the soft-only raise shape).
+    assert "limits 8388608 536870912" in within.content.text, within.content.text
+    assert "wrote 17825792" in within.content.text, within.content.text
+    assert past.status is Status.OK
+    assert "REFUSED" in past.content.text, past.content.text
+    assert "RAISED PAST THE CAP" not in past.content.text
+    assert "REFUSED" in soft_only.content.text, soft_only.content.text
+    assert "RAISED SOFT PAST THE CAP" not in soft_only.content.text
 
 
 def test_the_sweep_without_a_staged_pytest_is_inconclusive_by_name(tmp_path):
