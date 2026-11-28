@@ -3159,6 +3159,41 @@ def test_the_grounding_plan_parses_the_merge_base_workflows(tmp_path):
     assert plan.configured and not plan.unparseable
 
 
+def test_a_workflow_expression_is_named_and_never_run(tmp_path):
+    """A GitHub Actions expression (`${{ ... }}`) is filled in by the
+    Actions runner before the step ever runs; the sandbox has no such
+    fill-in, so a command carrying one is named in the plan instead of
+    running the literal brace text as if it were the check (the
+    validation run's grounding fix)."""
+    workflow = (
+        b"jobs:\n"
+        b"  gate:\n"
+        b"    steps:\n"
+        b"      - run: ruff check ${{ github.workspace }}\n"
+        b"      - run: python3 -m pytest --version\n"
+    )
+
+    def body(bridge):
+        plans.append(bridge.grounding_plan())
+        return "done"
+
+    plans: list[object] = []
+    source = SourceTrees(
+        source_tarball({**SUITE, ".github/workflows/ci.yml": workflow}),
+        source_tarball(SUITE),
+        OLD,
+        HEAD,
+    )
+    bridge_run(tmp_path, body, source=source)
+    (plan,) = plans
+    assert [(c.family, c.command) for c in plan.commands] == [
+        ("test", "python3 -m pytest --version")
+    ]
+    assert [(c.command, c.unreproducible) for c in plan.unreproducible] == [
+        ("ruff check ${{ github.workspace }}", True)
+    ]
+
+
 def test_the_grounding_pass_runs_the_declared_commands_and_names_the_gaps(tmp_path):
     """The pre-pass executes each declared command in its own disposable
     copy under the same sandbox, and names what it never ran: a command

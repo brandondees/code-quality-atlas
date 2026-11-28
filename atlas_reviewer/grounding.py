@@ -350,13 +350,22 @@ def _workflow_commands(
                 provisions = any(
                     _provisions(segment) for segment in segments if segment.split()
                 )
+                # A GitHub Actions expression (`${{ ... }}`) is filled in
+                # by the Actions runner before the step ever runs; the
+                # sandbox has no such fill-in, so the command's shell
+                # would receive the literal brace text. The pass cannot
+                # reproduce it, so it names the command instead of
+                # running the literal as if it were the check.
+                unreproducible = provisions or any(
+                    "${{" in segment for segment in segments
+                )
                 commands.append(
                     GroundingCommand(
                         family,
                         prefix + line,
                         tool,
                         path,
-                        unreproducible=provisions,
+                        unreproducible=unreproducible,
                     )
                 )
     return commands

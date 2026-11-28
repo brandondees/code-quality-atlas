@@ -3548,6 +3548,11 @@ def test_eval_run_writes_a_draft_and_a_loadable_run_file(tmp_path):
     assert mapped.verified is True
     assert mapped.lens == "tracing-correctness-and-invariants"
     assert "discount" in mapped.quote
+    # This run's own settled usage: the spend the review committed and
+    # the wall the command took (the validation run's blocker-4 fix) --
+    # recorded, not the null placeholders the loader's schema allows.
+    assert record.cost_usd is not None and record.cost_usd > 0
+    assert record.wall_seconds is not None and record.wall_seconds > 0
 
 
 def test_eval_run_logs_the_tool_results_it_served(tmp_path):

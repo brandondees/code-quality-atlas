@@ -940,10 +940,16 @@ jobs:
     # fake, the model provider is the offline one (OpenRouter, GitHub
     # App minting and Sprites are driven only through recorded fakes) --
     # no credentials and no network calls beyond a loopback HTTP server.
+    # The backstop sits at 30, not 20: the staged-setup e2e tests (the
+    # anchors' declared setup runs a real pip install) plus the grounding
+    # pre-pass and the mutant sweep pushed the merged stack's suite past
+    # the 20-minute wall -- three consecutive runs on #881 died at
+    # 20m05s-20m16s with the job marked cancelled, while the same suite
+    # on the parent layer finished in 18m56s.
     needs: changes
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.requirements == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
