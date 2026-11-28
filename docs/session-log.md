@@ -6938,3 +6938,58 @@ The e2e tests run serial lenses with the mutant sweep disabled (the
 existing `ATLAS_SWEEP_LENSES` knob) and the grounding pre-pass live, so
 each costs about two minutes now that the fixture's setup and the
 grounding run for real.
+
+## 2026-11-28 (same day) — #879 round 1: every sweep copy is a work tree, and the hard cap moves above the raises repos legitimately make
+
+The protocol review on #879 requested changes with one Major and one
+Minor, and the validation run's own stage-0 probing turned the Major's
+diagnosis into two distinct defects with two distinct cures.
+
+**The Major (the sweep's copies were not work trees).** The bash tool's
+copy build echoes `gitdir: {root}/repo.git` into the copy's `.git`; the
+sweep's copy build did not, so inside the sweep's disposable copy any
+test that shells git resolved in a non-repository. On the #661 anchor
+that was `test_git_archive_of_this_repository_is_accepted` (the
+reviewer ran the anchor's suite and counted 2,111 of 2,112 passing):
+its `git archive` exits 128, the baseline reads exit 1, and every
+mutant — 661-m3 (rounds.py:182) and 661-m4 (rounds.py:207) included —
+stayed inconclusive. The echo moves into `stage_copy_steps`, the one
+function every copy builder shares, so the two builders cannot drift
+again; the sweep-script pin counts one gitdir echo per copy build
+(baseline plus each mutant).
+
+**And the baselines still failed — the cap was too low.** With the
+gitdir fixed, the ledger group gained real killed verdicts but the
+coordinator and rounds groups' baselines still read exit 1. Capturing
+the nested staging's stderr (the anchor's own test helper discards it,
+which is why the failure read as a bare "exit 2") showed the cause:
+`/bin/sh: ulimit: error setting limit (Operation not permitted)` — the
+anchor's guest unpack sets `ulimit -f 524288` (256 MiB, both limits)
+when its tests stage nested bridges, and the 64 MiB hard cap refused
+the raise, collapsing those suites under `set -e`. The cap moves to
+512 MiB: above the largest raise a reviewed repo legitimately makes
+(measured on the anchor), still a hard per-file bound the guest cannot
+raise past. The raise test's refusal moves to 600 MiB and gains the
+soft-only shape — the Minor's experiment, run where it applies.
+
+**The Minor, declined with the measurement it lacked.** The review's
+empirical raise (soft-only, 70 MiB, succeeds) ran outside any bounded
+exec, where the host's unlimited inherited hard makes any soft raise
+trivially succeed — the host's own posture, which the constant's
+comment already names. Inside the exec the cap is enforced on the
+local runner too: the pinned measured pair is soft 8388608 /
+hard 536870912, a both-limits raise to 600 MiB is refused, and a
+soft-only raise to 600 MiB against the capped hard is refused (soft
+may not exceed hard). The case the comment concedes stands: where the
+executor cannot set the hard at all (an inherited hard already below
+the cap), that lower inherited hard is the bound.
+
+**Stage-0 evidence, at the new head.** The offline sweep over the #661
+anchor gives all 24 planned mutants real verdicts — 12 killed, 12
+survived, zero inconclusive; the three brief-named specs read
+rounds.py:182 break-continue → survived, rounds.py:207 drop-operand 1
+→ survived, drop-operand 2 → killed. The offline `eval-run` with the
+sweep enabled completes: APPROVE, coverage complete, the three sweep
+execs run the anchor's suites for real (40 s, 212 s, 176 s), and all
+five grounding execs exit 0 — including the ~95 s full pytest run the
+round-1 review had seen exit 1.
