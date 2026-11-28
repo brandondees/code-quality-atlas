@@ -120,6 +120,29 @@ STDERR_BYTES = 2_000
 STDERR_CHARS = 1_000
 # 512-byte blocks under dash (8 MiB); a shell counting 1 KiB blocks allows 16.
 RAW_OUTPUT_BLOCKS = 16_384
+# The hard limit's own cap, in the same 512-byte blocks (64 MiB). Under
+# dash a plain `ulimit -f` sets BOTH limits, which made every later
+# raise-permitted attempt fail with EPERM -- the reviewed repo's own test
+# suite raises its soft file-size limit when its tests stage bridges and
+# write their fixtures, and under a hard limit pinned at the soft one
+# every such raise is refused. The exec sets the soft limit at today's
+# bound first (leaving the inherited hard) and then the hard cap: on the
+# live runner the exec's user is root and the raise always takes; on the
+# local runner it is skipped when the session's hard is lower, and the
+# soft limit keeps the bound either way. The trade-off the cap buys: PR
+# code running inside the runner can raise its own file-size limit up to
+# the cap before the kernel stops it, so a PR test can write up to 64 MiB
+# per stream where the soft limit would have stopped it at 8 -- bounded,
+# documented, and far above what the repo's own tests legitimately raise
+# to, while the run's own output stays bounded by the soft limit and the
+# read caps.
+HARD_OUTPUT_BLOCKS = 131_072
+# The two ulimit commands every bounded exec opens with (see
+# HARD_OUTPUT_BLOCKS for why there are two).
+FILE_LIMIT_CMDS = (
+    f"ulimit -S -f {RAW_OUTPUT_BLOCKS} 2>/dev/null || ulimit -f {RAW_OUTPUT_BLOCKS}; "
+    f"ulimit -H -f {HARD_OUTPUT_BLOCKS} 2>/dev/null || true"
+)
 EXEC_SLACK_S = 15.0
 # The mutation edit runs under its own `timeout`, and a `mutate` call runs
 # two test processes (baseline, mutated), that edit, and two staging
@@ -406,7 +429,7 @@ def call_script(
             f"cd {quote(staged.root)}",
             f"export {' '.join(GIT_ENV)}",
             (
-                f"( ulimit -f {RAW_OUTPUT_BLOCKS}; exec timeout -k {KILL_AFTER_S} "
+                f"( {FILE_LIMIT_CMDS}; exec timeout -k {KILL_AFTER_S} "
                 f"{limits.timeout_s} {git} {argv} ) > out 2> err"
             ),
             "s=$?",
@@ -470,7 +493,7 @@ def bash_script(
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
             f'  echo "gitdir: {root}/repo.git" > {scratch}/.git',
-            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            f"  ( cd {scratch}; {FILE_LIMIT_CMDS};",
             env_exports,
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
@@ -541,7 +564,7 @@ def history_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             f"export {' '.join(GIT_ENV)}",
             f"if {precheck}; then",
             (
-                f"  ( ulimit -f {RAW_OUTPUT_BLOCKS}; exec timeout -k {KILL_AFTER_S} "
+                f"  ( {FILE_LIMIT_CMDS}; exec timeout -k {KILL_AFTER_S} "
                 f"{limits.timeout_s} {git} {argv} ) > out 2> err"
             ),
             "  s=$?",
@@ -1416,7 +1439,7 @@ def run_test_script(
             "stage=$?",
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
-            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            f"  ( cd {scratch}; {FILE_LIMIT_CMDS};",
             guarded_env_exports(staged.scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
@@ -1472,7 +1495,7 @@ def run_probe_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             f'echo "{STAGE_HEADER} $stage"',
             'if [ "$stage" = 0 ]; then',
             f"  printf %s {quote(content)} | base64 -d > {scratch}/{quote(probe_path)}",
-            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS};",
+            f"  ( cd {scratch}; {FILE_LIMIT_CMDS};",
             guarded_env_exports(staged.scratch),
             "  export PYTHONDONTWRITEBYTECODE=1;",
             (
@@ -1508,7 +1531,7 @@ def mutate_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     assert staged.pytest is not None  # the caller refuses the call before this
     assert staged.shim_python is not None  # the caller refuses the call before this
     run = (
-        f"( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+        f"( cd {scratch}; {FILE_LIMIT_CMDS}; "
         f"{guarded_env_exports(staged.scratch)}"
         "export PYTHONDONTWRITEBYTECODE=1; "
         f"exec timeout -k {KILL_AFTER_S} {limits.timeout_s} "
@@ -3959,7 +3982,7 @@ def sweep_script(
 
     def run_line(name: str) -> str:
         return (
-            f"  ( cd {scratch}; ulimit -f {RAW_OUTPUT_BLOCKS}; "
+            f"  ( cd {scratch}; {FILE_LIMIT_CMDS}; "
             f"{guarded_env_exports(staged.scratch)}"
             "export PYTHONDONTWRITEBYTECODE=1; "
             f"exec timeout -k {KILL_AFTER_S} {run_limit.timeout_s} {guarded} ) "
