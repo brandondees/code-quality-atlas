@@ -1,0 +1,1841 @@
+﻿2026-11-13T18:57:32.4441731Z Current runner version: '2.338.2'
+2026-11-13T18:57:32.4461109Z ##[group]Runner Image Provisioner
+2026-11-13T18:57:32.4461857Z Hosted Compute Agent
+2026-11-13T18:57:32.4462699Z Version: 20261103.629
+2026-11-13T18:57:32.4463262Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-13T18:57:32.4463871Z Build Date: 2026-11-03T17:26:59Z
+2026-11-13T18:57:32.4464455Z Worker ID: {052a85d8-7f5d-40ab-921d-154d73fee52b}
+2026-11-13T18:57:32.4465035Z Region: westus3
+2026-11-13T18:57:32.4465487Z Cloud: Azure
+2026-11-13T18:57:32.4465947Z ##[endgroup]
+2026-11-13T18:57:32.4467067Z ##[group]Operating System
+2026-11-13T18:57:32.4467583Z Ubuntu
+2026-11-13T18:57:32.4468051Z 26.04.1
+2026-11-13T18:57:32.4468479Z LTS
+2026-11-13T18:57:32.4468984Z ##[endgroup]
+2026-11-13T18:57:32.4469433Z ##[group]Runner Image
+2026-11-13T18:57:32.4469923Z Image: ubuntu-26.04
+2026-11-13T18:57:32.4470392Z Version: 20261111.196.1
+2026-11-13T18:57:32.4471464Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-13T18:57:32.4472852Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-13T18:57:32.4473639Z ##[endgroup]
+2026-11-13T18:57:32.4474674Z ##[group]GITHUB_TOKEN Permissions
+2026-11-13T18:57:32.4476317Z Contents: read
+2026-11-13T18:57:32.4476786Z Metadata: read
+2026-11-13T18:57:32.4477240Z PullRequests: read
+2026-11-13T18:57:32.4477707Z ##[endgroup]
+2026-11-13T18:57:32.4479426Z Secret source: Actions
+2026-11-13T18:57:32.4480170Z Cache mode: write
+2026-11-13T18:57:32.4480710Z Prepare workflow directory
+2026-11-13T18:57:32.4739037Z Prepare all required actions
+2026-11-13T18:57:32.4778663Z Getting action download info
+2026-11-13T18:57:32.7856467Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-13T18:57:32.9017187Z Download action repository 'dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d' (SHA:ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d)
+2026-11-13T18:57:33.3288737Z Download action repository 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0' (SHA:6d4fd22b20465ccc0f7354476588e8df7c9ca0e0)
+2026-11-13T18:57:33.4667624Z Download action repository 'DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34' (SHA:696eb3f2509270d7b882d2aa68347bc676e7af34)
+2026-11-13T18:57:34.0576931Z Complete job name: gate
+2026-11-13T18:57:34.1550643Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-11-13T18:57:34.1552228Z with:
+2026-11-13T18:57:34.1553417Z   fetch-depth: 2
+2026-11-13T18:57:34.1554266Z   persist-credentials: false
+2026-11-13T18:57:34.1555327Z   repository: brandondees/code-quality-atlas
+2026-11-13T18:57:34.1562499Z   token: ***
+2026-11-13T18:57:34.1563445Z   ssh-strict: true
+2026-11-13T18:57:34.1564305Z   ssh-user: git
+2026-11-13T18:57:34.1565169Z   clean: true
+2026-11-13T18:57:34.1566084Z   sparse-checkout-cone-mode: true
+2026-11-13T18:57:34.1567124Z   fetch-tags: false
+2026-11-13T18:57:34.1568031Z   show-progress: true
+2026-11-13T18:57:34.1568948Z   lfs: false
+2026-11-13T18:57:34.1569786Z   submodules: false
+2026-11-13T18:57:34.1570673Z   set-safe-directory: true
+2026-11-13T18:57:34.1571669Z   allow-unsafe-pr-checkout: false
+2026-11-13T18:57:34.1573224Z ##[endgroup]
+2026-11-13T18:57:34.3621337Z Syncing repository: brandondees/code-quality-atlas
+2026-11-13T18:57:34.3624503Z ##[group]Getting Git version info
+2026-11-13T18:57:34.3626043Z Working directory is '/home/runner/work/code-quality-atlas/code-quality-atlas'
+2026-11-13T18:57:34.3628722Z [command]/usr/bin/git version
+2026-11-13T18:57:34.3629751Z git version 2.56.1
+2026-11-13T18:57:34.3634656Z ##[endgroup]
+2026-11-13T18:57:34.3642637Z Temporarily overriding HOME='/home/runner/work/_temp/137c5d52-a420-408e-8d59-1e1698613169' before making global git config changes
+2026-11-13T18:57:34.3645297Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T18:57:34.3647476Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/code-quality-atlas/code-quality-atlas
+2026-11-13T18:57:34.3691861Z Deleting the contents of '/home/runner/work/code-quality-atlas/code-quality-atlas'
+2026-11-13T18:57:34.3695587Z ##[group]Determining repository object format
+2026-11-13T18:57:34.3697988Z ##[endgroup]
+2026-11-13T18:57:34.3699854Z ##[group]Initializing the repository
+2026-11-13T18:57:34.3701981Z [command]/usr/bin/git init /home/runner/work/code-quality-atlas/code-quality-atlas
+2026-11-13T18:57:34.3767470Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-13T18:57:34.3769272Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-13T18:57:34.3771028Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-13T18:57:34.3772621Z hint: call:
+2026-11-13T18:57:34.3773544Z hint:
+2026-11-13T18:57:34.3774514Z hint: 	git config --global init.defaultBranch <name>
+2026-11-13T18:57:34.3775767Z hint:
+2026-11-13T18:57:34.3777009Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-13T18:57:34.3779274Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-13T18:57:34.3780968Z hint:
+2026-11-13T18:57:34.3781939Z hint: 	git branch -m <name>
+2026-11-13T18:57:34.3783315Z hint:
+2026-11-13T18:57:34.3784511Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-13T18:57:34.3786720Z Initialized empty Git repository in /home/runner/work/code-quality-atlas/code-quality-atlas/.git/
+2026-11-13T18:57:34.3790017Z [command]/usr/bin/git remote add origin https://github.com/brandondees/code-quality-atlas
+2026-11-13T18:57:34.4003210Z ##[endgroup]
+2026-11-13T18:57:34.4005176Z ##[group]Disabling automatic garbage collection
+2026-11-13T18:57:34.4006482Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-13T18:57:34.4028837Z ##[endgroup]
+2026-11-13T18:57:34.4030393Z ##[group]Setting up auth
+2026-11-13T18:57:34.4031876Z Removing SSH command configuration
+2026-11-13T18:57:34.4033841Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T18:57:34.4055542Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T18:57:34.4341902Z Removing HTTP extra header
+2026-11-13T18:57:34.4345654Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T18:57:34.4373876Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T18:57:34.4561115Z Removing includeIf entries pointing to credentials config files
+2026-11-13T18:57:34.4563729Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T18:57:34.4584093Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T18:57:34.4778430Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-13T18:57:34.4806998Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git.path /home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:34.4830963Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:34.4857369Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:34.4881121Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:34.4903565Z ##[endgroup]
+2026-11-13T18:57:34.4905339Z ##[group]Fetching the repository
+2026-11-13T18:57:34.4908001Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=2 origin +fe6bc7f060ae93900b1411cb77e3ad86851ef42b:refs/remotes/pull/640/merge
+2026-11-13T18:57:35.4816102Z From https://github.com/brandondees/code-quality-atlas
+2026-11-13T18:57:35.4817843Z  * [new ref]         fe6bc7f060ae93900b1411cb77e3ad86851ef42b -> pull/640/merge
+2026-11-13T18:57:35.4820284Z ##[endgroup]
+2026-11-13T18:57:35.4821012Z ##[group]Determining the checkout info
+2026-11-13T18:57:35.4821830Z ##[endgroup]
+2026-11-13T18:57:35.4827318Z [command]/usr/bin/git sparse-checkout disable
+2026-11-13T18:57:35.4869220Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-13T18:57:35.4893105Z ##[group]Checking out the ref
+2026-11-13T18:57:35.4896105Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/640/merge
+2026-11-13T18:57:35.5539099Z Note: switching to 'refs/remotes/pull/640/merge'.
+2026-11-13T18:57:35.5539689Z 
+2026-11-13T18:57:35.5540235Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-13T18:57:35.5540851Z changes and commit them, and you can discard any commits you make in this
+2026-11-13T18:57:35.5541343Z state without impacting any branches by switching back to a branch.
+2026-11-13T18:57:35.5541644Z 
+2026-11-13T18:57:35.5541932Z If you want to create a new branch to retain commits you create, you may
+2026-11-13T18:57:35.5542736Z do so (now or later) by using -c with the switch command. Example:
+2026-11-13T18:57:35.5543130Z 
+2026-11-13T18:57:35.5543308Z   git switch -c <new-branch-name>
+2026-11-13T18:57:35.5543558Z 
+2026-11-13T18:57:35.5543696Z Or undo this operation with:
+2026-11-13T18:57:35.5543913Z 
+2026-11-13T18:57:35.5544062Z   git switch -
+2026-11-13T18:57:35.5544253Z 
+2026-11-13T18:57:35.5544527Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-13T18:57:35.5544806Z 
+2026-11-13T18:57:35.5545182Z HEAD is now at fe6bc7f Merge 10d1cf9b97b1b29ebf7176add3afe55376cd0c02 into 771925a538d6744b6017175e8fe5f170abf27a6d
+2026-11-13T18:57:35.5550927Z ##[endgroup]
+2026-11-13T18:57:35.5585812Z [command]/usr/bin/git log -1 --format=%H
+2026-11-13T18:57:35.5605505Z fe6bc7f060ae93900b1411cb77e3ad86851ef42b
+2026-11-13T18:57:35.5614812Z ##[group]Removing auth
+2026-11-13T18:57:35.5615337Z Removing SSH command configuration
+2026-11-13T18:57:35.5615880Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T18:57:35.5637637Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T18:57:35.5831283Z Removing HTTP extra header
+2026-11-13T18:57:35.5833868Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T18:57:35.5855822Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T18:57:35.6060318Z Removing includeIf entries pointing to credentials config files
+2026-11-13T18:57:35.6062894Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T18:57:35.6081291Z includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git.path
+2026-11-13T18:57:35.6082153Z includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git/worktrees/*.path
+2026-11-13T18:57:35.6083197Z includeif.gitdir:/github/workspace/.git.path
+2026-11-13T18:57:35.6083754Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T18:57:35.6087616Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git.path
+2026-11-13T18:57:35.6104979Z /home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:35.6113528Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-21b7c9f5\-cf03\-4222\-85bb\-86c05841bc1e\.config
+2026-11-13T18:57:35.6146370Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git/worktrees/*.path
+2026-11-13T18:57:35.6165785Z /home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:35.6172010Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/code-quality-atlas/code-quality-atlas/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-21b7c9f5\-cf03\-4222\-85bb\-86c05841bc1e\.config
+2026-11-13T18:57:35.6199323Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-13T18:57:35.6216650Z /github/runner_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:35.6223539Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-21b7c9f5\-cf03\-4222\-85bb\-86c05841bc1e\.config
+2026-11-13T18:57:35.6253362Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T18:57:35.6271529Z /github/runner_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config
+2026-11-13T18:57:35.6278102Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-21b7c9f5\-cf03\-4222\-85bb\-86c05841bc1e\.config
+2026-11-13T18:57:35.6305402Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T18:57:35.6503483Z Removing credentials config '/home/runner/work/_temp/git-credentials-21b7c9f5-cf03-4222-85bb-86c05841bc1e.config'
+2026-11-13T18:57:35.6511260Z ##[endgroup]
+2026-11-13T18:57:35.6737780Z ##[group]Run dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
+2026-11-13T18:57:35.6738305Z with:
+2026-11-13T18:57:35.6749937Z   filters: python:
+  - "skills/**"
+  - "collapsed/**"
+  - "tooling/**"
+  - "atlas_reviewer/**"
+  - "tests/**"
+  - "docs/research/**"
+  - "commands/**"
+  - "templates/**"
+  - "docs/map/**"
+  - "hooks/**"
+  - ".claude/skills/**"
+  - "AGENTS.md"
+  - "CLAUDE.md"
+  - "README.md"
+  - "REVIEW.md"
+  - "LICENSE*"
+  - ".claude-plugin/plugin.json"
+  - ".claude-plugin/marketplace.json"
+  - "docs/distribution.md"
+  - "docs/install.md"
+  - "docs/collapsed-entrypoints-and-depth-modes.md"
+  - "docs/review-depth-modes.md"
+  - "docs/open-questions.md"
+  # tests/test_session_log_currency.py reads this file's own
+  # newest header date -- a session-log-only backfill PR (the
+  # exact remediation that test asks for) must still run the
+  # `tests` step so the fix is actually verified, not silently
+  # reported as `skipped` (#513/#516).
+  - "docs/session-log.md"
+  # Read by 4 tests (test_ack_round_identity_binding.py,
+  # test_pr_review_automation_runbook_accuracy.py,
+  # test_review_protocol_markers_sync.py,
+  # test_review_thread_resolution_scoping.py) that keep this
+  # runbook honest against commands/atlas-review-pr.md -- a
+  # pre-existing gap in the same class this PR fixes for
+  # session-log.md, caught by atlas review round 2 on #522.
+  - "docs/runbooks/pr-review-automation.md"
+  # The Fly deploy files atlas_reviewer/tests/test_fly_deploy.py
+  # parses or reads.
+  - "Dockerfile"
+  - "fly.toml"
+  - ".dockerignore"
+  - ".gitignore"
+  - "*.py"
+  - "pyproject.toml"
+  - ".python-version"
+  - ".pre-commit-config.yaml"
+  - ".github/workflows/ci.yml"
+requirements:
+  - "requirements.in"
+  - "requirements.txt"
+# tests/test_session_log_currency.py's pull_request gate (#548)
+# reads this to decide whether a PR's own diff could plausibly
+# need a session-log entry. Deliberately NARROWER than `python`
+# above: `python` also answers "does the tests/lint/mypy job need
+# to run at all" and so includes purely mechanical/meta paths
+# (`.github/workflows/ci.yml`, `pyproject.toml`, `.python-version`,
+# `.pre-commit-config.yaml`) that a Dependabot `github-actions`
+# pin bump touches on its own -- reusing `python` verbatim here
+# left exactly that case still failing the gate (atlas review
+# round 1 on #550: a weekly actions-pin bump edits `ci.yml`,
+# which is in `python`, so it still tripped the calendar check).
+# Same list as `python` minus those four mechanical paths.
+session_log_substantive:
+  - "skills/**"
+  - "collapsed/**"
+  - "tooling/**"
+  - "atlas_reviewer/**"
+  - "tests/**"
+  - "docs/research/**"
+  - "commands/**"
+  - "templates/**"
+  - "docs/map/**"
+  - "hooks/**"
+  - ".claude/skills/**"
+  - "AGENTS.md"
+  - "CLAUDE.md"
+  - "README.md"
+  - "REVIEW.md"
+  - "LICENSE*"
+  - ".claude-plugin/plugin.json"
+  - ".claude-plugin/marketplace.json"
+  - "docs/distribution.md"
+  - "docs/install.md"
+  - "docs/collapsed-entrypoints-and-depth-modes.md"
+  - "docs/review-depth-modes.md"
+  - "docs/open-questions.md"
+  - "docs/session-log.md"
+  - "docs/runbooks/pr-review-automation.md"
+  - "Dockerfile"
+  - "fly.toml"
+  - ".dockerignore"
+  - ".gitignore"
+  - "*.py"
+shell:
+  - "tooling/**/*.sh"
+  - "hooks/**"
+  - "collapsed/hooks/**"
+  - "atlas_reviewer/**/*.sh"
+  # The whole workflows/ tree, not just ci.yml: actionlint below
+  # also shells out to shellcheck for embedded run: scripts in
+  # *any* workflow file, so a change to a workflow other than
+  # ci.yml must install shellcheck too, not just gate actionlint
+  # itself via `workflows:` below (#379).
+  - ".github/workflows/**"
+markdown:
+  - "**/*.md"
+  - ".markdownlint-cli2.jsonc"
+  - ".markdownlint-cli2.yaml"
+  - ".markdownlint-cli2.cjs"
+  - ".markdownlint-cli2.mjs"
+  - ".markdownlint.cjs"
+  - ".markdownlint.mjs"
+  - ".github/workflows/ci.yml"
+# `.github/workflows/ci.yml` above only ever matches itself, so a
+# change anywhere else under `.github/` (a new workflow file, a
+# `dependabot.yml` edit, ...) previously executed zero checks
+# here (#379). This filter covers the whole tree and gates the
+# actionlint step below.
+workflows:
+  - ".github/**"
+
+2026-11-13T18:57:35.6766719Z   token: ***
+2026-11-13T18:57:35.6767120Z   list-files: none
+2026-11-13T18:57:35.6767553Z   initial-fetch-depth: 100
+2026-11-13T18:57:35.6768050Z   predicate-quantifier: some
+2026-11-13T18:57:35.6768491Z ##[endgroup]
+2026-11-13T18:57:35.7549283Z ##[group]Fetching list of changed files for PR#640 from GitHub API
+2026-11-13T18:57:35.7556646Z Invoking listFiles(pull_number: 640, per_page: 100)
+2026-11-13T18:57:36.4246648Z Received 9 items
+2026-11-13T18:57:36.4247215Z [modified] atlas_reviewer/README.md
+2026-11-13T18:57:36.4247788Z [modified] atlas_reviewer/github_auth.py
+2026-11-13T18:57:36.4248292Z [modified] atlas_reviewer/service.py
+2026-11-13T18:57:36.4248751Z [added] atlas_reviewer/service_post.py
+2026-11-13T18:57:36.4249249Z [modified] atlas_reviewer/service_queue.py
+2026-11-13T18:57:36.4249692Z [modified] atlas_reviewer/tests/test_github_auth.py
+2026-11-13T18:57:36.4250245Z [added] atlas_reviewer/tests/test_service_post.py
+2026-11-13T18:57:36.4250746Z [modified] atlas_reviewer/tests/test_service_receive.py
+2026-11-13T18:57:36.4251279Z [modified] docs/open-questions.md
+2026-11-13T18:57:36.4252053Z ##[endgroup]
+2026-11-13T18:57:36.4252571Z Detected 9 changed files
+2026-11-13T18:57:36.4269468Z Results:
+2026-11-13T18:57:36.4270185Z ##[group]Filter python = true
+2026-11-13T18:57:36.4270622Z Matching files:
+2026-11-13T18:57:36.4271001Z atlas_reviewer/README.md [modified]
+2026-11-13T18:57:36.4271511Z atlas_reviewer/github_auth.py [modified]
+2026-11-13T18:57:36.4271944Z atlas_reviewer/service.py [modified]
+2026-11-13T18:57:36.4272523Z atlas_reviewer/service_post.py [added]
+2026-11-13T18:57:36.4272979Z atlas_reviewer/service_queue.py [modified]
+2026-11-13T18:57:36.4273422Z atlas_reviewer/tests/test_github_auth.py [modified]
+2026-11-13T18:57:36.4274137Z atlas_reviewer/tests/test_service_post.py [added]
+2026-11-13T18:57:36.4274629Z atlas_reviewer/tests/test_service_receive.py [modified]
+2026-11-13T18:57:36.4275084Z docs/open-questions.md [modified]
+2026-11-13T18:57:36.4278406Z ##[endgroup]
+2026-11-13T18:57:36.4279167Z ##[group]Filter requirements = false
+2026-11-13T18:57:36.4279592Z Matching files: none
+2026-11-13T18:57:36.4281909Z ##[endgroup]
+2026-11-13T18:57:36.4282893Z ##[group]Filter session_log_substantive = true
+2026-11-13T18:57:36.4283813Z Matching files:
+2026-11-13T18:57:36.4284276Z atlas_reviewer/README.md [modified]
+2026-11-13T18:57:36.4284595Z atlas_reviewer/github_auth.py [modified]
+2026-11-13T18:57:36.4284887Z atlas_reviewer/service.py [modified]
+2026-11-13T18:57:36.4285196Z atlas_reviewer/service_post.py [added]
+2026-11-13T18:57:36.4285490Z atlas_reviewer/service_queue.py [modified]
+2026-11-13T18:57:36.4285814Z atlas_reviewer/tests/test_github_auth.py [modified]
+2026-11-13T18:57:36.4286173Z atlas_reviewer/tests/test_service_post.py [added]
+2026-11-13T18:57:36.4286506Z atlas_reviewer/tests/test_service_receive.py [modified]
+2026-11-13T18:57:36.4286873Z docs/open-questions.md [modified]
+2026-11-13T18:57:36.4287290Z ##[endgroup]
+2026-11-13T18:57:36.4287691Z ##[group]Filter shell = false
+2026-11-13T18:57:36.4287950Z Matching files: none
+2026-11-13T18:57:36.4288360Z ##[endgroup]
+2026-11-13T18:57:36.4288710Z ##[group]Filter markdown = true
+2026-11-13T18:57:36.4288968Z Matching files:
+2026-11-13T18:57:36.4289289Z atlas_reviewer/README.md [modified]
+2026-11-13T18:57:36.4289605Z docs/open-questions.md [modified]
+2026-11-13T18:57:36.4290123Z ##[endgroup]
+2026-11-13T18:57:36.4290561Z ##[group]Filter workflows = false
+2026-11-13T18:57:36.4290856Z Matching files: none
+2026-11-13T18:57:36.4291341Z ##[endgroup]
+2026-11-13T18:57:36.4291762Z Changes output set to ["python","session_log_substantive","markdown"]
+2026-11-13T18:57:36.4468230Z ##[group]Run actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+2026-11-13T18:57:36.4468617Z with:
+2026-11-13T18:57:36.4468886Z   python-version: 3.12
+2026-11-13T18:57:36.4469135Z   cache: pip
+2026-11-13T18:57:36.4469380Z   check-latest: false
+2026-11-13T18:57:36.4471236Z   token: ***
+2026-11-13T18:57:36.4471560Z   mirror: https://raw.githubusercontent.com/actions/python-versions/main
+2026-11-13T18:57:36.4471987Z   update-environment: true
+2026-11-13T18:57:36.4472472Z   allow-prereleases: false
+2026-11-13T18:57:36.4472817Z   freethreaded: false
+2026-11-13T18:57:36.4473102Z ##[endgroup]
+2026-11-13T18:57:36.5421662Z ##[group]Installed versions
+2026-11-13T18:57:36.5496192Z Successfully set up CPython (3.12.16)
+2026-11-13T18:57:36.5496859Z ##[endgroup]
+2026-11-13T18:57:36.6885973Z [command]/opt/hostedtoolcache/Python/3.12.16/x64/bin/pip cache dir
+2026-11-13T18:57:37.8584542Z /home/runner/.cache/pip
+2026-11-13T18:57:38.0821371Z Cache hit for: setup-python-Linux-x64-26.04-Ubuntu-python-3.12.16-pip-85fbd452ab211eda4ba1be4aee9b53b3572300afba5e5bbf8a7bead27d13d387
+2026-11-13T18:57:39.2346588Z Received 47260800 of 47260800 (100.0%), 48.3 MBs/sec
+2026-11-13T18:57:39.2347612Z Cache Size: ~45 MB (47260800 B)
+2026-11-13T18:57:39.2401673Z [command]/usr/bin/tar -xf /home/runner/work/_temp/8213476a-616b-4e07-9cca-2602bbadaf63/cache.tzst -P -C /home/runner/work/code-quality-atlas/code-quality-atlas --use-compress-program unzstd
+2026-11-13T18:57:39.3000104Z Cache restored successfully
+2026-11-13T18:57:39.3017974Z Cache restored from key: setup-python-Linux-x64-26.04-Ubuntu-python-3.12.16-pip-85fbd452ab211eda4ba1be4aee9b53b3572300afba5e5bbf8a7bead27d13d387
+2026-11-13T18:57:39.3158467Z ##[group]Run python -m venv --clear "$RUNNER_TEMP/venv"
+2026-11-13T18:57:39.3158916Z [36;1mpython -m venv --clear "$RUNNER_TEMP/venv"[0m
+2026-11-13T18:57:39.3159290Z [36;1m"$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt[0m
+2026-11-13T18:57:39.3159670Z [36;1mecho "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"[0m
+2026-11-13T18:57:39.3192832Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:39.3193228Z env:
+2026-11-13T18:57:39.3193473Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:39.3193849Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:39.3194191Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:39.3194502Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:39.3194808Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:39.3195116Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:39.3195416Z ##[endgroup]
+2026-11-13T18:57:41.9368064Z Collecting ast-serialize==0.13.1 (from -r requirements.txt (line 7))
+2026-11-13T18:57:41.9376032Z   Using cached ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+2026-11-13T18:57:42.0087947Z Collecting cffi==2.1.1 (from -r requirements.txt (line 66))
+2026-11-13T18:57:42.0095359Z   Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+2026-11-13T18:57:42.2580254Z Collecting coverage==7.16.0 (from coverage[toml]==7.16.0->-r requirements.txt (line 168))
+2026-11-13T18:57:42.2589094Z   Using cached coverage-7.16.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (257 kB)
+2026-11-13T18:57:42.3732779Z Collecting cryptography==50.0.2 (from -r requirements.txt (line 291))
+2026-11-13T18:57:42.3740716Z   Using cached cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl (4.8 MB)
+2026-11-13T18:57:42.3868009Z Collecting iniconfig==2.3.0 (from -r requirements.txt (line 352))
+2026-11-13T18:57:42.3876639Z   Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+2026-11-13T18:57:42.4784461Z Collecting librt==0.16.0 (from -r requirements.txt (line 356))
+2026-11-13T18:57:42.4793176Z   Using cached librt-0.16.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+2026-11-13T18:57:42.5464662Z Collecting mypy==2.4.1 (from -r requirements.txt (line 495))
+2026-11-13T18:57:42.5471836Z   Using cached mypy-2.4.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.6 MB)
+2026-11-13T18:57:42.5758379Z Collecting mypy-extensions==1.1.0 (from -r requirements.txt (line 549))
+2026-11-13T18:57:42.5766596Z   Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+2026-11-13T18:57:42.5873049Z Collecting packaging==26.3 (from -r requirements.txt (line 553))
+2026-11-13T18:57:42.5881277Z   Using cached packaging-26.3-py3-none-any.whl (129 kB)
+2026-11-13T18:57:42.5966466Z Collecting pathspec==1.1.1 (from -r requirements.txt (line 557))
+2026-11-13T18:57:42.5975007Z   Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+2026-11-13T18:57:42.6063971Z Collecting pluggy==1.6.0 (from -r requirements.txt (line 561))
+2026-11-13T18:57:42.6073209Z   Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+2026-11-13T18:57:42.6150419Z Collecting pycparser==3.12 (from -r requirements.txt (line 567))
+2026-11-13T18:57:42.6159666Z   Using cached pycparser-3.12-py3-none-any.whl (62 kB)
+2026-11-13T18:57:42.6287936Z Collecting pygments==2.20.0 (from -r requirements.txt (line 571))
+2026-11-13T18:57:42.6297967Z   Using cached pygments-2.20.0-py3-none-any.whl (1.2 MB)
+2026-11-13T18:57:42.6435421Z Collecting pyjwt==2.15.1 (from pyjwt[crypto]==2.15.1->-r requirements.txt (line 575))
+2026-11-13T18:57:42.6444052Z   Using cached pyjwt-2.15.1-py3-none-any.whl (33 kB)
+2026-11-13T18:57:42.6655767Z Collecting pytest==9.2.0 (from -r requirements.txt (line 581))
+2026-11-13T18:57:42.6662453Z   Using cached pytest-9.2.0-py3-none-any.whl (411 kB)
+2026-11-13T18:57:42.6784523Z Collecting pytest-cov==7.1.0 (from -r requirements.txt (line 587))
+2026-11-13T18:57:42.6792667Z   Using cached pytest_cov-7.1.0-py3-none-any.whl (22 kB)
+2026-11-13T18:57:42.7020585Z Collecting pyyaml==6.0.3 (from -r requirements.txt (line 591))
+2026-11-13T18:57:42.7029056Z   Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+2026-11-13T18:57:42.9301865Z Collecting ruff==0.17.4 (from -r requirements.txt (line 666))
+2026-11-13T18:57:42.9311638Z   Using cached ruff-0.17.4-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.6 MB)
+2026-11-13T18:57:42.9568187Z Collecting types-pyyaml==6.0.12.20261103 (from -r requirements.txt (line 686))
+2026-11-13T18:57:42.9576482Z   Using cached types_pyyaml-6.0.12.20261103-py3-none-any.whl (21 kB)
+2026-11-13T18:57:42.9686615Z Collecting typing-extensions==4.16.0 (from -r requirements.txt (line 690))
+2026-11-13T18:57:42.9696291Z   Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+2026-11-13T18:57:43.0507416Z Installing collected packages: typing-extensions, types-pyyaml, ruff, pyyaml, pyjwt, pygments, pycparser, pluggy, pathspec, packaging, mypy-extensions, librt, iniconfig, coverage, ast-serialize, pytest, mypy, cffi, pytest-cov, cryptography
+2026-11-13T18:57:45.5357049Z Successfully installed ast-serialize-0.13.1 cffi-2.1.1 coverage-7.16.0 cryptography-50.0.2 iniconfig-2.3.0 librt-0.16.0 mypy-2.4.1 mypy-extensions-1.1.0 packaging-26.3 pathspec-1.1.1 pluggy-1.6.0 pycparser-3.12 pygments-2.20.0 pyjwt-2.15.1 pytest-9.2.0 pytest-cov-7.1.0 pyyaml-6.0.3 ruff-0.17.4 types-pyyaml-6.0.12.20261103 typing-extensions-4.16.0
+2026-11-13T18:57:45.5437631Z 
+2026-11-13T18:57:45.5438208Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-13T18:57:45.5438746Z [notice] To update, run: python -m pip install --upgrade pip
+2026-11-13T18:57:45.6324513Z ##[group]Run # pip-audit IS the CI vulnerability gate this repo relies on — unlike
+2026-11-13T18:57:45.6324996Z [36;1m# pip-audit IS the CI vulnerability gate this repo relies on — unlike[0m
+2026-11-13T18:57:45.6325403Z [36;1m# requirements.txt's deps (hash-pinned, resolved once and committed),[0m
+2026-11-13T18:57:45.6325791Z [36;1m# an unpinned `pip install pip-audit` re-resolves to whatever is[0m
+2026-11-13T18:57:45.6326174Z [36;1m# newest on PyPI on every run, so the gate itself isn't reproducible:[0m
+2026-11-13T18:57:45.6326548Z [36;1m# a scanner-tool release could change what CVEs are flagged (or[0m
+2026-11-13T18:57:45.6326928Z [36;1m# silently drop advisory coverage) with no diff in this repo to[0m
+2026-11-13T18:57:45.6327296Z [36;1m# review. Pinned exact-version like pip-tools below, though for a[0m
+2026-11-13T18:57:45.6327685Z [36;1m# different reason: that pin is about the requirements-check step's[0m
+2026-11-13T18:57:45.6328102Z [36;1m# own reproducibility (a pip-tools release could change what it[0m
+2026-11-13T18:57:45.6328469Z [36;1m# resolves), this one is about the vulnerability-audit gate's.[0m
+2026-11-13T18:57:45.6328806Z [36;1m# Like that pin, Dependabot has no manifest that[0m
+2026-11-13T18:57:45.6329141Z [36;1m# covers a version pinned inline in a `run:` script (its `pip`[0m
+2026-11-13T18:57:45.6329496Z [36;1m# ecosystem entry tracks requirements.txt/.in; `github-actions`[0m
+2026-11-13T18:57:45.6329871Z [36;1m# tracks `uses:` refs) — this pin has no automated freshness path.[0m
+2026-11-13T18:57:45.6330238Z [36;1m# Revisit trigger: bump manually whenever a new pip-audit release[0m
+2026-11-13T18:57:45.6330604Z [36;1m# ships, at minimum whenever `mise run audit`/this step starts[0m
+2026-11-13T18:57:45.6330957Z [36;1m# missing a CVE you'd expect it to catch; consider moving this to a[0m
+2026-11-13T18:57:45.6331337Z [36;1m# Dependabot-tracked requirements-dev.txt if it drifts noticeably.[0m
+2026-11-13T18:57:45.6331673Z [36;1mpip install pip-audit==2.10.1[0m
+2026-11-13T18:57:45.6331942Z [36;1mpip-audit --requirement requirements.txt[0m
+2026-11-13T18:57:45.6359817Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:45.6360065Z env:
+2026-11-13T18:57:45.6360318Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:45.6360862Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:45.6361364Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:45.6361864Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:45.6362525Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:45.6363144Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:45.6363502Z ##[endgroup]
+2026-11-13T18:57:45.9309875Z Collecting pip-audit==2.10.1
+2026-11-13T18:57:45.9320386Z   Using cached pip_audit-2.10.1-py3-none-any.whl.metadata (28 kB)
+2026-11-13T18:57:45.9454924Z Collecting CacheControl>=0.13.0 (from CacheControl[filecache]>=0.13.0->pip-audit==2.10.1)
+2026-11-13T18:57:45.9464108Z   Using cached cachecontrol-0.14.4-py3-none-any.whl.metadata (3.1 kB)
+2026-11-13T18:57:45.9722511Z Collecting cyclonedx-python-lib<12,>=5 (from pip-audit==2.10.1)
+2026-11-13T18:57:45.9731362Z   Using cached cyclonedx_python_lib-11.12.0-py3-none-any.whl.metadata (6.9 kB)
+2026-11-13T18:57:45.9755342Z Requirement already satisfied: packaging>=23.0.0 in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from pip-audit==2.10.1) (26.3)
+2026-11-13T18:57:45.9835036Z Collecting pip-api>=0.0.28 (from pip-audit==2.10.1)
+2026-11-13T18:57:45.9843827Z   Using cached pip_api-0.0.35-py3-none-any.whl.metadata (17 kB)
+2026-11-13T18:57:45.9923201Z Collecting pip-requirements-parser>=32.0.0 (from pip-audit==2.10.1)
+2026-11-13T18:57:45.9932036Z   Using cached pip_requirements_parser-32.0.1-py3-none-any.whl.metadata (9.3 kB)
+2026-11-13T18:57:46.0116039Z Collecting requests>=2.31.0 (from pip-audit==2.10.1)
+2026-11-13T18:57:46.0125339Z   Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+2026-11-13T18:57:46.0379195Z Collecting rich>=12.4 (from pip-audit==2.10.1)
+2026-11-13T18:57:46.0480503Z   Using cached rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+2026-11-13T18:57:46.0661790Z Collecting tomli>=2.2.1 (from pip-audit==2.10.1)
+2026-11-13T18:57:46.0670888Z   Using cached tomli-2.5.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10 kB)
+2026-11-13T18:57:46.0736171Z Collecting tomli-w>=1.2.0 (from pip-audit==2.10.1)
+2026-11-13T18:57:46.0745123Z   Using cached tomli_w-1.2.0-py3-none-any.whl.metadata (5.7 kB)
+2026-11-13T18:57:46.0898964Z Collecting platformdirs>=4.2.0 (from pip-audit==2.10.1)
+2026-11-13T18:57:46.0907928Z   Using cached platformdirs-4.14.5-py3-none-any.whl.metadata (5.7 kB)
+2026-11-13T18:57:46.1458811Z Collecting msgpack<2.0.0,>=0.5.2 (from CacheControl>=0.13.0->CacheControl[filecache]>=0.13.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.1467210Z   Using cached msgpack-1.2.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
+2026-11-13T18:57:46.1665511Z Collecting filelock>=3.8.0 (from CacheControl[filecache]>=0.13.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.1672709Z   Using cached filelock-4.2.10-py3-none-any.whl.metadata (2.3 kB)
+2026-11-13T18:57:46.1786856Z Collecting license-expression<31,>=30 (from cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.1795398Z   Using cached license_expression-30.4.4-py3-none-any.whl.metadata (11 kB)
+2026-11-13T18:57:46.1923306Z Collecting packageurl-python<2,>=0.11 (from cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.1931379Z   Using cached packageurl_python-0.17.6-py3-none-any.whl.metadata (5.1 kB)
+2026-11-13T18:57:46.2047944Z Collecting py-serializable<3.0.0,>=2.1.0 (from cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.2056623Z   Using cached py_serializable-2.2.0-py3-none-any.whl.metadata (4.5 kB)
+2026-11-13T18:57:46.2152415Z Collecting sortedcontainers<3.0.0,>=2.4.0 (from cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.2160652Z   Using cached sortedcontainers-2.4.0-py2.py3-none-any.whl.metadata (10 kB)
+2026-11-13T18:57:46.2177882Z Requirement already satisfied: typing_extensions<5.0,>=4.6 in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from cyclonedx-python-lib<12,>=5->pip-audit==2.10.1) (4.16.0)
+2026-11-13T18:57:46.2189035Z Requirement already satisfied: pip in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from pip-api>=0.0.28->pip-audit==2.10.1) (25.0.1)
+2026-11-13T18:57:46.2339547Z Collecting pyparsing (from pip-requirements-parser>=32.0.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.2348113Z   Using cached pyparsing-3.3.3-py3-none-any.whl.metadata (5.9 kB)
+2026-11-13T18:57:46.3127054Z Collecting charset_normalizer<4,>=2 (from requests>=2.31.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.3136237Z   Using cached charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+2026-11-13T18:57:46.3277979Z Collecting idna<4,>=2.5 (from requests>=2.31.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.3287917Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+2026-11-13T18:57:46.3484611Z Collecting urllib3<3,>=1.26 (from requests>=2.31.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.3494734Z   Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+2026-11-13T18:57:46.3645421Z Collecting certifi>=2023.5.7 (from requests>=2.31.0->pip-audit==2.10.1)
+2026-11-13T18:57:46.3655055Z   Using cached certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+2026-11-13T18:57:46.3770874Z Collecting markdown-it-py>=2.2.0 (from rich>=12.4->pip-audit==2.10.1)
+2026-11-13T18:57:46.3780593Z   Using cached markdown_it_py-4.3.0-py3-none-any.whl.metadata (7.9 kB)
+2026-11-13T18:57:46.3824826Z Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from rich>=12.4->pip-audit==2.10.1) (2.20.0)
+2026-11-13T18:57:46.3932893Z Collecting boolean.py>=4.0 (from license-expression<31,>=30->cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.3941785Z   Using cached boolean_py-5.0-py3-none-any.whl.metadata (2.3 kB)
+2026-11-13T18:57:46.4020617Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=12.4->pip-audit==2.10.1)
+2026-11-13T18:57:46.4028949Z   Using cached mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+2026-11-13T18:57:46.4115071Z Collecting defusedxml<0.8.0,>=0.7.1 (from py-serializable<3.0.0,>=2.1.0->cyclonedx-python-lib<12,>=5->pip-audit==2.10.1)
+2026-11-13T18:57:46.4123535Z   Using cached defusedxml-0.7.1-py2.py3-none-any.whl.metadata (32 kB)
+2026-11-13T18:57:46.4217175Z Using cached pip_audit-2.10.1-py3-none-any.whl (62 kB)
+2026-11-13T18:57:46.4226656Z Using cached cachecontrol-0.14.4-py3-none-any.whl (22 kB)
+2026-11-13T18:57:46.4236120Z Using cached cyclonedx_python_lib-11.12.0-py3-none-any.whl (529 kB)
+2026-11-13T18:57:46.4248007Z Using cached pip_api-0.0.35-py3-none-any.whl (123 kB)
+2026-11-13T18:57:46.4257865Z Using cached pip_requirements_parser-32.0.1-py3-none-any.whl (35 kB)
+2026-11-13T18:57:46.4266755Z Using cached platformdirs-4.14.5-py3-none-any.whl (35 kB)
+2026-11-13T18:57:46.4275527Z Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+2026-11-13T18:57:46.4284184Z Using cached rich-15.0.0-py3-none-any.whl (310 kB)
+2026-11-13T18:57:46.4295192Z Using cached tomli-2.5.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (286 kB)
+2026-11-13T18:57:46.4305540Z Using cached tomli_w-1.2.0-py3-none-any.whl (6.7 kB)
+2026-11-13T18:57:46.4313966Z Using cached certifi-2026.10.23-py3-none-any.whl (135 kB)
+2026-11-13T18:57:46.4323431Z Using cached charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (257 kB)
+2026-11-13T18:57:46.4332561Z Using cached filelock-4.2.10-py3-none-any.whl (218 kB)
+2026-11-13T18:57:46.4342225Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+2026-11-13T18:57:46.4350917Z Using cached license_expression-30.4.4-py3-none-any.whl (120 kB)
+2026-11-13T18:57:46.4359809Z Using cached markdown_it_py-4.3.0-py3-none-any.whl (96 kB)
+2026-11-13T18:57:46.4368888Z Using cached msgpack-1.2.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (475 kB)
+2026-11-13T18:57:46.4379056Z Using cached packageurl_python-0.17.6-py3-none-any.whl (36 kB)
+2026-11-13T18:57:46.4387544Z Using cached py_serializable-2.2.0-py3-none-any.whl (23 kB)
+2026-11-13T18:57:46.4395796Z Using cached sortedcontainers-2.4.0-py2.py3-none-any.whl (29 kB)
+2026-11-13T18:57:46.4403953Z Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+2026-11-13T18:57:46.4412597Z Using cached pyparsing-3.3.3-py3-none-any.whl (126 kB)
+2026-11-13T18:57:46.4421147Z Using cached boolean_py-5.0-py3-none-any.whl (26 kB)
+2026-11-13T18:57:46.4429438Z Using cached defusedxml-0.7.1-py2.py3-none-any.whl (25 kB)
+2026-11-13T18:57:46.4437569Z Using cached mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+2026-11-13T18:57:46.4999224Z Installing collected packages: sortedcontainers, boolean.py, urllib3, tomli-w, tomli, pyparsing, platformdirs, pip-api, packageurl-python, msgpack, mdurl, license-expression, idna, filelock, defusedxml, charset_normalizer, certifi, requests, py-serializable, pip-requirements-parser, markdown-it-py, rich, cyclonedx-python-lib, CacheControl, pip-audit
+2026-11-13T18:57:47.3232022Z Successfully installed CacheControl-0.14.4 boolean.py-5.0 certifi-2026.10.23 charset_normalizer-3.5.2 cyclonedx-python-lib-11.12.0 defusedxml-0.7.1 filelock-4.2.10 idna-3.20 license-expression-30.4.4 markdown-it-py-4.3.0 mdurl-0.1.2 msgpack-1.2.4 packageurl-python-0.17.6 pip-api-0.0.35 pip-audit-2.10.1 pip-requirements-parser-32.0.1 platformdirs-4.14.5 py-serializable-2.2.0 pyparsing-3.3.3 requests-2.34.2 rich-15.0.0 sortedcontainers-2.4.0 tomli-2.5.0 tomli-w-1.2.0 urllib3-2.8.0
+2026-11-13T18:57:47.3314947Z 
+2026-11-13T18:57:47.3315512Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-13T18:57:47.3316021Z [notice] To update, run: pip install --upgrade pip
+2026-11-13T18:57:53.0025388Z No known vulnerabilities found
+2026-11-13T18:57:53.0466107Z ##[group]Run ruff check .
+2026-11-13T18:57:53.0466371Z [36;1mruff check .[0m
+2026-11-13T18:57:53.0493820Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:53.0494053Z env:
+2026-11-13T18:57:53.0494305Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.0494666Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:53.0495011Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.0495316Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.0495650Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.0496004Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:53.0496270Z ##[endgroup]
+2026-11-13T18:57:53.0973537Z All checks passed!
+2026-11-13T18:57:53.1010740Z ##[group]Run ruff format --check .
+2026-11-13T18:57:53.1011003Z [36;1mruff format --check .[0m
+2026-11-13T18:57:53.1033079Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:53.1033316Z env:
+2026-11-13T18:57:53.1033552Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1033905Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:53.1034256Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1034560Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1034858Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1035168Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:53.1035446Z ##[endgroup]
+2026-11-13T18:57:53.1482073Z 162 files already formatted
+2026-11-13T18:57:53.1514582Z ##[group]Run mypy
+2026-11-13T18:57:53.1514798Z [36;1mmypy[0m
+2026-11-13T18:57:53.1534967Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:53.1535193Z env:
+2026-11-13T18:57:53.1535427Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1535785Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:53.1536139Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1536450Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1536757Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:53.1537070Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:53.1537336Z ##[endgroup]
+2026-11-13T18:57:55.1402634Z Success: no issues found in 75 source files
+2026-11-13T18:57:55.1523530Z ##[group]Run python -m pytest tests/ -q --cov=tooling
+2026-11-13T18:57:55.1524421Z [36;1mpython -m pytest tests/ -q --cov=tooling[0m
+2026-11-13T18:57:55.1564847Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:57:55.1565273Z env:
+2026-11-13T18:57:55.1565655Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:55.1566082Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:57:55.1566487Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:55.1567055Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:55.1567618Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:57:55.1568180Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:57:55.1568531Z   CI_EVENT_NAME: pull_request
+2026-11-13T18:57:55.1568755Z   CI_FILTER_SESSION_LOG_SUBSTANTIVE: true
+2026-11-13T18:57:55.1569031Z ##[endgroup]
+2026-11-13T18:58:03.2773041Z ........................................................................ [  8%]
+2026-11-13T18:58:03.9637991Z ........................................................................ [ 16%]
+2026-11-13T18:58:04.0168066Z ........................................................................ [ 24%]
+2026-11-13T18:58:04.0755710Z ................s...s..s..sss..s........s.s.s..s..s..s...s.............. [ 32%]
+2026-11-13T18:58:08.7284998Z ........................................................................ [ 40%]
+2026-11-13T18:58:09.8578868Z ........................................................................ [ 48%]
+2026-11-13T18:58:10.7051645Z ........................................................................ [ 56%]
+2026-11-13T18:58:11.8342651Z ........................................................................ [ 64%]
+2026-11-13T18:58:12.1815621Z ........................................................................ [ 73%]
+2026-11-13T18:58:21.3213286Z ........................................................................ [ 81%]
+2026-11-13T18:58:21.4800003Z ........................................................................ [ 89%]
+2026-11-13T18:58:29.8138421Z ........................................................................ [ 97%]
+2026-11-13T18:58:41.4850436Z .......................                                                  [100%]
+2026-11-13T18:58:41.4853333Z ================================ tests coverage ================================
+2026-11-13T18:58:41.4853846Z _______________ coverage: platform linux, python 3.12.16-final-0 _______________
+2026-11-13T18:58:41.4854134Z 
+2026-11-13T18:58:41.4854274Z Name                              Stmts   Miss Branch BrPart  Cover
+2026-11-13T18:58:41.4854643Z -------------------------------------------------------------------
+2026-11-13T18:58:41.4855070Z tooling/__init__.py                   0      0      0      0   100%
+2026-11-13T18:58:41.4855512Z tooling/cli.py                      130      8     34      2    94%
+2026-11-13T18:58:41.4855970Z tooling/drift.py                     48      0     16      0   100%
+2026-11-13T18:58:41.4856381Z tooling/evals.py                     33      1     14      1    96%
+2026-11-13T18:58:41.4856806Z tooling/frontmatter.py                9      0      2      0   100%
+2026-11-13T18:58:41.4857262Z tooling/generate_collapsed.py       169      2     68      3    98%
+2026-11-13T18:58:41.4857670Z tooling/generate_common.py          105      3     48      5    95%
+2026-11-13T18:58:41.4858157Z tooling/generate_doc_counts.py       43      0     12      0   100%
+2026-11-13T18:58:41.4858626Z tooling/generate_prepass.py          38      0      0      0   100%
+2026-11-13T18:58:41.4859077Z tooling/generate_router.py           40      0      8      0   100%
+2026-11-13T18:58:41.4859517Z tooling/generate_skill.py            96      1     34      4    96%
+2026-11-13T18:58:41.4859972Z tooling/generate_synthesizer.py      44      0      6      0   100%
+2026-11-13T18:58:41.4860436Z tooling/manifest.py                 576     38    306     33    92%
+2026-11-13T18:58:41.4861288Z tooling/run_evals.py                167      2     60      3    98%
+2026-11-13T18:58:41.4861825Z tooling/sections.py                  87      0     34      1    99%
+2026-11-13T18:58:41.4862420Z -------------------------------------------------------------------
+2026-11-13T18:58:41.4862860Z TOTAL                              1585     55    642     52    95%
+2026-11-13T18:58:41.4863161Z Required test coverage of 94.0% reached. Total coverage: 95.20%
+2026-11-13T18:58:41.4863455Z 873 passed, 14 skipped in 45.85s
+2026-11-13T18:58:41.5357811Z ##[group]Run python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+2026-11-13T18:58:41.5358271Z [36;1mpython -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer[0m
+2026-11-13T18:58:41.5387815Z shell: /usr/bin/bash -e {0}
+2026-11-13T18:58:41.5388064Z env:
+2026-11-13T18:58:41.5388333Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:58:41.5388733Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T18:58:41.5389118Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:58:41.5389476Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:58:41.5389824Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T18:58:41.5390168Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T18:58:41.5390461Z ##[endgroup]
+2026-11-13T18:58:46.2375502Z ........................................................................ [  3%]
+2026-11-13T18:58:52.4929037Z ........................................................................ [  7%]
+2026-11-13T18:58:58.2096586Z ........................................................................ [ 10%]
+2026-11-13T18:58:59.4311169Z ........................................................................ [ 14%]
+2026-11-13T18:59:01.1176963Z ........................................................................ [ 17%]
+2026-11-13T18:59:03.1275111Z ........................................................................ [ 21%]
+2026-11-13T18:59:05.5927989Z ........................................................................ [ 24%]
+2026-11-13T18:59:07.5191666Z ........................................................................ [ 28%]
+2026-11-13T18:59:16.7749476Z ........................................................................ [ 32%]
+2026-11-13T18:59:16.8427412Z ........................................................................ [ 35%]
+2026-11-13T18:59:16.9065927Z ........................................................................ [ 39%]
+2026-11-13T18:59:18.6229892Z ........................................................................ [ 42%]
+2026-11-13T18:59:18.7900603Z ........................................................................ [ 46%]
+2026-11-13T19:00:03.8213030Z ........................................................................ [ 49%]
+2026-11-13T19:00:09.1314804Z ........................................................................ [ 53%]
+2026-11-13T19:00:21.3268667Z ........................................................................ [ 57%]
+2026-11-13T19:00:25.4829045Z ........................................................................ [ 60%]
+2026-11-13T19:00:25.5536224Z ........................................................................ [ 64%]
+2026-11-13T19:00:25.6293867Z ........................................................................ [ 67%]
+2026-11-13T19:00:25.7996121Z ........................................................................ [ 71%]
+2026-11-13T19:00:26.5581677Z ........................................................................ [ 74%]
+2026-11-13T19:00:27.1344345Z ........................................................................ [ 78%]
+2026-11-13T19:00:27.4150123Z ........................................................................ [ 82%]
+2026-11-13T19:00:30.4385125Z ........................................................................ [ 85%]
+2026-11-13T19:00:33.2823099Z ........................................................................ [ 89%]
+2026-11-13T19:00:35.3359714Z ........................................................................ [ 92%]
+2026-11-13T19:00:44.4479502Z ........................................................................ [ 96%]
+2026-11-13T19:00:44.7199951Z ........................................................................ [ 99%]
+2026-11-13T19:00:46.0993553Z ...                                                                      [100%]
+2026-11-13T19:00:46.0994598Z ================================ tests coverage ================================
+2026-11-13T19:00:46.0995101Z _______________ coverage: platform linux, python 3.12.16-final-0 _______________
+2026-11-13T19:00:46.0995466Z 
+2026-11-13T19:00:46.0995719Z Name                                  Stmts   Miss Branch BrPart  Cover
+2026-11-13T19:00:46.0996195Z -----------------------------------------------------------------------
+2026-11-13T19:00:46.0996702Z atlas_reviewer/__init__.py                0      0      0      0   100%
+2026-11-13T19:00:46.0997048Z atlas_reviewer/agentic_config.py         62      1     30      1    98%
+2026-11-13T19:00:46.0997395Z atlas_reviewer/archive.py               140      0     38      0   100%
+2026-11-13T19:00:46.0997731Z atlas_reviewer/attestation.py           260      6     68      6    96%
+2026-11-13T19:00:46.0998067Z atlas_reviewer/bridge.py                369      0     68      0   100%
+2026-11-13T19:00:46.0998390Z atlas_reviewer/bridge_args.py           118      0     34      0   100%
+2026-11-13T19:00:46.0998734Z atlas_reviewer/bridge_staging.py        101      0     14      0   100%
+2026-11-13T19:00:46.0999061Z atlas_reviewer/budget.py                 89      0     22      0   100%
+2026-11-13T19:00:46.0999387Z atlas_reviewer/classify.py               45      0      4      0   100%
+2026-11-13T19:00:46.0999705Z atlas_reviewer/cli.py                   443      5     80      1    99%
+2026-11-13T19:00:46.1000027Z atlas_reviewer/clock.py                   8      0      0      0   100%
+2026-11-13T19:00:46.1000357Z atlas_reviewer/committed_secrets.py      47      0     14      0   100%
+2026-11-13T19:00:46.1000701Z atlas_reviewer/controller.py            378      0     68      0   100%
+2026-11-13T19:00:46.1001034Z atlas_reviewer/conversation.py          148      0     14      0   100%
+2026-11-13T19:00:46.1001372Z atlas_reviewer/coordinator.py           298      1     86      3    99%
+2026-11-13T19:00:46.1001693Z atlas_reviewer/diffs.py                 178      0     28      0   100%
+2026-11-13T19:00:46.1002005Z atlas_reviewer/domain.py                124      0     18      0   100%
+2026-11-13T19:00:46.1002551Z atlas_reviewer/draft.py                 197      0     26      0   100%
+2026-11-13T19:00:46.1002901Z atlas_reviewer/evidence.py              236      0     24      0   100%
+2026-11-13T19:00:46.1003224Z atlas_reviewer/fakes.py                 160      2     30      2    98%
+2026-11-13T19:00:46.1003537Z atlas_reviewer/gather.py                199      0     40      0   100%
+2026-11-13T19:00:46.1003866Z atlas_reviewer/github_api.py            113      2     24      0    99%
+2026-11-13T19:00:46.1004198Z atlas_reviewer/github_auth.py           117      0     26      0   100%
+2026-11-13T19:00:46.1004521Z atlas_reviewer/github_fixture.py        108     10     16      6    87%
+2026-11-13T19:00:46.1004844Z atlas_reviewer/groups.py                 72      0     22      0   100%
+2026-11-13T19:00:46.1005173Z atlas_reviewer/guest_unpack.py           27      0      2      0   100%
+2026-11-13T19:00:46.1005539Z atlas_reviewer/harness.py                43      0      0      0   100%
+2026-11-13T19:00:46.1005870Z atlas_reviewer/http.py                  156      8     26      1    94%
+2026-11-13T19:00:46.1006191Z atlas_reviewer/instrumented.py           47      0      0      0   100%
+2026-11-13T19:00:46.1006533Z atlas_reviewer/interpreter.py            73      0      2      0   100%
+2026-11-13T19:00:46.1006858Z atlas_reviewer/keepalive.py             175      2     40      3    98%
+2026-11-13T19:00:46.1007180Z atlas_reviewer/ledger.py                 60      0      8      0   100%
+2026-11-13T19:00:46.1007649Z atlas_reviewer/lens_contract.py         166      1     44      1    99%
+2026-11-13T19:00:46.1007983Z atlas_reviewer/lens_loop.py             340      3     92      1    99%
+2026-11-13T19:00:46.1008300Z atlas_reviewer/lenses.py                 71      0     18      0   100%
+2026-11-13T19:00:46.1008620Z atlas_reviewer/limit_stop.py             24      0      0      0   100%
+2026-11-13T19:00:46.1009020Z atlas_reviewer/notes.py                  53      0      6      0   100%
+2026-11-13T19:00:46.1009347Z atlas_reviewer/openrouter.py            267      0     88      0   100%
+2026-11-13T19:00:46.1009680Z atlas_reviewer/pagination.py             32      0     14      0   100%
+2026-11-13T19:00:46.1010006Z atlas_reviewer/picker.py                 93      0     16      0   100%
+2026-11-13T19:00:46.1010325Z atlas_reviewer/ports.py                  60      0      0      0   100%
+2026-11-13T19:00:46.1010645Z atlas_reviewer/pricing.py                76      0     22      0   100%
+2026-11-13T19:00:46.1010966Z atlas_reviewer/prompt.py                 39      0      2      0   100%
+2026-11-13T19:00:46.1011288Z atlas_reviewer/providers.py              12      0      0      0   100%
+2026-11-13T19:00:46.1011619Z atlas_reviewer/quotes.py                138      4     52      4    96%
+2026-11-13T19:00:46.1011933Z atlas_reviewer/redact.py                175      0     54      0   100%
+2026-11-13T19:00:46.1012373Z atlas_reviewer/runner.py                603      0    102      1    99%
+2026-11-13T19:00:46.1012710Z atlas_reviewer/service.py               532     43    148     19    91%
+2026-11-13T19:00:46.1013044Z atlas_reviewer/service_admit.py          75      8     22      4    88%
+2026-11-13T19:00:46.1013372Z atlas_reviewer/service_post.py          288     35     98     12    86%
+2026-11-13T19:00:46.1013699Z atlas_reviewer/service_queue.py         429     52    162     24    85%
+2026-11-13T19:00:46.1014027Z atlas_reviewer/service_run.py           188     20     46      5    89%
+2026-11-13T19:00:46.1014371Z atlas_reviewer/source_archive.py        236      0     84      0   100%
+2026-11-13T19:00:46.1014699Z atlas_reviewer/sprites_api.py            80      0     16      0   100%
+2026-11-13T19:00:46.1015025Z atlas_reviewer/stops.py                  33      0     10      0   100%
+2026-11-13T19:00:46.1015354Z atlas_reviewer/telemetry.py             145      1     22      4    97%
+2026-11-13T19:00:46.1015678Z atlas_reviewer/tool_model.py            175      3     72      3    98%
+2026-11-13T19:00:46.1015998Z atlas_reviewer/verdict.py                74      0     10      0   100%
+2026-11-13T19:00:46.1016310Z -----------------------------------------------------------------------
+2026-11-13T19:00:46.1016600Z TOTAL                                  8995    207   2072    101    97%
+2026-11-13T19:00:46.1017007Z Required test coverage of 94.0% reached. Total coverage: 97.00%
+2026-11-13T19:00:46.1017334Z 2019 passed in 124.32s (0:02:04)
+2026-11-13T19:00:46.1968884Z ##[group]Run draft="$RUNNER_TEMP/atlas-reviewer-draft.md"
+2026-11-13T19:00:46.1969278Z [36;1mdraft="$RUNNER_TEMP/atlas-reviewer-draft.md"[0m
+2026-11-13T19:00:46.1969531Z [36;1mcode=0[0m
+2026-11-13T19:00:46.1970059Z [36;1mpython -m atlas_reviewer --state-dir "$RUNNER_TEMP/atlas-reviewer-state" review --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run > "$draft" || code=$?[0m
+2026-11-13T19:00:46.1970624Z [36;1mstatus="$(head -n 1 "$draft")"[0m
+2026-11-13T19:00:46.1970849Z [36;1mcase "$code" in[0m
+2026-11-13T19:00:46.1971105Z [36;1m  0) meaning="coverage complete, approved or commented" ;;[0m
+2026-11-13T19:00:46.1971446Z [36;1m  5) meaning="coverage complete, changes requested" ;;[0m
+2026-11-13T19:00:46.1971736Z [36;1m  4) meaning="coverage incomplete" ;;[0m
+2026-11-13T19:00:46.1972005Z [36;1m  2) meaning="usage error or review lock held" ;;[0m
+2026-11-13T19:00:46.1972604Z [36;1m  3) meaning="boundary error" ;;[0m
+2026-11-13T19:00:46.1972915Z [36;1m  *) meaning="unexpected exit code" ;;[0m
+2026-11-13T19:00:46.1973146Z [36;1mesac[0m
+2026-11-13T19:00:46.1973452Z [36;1mecho "exit $code ($meaning); $status"[0m
+2026-11-13T19:00:46.1973691Z [36;1mtest "$code" -eq 4[0m
+2026-11-13T19:00:46.1973935Z [36;1mgrep -q '"coverage_complete": false' <<<"$status"[0m
+2026-11-13T19:00:46.1974244Z [36;1m! grep -q '"review_event": "APPROVE"' <<<"$status"[0m
+2026-11-13T19:00:46.2002661Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:46.2002909Z env:
+2026-11-13T19:00:46.2003160Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.2003523Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:46.2003864Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.2004173Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.2004484Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.2004800Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:46.2005059Z ##[endgroup]
+2026-11-13T19:00:46.4176596Z telemetry: 38 event(s), (not written)
+2026-11-13T19:00:46.4177383Z review event: COMMENT; coverage_complete=false; unreviewed_files=2
+2026-11-13T19:00:46.4410822Z exit 4 (coverage incomplete); <!-- atlas-review-status: {"review_event": "COMMENT", "proposed_event": "COMMENT", "coverage_complete": false, "changed_files": 2, "unreviewed_files": 2} -->
+2026-11-13T19:00:46.4467735Z ##[group]Run python -m tooling.cli eval
+2026-11-13T19:00:46.4468175Z [36;1mpython -m tooling.cli eval[0m
+2026-11-13T19:00:46.4497574Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:46.4497834Z env:
+2026-11-13T19:00:46.4498077Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.4498445Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:46.4498788Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.4499099Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.4499408Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.4499738Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:46.4500001Z ##[endgroup]
+2026-11-13T19:00:46.5995898Z OK: auditing-architecture-conformance (20 scenarios)
+2026-11-13T19:00:46.5996529Z OK: auditing-compliance-and-provenance (22 scenarios)
+2026-11-13T19:00:46.5996934Z OK: auditing-config-and-build-hygiene (28 scenarios)
+2026-11-13T19:00:46.5997263Z OK: auditing-data-pipeline-health (25 scenarios)
+2026-11-13T19:00:46.5997603Z OK: auditing-decision-record-currency (20 scenarios)
+2026-11-13T19:00:46.5997947Z OK: auditing-dependencies-and-supply-chain (22 scenarios)
+2026-11-13T19:00:46.5998304Z OK: auditing-deployment-and-trust-boundaries (21 scenarios)
+2026-11-13T19:00:46.5998649Z OK: auditing-documentation-health (23 scenarios)
+2026-11-13T19:00:46.5998992Z OK: auditing-enforcement-and-meta-artifacts (20 scenarios)
+2026-11-13T19:00:46.5999353Z OK: auditing-infrastructure-as-code (20 scenarios)
+2026-11-13T19:00:46.5999658Z OK: checking-idioms-and-consistency (21 scenarios)
+2026-11-13T19:00:46.5999953Z OK: checking-restraint (24 scenarios)
+2026-11-13T19:00:46.6000218Z OK: choosing-review-lenses (5 scenarios)
+2026-11-13T19:00:46.6000526Z OK: finding-maintainability-hotspots (24 scenarios)
+2026-11-13T19:00:46.6000861Z OK: grounding-review-in-tool-output (13 scenarios)
+2026-11-13T19:00:46.6001164Z OK: hunting-silent-failures (27 scenarios)
+2026-11-13T19:00:46.6001455Z OK: reviewing-accessibility-and-i18n (25 scenarios)
+2026-11-13T19:00:46.6001779Z OK: reviewing-agent-legibility (21 scenarios)
+2026-11-13T19:00:46.6002051Z OK: reviewing-agentic-safety (22 scenarios)
+2026-11-13T19:00:46.6002566Z OK: reviewing-ai-authored-code (20 scenarios)
+2026-11-13T19:00:46.6003036Z OK: reviewing-api-contract-safety (20 scenarios)
+2026-11-13T19:00:46.6003362Z OK: reviewing-artifact-conventions (19 scenarios)
+2026-11-13T19:00:46.6003675Z OK: reviewing-conceptual-integrity (22 scenarios)
+2026-11-13T19:00:46.6003977Z OK: reviewing-concurrency-and-async (24 scenarios)
+2026-11-13T19:00:46.6004560Z OK: reviewing-data-transformations-and-contracts (28 scenarios)
+2026-11-13T19:00:46.6004914Z OK: reviewing-decision-lifecycle (18 scenarios)
+2026-11-13T19:00:46.6005204Z OK: reviewing-ethical-design (21 scenarios)
+2026-11-13T19:00:46.6005540Z OK: reviewing-install-and-upgrade-experience (28 scenarios)
+2026-11-13T19:00:46.6005851Z OK: reviewing-interoperability (21 scenarios)
+2026-11-13T19:00:46.6006125Z OK: reviewing-llm-integration (26 scenarios)
+2026-11-13T19:00:46.6006428Z OK: reviewing-migration-and-data-safety (25 scenarios)
+2026-11-13T19:00:46.6006717Z OK: reviewing-module-design (26 scenarios)
+2026-11-13T19:00:46.6006995Z OK: reviewing-naming-and-readability (25 scenarios)
+2026-11-13T19:00:46.6007318Z OK: reviewing-observability-and-operability (20 scenarios)
+2026-11-13T19:00:46.6007646Z OK: reviewing-outcome-instrumentation (23 scenarios)
+2026-11-13T19:00:46.6007967Z OK: reviewing-performance-and-efficiency (26 scenarios)
+2026-11-13T19:00:46.6008281Z OK: reviewing-pr-and-process-hygiene (31 scenarios)
+2026-11-13T19:00:46.6008605Z OK: reviewing-resilience-and-scalability (24 scenarios)
+2026-11-13T19:00:46.6008892Z OK: reviewing-test-quality (24 scenarios)
+2026-11-13T19:00:46.6009174Z OK: reviewing-threat-model (21 scenarios)
+2026-11-13T19:00:46.6009444Z OK: reviewing-usability-and-interaction (22 scenarios)
+2026-11-13T19:00:46.6009823Z OK: sweeping-for-security (27 scenarios)
+2026-11-13T19:00:46.6010085Z OK: synthesizing-review-findings (24 scenarios)
+2026-11-13T19:00:46.6010382Z OK: tracing-correctness-and-invariants (28 scenarios)
+2026-11-13T19:00:46.6095633Z ##[group]Run python -m tooling.cli eval --skills-root collapsed/skills
+2026-11-13T19:00:46.6096056Z [36;1mpython -m tooling.cli eval --skills-root collapsed/skills[0m
+2026-11-13T19:00:46.6121243Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:46.6121474Z env:
+2026-11-13T19:00:46.6121723Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.6122087Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:46.6122652Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.6122970Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.6123290Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.6123603Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:46.6123870Z ##[endgroup]
+2026-11-13T19:00:46.7533584Z OK: auditing-a-repository (3 scenarios)
+2026-11-13T19:00:46.7534016Z OK: reviewing-a-change (3 scenarios)
+2026-11-13T19:00:46.7534430Z OK: reviewing-a-decision (3 scenarios)
+2026-11-13T19:00:46.7534791Z OK: reviewing-an-artifact (3 scenarios)
+2026-11-13T19:00:46.7631221Z ##[group]Run python -m tooling.cli drift
+2026-11-13T19:00:46.7631548Z [36;1mpython -m tooling.cli drift[0m
+2026-11-13T19:00:46.7655991Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:46.7656257Z env:
+2026-11-13T19:00:46.7656541Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.7656968Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:46.7657368Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.7657728Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.7658088Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.7658442Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:46.7658744Z ##[endgroup]
+2026-11-13T19:00:46.8884652Z No drift: all 44 skills are in sync with their source research.
+2026-11-13T19:00:46.8976609Z ##[group]Run python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
+2026-11-13T19:00:46.8977361Z [36;1mpython -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed[0m
+2026-11-13T19:00:46.8977808Z [36;1mok=1[0m
+2026-11-13T19:00:46.8978101Z [36;1m# `git diff --exit-code` only sees paths git already tracks — a generator[0m
+2026-11-13T19:00:46.8978603Z [36;1m# emitting a brand-new file (or leaving one orphaned untracked after a[0m
+2026-11-13T19:00:46.8978998Z [36;1m# rename) shows up as untracked, not modified, and the plain diff below[0m
+2026-11-13T19:00:46.8979388Z [36;1m# would report clean. `git add -A -- <path>` stages creations/deletions[0m
+2026-11-13T19:00:46.8979735Z [36;1m# too, so `git diff --cached` actually sees them (#382).[0m
+2026-11-13T19:00:46.8980019Z [36;1mgit add -A -- skills/ collapsed/[0m
+2026-11-13T19:00:46.8980562Z [36;1mgit diff --cached --exit-code -- skills/    || { git diff --cached --stat -- skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }[0m
+2026-11-13T19:00:46.8981309Z [36;1mgit diff --cached --exit-code -- collapsed/ || { git diff --cached --stat -- collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }[0m
+2026-11-13T19:00:46.8983055Z [36;1mgit diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }[0m
+2026-11-13T19:00:46.8984439Z [36;1m[ "$ok" -eq 1 ][0m
+2026-11-13T19:00:46.9005490Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:46.9005734Z env:
+2026-11-13T19:00:46.9005962Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.9006326Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:46.9006667Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.9006973Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.9007270Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:46.9007588Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:46.9007848Z ##[endgroup]
+2026-11-13T19:00:47.6885104Z generated skills/hunting-silent-failures
+2026-11-13T19:00:47.6885912Z generated skills/reviewing-naming-and-readability
+2026-11-13T19:00:47.6886869Z generated skills/reviewing-module-design
+2026-11-13T19:00:47.6887580Z generated skills/checking-restraint
+2026-11-13T19:00:47.6888265Z generated skills/reviewing-llm-integration
+2026-11-13T19:00:47.6888968Z generated skills/reviewing-agentic-safety
+2026-11-13T19:00:47.6889559Z generated skills/reviewing-threat-model
+2026-11-13T19:00:47.6890040Z generated skills/reviewing-ai-authored-code
+2026-11-13T19:00:47.6890531Z generated skills/reviewing-agent-legibility
+2026-11-13T19:00:47.6890988Z generated skills/reviewing-ethical-design
+2026-11-13T19:00:47.6891510Z generated skills/reviewing-usability-and-interaction
+2026-11-13T19:00:47.6892042Z generated skills/reviewing-outcome-instrumentation
+2026-11-13T19:00:47.6892890Z generated skills/reviewing-conceptual-integrity
+2026-11-13T19:00:47.6893422Z generated skills/finding-maintainability-hotspots
+2026-11-13T19:00:47.6893921Z generated skills/sweeping-for-security
+2026-11-13T19:00:47.6894400Z generated skills/reviewing-performance-and-efficiency
+2026-11-13T19:00:47.6894887Z generated skills/reviewing-test-quality
+2026-11-13T19:00:47.6895376Z generated skills/reviewing-migration-and-data-safety
+2026-11-13T19:00:47.6895993Z generated skills/reviewing-data-transformations-and-contracts
+2026-11-13T19:00:47.6896847Z generated skills/auditing-data-pipeline-health
+2026-11-13T19:00:47.6897369Z generated skills/reviewing-accessibility-and-i18n
+2026-11-13T19:00:47.6898133Z generated skills/tracing-correctness-and-invariants
+2026-11-13T19:00:47.6898613Z generated skills/reviewing-concurrency-and-async
+2026-11-13T19:00:47.6899170Z generated skills/checking-idioms-and-consistency
+2026-11-13T19:00:47.6899691Z generated skills/reviewing-api-contract-safety
+2026-11-13T19:00:47.6900530Z generated skills/reviewing-observability-and-operability
+2026-11-13T19:00:47.6901095Z generated skills/reviewing-pr-and-process-hygiene
+2026-11-13T19:00:47.6901608Z generated skills/auditing-architecture-conformance
+2026-11-13T19:00:47.6902224Z generated skills/auditing-dependencies-and-supply-chain
+2026-11-13T19:00:47.6902999Z generated skills/auditing-config-and-build-hygiene
+2026-11-13T19:00:47.6903585Z generated skills/auditing-documentation-health
+2026-11-13T19:00:47.6904138Z generated skills/auditing-compliance-and-provenance
+2026-11-13T19:00:47.6904694Z generated skills/reviewing-decision-lifecycle
+2026-11-13T19:00:47.6905327Z generated skills/auditing-decision-record-currency
+2026-11-13T19:00:47.6905968Z generated skills/auditing-enforcement-and-meta-artifacts
+2026-11-13T19:00:47.6906857Z generated skills/reviewing-resilience-and-scalability
+2026-11-13T19:00:47.6907566Z generated skills/auditing-infrastructure-as-code
+2026-11-13T19:00:47.6908301Z generated skills/auditing-deployment-and-trust-boundaries
+2026-11-13T19:00:47.6909064Z generated skills/reviewing-install-and-upgrade-experience
+2026-11-13T19:00:47.6909747Z generated skills/reviewing-interoperability
+2026-11-13T19:00:47.6910797Z generated skills/reviewing-artifact-conventions
+2026-11-13T19:00:47.6911317Z generated skills/choosing-review-lenses
+2026-11-13T19:00:47.6911809Z generated skills/grounding-review-in-tool-output
+2026-11-13T19:00:47.6912675Z generated skills/synthesizing-review-findings
+2026-11-13T19:00:47.6913397Z generated collapsed/skills/reviewing-a-change
+2026-11-13T19:00:47.6913982Z generated collapsed/skills/auditing-a-repository
+2026-11-13T19:00:47.6914499Z generated collapsed/skills/reviewing-a-decision
+2026-11-13T19:00:47.6915021Z generated collapsed/skills/reviewing-an-artifact
+2026-11-13T19:00:47.6915589Z generated collapsed/.claude-plugin/plugin.json
+2026-11-13T19:00:47.7207239Z ##[group]Run pip install pip-licenses==5.5.5
+2026-11-13T19:00:47.7207618Z [36;1mpip install pip-licenses==5.5.5[0m
+2026-11-13T19:00:47.7208673Z [36;1mpip-licenses --allow-only="MIT License;MIT;MIT-0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"[0m
+2026-11-13T19:00:47.7237051Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:47.7237348Z env:
+2026-11-13T19:00:47.7237751Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:47.7238195Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:47.7238616Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:47.7239075Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:47.7239552Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:47.7239929Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:47.7240257Z ##[endgroup]
+2026-11-13T19:00:48.0192217Z Collecting pip-licenses==5.5.5
+2026-11-13T19:00:48.0202606Z   Using cached pip_licenses-5.5.5-py3-none-any.whl.metadata (35 kB)
+2026-11-13T19:00:48.0350803Z Collecting prettytable>=3.12.0 (from pip-licenses==5.5.5)
+2026-11-13T19:00:48.0360968Z   Using cached prettytable-3.18.0-py3-none-any.whl.metadata (37 kB)
+2026-11-13T19:00:48.0518187Z Collecting wcwidth>=0.3.5 (from prettytable>=3.12.0->pip-licenses==5.5.5)
+2026-11-13T19:00:48.0527659Z   Using cached wcwidth-0.9.4-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (23 kB)
+2026-11-13T19:00:48.0560211Z Using cached pip_licenses-5.5.5-py3-none-any.whl (23 kB)
+2026-11-13T19:00:48.0569971Z Using cached prettytable-3.18.0-py3-none-any.whl (37 kB)
+2026-11-13T19:00:48.0579221Z Using cached wcwidth-0.9.4-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (785 kB)
+2026-11-13T19:00:48.0980739Z Installing collected packages: wcwidth, prettytable, pip-licenses
+2026-11-13T19:00:48.3235399Z Successfully installed pip-licenses-5.5.5 prettytable-3.18.0 wcwidth-0.9.4
+2026-11-13T19:00:48.3326197Z 
+2026-11-13T19:00:48.3326834Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-13T19:00:48.3327666Z [notice] To update, run: pip install --upgrade pip
+2026-11-13T19:00:48.6978956Z  Name                     Version          License                              
+2026-11-13T19:00:48.6980403Z  CacheControl             0.14.4           Apache-2.0                           
+2026-11-13T19:00:48.6981526Z  PyJWT                    2.15.1           MIT                                  
+2026-11-13T19:00:48.6982509Z  PyYAML                   6.0.3            MIT License                          
+2026-11-13T19:00:48.6983309Z  Pygments                 2.20.0           BSD-2-Clause                         
+2026-11-13T19:00:48.6984077Z  ast_serialize            0.13.1           MIT                                  
+2026-11-13T19:00:48.6984862Z  boolean.py               5.0              BSD-2-Clause                         
+2026-11-13T19:00:48.6985596Z  certifi                  2026.10.23       Mozilla Public License 2.0 (MPL 2.0) 
+2026-11-13T19:00:48.6986378Z  cffi                     2.1.1            MIT-0                                
+2026-11-13T19:00:48.6987120Z  charset-normalizer       3.5.2            MIT                                  
+2026-11-13T19:00:48.6987841Z  coverage                 7.16.0           Apache-2.0                           
+2026-11-13T19:00:48.6988622Z  cryptography             50.0.2           Apache-2.0 OR BSD-3-Clause           
+2026-11-13T19:00:48.6989446Z  cyclonedx-python-lib     11.12.0          Apache Software License              
+2026-11-13T19:00:48.6990294Z  defusedxml               0.7.1            Python Software Foundation License   
+2026-11-13T19:00:48.6991386Z  filelock                 4.2.10           MIT                                  
+2026-11-13T19:00:48.6992221Z  idna                     3.20             BSD-3-Clause                         
+2026-11-13T19:00:48.6993167Z  iniconfig                2.3.0            MIT                                  
+2026-11-13T19:00:48.6993921Z  librt                    0.16.0           MIT                                  
+2026-11-13T19:00:48.6994862Z  license-expression       30.4.4           Apache-2.0                           
+2026-11-13T19:00:48.6995652Z  markdown-it-py           4.3.0            MIT License                          
+2026-11-13T19:00:48.6996430Z  mdurl                    0.1.2            MIT License                          
+2026-11-13T19:00:48.6997172Z  msgpack                  1.2.4            Apache-2.0                           
+2026-11-13T19:00:48.6997938Z  mypy                     2.4.1            MIT                                  
+2026-11-13T19:00:48.6998655Z  mypy_extensions          1.1.0            MIT                                  
+2026-11-13T19:00:48.6999512Z  packageurl-python        0.17.6           MIT License                          
+2026-11-13T19:00:48.7000385Z  packaging                26.3             Apache-2.0 OR BSD-2-Clause           
+2026-11-13T19:00:48.7001236Z  pathspec                 1.1.1            Mozilla Public License 2.0 (MPL 2.0) 
+2026-11-13T19:00:48.7002602Z  pip-requirements-parser  32.0.1           MIT                                  
+2026-11-13T19:00:48.7003641Z  pip_api                  0.0.35           Apache Software License              
+2026-11-13T19:00:48.7004581Z  pip_audit                2.10.1           Apache Software License              
+2026-11-13T19:00:48.7005682Z  platformdirs             4.14.5           MIT                                  
+2026-11-13T19:00:48.7006632Z  pluggy                   1.6.0            MIT License                          
+2026-11-13T19:00:48.7007755Z  py-serializable          2.2.0            Apache Software License              
+2026-11-13T19:00:48.7008877Z  pycparser                3.12             BSD-3-Clause                         
+2026-11-13T19:00:48.7009889Z  pyparsing                3.3.3            MIT                                  
+2026-11-13T19:00:48.7011055Z  pytest                   9.2.0            MIT                                  
+2026-11-13T19:00:48.7011998Z  pytest-cov               7.1.0            MIT                                  
+2026-11-13T19:00:48.7013351Z  requests                 2.34.2           Apache Software License              
+2026-11-13T19:00:48.7014347Z  rich                     15.0.0           MIT License                          
+2026-11-13T19:00:48.7015148Z  ruff                     0.17.4           MIT                                  
+2026-11-13T19:00:48.7016040Z  sortedcontainers         2.4.0            Apache Software License              
+2026-11-13T19:00:48.7016892Z  tomli                    2.5.0            MIT                                  
+2026-11-13T19:00:48.7017760Z  tomli_w                  1.2.0            MIT License                          
+2026-11-13T19:00:48.7018611Z  types-PyYAML             6.0.12.20261103  Apache-2.0                           
+2026-11-13T19:00:48.7019530Z  typing_extensions        4.16.0           PSF-2.0                              
+2026-11-13T19:00:48.7020383Z  urllib3                  2.8.0            MIT                                  
+2026-11-13T19:00:48.7131714Z ##[group]Run # pip-tools 7.6.0 crashed under pip 26.2 (RequirementCommand's
+2026-11-13T19:00:48.7132882Z [36;1m# pip-tools 7.6.0 crashed under pip 26.2 (RequirementCommand's[0m
+2026-11-13T19:00:48.7133400Z [36;1m# make_requirement_preparer gained a required `allow_editables`[0m
+2026-11-13T19:00:48.7133889Z [36;1m# kwarg pip-tools 7.6.0 didn't pass) — pip-tools 7.6.1 (2026-08-11)[0m
+2026-11-13T19:00:48.7134470Z [36;1m# fixed that compatibility, so no pip-version workaround is needed[0m
+2026-11-13T19:00:48.7134950Z [36;1m# any more; pip-tools alone is pinned exact so this step's own gate[0m
+2026-11-13T19:00:48.7135488Z [36;1m# stays reproducible. Not hash-verified like requirements.txt's[0m
+2026-11-13T19:00:48.7135977Z [36;1m# deps — considered and deliberately skipped: it's CI-only tooling,[0m
+2026-11-13T19:00:48.7136451Z [36;1m# not shipped or imported by this repo's own code, and a[0m
+2026-11-13T19:00:48.7137000Z [36;1m# hash-pinned requirements-dev.txt for one tool was judged not[0m
+2026-11-13T19:00:48.7137511Z [36;1m# worth the added Dependabot/maintenance surface.[0m
+2026-11-13T19:00:48.7137877Z [36;1mpip install pip-tools==7.6.1[0m
+2026-11-13T19:00:48.7138273Z [36;1m# The committed lockfile is seeded into the check dir, not just the .in.[0m
+2026-11-13T19:00:48.7138831Z [36;1m# Without it pip-compile resolves from scratch and pins whatever is[0m
+2026-11-13T19:00:48.7139307Z [36;1m# newest on PyPI *today*, so any upstream release turns every open PR[0m
+2026-11-13T19:00:48.7139816Z [36;1m# red for a reason unrelated to its diff — that happened on three[0m
+2026-11-13T19:00:48.7140283Z [36;1m# consecutive PRs (#204/#206/#208, all of them a fresh `ruff`). With the[0m
+2026-11-13T19:00:48.7140803Z [36;1m# lockfile present, pip-compile keeps existing pins that still satisfy[0m
+2026-11-13T19:00:48.7141294Z [36;1m# requirements.in, so this step asserts what it is named for[0m
+2026-11-13T19:00:48.7141774Z [36;1m# (lockfile *consistent with* the .in, hashes genuine, no hand-edits)[0m
+2026-11-13T19:00:48.7142478Z [36;1m# rather than "the lockfile is the newest possible resolution".[0m
+2026-11-13T19:00:48.7142879Z [36;1m#[0m
+2026-11-13T19:00:48.7143312Z [36;1m# What this step does NOT check, stated because a first draft of this[0m
+2026-11-13T19:00:48.7143878Z [36;1m# comment claimed otherwise: with the lockfile seeded, pip-compile[0m
+2026-11-13T19:00:48.7144403Z [36;1m# reuses an already-satisfying pinned line *verbatim, hash included*,[0m
+2026-11-13T19:00:48.7144877Z [36;1m# and only computes hashes for packages it newly resolves. So a[0m
+2026-11-13T19:00:48.7145337Z [36;1m# hand-edited hash on an already-pinned package survives this diff.[0m
+2026-11-13T19:00:48.7145896Z [36;1m# `pip install --require-hashes` above (into a fresh per-job venv,[0m
+2026-11-13T19:00:48.7146483Z [36;1m# #366) catches most of that: it verifies the one artifact pip[0m
+2026-11-13T19:00:48.7146954Z [36;1m# actually resolves and downloads for this job's platform/Python[0m
+2026-11-13T19:00:48.7147481Z [36;1m# against the hash(es) listed for it, and exits 1 on any mismatch.[0m
+2026-11-13T19:00:48.7147859Z [36;1m#[0m
+2026-11-13T19:00:48.7148213Z [36;1m# #366: what it does NOT do, despite a second draft of this comment[0m
+2026-11-13T19:00:48.7148684Z [36;1m# claiming otherwise -- is verify every hash in the committed[0m
+2026-11-13T19:00:48.7149167Z [36;1m# lockfile. A requirement line can list hashes for several[0m
+2026-11-13T19:00:48.7149634Z [36;1m# platforms' wheels (sdist, manylinux, macOS, Windows, ...), and pip[0m
+2026-11-13T19:00:48.7150081Z [36;1m# only ever downloads and checks the one it selects for the running[0m
+2026-11-13T19:00:48.7150571Z [36;1m# job. A forged hash on a wheel this platform never selects passes[0m
+2026-11-13T19:00:48.7151018Z [36;1m# both this step's diff and that install silently (reproduced with[0m
+2026-11-13T19:00:48.7151455Z [36;1m# a forged pyyaml hash during the audit). Hash integrity for the[0m
+2026-11-13T19:00:48.7151998Z [36;1m# platform this job actually runs on is that step's; .in consistency[0m
+2026-11-13T19:00:48.7152759Z [36;1m# is this one's; cross-platform hash coverage is neither's.[0m
+2026-11-13T19:00:48.7153166Z [36;1m#[0m
+2026-11-13T19:00:48.7153492Z [36;1m# Freshness is neither step's, and is already owned twice: Dependabot[0m
+2026-11-13T19:00:48.7153995Z [36;1m# proposes upgrades weekly as their own PRs, and `pip-audit` below[0m
+2026-11-13T19:00:48.7154439Z [36;1m# fails on a pin with a known CVE — the question that actually matters[0m
+2026-11-13T19:00:48.7154872Z [36;1m# about a stale pin. Verified against pip-tools 7.6.0 that this check[0m
+2026-11-13T19:00:48.7155358Z [36;1m# still fails on a raised .in floor and on a dependency dropped from[0m
+2026-11-13T19:00:48.7155762Z [36;1m# the .in.[0m
+2026-11-13T19:00:48.7156037Z [36;1m#[0m
+2026-11-13T19:00:48.7156355Z [36;1m# 2026-08-26: this step went red on every open PR with zero .in/.txt[0m
+2026-11-13T19:00:48.7156829Z [36;1m# diff in any of them — pip-compile started emitting `--no-index` in[0m
+2026-11-13T19:00:48.7157296Z [36;1m# its own regenerated header comment (Python 3.12, pip-tools 7.6.1)[0m
+2026-11-13T19:00:48.7157738Z [36;1m# where it previously didn't. requirements.in itself is NOT fully[0m
+2026-11-13T19:00:48.7158182Z [36;1m# pinned (>= floors, e.g. `ruff>=0.16.4`). #378's audit found the[0m
+2026-11-13T19:00:48.7158638Z [36;1m# comment that used to sit here (blaming a "warm local wheel cache")[0m
+2026-11-13T19:00:48.7159083Z [36;1m# was wrong: reading piptools.utils.get_compile_command (7.6.1)[0m
+2026-11-13T19:00:48.7159535Z [36;1m# shows the regenerated header re-includes any option whose[0m
+2026-11-13T19:00:48.7159975Z [36;1m# *resolved* value differs from that click Option's own hardcoded[0m
+2026-11-13T19:00:48.7160445Z [36;1m# default -- regardless of whether the CLI, a discovered pip-tools[0m
+2026-11-13T19:00:48.7160876Z [36;1m# config file, or a `PIP_*`-style environment variable is what[0m
+2026-11-13T19:00:48.7161370Z [36;1m# actually set it, and regardless of wheel-cache state. A[0m
+2026-11-13T19:00:48.7161794Z [36;1m# machine-local default for `--no-index` (or any other flag) making[0m
+2026-11-13T19:00:48.7162342Z [36;1m# the header differ between two otherwise-identical runs is exactly[0m
+2026-11-13T19:00:48.7162833Z [36;1m# that: an environment difference on the header line, not a[0m
+2026-11-13T19:00:48.7163302Z [36;1m# resolution difference in the pins below it. Reproduced cold (fresh[0m
+2026-11-13T19:00:48.7163794Z [36;1m# venv, cleared pip cache) that the header's presence/absence tracks[0m
+2026-11-13T19:00:48.7164240Z [36;1m# the machine's own pip-tools-visible defaults, not cache warmth.[0m
+2026-11-13T19:00:48.7164640Z [36;1m#[0m
+2026-11-13T19:00:48.7164993Z [36;1m# Since the header can legitimately vary by machine for reasons that[0m
+2026-11-13T19:00:48.7165645Z [36;1m# have nothing to do with requirements.in/.txt actually drifting,[0m
+2026-11-13T19:00:48.7166121Z [36;1m# this step now diffs only the non-comment lines (#378) -- the[0m
+2026-11-13T19:00:48.7166602Z [36;1m# pinned packages and hashes, which is what this step exists to[0m
+2026-11-13T19:00:48.7167027Z [36;1m# verify -- rather than the whole file. The comment lines[0m
+2026-11-13T19:00:48.7167460Z [36;1m# documenting how the file was produced are informational, not part[0m
+2026-11-13T19:00:48.7167900Z [36;1m# of the contract this gate checks.[0m
+2026-11-13T19:00:48.7168322Z [36;1m# $RUNNER_TEMP unconditionally, no ${RUNNER_TEMP:-/tmp} fallback --[0m
+2026-11-13T19:00:48.7168774Z [36;1m# matching the convention the require-hashes install and shellcheck[0m
+2026-11-13T19:00:48.7169212Z [36;1m# steps in this same job already use (#366/#378): GitHub Actions[0m
+2026-11-13T19:00:48.7169672Z [36;1m# guarantees the var is set on every runner, so a fallback here[0m
+2026-11-13T19:00:48.7170129Z [36;1m# would only mask it silently going missing rather than failing loudly.[0m
+2026-11-13T19:00:48.7170669Z [36;1mwork="$(mktemp -d "$RUNNER_TEMP/reqcheck.XXXXXX")"[0m
+2026-11-13T19:00:48.7171064Z [36;1mtrap 'rm -rf "$work"' EXIT[0m
+2026-11-13T19:00:48.7171448Z [36;1mcp requirements.in requirements.txt "$work"/[0m
+2026-11-13T19:00:48.7171984Z [36;1m( cd "$work" && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )[0m
+2026-11-13T19:00:48.7172930Z [36;1mdiff -u <(grep -v '^#' requirements.txt) <(grep -v '^#' "$work/requirements.txt") || {[0m
+2026-11-13T19:00:48.7173750Z [36;1m  echo "::error::requirements.txt is not consistent with requirements.in (or was hand-edited) — recompile with pip-compile --generate-hashes and commit"[0m
+2026-11-13T19:00:48.7174349Z [36;1m  exit 1[0m
+2026-11-13T19:00:48.7174629Z [36;1m}[0m
+2026-11-13T19:00:48.7203097Z shell: /usr/bin/bash -e {0}
+2026-11-13T19:00:48.7203459Z env:
+2026-11-13T19:00:48.7203794Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:48.7204294Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:48.7204719Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:48.7205166Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:48.7205552Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:48.7205945Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:48.7206356Z ##[endgroup]
+2026-11-13T19:00:49.0175484Z Collecting pip-tools==7.6.1
+2026-11-13T19:00:49.0185128Z   Using cached pip_tools-7.6.1-py3-none-any.whl.metadata (25 kB)
+2026-11-13T19:00:49.0308520Z Collecting build>=1.0.0 (from pip-tools==7.6.1)
+2026-11-13T19:00:49.0317480Z   Using cached build-1.6.1-py3-none-any.whl.metadata (5.6 kB)
+2026-11-13T19:00:49.0447453Z Collecting click>=8 (from pip-tools==7.6.1)
+2026-11-13T19:00:49.0456008Z   Using cached click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+2026-11-13T19:00:49.0467677Z Requirement already satisfied: pip>=22.2 in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from pip-tools==7.6.1) (25.0.1)
+2026-11-13T19:00:49.0527851Z Collecting pyproject_hooks (from pip-tools==7.6.1)
+2026-11-13T19:00:49.0536494Z   Using cached pyproject_hooks-1.3.3-py3-none-any.whl.metadata (1.3 kB)
+2026-11-13T19:00:49.1313310Z Collecting setuptools (from pip-tools==7.6.1)
+2026-11-13T19:00:49.1321742Z   Using cached setuptools-84.2.1-py3-none-any.whl.metadata (6.6 kB)
+2026-11-13T19:00:49.1501304Z Collecting wheel (from pip-tools==7.6.1)
+2026-11-13T19:00:49.1510580Z   Using cached wheel-0.48.0-py3-none-any.whl.metadata (2.3 kB)
+2026-11-13T19:00:49.1529610Z Requirement already satisfied: packaging>=24.0 in /home/runner/work/_temp/venv/lib/python3.12/site-packages (from build>=1.0.0->pip-tools==7.6.1) (26.3)
+2026-11-13T19:00:49.1565179Z Using cached pip_tools-7.6.1-py3-none-any.whl (74 kB)
+2026-11-13T19:00:49.1574577Z Using cached build-1.6.1-py3-none-any.whl (31 kB)
+2026-11-13T19:00:49.1583200Z Using cached click-8.5.1-py3-none-any.whl (126 kB)
+2026-11-13T19:00:49.1592148Z Using cached pyproject_hooks-1.3.3-py3-none-any.whl (10 kB)
+2026-11-13T19:00:49.1600623Z Using cached setuptools-84.2.1-py3-none-any.whl (876 kB)
+2026-11-13T19:00:49.1612912Z Using cached wheel-0.48.0-py3-none-any.whl (33 kB)
+2026-11-13T19:00:49.2049909Z Installing collected packages: wheel, setuptools, pyproject_hooks, click, build, pip-tools
+2026-11-13T19:00:49.6921514Z Successfully installed build-1.6.1 click-8.5.1 pip-tools-7.6.1 pyproject_hooks-1.3.3 setuptools-84.2.1 wheel-0.48.0
+2026-11-13T19:00:49.7002218Z 
+2026-11-13T19:00:49.7002711Z [notice] A new release of pip is available: 25.0.1 -> 26.3
+2026-11-13T19:00:49.7003281Z [notice] To update, run: pip install --upgrade pip
+2026-11-13T19:00:51.6622999Z WARNING: --strip-extras is becoming the default in version 8.0.0. To silence this warning, either use --strip-extras to opt into the new default or use --no-strip-extras to retain the existing behavior.
+2026-11-13T19:00:51.6624197Z #
+2026-11-13T19:00:51.6624872Z # This file is autogenerated by pip-compile with Python 3.12
+2026-11-13T19:00:51.6625640Z # by the following command:
+2026-11-13T19:00:51.6626028Z #
+2026-11-13T19:00:51.6626710Z #    pip-compile --generate-hashes --no-index --output-file=requirements.txt requirements.in
+2026-11-13T19:00:51.6627421Z #
+2026-11-13T19:00:51.6628154Z ast-serialize==0.13.1 \
+2026-11-13T19:00:51.6628963Z     --hash=sha256:02686b281ec9b8e9614f6f0db27e12e4cac515f336c5d05b678bc9eb73ff2af5 \
+2026-11-13T19:00:51.6629806Z     --hash=sha256:032b09d86c785c3984e975378b7861f2a68ac44e22ba7b07b93a536b2524eeb8 \
+2026-11-13T19:00:51.6630669Z     --hash=sha256:0d764913374ba21df8cd618045b371ed104ce55c6276de7c59e554a4f5ba26fd \
+2026-11-13T19:00:51.6631573Z     --hash=sha256:121e1d08d58b75c15491cc3003609cbad71ac2b0016043c36d30a6b2032b6605 \
+2026-11-13T19:00:51.6632524Z     --hash=sha256:1b158f1c9e3a0d386913924c57995d6df78224868a4d0f215bdd41587c97b34a \
+2026-11-13T19:00:51.6633483Z     --hash=sha256:2015fd0165e463aac3b1aadc6a1fa1e5820c14ca950821f4fe02f8a3f6a388d6 \
+2026-11-13T19:00:51.6634335Z     --hash=sha256:23d768369b89d551077dc173da6892fad00443338417523b6732f4e8ba4a7ed5 \
+2026-11-13T19:00:51.6635237Z     --hash=sha256:2876444a5f87a7c76f371af3c07c2fda563a08bc8af52568df812e8aba4bf568 \
+2026-11-13T19:00:51.6636139Z     --hash=sha256:29422d7bcd9e7f39411571c36cec45ce8a7a9b3ad4b2e7aa64497c15a9e397f6 \
+2026-11-13T19:00:51.6636947Z     --hash=sha256:2bad302ae2427454ef9dab71bd5c3ad67188860c39d36daee38f72031edb39c4 \
+2026-11-13T19:00:51.6637847Z     --hash=sha256:2f9a9ce8b0994f757b941f7f7fe384a6666b4162b941ebc5c248081baea18e47 \
+2026-11-13T19:00:51.6638639Z     --hash=sha256:30cf89b6a6844542d116c758725d13de5b97b9410a51ee577715f761270d0c1c \
+2026-11-13T19:00:51.6639447Z     --hash=sha256:3e129d44b0cffbea24a7f40117ce49e30993c3d119e584d4817ebd6f87246456 \
+2026-11-13T19:00:51.6640275Z     --hash=sha256:401cc84e8888d4d76f2c8d296fa006ed1a5ff993b6aff90dd777c03973efd025 \
+2026-11-13T19:00:51.6641060Z     --hash=sha256:43e8ddd63e80fc280c2f790157386f27f9b9f6ccb9c4f8e803b863cbfb085769 \
+2026-11-13T19:00:51.6641775Z     --hash=sha256:48f11d96c9ec71119612f8e79a8c55c12f2b136716d68347433c561d27a25f43 \
+2026-11-13T19:00:51.6642637Z     --hash=sha256:4bcf1d5f4eefecaa325a34ecf079b2741189e7d0821523f92cb343a389a67489 \
+2026-11-13T19:00:51.6643386Z     --hash=sha256:4e385b17d5bde892a6184003a9aff3518387908b73f8f5ea539313c07c8c0ede \
+2026-11-13T19:00:51.6644069Z     --hash=sha256:4f98da562e5901d69c7dd30885594c5438f859edf354e9ac7517d188fb026c3a \
+2026-11-13T19:00:51.6644798Z     --hash=sha256:523d45bab16ddaf1399c04c4fe81bbf180f81e33c2f7bcbe76be56b0f7311ab4 \
+2026-11-13T19:00:51.6645517Z     --hash=sha256:5d99910e6b9a9b9360bcca2ae99aee36cc912ce058df2a57d1c33099b6cb2593 \
+2026-11-13T19:00:51.6646298Z     --hash=sha256:5db12d843d931b9d1f1519ce66b9cbfe72d8563b75c1204d255322254d1964dd \
+2026-11-13T19:00:51.6647036Z     --hash=sha256:638333fb8ae72c62753f9e794fda20290883ddc65b0d85e26e08f8bb227567ad \
+2026-11-13T19:00:51.6647964Z     --hash=sha256:68f8829d114dab6c9db4a8bbb8d0e342958faee1b5e15a29022678df639960f8 \
+2026-11-13T19:00:51.6648753Z     --hash=sha256:6eb0be64c9b8f1ed26637eef345abe75ea90351c92c85a8aec7838b3af971011 \
+2026-11-13T19:00:51.6649468Z     --hash=sha256:6ffb0f548a7dc126067fdfb7b2325ab5dfcdeecc29faf5e0f0461c96d6ebfa3d \
+2026-11-13T19:00:51.6650222Z     --hash=sha256:732aaae9e498c973fc63fd7f308009b57c4afa6ff59d0b674d894e57d0bca01a \
+2026-11-13T19:00:51.6650950Z     --hash=sha256:75d7750fe98f6f35a96c43aba8d98a2e623e22c778a0c17ab9ede92eb10f5d82 \
+2026-11-13T19:00:51.6651734Z     --hash=sha256:77a6201b69ce42e919f2fd9a559138d5410b5d8afff7c3a6b1f500b0481ff7d8 \
+2026-11-13T19:00:51.6652716Z     --hash=sha256:7a5c38bdb93669c596f94fb7204dd6ebe4fadb19058ac9a2faf2948c2a175f96 \
+2026-11-13T19:00:51.6653458Z     --hash=sha256:7f2427bddfca208e84de700044fadf9aef2769a70bae740a1bdabb89ee9e1117 \
+2026-11-13T19:00:51.6654318Z     --hash=sha256:7f3e8a3eff69af640db985360fef35073fb46956dfc3e5c614cf00920d2746dd \
+2026-11-13T19:00:51.6655028Z     --hash=sha256:847cad4c22953823f5e76d0b126c6f9da670cfa45b1df41b9324e22189d77611 \
+2026-11-13T19:00:51.6655930Z     --hash=sha256:87427913c325adc811e81e7c9a757b061f47ef1e29114ac479aa0953a2687a98 \
+2026-11-13T19:00:51.6656677Z     --hash=sha256:885a62ec6481ce58ab24c6357360d7a82023b62dd7e5e7ceccf59e9662a3272b \
+2026-11-13T19:00:51.6657558Z     --hash=sha256:8899c038b1c15ae8b98e379057fb3ef398ceb0b21d1737a8156dd5a0923b7e51 \
+2026-11-13T19:00:51.6658708Z     --hash=sha256:88df960e67184a71874e5b2ee014f87d1254a0dbc1f903c7bd7b1ab7733ecaef \
+2026-11-13T19:00:51.6659827Z     --hash=sha256:8c8ebd419811c435812d242fb2a173e57dfede198c9ac9a0a584666ebc9b9331 \
+2026-11-13T19:00:51.6661007Z     --hash=sha256:9221e09496fb942901993c1812ee87950cc0ecbb514c7c0f1f5fa6d78f701ed8 \
+2026-11-13T19:00:51.6662110Z     --hash=sha256:929eda0c419e622ab49df3a4c45f81c57dcc10874bbad55d0470a4a03324dac3 \
+2026-11-13T19:00:51.6663459Z     --hash=sha256:9f99786e0d62082a5b121b3437f3167562133711df22128de1e9886f57f0b226 \
+2026-11-13T19:00:51.6664889Z     --hash=sha256:a01b515b25a03184eff4acef25b981ae007916379682e908fc8785b342a0bf3e \
+2026-11-13T19:00:51.6666052Z     --hash=sha256:a789cbe14d0a0e9ec9b32a456e5abc81ad8799479c3cfd88a29e3442262aebe6 \
+2026-11-13T19:00:51.6667188Z     --hash=sha256:a8ab2c2585b2e22e48cd4aff2136fce4eab4ced569b85f150ef9a5a5d6f34d49 \
+2026-11-13T19:00:51.6668429Z     --hash=sha256:aca07de3ca8e3d9f2b716c3c31f4f384fe4bd2d03e09912417cff7a3e08036f7 \
+2026-11-13T19:00:51.6669656Z     --hash=sha256:acf4e9f055d75058ab01536da330648746f2f82b7697a85230547f2d5ebe895c \
+2026-11-13T19:00:51.6671475Z     --hash=sha256:ad88921f95b92bc144d9ad059a0e16f8c1ae69f5239f2d3c6536fd2774f73dfe \
+2026-11-13T19:00:51.6672752Z     --hash=sha256:bf53a3ba1cbe45399fc1e4ccd684b8f2a11cca450f89706b79122f478534c6f5 \
+2026-11-13T19:00:51.6673937Z     --hash=sha256:c652d9f5d52d8b81eff3ff2c95c9dd0f281de45f6ad5d3fa95527550c396454a \
+2026-11-13T19:00:51.6675124Z     --hash=sha256:ca9acc67f796aa2554fa3037dccc022a4b08b38b2ad153edfac9c9bb7cb1f3c6 \
+2026-11-13T19:00:51.6676283Z     --hash=sha256:cc34c670747d85d4232834665e247009413eaebe47c69eaf60a5c439aaecaed9 \
+2026-11-13T19:00:51.6677395Z     --hash=sha256:d9c1a920b2aa0c1e016bed7721689717034ca0dba64ac3a3ff243b003d4e8dd8 \
+2026-11-13T19:00:51.6678601Z     --hash=sha256:ddf7cbc9c8abf70102c4a088efe154bb86bfb825b0a10e556d2b15972cf99bd7 \
+2026-11-13T19:00:51.6679729Z     --hash=sha256:e14c4de98f965647a74e6eaf37e20207124e45451ccd36e84a6f6ebab45e0372 \
+2026-11-13T19:00:51.6680856Z     --hash=sha256:eb41e1906502ac80d24ff343f45008552a3f5b5158607959fe6a07dbfc6eb037 \
+2026-11-13T19:00:51.6682028Z     --hash=sha256:f8b17e2921e56621bcb46792bd3e0b82ca3b85de78d5936e7b8174ba1758b0aa \
+2026-11-13T19:00:51.6683229Z     --hash=sha256:fb8021f4dc3296de18737e3b8b34994411da725374d74a0b9eb32a738f2a23d0
+2026-11-13T19:00:51.6684125Z     # via mypy
+2026-11-13T19:00:51.6684570Z cffi==2.1.1 \
+2026-11-13T19:00:51.6685483Z     --hash=sha256:046bfc24911b37851ee1b51aab8bffe713d89c68c6a057b09484ce9fd5f69b4e \
+2026-11-13T19:00:51.6686818Z     --hash=sha256:06c72bb76605a4b0cd0aad6930b69d4baf7dd5d806cfc409b824191099700e66 \
+2026-11-13T19:00:51.6687944Z     --hash=sha256:0beceaabe56af686895136a2de78db54ecd8e4046b236b8fd6d6cb61389e9bf2 \
+2026-11-13T19:00:51.6689140Z     --hash=sha256:154852545011f779917b11c78db2358d095da62a9a172b78ad0a583ee5adc0d0 \
+2026-11-13T19:00:51.6690313Z     --hash=sha256:194cffa889098ced9976c3fc6340305e43f6303657d298da55366907c05c22d6 \
+2026-11-13T19:00:51.6691493Z     --hash=sha256:19ee6127ee34de7d83ce3d371ebc5ed91addbdcc39f9ab15ce4eb35a4e534971 \
+2026-11-13T19:00:51.6692212Z     --hash=sha256:1a18a57b58cfb21fc28d72e876acf10eaed67a1ed96226f92af4df681d571c4c \
+2026-11-13T19:00:51.6693112Z     --hash=sha256:1aa5645c30469b09530c4ebca77ebf8f17618293c58f8549cb1a543a50236e7d \
+2026-11-13T19:00:51.6693804Z     --hash=sha256:1dea0e4d7d4f11f619fe8c1d76caf49e24405b4b5743c0e3be16a500ecd930c9 \
+2026-11-13T19:00:51.6694510Z     --hash=sha256:208f941bb9d18e768138677f0a6d2ce01f590df56043dda1df1535ac57c88517 \
+2026-11-13T19:00:51.6695220Z     --hash=sha256:210019b6c7cf07f081b4c54635c8cf744377001350e29cc0f81c4377b4797735 \
+2026-11-13T19:00:51.6696066Z     --hash=sha256:246fa40ce8645a614ff682e0b70f37134e460eaf93a775e0cbe3cca585a67a80 \
+2026-11-13T19:00:51.6696755Z     --hash=sha256:25792eac27877609e7bb06d42ff88278a6624fff2ba9bbb523c09616b117e80f \
+2026-11-13T19:00:51.6697469Z     --hash=sha256:27350daa11d4f10c540e6e89dada4c54feb7256ad03e9a4dc075ebad7ba360d1 \
+2026-11-13T19:00:51.6698147Z     --hash=sha256:28907ab9bfb6aa13184cfc17c6b8e1023c5ab6fd7076d8c20a35e59fe04f8f29 \
+2026-11-13T19:00:51.6698859Z     --hash=sha256:2ae64be792b8966f2c69538199728b290e34726562896df1e5dc8ffd8d8188e8 \
+2026-11-13T19:00:51.6699526Z     --hash=sha256:31348097ff5bbe827ccc41795d4dd099d9f0625e7def00ee653c137a490c2a6c \
+2026-11-13T19:00:51.6700185Z     --hash=sha256:3143d81e29e1e20a9ce10901ec369012947876596f75a222235965f2b7ae832e \
+2026-11-13T19:00:51.6700951Z     --hash=sha256:3222ba5d678f80a030e6afbcc33dc1ae5cb45facabb61cee2c7016b8432fde48 \
+2026-11-13T19:00:51.6701593Z     --hash=sha256:3311ed60d36f83378794e1009ac6258bafbf81f7888b4caa7b35a521e3f95813 \
+2026-11-13T19:00:51.6702456Z     --hash=sha256:334644fbac4eff73d985a17a91226df55d0f394160c4cfb880e084c8f7161cac \
+2026-11-13T19:00:51.6703164Z     --hash=sha256:34e261f78cb6ceaaa36f42f2613f4380d94d9c759a9c73c769ee6e0247364632 \
+2026-11-13T19:00:51.6703874Z     --hash=sha256:363e05fa78e15116c3c32c210ee36884fd6b9afa6d440e47112c3bd511d64cb6 \
+2026-11-13T19:00:51.6704521Z     --hash=sha256:398aff33cee2767e3e781d2554c54bd0dff386bb437581e0d8011fde1a942ec1 \
+2026-11-13T19:00:51.6705223Z     --hash=sha256:3d22a20b1fb1632cc72c22f95f7b0d2961c3e1c235f245ba4c606c4771035659 \
+2026-11-13T19:00:51.6705878Z     --hash=sha256:42a494cee34437f05546455144f2b5d9ac09b1face62bcfce597d2e521066688 \
+2026-11-13T19:00:51.6706540Z     --hash=sha256:42e2f76b9455f5a9a844f770bf3e200ed3da0e15f5df3db9c31fe80b04b3d004 \
+2026-11-13T19:00:51.6707241Z     --hash=sha256:42f6930c31dc7f50732c9ae793c2786c7b6b044195967bbdde40bb9be81c4cc0 \
+2026-11-13T19:00:51.6707941Z     --hash=sha256:456a61fa52d579ebf9df2e9552ead5129855dbaff6c1e5a9b1bc408809bdc062 \
+2026-11-13T19:00:51.6708617Z     --hash=sha256:471cee653ae88de62096552e6d24ccb4a5adb8c8c9f10b5054d0122c15bf2779 \
+2026-11-13T19:00:51.6709293Z     --hash=sha256:49cbc70e6542d4ccccb936558d1064a8012541e78f821f955cff24e357776c94 \
+2026-11-13T19:00:51.6709956Z     --hash=sha256:4a7c934f7360e8cd64fe9efadcbd10c7c6364f531e432b9a4bf5ccbc9e0e8b50 \
+2026-11-13T19:00:51.6710714Z     --hash=sha256:4be96343e422f2dfcd12ab5c9f5aebe03f82f737c6bffeca6830b3875cb44aab \
+2026-11-13T19:00:51.6711405Z     --hash=sha256:4f42141fc14250de6dde5ee7ea4432be017252d91f19c5ad043c084cea629cac \
+2026-11-13T19:00:51.6712072Z     --hash=sha256:507a24c282e0f42f8ed737cf048572cbf580468da5555764a8331735e9c736b6 \
+2026-11-13T19:00:51.6712949Z     --hash=sha256:51b31d1c98274844cfd7838ce00bfc27c7423a4dc00fc0772fc3331c2cc90676 \
+2026-11-13T19:00:51.6713616Z     --hash=sha256:58acb8ab8e295e6c5ea12f888cbb13cf21511ef2a3303a23f4325c29d17fe5c1 \
+2026-11-13T19:00:51.6714530Z     --hash=sha256:5a59cc1c4442bc3d5c703bf720b51138d0bfc173618807c9ee2490a7541dd3d9 \
+2026-11-13T19:00:51.6715220Z     --hash=sha256:5bb4e7ea95dcd6a014a6fef62e62467d67d8e582326443f3d68e71d6320a9fcf \
+2026-11-13T19:00:51.6715951Z     --hash=sha256:5c58fe613dc5e5336357eff555824a314d8e43282600435c8d1cb6a7a2fedd13 \
+2026-11-13T19:00:51.6716623Z     --hash=sha256:5e7cecbaadb83884793e05828cee59b210b24583b9c7425d0ba6a754fe22eb4e \
+2026-11-13T19:00:51.6717284Z     --hash=sha256:616f097f2fe415bc92a247f02e11f634e1f9e9a83d327e3c915c15089c87869e \
+2026-11-13T19:00:51.6718027Z     --hash=sha256:63bbfd5ded17c4840ac07cd8f1c21ba9d9708141f840b324f422f41b207e3973 \
+2026-11-13T19:00:51.6718701Z     --hash=sha256:64faea20f4e2613363a1a9b9c7dd73058f3ecd00133a511e72ad7c511658f527 \
+2026-11-13T19:00:51.6719403Z     --hash=sha256:661c298b4821edebead0c91edd2b00374d67ad7c5a1f7a91d4442633b79d6a72 \
+2026-11-13T19:00:51.6720094Z     --hash=sha256:68e62fe11f30d5ca8289242866f0a5291402d8529ca2178ab8afc5c9694ae890 \
+2026-11-13T19:00:51.6720793Z     --hash=sha256:6a8dddef476fab96d066d578fc88526767b836ab5ab21754e1d5bf3879c31c7c \
+2026-11-13T19:00:51.6721602Z     --hash=sha256:6e192623c49c94421616a5778fba35cf0d5a8d000650c1967ef4448ee5cdd990 \
+2026-11-13T19:00:51.6722407Z     --hash=sha256:7225e4514edb64eb6740324353e0da0711954fd8d7da4576755b1c6e09b697cd \
+2026-11-13T19:00:51.6723780Z     --hash=sha256:75f80557d1389eddbd0de2681f6a390a0c5338c31ddaa821381c203fc3fd50d9 \
+2026-11-13T19:00:51.6724457Z     --hash=sha256:770de9db11e84213beec501cfcaa013b019820ca881e03344dea5844f7876d94 \
+2026-11-13T19:00:51.6725110Z     --hash=sha256:7750c6449dff7864bb9bb27ddfb0267756189201a3afc911d82b3caacd70dfc3 \
+2026-11-13T19:00:51.6725785Z     --hash=sha256:7bde5e4cc5c10140859842b9d383af292b22639a4dffb725314baf45968cef80 \
+2026-11-13T19:00:51.6726403Z     --hash=sha256:7ce713ace7c0e4520535b42b77eaa742c16dab813978064913e5a3cf82973b41 \
+2026-11-13T19:00:51.6727045Z     --hash=sha256:7da0c5eff80f0197f3b3d1232ec5a682a9325f4ae9016a78f5f5ca35f9ced1f5 \
+2026-11-13T19:00:51.6727588Z     --hash=sha256:7dbb61fe3a7699468030f71bbe5f8a0e326a151daa91beb11a6fc1f980c55e1c \
+2026-11-13T19:00:51.6728139Z     --hash=sha256:811bd1e21d32de12efca32393a0ab3f5133b54fce9bd44b8bd77ab07da14bf6a \
+2026-11-13T19:00:51.6728636Z     --hash=sha256:8ef53b2de9bcb9197d31854256575d59dbac0cba72ac627bb291ef5eceb74be4 \
+2026-11-13T19:00:51.6729145Z     --hash=sha256:937c0052c05a31ca1daf18de3158eed4dbfcb9cc107adbea227728d647be701e \
+2026-11-13T19:00:51.6729695Z     --hash=sha256:9d2055050ea716bd38b7f7f1579c275386646b4894c155a3e2f3cd62ed41b7c6 \
+2026-11-13T19:00:51.6730353Z     --hash=sha256:9f8d177621de5cb38ee3e731eda45d421db093ec0739f46a5594babda7987a98 \
+2026-11-13T19:00:51.6730866Z     --hash=sha256:a2d7755bef5a12ed488f4ef1f1b69ee9191d7396083b755a5d2295f6edb4768b \
+2026-11-13T19:00:51.6731362Z     --hash=sha256:a48d62ab9d6f4f98c983223a547af44be6ca3691074c31cecced6facd3ba2dc1 \
+2026-11-13T19:00:51.6731996Z     --hash=sha256:a4f00aa42f75d6e4595e8866e748cc1705adc0cddfeb2ca86d0d03993d63ba03 \
+2026-11-13T19:00:51.6732631Z     --hash=sha256:a6e721d4b0e45d5b65e87534470e67b18dcd092c83f68fba09f152b9cbc061af \
+2026-11-13T19:00:51.6733118Z     --hash=sha256:a730a083190634c65cca36ba5f489531576ebd79bcd5c8e172130f6453127231 \
+2026-11-13T19:00:51.6733647Z     --hash=sha256:a931079504ecc49efed7744c476a5c343a92fabf66dec2db95edb1b2fdc770e2 \
+2026-11-13T19:00:51.6734162Z     --hash=sha256:aa9511c62d14da7aacc9b4bf51f3f697a621e83b2d6919008243c3aad168eea3 \
+2026-11-13T19:00:51.6734674Z     --hash=sha256:ab36d55f9ed2d067327667c2fea18dda018eb628dd6347aa01dda6cf1f5d3836 \
+2026-11-13T19:00:51.6735177Z     --hash=sha256:ad2c86c495b899d862ea0f4b42891b8713a3bd45dd4105c7fd51c2a72f39f3a5 \
+2026-11-13T19:00:51.6735687Z     --hash=sha256:aeae0e330c9f6acd681f647d46cefd30c29f93e3392882e792e82080c9691399 \
+2026-11-13T19:00:51.6736213Z     --hash=sha256:b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96 \
+2026-11-13T19:00:51.6736730Z     --hash=sha256:b5bdfd1c873d4e093aabc0ca84c4ca6dbc4f752afb5c86f146d9742580c9da2e \
+2026-11-13T19:00:51.6737461Z     --hash=sha256:baed1e86cc735622097354b9d1281406caf42ff42a886d29faa8e8d1630333be \
+2026-11-13T19:00:51.6737957Z     --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf \
+2026-11-13T19:00:51.6738427Z     --hash=sha256:c26608d2222fb1e94487e4a387d85f13eb55d5ed725cb25a0c589ac4ee60e7bc \
+2026-11-13T19:00:51.6738940Z     --hash=sha256:c7659f22557c5a0bc4855cd635f55edec690cc008a40768527762cb9fb263455 \
+2026-11-13T19:00:51.6739481Z     --hash=sha256:c8c69575568085ba0b1b10c0249d779a214aea6f6522e949a0fc9fb0fcb449d0 \
+2026-11-13T19:00:51.6739990Z     --hash=sha256:c8d2c9fd1f2d16f780d15127abb050d13d1a76c03a4bd87d7e4980e45e511e12 \
+2026-11-13T19:00:51.6740481Z     --hash=sha256:ca82be1a1d406ecfe1d25dc16cb33488e5a16bf4438c9fb590484ea29d92478b \
+2026-11-13T19:00:51.6741012Z     --hash=sha256:cc572dace3f60ef98d7b12ff411d20f5362feb31a0439eab0085bbfd349982d7 \
+2026-11-13T19:00:51.6741534Z     --hash=sha256:d18e5ac0f2f03f4f518d3e23db0f0cad7faa1da8620e9c09461d443bbf6e6692 \
+2026-11-13T19:00:51.6742031Z     --hash=sha256:d28630f5854ab07ab1fd4aba756de52326c82e6be15d414b12793f1975048b54 \
+2026-11-13T19:00:51.6742966Z     --hash=sha256:d9c275eaacd24aa73f94ffd6de08fc3f932424d8b6c376f4bed7cde376fe7bc3 \
+2026-11-13T19:00:51.6743504Z     --hash=sha256:da0e573f9f97159390c89d9f1a9e41908b66d408cc5b58d08cf3847d844c531b \
+2026-11-13T19:00:51.6744000Z     --hash=sha256:dd31f52ea1086513bb9df30f8fcee9b8918323ae067a3d5b78bc826a000712be \
+2026-11-13T19:00:51.6744525Z     --hash=sha256:dddad92b554513a31f272570678ba307fb9f618f05e3d4a5eacafff9eae03e1d \
+2026-11-13T19:00:51.6745032Z     --hash=sha256:df423d40ee8654634421812bc3b196da3f9bd7d32929da813f8394c4348a5358 \
+2026-11-13T19:00:51.6745543Z     --hash=sha256:df913725b79db7bcf03448f36b7bf8815363417d5b58deecf9305e3e30f0f21a \
+2026-11-13T19:00:51.6746045Z     --hash=sha256:e0bcb7e0f677f543555d2adff3bf19c05f66cdb4796e5ff602442ab2fe3c4ef7 \
+2026-11-13T19:00:51.6746537Z     --hash=sha256:e2d65b31f36619cda3999b78b2aa9632e76b78448e7a56fc4240824200e7c4fc \
+2026-11-13T19:00:51.6747092Z     --hash=sha256:e6e8cff14d6fb0be70a09c0bdc58096f501952d04624ebf867e0e56da2df8960 \
+2026-11-13T19:00:51.6747572Z     --hash=sha256:f16c709686a78c727bbbf059f92b0bf41c6fc60deec706d2dc19f529175a6125 \
+2026-11-13T19:00:51.6748091Z     --hash=sha256:f24fb43132a4c6b4cb4eb029492919b2db645be6808d738f244fd146c03c32cb \
+2026-11-13T19:00:51.6748608Z     --hash=sha256:f53e442b08449d42821fa4a4fba000095af9f62742a500f978a9f557ec44339a \
+2026-11-13T19:00:51.6749122Z     --hash=sha256:f5cfbc5fe74540d335175b656c725d74d90e3730c626d92575eea35029d9afaa \
+2026-11-13T19:00:51.6749609Z     --hash=sha256:f81b3b8f3d4e343550fa4baa0e479bba9f2d29ce9c2e9b51d1ce1718d7442fcf \
+2026-11-13T19:00:51.6750085Z     --hash=sha256:f8ec5e643a9a937f64e1999eb9f75d072263751912dc5cd06d3c85f8f44be7c3 \
+2026-11-13T19:00:51.6750617Z     --hash=sha256:fb92203a88b3d3053034db775110081c49d28be6551923805e039924093761e4 \
+2026-11-13T19:00:51.6751103Z     --hash=sha256:fcd22650c908d7b7da162bbfaab594a1227a15d1643a98c68b122ac642fa2264
+2026-11-13T19:00:51.6751536Z     # via cryptography
+2026-11-13T19:00:51.6751857Z coverage[toml]==7.16.0 \
+2026-11-13T19:00:51.6752352Z     --hash=sha256:01b18b8a6c9cec8d5f45550e2501426ed982cf2c35016b0acd2ba9b5d8b2fb06 \
+2026-11-13T19:00:51.6752924Z     --hash=sha256:0466f4a5c0370461b7d8c7eb259d7d1db0b5756f13d66230b04d22a1d380ee11 \
+2026-11-13T19:00:51.6753414Z     --hash=sha256:050a291b3cfe5e0df5999ef2fa5a7aff6e2db329f069d47eb63f02bde2e7e96b \
+2026-11-13T19:00:51.6753977Z     --hash=sha256:058631257350b31784ed43ceb808298b6f074edf4ebca4c7ce5082e6bf873a61 \
+2026-11-13T19:00:51.6754458Z     --hash=sha256:0598aadae641f30a0796b75b45c0b9c5de8619bd5cfb251bb0cc254e86e6dd13 \
+2026-11-13T19:00:51.6754954Z     --hash=sha256:06f20145a9eb5bf1fd1dde3c0bc2af2e7c22135ab07ca6284d6ada7cc3904c4e \
+2026-11-13T19:00:51.6755485Z     --hash=sha256:077f0964087883176ff6ab9b074694cae29f8c708273b13ca62c183c6ed716cd \
+2026-11-13T19:00:51.6755968Z     --hash=sha256:0bb04ee77e557d7476471969d35fbbfb5fc8a4152e9409aa5811780c36d9b23e \
+2026-11-13T19:00:51.6756557Z     --hash=sha256:0ccc37c00e1a5d30840902c54557e104d04aead872cedf6d2281c8725a467e06 \
+2026-11-13T19:00:51.6757045Z     --hash=sha256:0fca700cae4635656668ba6e2b66a85aac9f2622d7b2bcf82e844c409eaa1313 \
+2026-11-13T19:00:51.6757582Z     --hash=sha256:136988df5bc5a48795d9c42c75c4bbda5d9a78e750a080c1233010edff93a1af \
+2026-11-13T19:00:51.6758058Z     --hash=sha256:1420370276f1694b663207b8245c3628aafb9624fe3cebf313a13d860e55ee67 \
+2026-11-13T19:00:51.6758538Z     --hash=sha256:151855767480be14db595cbc2040f6a4db965cdfeebd354d79b0256742b029e0 \
+2026-11-13T19:00:51.6759078Z     --hash=sha256:1545c52ce756b8a97007f439a220297f1cd72a2cbbcdffccdf1c1f70e74f9a42 \
+2026-11-13T19:00:51.6759566Z     --hash=sha256:17fc3628f99812fec24f40092af34c1c73274d331babab3d1d768a75de650cf7 \
+2026-11-13T19:00:51.6760072Z     --hash=sha256:181c2906b9b3759955c1c33c51fbb91c754fbd0b82ea49e2c81061f5a052082c \
+2026-11-13T19:00:51.6760568Z     --hash=sha256:183613f664718b340589d7f005c7e92b4b601cffd20a8a4117cfda3e983b080f \
+2026-11-13T19:00:51.6761084Z     --hash=sha256:190ffa0f5af966254c249fb3aeaca2cef389785e3e287fd577d39e134d20f8a3 \
+2026-11-13T19:00:51.6761630Z     --hash=sha256:1a03e78f53e4d2ab13adac19958a89322d1829913e5623d642627bf60b35da21 \
+2026-11-13T19:00:51.6762115Z     --hash=sha256:1c2c45ee1853668f0ea1a0ddff396421c9dc5ad25a56bfb94a895970c2d8e7c2 \
+2026-11-13T19:00:51.6762811Z     --hash=sha256:1c5a43cc0ef101637ae920a9eed24cf0549ef815621eae68b3ad577ec5a7ad2f \
+2026-11-13T19:00:51.6763318Z     --hash=sha256:1f81cb1554c3712e41649ed5dc98656b50b958e4da12f0f5adb681ce3db92831 \
+2026-11-13T19:00:51.6763808Z     --hash=sha256:22d8802827404be32f5a4d6ddc037f6fa0074b7d06702c0224cb598def8b665d \
+2026-11-13T19:00:51.6764302Z     --hash=sha256:245f7de6d023a5bba375dbec9f2e0869bfa26ac0cc639bbb7b4c814884000b73 \
+2026-11-13T19:00:51.6764843Z     --hash=sha256:26e7de0cb87960c6c9b5cad760068dab767b2b49a3b9376e1992c1e2691a015e \
+2026-11-13T19:00:51.6765384Z     --hash=sha256:27461af9f3ed7d2cf2411eb083784f87055ebf42211789ae3a216c48609bc743 \
+2026-11-13T19:00:51.6765870Z     --hash=sha256:289f2ed4d56eebf029b649e7dfc3c1153b111962a75e294cdd8e4a1598a04cc3 \
+2026-11-13T19:00:51.6766404Z     --hash=sha256:2c3ff6580f2dfc5bec34717b85b2e6cf5ec993b721e7bb58a794babd525a8178 \
+2026-11-13T19:00:51.6766886Z     --hash=sha256:2ddaa9e2af4760a329d80008b7a3b4762fbb0dbcb169199360f9a5179c32f2dc \
+2026-11-13T19:00:51.6767360Z     --hash=sha256:30f5aee6d1d517abcdfd4f9cad027969ff79a1440a22da263f9514e31b5b66e9 \
+2026-11-13T19:00:51.6767885Z     --hash=sha256:32c56b5b47c50635081445ac404dd08c2d591b9c837c22570aa9e182c3b42cd4 \
+2026-11-13T19:00:51.6768398Z     --hash=sha256:34d8686bce035c8465b318a8c2890e69ba14a00801a27f4eb6bdc97c23944d87 \
+2026-11-13T19:00:51.6768882Z     --hash=sha256:35a9676bf86097f790113ebd9fb67681804ef54d40941d2f10ba68c02239e575 \
+2026-11-13T19:00:51.6769356Z     --hash=sha256:360967a6fd77794c167529eec2d16ff8e38216110619d23acc3fd466a1648bee \
+2026-11-13T19:00:51.6769867Z     --hash=sha256:36aed4951aedf04cbe9465e76f8e71219980a52b73d07afe69746cba6ba7b97a \
+2026-11-13T19:00:51.6770386Z     --hash=sha256:38b8e1e73750b8965d1154ed733f5303acd4e24ee2d5ee872bb1bfab744a31ce \
+2026-11-13T19:00:51.6770873Z     --hash=sha256:3e8037e8213adf882e9d7eedd2c5c557933ab0b9632c42d98fe98ec9bcdb4025 \
+2026-11-13T19:00:51.6771370Z     --hash=sha256:4080ad6bad9f14690e6b2104f5e8d137ccc65a4b5427a36662090637d4bd16d5 \
+2026-11-13T19:00:51.6771883Z     --hash=sha256:4212cec9b42fd9929e70b462732fefd8b13406371871c82f3c14397499d6550b \
+2026-11-13T19:00:51.6772589Z     --hash=sha256:47d5e1fc0b321c8308a2aacee0497c435b08acaa629b7059798fdf6fc3006352 \
+2026-11-13T19:00:51.6773122Z     --hash=sha256:496277c8d7beed695e02c7be53516a0152e4caef8738a0feab6a638546cce449 \
+2026-11-13T19:00:51.6773628Z     --hash=sha256:49fa72ead28c8216f8916398a4f3c4669acb30a061822810ee20a727a1be2897 \
+2026-11-13T19:00:51.6774142Z     --hash=sha256:4b1d09cb5d8dc2c7164450f5217e6f0717497de9c588806a0780d352abef904a \
+2026-11-13T19:00:51.6774624Z     --hash=sha256:4c1f16d5555a195295d0dc9c902612270e3dfed6a11f3bf7bc470b7b6a79ed3c \
+2026-11-13T19:00:51.6775214Z     --hash=sha256:4fcb5f07a9b7083bfb715115d27ce263ba2b5b89dddeee536b295ba0e3c2c627 \
+2026-11-13T19:00:51.6775745Z     --hash=sha256:507596cee23e9968b1934fe86d799b76166541af0a293930918b1b48a5c84bd2 \
+2026-11-13T19:00:51.6776212Z     --hash=sha256:51e7d0e311d2fba3915f971236cbdd4ad821fc7a23988221c0b33c964b0eba22 \
+2026-11-13T19:00:51.6776727Z     --hash=sha256:5205baea687133613dced668a3d0168ea1479349615bfc255849a7944988c889 \
+2026-11-13T19:00:51.6777240Z     --hash=sha256:54b7fba6a74d010de34319a0419d5b65af8c00f539ad0b6f39fc6f342ab99697 \
+2026-11-13T19:00:51.6777749Z     --hash=sha256:55957d350452017f523b9b03ffac078f9a214e23c04a3d0a674569203550c719 \
+2026-11-13T19:00:51.6778225Z     --hash=sha256:577c2ac8c0036f6f8edd3a7783a9e67302b17771d1abf0fd2ed246e3158be51b \
+2026-11-13T19:00:51.6778691Z     --hash=sha256:584896fb8b650e999e24ef57e9513e482c12f8e15a73ee9d4584e23c99465867 \
+2026-11-13T19:00:51.6779245Z     --hash=sha256:5dad64d9c17cb1983adef07998e6e2e1cf870a156f1ea80f81ce1970f4c545ce \
+2026-11-13T19:00:51.6779763Z     --hash=sha256:64f0611ee05364fc85cc3e5bc371804117a76fd337720e6017332fc7c534257a \
+2026-11-13T19:00:51.6780301Z     --hash=sha256:69474d81f198774c9d2937599ca5da04c9e1c5de5032da23c607ce4960ce360e \
+2026-11-13T19:00:51.6780815Z     --hash=sha256:6ad3bbad240ab937512156bc944fdee63ac4dd34a7558a3094548fd4c1150c02 \
+2026-11-13T19:00:51.6781313Z     --hash=sha256:6c60cde430c0e7e3be612973af39b4cff90ec2e2defe7b2b701daea3a0ffff04 \
+2026-11-13T19:00:51.6781817Z     --hash=sha256:6e2854b62601c89a63814ad5def3b90d99c6724cc4cb977f75b725e5fca4b1e3 \
+2026-11-13T19:00:51.6782384Z     --hash=sha256:6e701938ec9081d3e400a0c9a9a8ae0f7ca44214741daeac4454b1c6ef6dbd19 \
+2026-11-13T19:00:51.6783000Z     --hash=sha256:6fde65e0ea945920265dfe4a2108fc45eee2e2ea3d9c3073af6373ff9836aa71 \
+2026-11-13T19:00:51.6783489Z     --hash=sha256:719a3feb6220dd32ed932d4c3676d17fb8739e2643b29c0e7c3af400ff80ac44 \
+2026-11-13T19:00:51.6783974Z     --hash=sha256:72a0795cc6d34acc2b03dfeabdc82b61b72087f2737018b56ac92c1cf5446c54 \
+2026-11-13T19:00:51.6784533Z     --hash=sha256:770d4244c423dcafb5c31db393f429fe952b1bba23bbff7cc3886f8133769ba5 \
+2026-11-13T19:00:51.6785014Z     --hash=sha256:78103e79f9378cb0e43ddaa728629a373c070df903c5dfa98b63ba2cfb4e8c42 \
+2026-11-13T19:00:51.6785525Z     --hash=sha256:785b114356c99c0dd5b3f57b9696cfd57b7704f4c53847df8dc88c6cc0d9bcb6 \
+2026-11-13T19:00:51.6786014Z     --hash=sha256:78f8b56261d608be102c62edd3a60b66bcd0b581f3f86fdcabaf8b8d95adc950 \
+2026-11-13T19:00:51.6786557Z     --hash=sha256:7cae7715afa51dd7c9c42e6603bb46daf424c3449fdf06519cc658aa8d46e2e4 \
+2026-11-13T19:00:51.6787070Z     --hash=sha256:80cf547379ad6b1878fd03b033b51188beab4b41824c96e7839e014a4cb947be \
+2026-11-13T19:00:51.6787538Z     --hash=sha256:80d7d5d744a041f08637df743ac086204ec5acbcd8432a42b00b49e607358024 \
+2026-11-13T19:00:51.6788077Z     --hash=sha256:81d63b68b26304e3668edb103311c17fe13c2ed1c7fe973309819f27bf61c5b8 \
+2026-11-13T19:00:51.6788564Z     --hash=sha256:857fceba6ff4b507ee0ad98798a33d544a8473df0c542bf04251ee4ed5ee6292 \
+2026-11-13T19:00:51.6789068Z     --hash=sha256:87771ecf986cff55e87413238cd5e4f54d949c2074bd6fc1657d26a56314ee24 \
+2026-11-13T19:00:51.6789564Z     --hash=sha256:916cf8d25c1ce148f7eceb1d45afc9724841200110adc4e53250391852debd91 \
+2026-11-13T19:00:51.6790086Z     --hash=sha256:92cbc2bf4f7f67c79f1d3ca4fe8c50faddf48e852a3d07eaaf02dc014889832f \
+2026-11-13T19:00:51.6790585Z     --hash=sha256:9421dde689e68d9fd2b6cd7d8c4498e79b5431467b6298517e3f3e60fdbe80a7 \
+2026-11-13T19:00:51.6791063Z     --hash=sha256:949eae7e0f562b1518355aaef4b03523e49a6d3fea12aa3542d9e36c863f8267 \
+2026-11-13T19:00:51.6791586Z     --hash=sha256:97051c4903689b1afedc2a354d6118223051e03588078b53048603bda9014577 \
+2026-11-13T19:00:51.6792075Z     --hash=sha256:984e5430fc6f858385009e92549955157d79335b1f3e13e1031e0f89d1284261 \
+2026-11-13T19:00:51.6792761Z     --hash=sha256:9b83f6ac575530783771c8dcf05284f7c8b5b12f1e7cb226d63445aac4497a3a \
+2026-11-13T19:00:51.6793259Z     --hash=sha256:9c0690994b84a15a53bdd39e0b2fdb539b22533820623eb86ba75b93760c645b \
+2026-11-13T19:00:51.6793810Z     --hash=sha256:a336b1e2990a64f5c356a9b8380fb9c029d56c832b801255250c44d603271bfd \
+2026-11-13T19:00:51.6794345Z     --hash=sha256:a3cd34b9025d62180ce2b5dae8a985bfa6cb8c05ecd57fd34ffc1ff751b5a74d \
+2026-11-13T19:00:51.6794837Z     --hash=sha256:a739bf08cdca0fad51b73322e4fade0102dd87794e278450b5ee87ef827954db \
+2026-11-13T19:00:51.6795360Z     --hash=sha256:a89d07e48d9baead9a15599923a02f62c6df6c3d85aa84ef34be3c9fd6aeb91f \
+2026-11-13T19:00:51.6795848Z     --hash=sha256:acadbf2f2a18d7f9c7f119ac798c00c540d7c79c93abd71ed648c87891303633 \
+2026-11-13T19:00:51.6796330Z     --hash=sha256:b1374099dd1ad0d31fbb6c95d00a56a3c5e85fb3343dca14fc12f78323a2b42a \
+2026-11-13T19:00:51.6796864Z     --hash=sha256:b2af58ecdcec37fe633d4865fccbc8c00d8aa3b31c099bcacb2720c9a0be6ab9 \
+2026-11-13T19:00:51.6797397Z     --hash=sha256:b37ad5cbb77776f446e1b55b461eec2eef5c3e7130c72dc0e1447c3a9da2d199 \
+2026-11-13T19:00:51.6797960Z     --hash=sha256:b670bd5fa93d9b6855b2837217b45a90863118e2de5e9e033aebd46d07cd08d3 \
+2026-11-13T19:00:51.6798447Z     --hash=sha256:b7dbbbf6551eb94618e7bc76ab61cc2740a5b3d13294171bd6adb36e12346c3c \
+2026-11-13T19:00:51.6799048Z     --hash=sha256:bbf08d951abaa1ce89e28c998361d56b952413846b459cd017f116ad4c9adbfa \
+2026-11-13T19:00:51.6799533Z     --hash=sha256:c1bcfe470a796fbea6234accd81d258a31574dc0b7bf569e16be757572c4de17 \
+2026-11-13T19:00:51.6800007Z     --hash=sha256:c5297028c8df849a61b29129cadfe682f90b5b396f528eb319a57d7678eefdad \
+2026-11-13T19:00:51.6800546Z     --hash=sha256:c5612cc20ca76abc883e50269af47c1494b42958bb63dbb9aa79729a1ab5f7d3 \
+2026-11-13T19:00:51.6801038Z     --hash=sha256:c5feffce90c3d602e149de1c477578efc34dee5f069f9764cc15808ce01ee15c \
+2026-11-13T19:00:51.6801552Z     --hash=sha256:c72c9b201dc0e8c2c8821d49858fd865010d08181bf877d2320971b6464ebfd5 \
+2026-11-13T19:00:51.6802020Z     --hash=sha256:c76a9b50a344261fe4a9bd20c322b48d3913cc48e8c37f78c21a596008296e68 \
+2026-11-13T19:00:51.6802817Z     --hash=sha256:c94ef980f7b94d9dab9dac076d44ca706654cd51bad19734e029084adf528c8e \
+2026-11-13T19:00:51.6803333Z     --hash=sha256:cb953835dbfa6d641ac3943e0986bc680f8abbdc2985af15b46c54985347146a \
+2026-11-13T19:00:51.6803830Z     --hash=sha256:cc12e5e32acdd62fe5895939695579560639853219288519685c75b7e968d63a \
+2026-11-13T19:00:51.6804360Z     --hash=sha256:cce4dc8528453128c6fae523b15f3887fbea1d4d7c9eb9639d3d4fdcbe570c73 \
+2026-11-13T19:00:51.6804852Z     --hash=sha256:cd1e85abed2d2499c16664137ac802356316f92b4e2bf3c150bdf0c45f5dd9ae \
+2026-11-13T19:00:51.6805351Z     --hash=sha256:ce2ba5e9f1842fe09165825abfb3bc6b527c71a27bc2eb3a10f2284ced64506d \
+2026-11-13T19:00:51.6805860Z     --hash=sha256:d1c77c3579ac42798f8b7eed6d3dd258debacca32c8753fc8a1f6eaf1db644f5 \
+2026-11-13T19:00:51.6806394Z     --hash=sha256:d568a8adcec0eda42ec23e5e65dfb8c184fc255120f9e99b484f7c869d923fb9 \
+2026-11-13T19:00:51.6806912Z     --hash=sha256:d9a218d3f9c7d6916684ed5ba94f620661117a730e733cd6ef5e87accc5872eb \
+2026-11-13T19:00:51.6807403Z     --hash=sha256:dcd3dafcdd78305d27c59a1006b53a4990acb89e68d8fbe0992f4f83503c827f \
+2026-11-13T19:00:51.6807938Z     --hash=sha256:de24c62bf798940a14674a47489a81b79915ec4134f556d5199830e065225dd0 \
+2026-11-13T19:00:51.6808433Z     --hash=sha256:e40e323711b485592354069b1c027ef879cc2d11657eac09a6e5ad0b49ab7406 \
+2026-11-13T19:00:51.6808943Z     --hash=sha256:e6b2b9599e7513b0a9c5bf0357f9f8deaa4c2c821025b0693d420e6602748981 \
+2026-11-13T19:00:51.6809483Z     --hash=sha256:e9883a2f8206ce3af59117dc278e5d043fea06912bca3f199816129e5e2de354 \
+2026-11-13T19:00:51.6810039Z     --hash=sha256:ebaf39dd13f8af65fe5f0316b81046228ef4d91d3c3766192b418753649896d6 \
+2026-11-13T19:00:51.6810590Z     --hash=sha256:ed35097438dfa980c1ec75bc83edf8acbe7a374d7007e571957a257fbd0e2fb3 \
+2026-11-13T19:00:51.6811123Z     --hash=sha256:edc2be98e6c55ccc5ff7832bb64f023a4b03dba39dfa84b850046cf08a8249b0 \
+2026-11-13T19:00:51.6811667Z     --hash=sha256:f093faf23df888518d273be6da65f0ec5a25b5d8b670231e4d87de07361042e7 \
+2026-11-13T19:00:51.6812183Z     --hash=sha256:f6c9c21a8bf0d19788f3c5f3e020c90317a0a63ef60521b376003801e21250fb \
+2026-11-13T19:00:51.6812989Z     --hash=sha256:f98d438add63546745e5e847192e3e9ab897ed6f2ca96f8281e2f5a15958ae62 \
+2026-11-13T19:00:51.6813575Z     --hash=sha256:f99d12f8234c00b88b8077fedf288b25c77f746de312053b7db90fa756ecbdb3 \
+2026-11-13T19:00:51.6814145Z     --hash=sha256:fa4ff0b3dd52208d2b30903022d5087f82000507b504753dfeee83e4f32d6883 \
+2026-11-13T19:00:51.6814643Z     --hash=sha256:fddd26ed9a2527a7e23f7e4c1fd0734c4a5b45f77b261da1c536b20a7d2e6f0c \
+2026-11-13T19:00:51.6815163Z     --hash=sha256:fe5aa402d02318db2f41e471320b2ecca6085b8f595a034c037085732e49c04a
+2026-11-13T19:00:51.6815594Z     # via pytest-cov
+2026-11-13T19:00:51.6815925Z cryptography==50.0.2 \
+2026-11-13T19:00:51.6816310Z     --hash=sha256:0ddc924c04591c2811ca024d62ecad4f7f6f08af8939c211438f48a16bd23602 \
+2026-11-13T19:00:51.6816811Z     --hash=sha256:0ec5f09541743261e66e291b4a0cbf0fb2997aeaab6d9e9c740b9dba1b58d1c2 \
+2026-11-13T19:00:51.6817362Z     --hash=sha256:0ecbc5652bdb6fc9eaf89a7d196e20941adfe812f43bc4ca05d9150496821047 \
+2026-11-13T19:00:51.6817853Z     --hash=sha256:1981f1db4630889b9ef7803fadef12b056f428cb6b85c27ba57b774793b6093c \
+2026-11-13T19:00:51.6818477Z     --hash=sha256:1ba34f04897fcdaa73f74145c25f3ec146fbd56593853e88adc2e811303c5f42 \
+2026-11-13T19:00:51.6818977Z     --hash=sha256:241449bf940a5d27309bd317e6f9a2af6932113818bb2b8f5c59ddc7ef16da18 \
+2026-11-13T19:00:51.6819520Z     --hash=sha256:25784ce8b9621c90c643efb9e1e2162ab3b0224cae446ad5e70e7fcb1ce18b51 \
+2026-11-13T19:00:51.6820022Z     --hash=sha256:3dc4fd8058cea1644971207d530e1a03a184a805ffc8ebdddf0599d78a331b81 \
+2026-11-13T19:00:51.6820502Z     --hash=sha256:4061c0079120205fb760c58acab6443e217307dcf05e3702cf970e0689972856 \
+2026-11-13T19:00:51.6821102Z     --hash=sha256:4a20ce1e5cb4284a86692fdcba7cb8754185c6b2e5c56fcef3751cf451d3cdc2 \
+2026-11-13T19:00:51.6821610Z     --hash=sha256:4e81d95e5bafc2d6e34e4bed780e53e4d5b9a2f928573428aa4d35fbec1eb0de \
+2026-11-13T19:00:51.6822128Z     --hash=sha256:58a0c478eeca76fe5e07993c5a0703def34a6dc6a0cda4f5564639b33112ffe7 \
+2026-11-13T19:00:51.6822921Z     --hash=sha256:58ddb5a8e3179d12f19e4ea34d2d32e9d63a4baa142c875c1eb59f41b7243acd \
+2026-11-13T19:00:51.6823499Z     --hash=sha256:630ebfea3bf689d075f82316324ff7433dc447fe6bc1bfc76524b74b4a9567d2 \
+2026-11-13T19:00:51.6824010Z     --hash=sha256:6f8700550aa1474a91e5dc07049c46f98b423b5b1ddd0483e0b51362eeeaf5be \
+2026-11-13T19:00:51.6824507Z     --hash=sha256:78198641e5be9521beea5aa782bb551a58068d10e6eb04c9c680c1b69f2e7d45 \
+2026-11-13T19:00:51.6825048Z     --hash=sha256:79def8d059362e7831389ed3be0ecdf58a89386e1271e35dd9f5af84e81bffd0 \
+2026-11-13T19:00:51.6825539Z     --hash=sha256:7a8701d6b584d76e909e3d305b7d126b41439876a5aaf76cddc67fc230eafa2e \
+2026-11-13T19:00:51.6826059Z     --hash=sha256:7afa5a6602a9f29af1f3a2965f831bae7c9d5d597b7cbb716d41ab3b7d89879c \
+2026-11-13T19:00:51.6826611Z     --hash=sha256:7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5 \
+2026-11-13T19:00:51.6827100Z     --hash=sha256:7b75de3c8b3be1cdb1052747c929440c3eea46c1bc2cb8a6e3a48388e9b7b452 \
+2026-11-13T19:00:51.6827628Z     --hash=sha256:7c6d0330c472d96f6a6afe24d80dfdf15176c33096f0a4397ae4c60f3dd3be48 \
+2026-11-13T19:00:51.6828126Z     --hash=sha256:828d49b0ff5a0e3975865571c5d91dbbdd0d38d8289b249a163e9425413a5e05 \
+2026-11-13T19:00:51.6828687Z     --hash=sha256:84f964e537f916e2cc85199e5a88742e964939b575ac8598b3f9d6cc416cdaf1 \
+2026-11-13T19:00:51.6829176Z     --hash=sha256:85d0d9a31b9098e98534226d5686b47264b95e62ce459dc2e62fdfc809f9fe93 \
+2026-11-13T19:00:51.6829657Z     --hash=sha256:87e9ce85beb6b328ba370cc6e6aea483c92617b4c95b1d33a49297eb662bfb04 \
+2026-11-13T19:00:51.6830208Z     --hash=sha256:8c71ba2cd31fc93748c38e1b613200ff1c2665cbfd5341fe3a61cfde35a1430e \
+2026-11-13T19:00:51.6830726Z     --hash=sha256:92e665960f25fcdc73725b9cec7a3824f279ba97a98653afe9ffac2e43668f67 \
+2026-11-13T19:00:51.6831230Z     --hash=sha256:94e5e9f108ee10471288214d3d233fbfbb492840a8457eb85178d643ddeb32c7 \
+2026-11-13T19:00:51.6831725Z     --hash=sha256:9c8402a82ea0dc4ceeab793db05f0fafa8ca139ca34fcde5df0f596103c74107 \
+2026-11-13T19:00:51.6832470Z     --hash=sha256:9dab55f57c74c3cad24c323bacbbd04be4705ba6eb0d92e920b1fc4837ed5079 \
+2026-11-13T19:00:51.6833031Z     --hash=sha256:a582ab2ae1d34f67112cadc86702774c9ea4374df6bca6afe672817203c99134 \
+2026-11-13T19:00:51.6833562Z     --hash=sha256:a6557e5f38e065ca9fbdaf7cfc7435ecb1d113aa81a022d1b51921ee7432e227 \
+2026-11-13T19:00:51.6834119Z     --hash=sha256:a9f7355e6fab51f6c369b86fb7571cffa05edee2c2121e0380a37fb9ac1cd5c1 \
+2026-11-13T19:00:51.6834615Z     --hash=sha256:ab50ee449bf968271e820086f10a33d101dd060370abc10bcd22279be2656539 \
+2026-11-13T19:00:51.6835115Z     --hash=sha256:ac9ed99d81760c62fe89d5f0815cdfa1ba9a35141cf30f1c2d044f04b4803d2e \
+2026-11-13T19:00:51.6835622Z     --hash=sha256:b13478603dcd0a2479ff8e87e2c19a7d525734686fe3c49542472293a204212d \
+2026-11-13T19:00:51.6836155Z     --hash=sha256:c423ab384a46c4dff7217b2ea5ba2e11cffdeab6441acd04cf65a369caf0366c \
+2026-11-13T19:00:51.6836680Z     --hash=sha256:c5e67125c7dca78d199ec4e116aa93dbb83494808ecbb8211a2cb09b1bf41dbd \
+2026-11-13T19:00:51.6837197Z     --hash=sha256:c71be1cbfa5cd9a41ee452acf1eccd82b2c05950358b106ec8ceb83411d1a020 \
+2026-11-13T19:00:51.6837812Z     --hash=sha256:cbc8738fd8526d80f35cb3a40d41f41a2e7030bb3b18b09a6778ef63d291c2fd \
+2026-11-13T19:00:51.6838325Z     --hash=sha256:ce47f66801c20ec6c6632453bb5960fe38939e9306970b48b3a5a26de7745d94 \
+2026-11-13T19:00:51.6838805Z     --hash=sha256:d370b8d1dfcdf7130178137f6fbee6140774a1acc6cacefc4b42643ec11d0a3a \
+2026-11-13T19:00:51.6839334Z     --hash=sha256:d38cdff612d06fa6a32840d5e1b1f7a27cee4a349aa9085d94a67789d6bfd408 \
+2026-11-13T19:00:51.6839869Z     --hash=sha256:d8947001be83df1394050758ce0e745dd74fb134eef0a4b5124208dfc3a68c37 \
+2026-11-13T19:00:51.6840378Z     --hash=sha256:deb9fde5c60e437ee4821bc9bc39ff31b42135c27e1dc61ef0a629389c1de62e \
+2026-11-13T19:00:51.6840902Z     --hash=sha256:dfe9763530994147d9af1def057a5b9658b00e8f8fe8743d144d1e0911c2e454 \
+2026-11-13T19:00:51.6841427Z     --hash=sha256:e105ab60406787da31fccc883fc0f733af1efd78f0136a4599692c4083a73d0c \
+2026-11-13T19:00:51.6841928Z     --hash=sha256:e275096ea1e60cc595cda2836fd4a6c725d1125108b868be17f53684d164e2cc \
+2026-11-13T19:00:51.6842614Z     --hash=sha256:edc3342adf8f697fc5f59c887a304356f147b397809440ed64e2fa6af2f50f37 \
+2026-11-13T19:00:51.6843138Z     --hash=sha256:ee247f5c245c9a2fe7c8e2214e295918838e44e00a45a6718451e4004219e767 \
+2026-11-13T19:00:51.6843685Z     --hash=sha256:eef4c2f3423810b3070ab391f85436d2f8bbfcb286ac15cbc73190b3563b1f1a \
+2026-11-13T19:00:51.6844184Z     --hash=sha256:f21e8a22c8605750c7af886bab299a363721264061b4ac0a30efb73cfd58efc5 \
+2026-11-13T19:00:51.6844691Z     --hash=sha256:f265528741e048bce55c3463ed721fb0aa45a5888d8add8cfeccb3035451bbdc \
+2026-11-13T19:00:51.6845204Z     --hash=sha256:f2f9bd7f90c64fe89253f0a2c05e3c4856072660429ce8831b4235bf29403a67 \
+2026-11-13T19:00:51.6845746Z     --hash=sha256:f785f6161f202ab04d8ca194158968798e480ca058943907972da5f12e2881e8 \
+2026-11-13T19:00:51.6846236Z     --hash=sha256:f9f6143a8c75945eb960d9eb98905a441394abfa24afaae239d514ffb2586480 \
+2026-11-13T19:00:51.6846738Z     --hash=sha256:fa8f5efb344d6908a1ce62f4a24e2e5780f825d6f53f5f50ec5ffacac72936cb \
+2026-11-13T19:00:51.6847292Z     --hash=sha256:fdd28f912fccfec1846a94e2e1e8f9b0012f557f0c46fe4f3eb0d7a87afcf90b
+2026-11-13T19:00:51.6847683Z     # via pyjwt
+2026-11-13T19:00:51.6848003Z iniconfig==2.3.0 \
+2026-11-13T19:00:51.6848364Z     --hash=sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730 \
+2026-11-13T19:00:51.6848906Z     --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
+2026-11-13T19:00:51.6849304Z     # via pytest
+2026-11-13T19:00:51.6849547Z librt==0.16.0 \
+2026-11-13T19:00:51.6849988Z     --hash=sha256:001bfd59a7d45b17e3e75f2a8c6405280b35e7b84471792778e718c4f368950e \
+2026-11-13T19:00:51.6850475Z     --hash=sha256:0058f9d68721094105917254c72ac0569117bb7b13b9769cf45d26d89f9d21cd \
+2026-11-13T19:00:51.6850988Z     --hash=sha256:02118f56a9c36ddd07dfd9b919d9ecc117ba20a90987d56aa4c429fa34509188 \
+2026-11-13T19:00:51.6851543Z     --hash=sha256:0253721561787b8df8443eb347b7a6461015354e5bdd37ee38a41fef220d2bb0 \
+2026-11-13T19:00:51.6852085Z     --hash=sha256:02d89c813d5ff74b17df72d3a34819d132cd168e56b81bf755b809bd9e46b8c4 \
+2026-11-13T19:00:51.6852725Z     --hash=sha256:0314058469f4d2fd279ce7c62ac274ac82c3918ef7db62ef0697c4c359370155 \
+2026-11-13T19:00:51.6853238Z     --hash=sha256:0dbe4096a7ecc00fa835d24510ad8545a4efef738dac96e0e63516783ccde905 \
+2026-11-13T19:00:51.6853796Z     --hash=sha256:0ead24d2562a49473dddd9efef8581f020007eb0054389c3ee3ffad38b1ca4c9 \
+2026-11-13T19:00:51.6854312Z     --hash=sha256:13b4e8aba90b0b1c82474e9844aa9ffe7ad3faa484350e1da64cb8188d903134 \
+2026-11-13T19:00:51.6854875Z     --hash=sha256:14ed6ebe3e4f85f326d7920011ad30ff49ed9334e62cf88caef9ba973d9e3a92 \
+2026-11-13T19:00:51.6855386Z     --hash=sha256:17bac7f7a16b328fff77e440287693eb017abde913595b5827ebccbc21ecd8a6 \
+2026-11-13T19:00:51.6855893Z     --hash=sha256:1b384b90ab79a7bc30b566895809a636e0666f21f3cf12b54823d025b7e83839 \
+2026-11-13T19:00:51.6856418Z     --hash=sha256:1bc17e54e5305f8d40b7ca203671ff5a9e59c1d0f8ea0f625dcca53a3984de11 \
+2026-11-13T19:00:51.6856999Z     --hash=sha256:1d28ae980ae2218f9c5b95d191e947296f918c9bf0b400d467a9430275bbe678 \
+2026-11-13T19:00:51.6857530Z     --hash=sha256:1e511762a074005bb0aa569166779834e75e438370226930d0ce1866d4b6a33b \
+2026-11-13T19:00:51.6858023Z     --hash=sha256:20fe0bf9053885e21c62b3e091fb5e73e1c54d1daf2e70eb388d70763bcd4220 \
+2026-11-13T19:00:51.6858512Z     --hash=sha256:242e00b3d4fa37c3d3c1ca5f5c9adb7d909ddb1eac9c41f2787320d00caa0af2 \
+2026-11-13T19:00:51.6859034Z     --hash=sha256:25a58a19ea8d83b68209f04912df765e9260635ef77646542ed4b4abe6bc7940 \
+2026-11-13T19:00:51.6859571Z     --hash=sha256:273d00be33792a15189331df10f1f1331621b043881e66c6c4377f7f776e1291 \
+2026-11-13T19:00:51.6860073Z     --hash=sha256:28e038895b998d7a0c7798922ce8a1dc157675df5cf1c9ef0aca809ed804b7a1 \
+2026-11-13T19:00:51.6860577Z     --hash=sha256:2bec3818c7da7c96ceae0ef5915a3d16c52dd08f3ea913bf1fe8568c447c7978 \
+2026-11-13T19:00:51.6861121Z     --hash=sha256:2c4aa329c17bd1aaea4f6e89335d8ccd494b3a5830b6654462273e50e11023f0 \
+2026-11-13T19:00:51.6861634Z     --hash=sha256:300c3ffdc459f4a779a8411ecb188e3ac0b1ff3a3a7b099642555dedae06c69b \
+2026-11-13T19:00:51.6862165Z     --hash=sha256:30b7beaf3f4487b7d8adef1f158b49067cb4d5a19fa7a3bf31a4e7a820e435c5 \
+2026-11-13T19:00:51.6862847Z     --hash=sha256:314e703f0c19320dc8094e7a784b9cf29e1b67402515abf580069a6363c0b4f1 \
+2026-11-13T19:00:51.6863378Z     --hash=sha256:33f41443a1f4e1f099331b3d8120e409fbff84b9760bc1cc9ea496f37ddaa5cc \
+2026-11-13T19:00:51.6863898Z     --hash=sha256:349c0bcb87ebd07481b6ff781e25cdc699723dbe2212e57dabb27f7a13b7b87d \
+2026-11-13T19:00:51.6864433Z     --hash=sha256:36e53948e99bbe3ffea257124cfcae1cfb01831555c9a9c903c9f9a72db7fd07 \
+2026-11-13T19:00:51.6864949Z     --hash=sha256:375bfe6b572a8f6cfc398709356046173bf27e64c4c5edaf5f7062f051fb4bf9 \
+2026-11-13T19:00:51.6865475Z     --hash=sha256:378dfaffb38e59c24a87cde5713cd865d51ff7383fa12947f3907f306ea1ca55 \
+2026-11-13T19:00:51.6865970Z     --hash=sha256:3931f7a3db322e7f44e02a280e3949326ce9579ad388ee8d691dc7c76da9fb70 \
+2026-11-13T19:00:51.6866476Z     --hash=sha256:39ca4f2f2fe05de8e63493da592d84311adabe5bef52b193851981da9816b302 \
+2026-11-13T19:00:51.6867045Z     --hash=sha256:39ec1d5a14e37baf1450a6cabf03fe552340808bf1ad9d71824ab90117716459 \
+2026-11-13T19:00:51.6867537Z     --hash=sha256:3ddeb3c9dedb461bb457c6c7d9aa7fbf35329da313d1a7543d00c8d0f3473c96 \
+2026-11-13T19:00:51.6868062Z     --hash=sha256:3e0c39bdc85370422e8b637be76eb1fd07d30967551b03e62267dd156f553152 \
+2026-11-13T19:00:51.6868587Z     --hash=sha256:3e483a8d69ede8067db70c0e83007423b6925de6fd53afed01d66160f2e9398c \
+2026-11-13T19:00:51.6869098Z     --hash=sha256:3f0b8114c44b2ac06ff5dacd08e07e8e807ff4f46083f2a1602685122559be41 \
+2026-11-13T19:00:51.6869612Z     --hash=sha256:3ff4b2367926b69c6215635902cccb04048e73094e9862900d27cb2c6bbff143 \
+2026-11-13T19:00:51.6870086Z     --hash=sha256:4323193ac0cd025f85af531df8ba91bf24d1973b401697347a6282e8fd3fcf5e \
+2026-11-13T19:00:51.6870706Z     --hash=sha256:468df902df016a06eb0e40b0747dc8d14e47d7a38b18b63b1fb167d85cb94d63 \
+2026-11-13T19:00:51.6871211Z     --hash=sha256:473eebc7866bb0a0c8849a292b5e7157c1aba5d14d0f0f610c52158d6d964262 \
+2026-11-13T19:00:51.6871749Z     --hash=sha256:47ada6ea32636492c61aa8ad27ae3b9404bfe7a97e3ba946d1984236cc741da0 \
+2026-11-13T19:00:51.6872415Z     --hash=sha256:4b6183e2e2e0ee00aac2ec07c7f7d151c97e85666b304f574b71cff0f9fccc4e \
+2026-11-13T19:00:51.6872965Z     --hash=sha256:4e29522c62e28595ff7e324c6834ade51127707f0e255b18d1c1cf03d39c1048 \
+2026-11-13T19:00:51.6873465Z     --hash=sha256:4eb1313a19847089ee81e88742abedf285c60538816640b99742d8534b81d26a \
+2026-11-13T19:00:51.6873957Z     --hash=sha256:52327da75a94012e7f932f913d20d3876bed3c102be00e6c3e8600ff7bdd58a7 \
+2026-11-13T19:00:51.6874538Z     --hash=sha256:54d11f726aae9df5a6ffbbf0a03a52449bbac84a53ef03669cb41cdfd4ae41bf \
+2026-11-13T19:00:51.6875039Z     --hash=sha256:5696d7f52e7b37217cb3a8f92c744fe835942602fdd4c1a8bc4741d3bfdce15e \
+2026-11-13T19:00:51.6875542Z     --hash=sha256:5750a105b42a416f930edc59054927a406effb2550cd5bab92ad7a5842ed5d05 \
+2026-11-13T19:00:51.6876141Z     --hash=sha256:5810ba811297fdf37a1531a57667cb8ace0842013ca8606bf9eb7c24cf4be154 \
+2026-11-13T19:00:51.6876636Z     --hash=sha256:5981c011b306781ce561e18e14230a14524a3d8109b97553666c942c18f31a96 \
+2026-11-13T19:00:51.6877160Z     --hash=sha256:5a269c46ae327d8e6f8c1f85f7516cb52c0fa48127565a1105a4f4a05ff2a0b4 \
+2026-11-13T19:00:51.6877658Z     --hash=sha256:5b976054553670829985ed767feb78fb6bcede0175327c4844dd5c281c1be659 \
+2026-11-13T19:00:51.6878206Z     --hash=sha256:5bcc2c4726ced915b00de0c9856a4eeabfb3fddb93e10e0b8f735b7709358b6d \
+2026-11-13T19:00:51.6878727Z     --hash=sha256:5cd5b092441053364af968ea12084692cb9d4a22f3ce9524e377880bf028761e \
+2026-11-13T19:00:51.6879231Z     --hash=sha256:5f49cff01bd608ef7d97104cb035c75455e79c2d70bf4a506cf773338ac1860d \
+2026-11-13T19:00:51.6879805Z     --hash=sha256:6072e92dd876ff6ceeb6cf371e35e51f479349837391341f479b08df4564242b \
+2026-11-13T19:00:51.6880303Z     --hash=sha256:64c79520414a3fdfc6aabd7593e6169afa14d5f8d9908d4b498db068868b08dd \
+2026-11-13T19:00:51.6880817Z     --hash=sha256:67e718c7a43f8db325abbbf1404e2d535f12f8f7a1a82259568385cc5274b82a \
+2026-11-13T19:00:51.6881316Z     --hash=sha256:69ba927445cfaaffb4081003ef5224c55a5c2ab67ef956f416ef744916e44121 \
+2026-11-13T19:00:51.6881878Z     --hash=sha256:6a63610fa76524edfa605b5b259a603915c7a6e10e54f003e5503030506e81de \
+2026-11-13T19:00:51.6882690Z     --hash=sha256:6c5da27e8056439f927ea896735da60e616c477a8293feaa3233d4e7781a6726 \
+2026-11-13T19:00:51.6883205Z     --hash=sha256:6c8893eae2fd13c5488d94056f3e6e5cf3142bfb1c4acaf136cb33d760c5964b \
+2026-11-13T19:00:51.6883746Z     --hash=sha256:6d4a64283ee61824b5790de882bc68e2d9d7a5143537cb7a966f7354f71646d4 \
+2026-11-13T19:00:51.6884264Z     --hash=sha256:6fe436af2eaf630474f491af5d032cbe45f93fcff5c3b9fe4ab194a7255b20ff \
+2026-11-13T19:00:51.6884762Z     --hash=sha256:71b93b42784e25b975079573c642a8fedb049a7bb31d70a51721b1666b3b2ced \
+2026-11-13T19:00:51.6885274Z     --hash=sha256:7393c9a48dcce4817dbd4b0d8ff6237efe9b0a0609f5b0adaef315f8541726b5 \
+2026-11-13T19:00:51.6885800Z     --hash=sha256:77c7a2b4fe2c1369e0d5aa1cade26740a7b14be32fbc9a5535d617d20065c39d \
+2026-11-13T19:00:51.6886339Z     --hash=sha256:7a1d272724b581bb6bc769dfdafed6da2ecc9886ba2450311de55a4ac2e1e9cd \
+2026-11-13T19:00:51.6886869Z     --hash=sha256:7cc365f006891afb006b52d5ee5ee74c09306ffa20e2f8705a32a4450af2f3ba \
+2026-11-13T19:00:51.6887413Z     --hash=sha256:7e510b7770bee609617a3374a96548eb114cae048023e3f049ee449e7ff2db32 \
+2026-11-13T19:00:51.6887911Z     --hash=sha256:80039ba9b6a7d5f1a0175a4cca6bbefead87bd854c80abad1cb30afe47a830db \
+2026-11-13T19:00:51.6888398Z     --hash=sha256:83d4041a3d9b2fd053a8a4e1f22878b3e5833e2712956382d5c048d791454e91 \
+2026-11-13T19:00:51.6888922Z     --hash=sha256:845a511b60ca43b9880dcc84a9784c891d6a2098c829130b320846c69c9c0c68 \
+2026-11-13T19:00:51.6889469Z     --hash=sha256:877698bf6bca5721d8be345f2fe09778e40ecadea8b58c73075f2b1a53666bf2 \
+2026-11-13T19:00:51.6890050Z     --hash=sha256:8caf96a4ef8fb27d0ac0d1ad8337d26a240acd4a02fe4345d0a8f264753e8f99 \
+2026-11-13T19:00:51.6890565Z     --hash=sha256:8ceafb70f2a4f0826f11031942e59c0728fd98da112dc346d4352bde1e486866 \
+2026-11-13T19:00:51.6891092Z     --hash=sha256:8f36c58e33b304b525c6c9c5076399c6ebf1109e17b9051a05a407b091b9215b \
+2026-11-13T19:00:51.6891617Z     --hash=sha256:8ff5d26c529336be9bd7ae04483235d77778ee7d6444a95353102b542601ce81 \
+2026-11-13T19:00:51.6892117Z     --hash=sha256:909d8e3c1faee44cb762b1c519ff8613dcc5ceae5c99987a00917b5a31fd1d6a \
+2026-11-13T19:00:51.6892721Z     --hash=sha256:92caf82ebef5e12d21c72242b70d1e92536f1711cf2a727a4c276de4b4469087 \
+2026-11-13T19:00:51.6893260Z     --hash=sha256:931a0bb0fcac88f263e269e46eb30ba8e21402cd3c62ca40cb97034c0693fab1 \
+2026-11-13T19:00:51.6893767Z     --hash=sha256:943c6bbecbdf7fa575a4f2952fcfd848c88ef95507c3fca411e89d4ac3ff8143 \
+2026-11-13T19:00:51.6894302Z     --hash=sha256:94aed6a8308818b91677957d1bd03188869cd7aeb23c5dba7912a6c0402f7602 \
+2026-11-13T19:00:51.6894798Z     --hash=sha256:94be5cb7bca4df6201f4183e9e4fa2086c655283d20b38cd84500a69057575a7 \
+2026-11-13T19:00:51.6895447Z     --hash=sha256:953107e2f68d0f3512c48f898b0dbf0ce5cc52bba0f318d847c985dc555ee4cc \
+2026-11-13T19:00:51.6895940Z     --hash=sha256:96f576f2711f8519152ec76d0e599243555c1f07679fa73606ca8c8c868c0be6 \
+2026-11-13T19:00:51.6896492Z     --hash=sha256:a33e0dae1f8592146a4764d54ce842b278732d21a84e17c3bbe6b1bc158a2248 \
+2026-11-13T19:00:51.6897182Z     --hash=sha256:a4aaefb4ba6c07e1aeebb2795c8958148f1d6f9af3b555b53d23d766edb6d67a \
+2026-11-13T19:00:51.6897677Z     --hash=sha256:a8afb6557920860b7a3a596eb804cf37e09e7cf8a803db2478c202acc72d8c2e \
+2026-11-13T19:00:51.6898209Z     --hash=sha256:aa9357a1b4d4fc787bb718a59cb1112c28c8a976d6bfa268b71cc0a4ab8f3a94 \
+2026-11-13T19:00:51.6898748Z     --hash=sha256:ac38d6d8d66bf3d744148dbbc0b8e193e195a51e364ed55e224631f5721891fc \
+2026-11-13T19:00:51.6899290Z     --hash=sha256:ad37d5b9abd49c9a655dcda7ea52a8a752884062ef1ee71ae17c2f2a0f81fe6a \
+2026-11-13T19:00:51.6899812Z     --hash=sha256:aea7b1f2b125dad5de85f049136651bff256c883c65e6b9209b2da0a1ac3cdef \
+2026-11-13T19:00:51.6900353Z     --hash=sha256:afced3dfc17cd805ecf7a3d77996a71cf5f2c75aa66eb0c21a9930f4fc992f86 \
+2026-11-13T19:00:51.6900882Z     --hash=sha256:b0e3e721c75d2e79a76d4422c79d7ba705fe1bbafec907037fe7a657a480a0e3 \
+2026-11-13T19:00:51.6901382Z     --hash=sha256:b6d085d70bce51d43c5c7c36d63490770180d8779e71c49305c87b4213918de7 \
+2026-11-13T19:00:51.6901912Z     --hash=sha256:b95d5d92ab83d39e760a52091bb1baba664f3a2351e39b1e16801e5747c2f0e9 \
+2026-11-13T19:00:51.6902700Z     --hash=sha256:b9d6d4b14e92d876f8026b54c20c445f36425214c1081dc76f74e40db386b82b \
+2026-11-13T19:00:51.6903213Z     --hash=sha256:bc02954b1295de798bbdb0b4e2d8a28c2117de8b5c73dcbeb27dc32572dfb971 \
+2026-11-13T19:00:51.6903732Z     --hash=sha256:bd3150023d3dc2bc70f3784e59ffa1140d56ddba3d8125b3d6f9f85221279bfc \
+2026-11-13T19:00:51.6904230Z     --hash=sha256:be56ba9c884143495b517f23fe794ae367d58cd89ea0fdd6d437e3c024a87f9f \
+2026-11-13T19:00:51.6904791Z     --hash=sha256:c17194318e4c0c0348b36f36c2ec7534436fe0a4c15582403162a4f08c80797a \
+2026-11-13T19:00:51.6905289Z     --hash=sha256:c3d1bb7841a816ace6449bb26d3f9560dbfa20e71c568d23f0f62bf1e68f50b1 \
+2026-11-13T19:00:51.6905792Z     --hash=sha256:c43bd6e642d8a248c114327f98dd25ac5a7cb5aa168ef02f0559b91874df16b8 \
+2026-11-13T19:00:51.6906338Z     --hash=sha256:c5db585d43449a5f54303d4b2774e45e1babd975cfe1630a3d708c0b80c3e560 \
+2026-11-13T19:00:51.6906841Z     --hash=sha256:c5e6144e68b577f157519f2ba88ca20e3ed61c29b00e5cdfa76cd2d45acf059a \
+2026-11-13T19:00:51.6907363Z     --hash=sha256:c6f1b27bf1632a7e016af9f145f82be95e1edd7721a646505c21059257cb5a04 \
+2026-11-13T19:00:51.6907891Z     --hash=sha256:c71d1b76210a36729fedfc5115069b50a3d8619054745f8758fe5d6f19e86671 \
+2026-11-13T19:00:51.6908412Z     --hash=sha256:c72c5295a84bd249526da9bdca38f2e176d15c31c13bb0063c5053f4ca023421 \
+2026-11-13T19:00:51.6908904Z     --hash=sha256:ca8052401c55d7511dda6760719fda7618067e83535d7d0010096d216c34b667 \
+2026-11-13T19:00:51.6909484Z     --hash=sha256:d1aabe3925cbb4a08d15b7b20ba4011b53019da0c4173a25155139b7b1baed65 \
+2026-11-13T19:00:51.6910074Z     --hash=sha256:d3c94211ee0c4f8d649ec06b7c115c0ec4eadb873a0e3154ca15cef3f814b071 \
+2026-11-13T19:00:51.6910589Z     --hash=sha256:d46ca272b251d033dd4527b0dec5f261a28a52bd5fa0f99c117b0a1f8588cc2d \
+2026-11-13T19:00:51.6911132Z     --hash=sha256:d608f0bf3b8cbddd0067fe02cb8cab7d13e8eb9386b23a1843d4363044fd9e22 \
+2026-11-13T19:00:51.6911713Z     --hash=sha256:d6a365f2ab45a984d0e00eee0dd17f599ceab8cadab6ea07b6111c8132fc0e42 \
+2026-11-13T19:00:51.6912212Z     --hash=sha256:d92db7a0f6aee44f1baee94750457e8d2d1c6ccea41842de6268d34e8dc7eddd \
+2026-11-13T19:00:51.6912888Z     --hash=sha256:df183721229ae51eef90108c115b43e98cb169b6155d34480338e5fc6616df00 \
+2026-11-13T19:00:51.6913371Z     --hash=sha256:e05108e0849966f53a8d2d3112a7af881d0efaa479bc735bba91108f9f2350a7 \
+2026-11-13T19:00:51.6913921Z     --hash=sha256:e1967e36ac4cae0c7e9615ad32e1a513cdacff79f9e8afb28bedc91caf48b4f3 \
+2026-11-13T19:00:51.6914442Z     --hash=sha256:e42f8e098b9c5396fefa05fb1cc7e33b0e08fc51da106b5de4a45fd22aac6743 \
+2026-11-13T19:00:51.6915006Z     --hash=sha256:e56aaf8c167548dc8e5d6f3bd0f48dcdd299a23c73be3f744aab79d99e9c7f5d \
+2026-11-13T19:00:51.6915544Z     --hash=sha256:e9ce0bc440e7fd09b5f51f372f0f6640658f854b8fb05260f819cc669c93c42d \
+2026-11-13T19:00:51.6916032Z     --hash=sha256:ebefd60b42e2a82b32d136bb5f7c94eadfcd29f772b547df6f3291d1ed855a1c \
+2026-11-13T19:00:51.6916564Z     --hash=sha256:ef46c1a29ffb8c72e882e22618ec618778eacd0578fb22c6e7cf9c11d15f357b \
+2026-11-13T19:00:51.6917082Z     --hash=sha256:efc49c462d4516b8a58b00b490078fa64689fd1fe66970cc190131d7afb8027e \
+2026-11-13T19:00:51.6917611Z     --hash=sha256:f01f3805f2dae4781c0c34b440e31740d082950bdaf89a6f601ad589a28af57a \
+2026-11-13T19:00:51.6918099Z     --hash=sha256:f06c689cb14afd9b612727553a5ec5a40febf113ca41c4413a2b0b334285884b \
+2026-11-13T19:00:51.6918567Z     --hash=sha256:f1e8591bd8a5a628cd7f07954c6a1592359a878bf032957a8e9057a41d644311 \
+2026-11-13T19:00:51.6919132Z     --hash=sha256:f4462528b6000afe8f16907b5c7c2553abf1df005ba5140e6eb394541c3624c3 \
+2026-11-13T19:00:51.6919618Z     --hash=sha256:f7be7cf555bc30ec12622e9447299cc4a9b8ff307548b634794353db0c2065dc \
+2026-11-13T19:00:51.6920111Z     --hash=sha256:f81b5b19ce748ef68d4746656b7929762eb2fe99269b266e4be07e2ee4de7144 \
+2026-11-13T19:00:51.6920593Z     --hash=sha256:f9807485a908f00355820f18e91e045ffdcdc5adb68aaec40a1e2b88c5f7bba1 \
+2026-11-13T19:00:51.6921117Z     --hash=sha256:fbe4fb8c5445f7496d7f7f6bb0807875d09d47e6771ffa175fb2df2895fb86ba \
+2026-11-13T19:00:51.6921638Z     --hash=sha256:fe4372c52d4849096c6cc1cda2817d293ec51440c890474ed59ef38d46556f18 \
+2026-11-13T19:00:51.6922117Z     --hash=sha256:fe52bf4641069e7978a14253b036cb9002def1926317e710f2e249f8a8c47742 \
+2026-11-13T19:00:51.6922833Z     --hash=sha256:ff7baa55f8e7c69851419e50a666015d02a74198716fd45c0125a2112e0a389f
+2026-11-13T19:00:51.6923221Z     # via mypy
+2026-11-13T19:00:51.6923476Z mypy==2.4.1 \
+2026-11-13T19:00:51.6923861Z     --hash=sha256:01b7718552d017f88d1151f3cc9d6556d778a90bd58060a2c3d87d070f9099fb \
+2026-11-13T19:00:51.6924370Z     --hash=sha256:0724cf95fabc87ca4a2d5b7f276b43f51afce8a3804bde704490b008e377e50b \
+2026-11-13T19:00:51.6924879Z     --hash=sha256:080cf64a60b90a73435542feecf4171904cc5710658165b40c6869115d4aa100 \
+2026-11-13T19:00:51.6925364Z     --hash=sha256:0c5bf267645351887b72903fd2f5fbddcf85234e0e6c4ad94e2fcfb4f0c3f971 \
+2026-11-13T19:00:51.6925855Z     --hash=sha256:0e95ad0bec03ced9a73b42514208abd24c789e67f0e1eba476e276dd7a2dea3a \
+2026-11-13T19:00:51.6926407Z     --hash=sha256:0f0a8b8f5dee799195a3f2670a5b2617ac7193d3563f52dbef42ad6770c6a9db \
+2026-11-13T19:00:51.6926870Z     --hash=sha256:133886ef1a7a8cf673df55d865e41580c6c46aa9b8e31e1325dfe315c038f745 \
+2026-11-13T19:00:51.6927385Z     --hash=sha256:1784648d6ec8c2b5465e3f26241b845a0b3cb4e56c993c64abe16989e7698999 \
+2026-11-13T19:00:51.6927907Z     --hash=sha256:1fb70621535c22fd4b1a0450d37ed1d6c5eb39656a1cebfb189084c12de54ba7 \
+2026-11-13T19:00:51.6928483Z     --hash=sha256:2875280687e64740e6ddcef43bd4c5852ad45ff34549740f6aea3f0373870b93 \
+2026-11-13T19:00:51.6928973Z     --hash=sha256:2b4e0aa029ad0c1d42cc494daf86d1e0efd15dab4db7bd096ece29e8a9689c6a \
+2026-11-13T19:00:51.6929450Z     --hash=sha256:3467b1d13000812ab85dc2a3834b9379ec77798ca1bcabe434e23fb21fead692 \
+2026-11-13T19:00:51.6930001Z     --hash=sha256:3f1613bfe6726169a5680ec3dad5fe1f6d96285c12aded51ad432eadedd39d45 \
+2026-11-13T19:00:51.6930492Z     --hash=sha256:4af5ad558033bf71a44a1be149ed61633522824f84c1b6bc2445d3fe2d2a5296 \
+2026-11-13T19:00:51.6931014Z     --hash=sha256:4c194c5d878130fca1ae662dfb1feb6274afbab0b40032c80147377e0ea803d5 \
+2026-11-13T19:00:51.6931538Z     --hash=sha256:4e18d0da3898b3bcd16192f15a206e7b8b8dd0f4a0b3e51aa5bd5c2afe749e2c \
+2026-11-13T19:00:51.6932027Z     --hash=sha256:51f742d4154824837ca6e92aa81f00eec222700a3c337bd258e5562a3880d75a \
+2026-11-13T19:00:51.6932596Z     --hash=sha256:63b590965691e540a335fa74dadf31a7069142f6b72e234689bbd244edf55623 \
+2026-11-13T19:00:51.6933108Z     --hash=sha256:63c6ff0e7ea546943001a91639c9f0c64b60d239268fa5d29e4a6c87f82c2373 \
+2026-11-13T19:00:51.6933701Z     --hash=sha256:680ba5d9f0e3fe0c746b3d14df15f2a718e4bc308a1145616a1ea691ce7c354b \
+2026-11-13T19:00:51.6934186Z     --hash=sha256:6f7225951a277dd0d6add900731d487174b7d24ac133c09d670ed63b4d8cb90d \
+2026-11-13T19:00:51.6934652Z     --hash=sha256:70196470ac300f444a302a738541101893c2c57804078b33690286a7899149e9 \
+2026-11-13T19:00:51.6935173Z     --hash=sha256:70971cc0bcb1d3f03d2eb68fa430a6481ccc03558dc001d9534d7e5fa274c392 \
+2026-11-13T19:00:51.6935692Z     --hash=sha256:71eda06e5bae51976ce869fda429159c9cec678bd02f25bb197f0265c8f991be \
+2026-11-13T19:00:51.6936240Z     --hash=sha256:727890a32f1858c09549eb55a8b234fe990d460450b28f03e8213ef925f1247c \
+2026-11-13T19:00:51.6936754Z     --hash=sha256:7344869cad05f073b8cae2826774fa0161e3eb2f5c685b76813574008d77d750 \
+2026-11-13T19:00:51.6937327Z     --hash=sha256:79a1e79199e980fb41f219cb3d4746d25c64b0b623840d3ed57df1cdc13a6502 \
+2026-11-13T19:00:51.6937904Z     --hash=sha256:8e437811ebd26d3e6258efb562a711b385c139be597dffed5e735c801d15c77f \
+2026-11-13T19:00:51.6938410Z     --hash=sha256:9d7dafd56179d296651df9e1844b91c9517c379398f017a2a435d077a28943c1 \
+2026-11-13T19:00:51.6938998Z     --hash=sha256:9ed1195502cca32be5ef756b1693477f4991db2f2e34eaa90cc4ad6bea4f9531 \
+2026-11-13T19:00:51.6939534Z     --hash=sha256:a20ff6cd2af7a670c64f089bfa5fbcebe8ff3bf896c5e6ac7c9862c7960e4494 \
+2026-11-13T19:00:51.6940076Z     --hash=sha256:a2d4a51db92059eecc2c33b2a5194b28585ebfd917292c015fe87a77dbff6cd2 \
+2026-11-13T19:00:51.6940656Z     --hash=sha256:a5b5da107dc2c93fb0a22f7a45dbaea5dc131afc7056b5468d78e819f9a138e6 \
+2026-11-13T19:00:51.6941222Z     --hash=sha256:acdd82cb3a2eb10720e87706a128d75785d005a8c47e36a4973221524f41fc56 \
+2026-11-13T19:00:51.6941760Z     --hash=sha256:b69a15fc2e75858d6b15e91ed3a0dcff1a533265183b64734138791fe0f49aa5 \
+2026-11-13T19:00:51.6942388Z     --hash=sha256:be4c03f33c55500191df2ed4a9b5e7edbdd1fff067fe361a5a9b1b5d3262da6e \
+2026-11-13T19:00:51.6943076Z     --hash=sha256:beb254fec368c4e7f7f82a5f310c6470b893ec88a90b66426da971c6826b0453 \
+2026-11-13T19:00:51.6943670Z     --hash=sha256:c3a4d0c47053cc90035dd3a2c321112b593ad42935d0cbfd747288e1564fa8ca \
+2026-11-13T19:00:51.6944238Z     --hash=sha256:c45485061ba08f700acc12cfc8b177e6997e6bc353605babfc0abb081e079456 \
+2026-11-13T19:00:51.6944829Z     --hash=sha256:c535efcb91f7e66f41b9bd2b5dbd78900a7609ce88f4c020d668e4c82d082b0b \
+2026-11-13T19:00:51.6945377Z     --hash=sha256:c6c7210e40dd423af7d65cbe428b5906d11dc60659337bdae4e5fdf02ce32ed7 \
+2026-11-13T19:00:51.6945939Z     --hash=sha256:d4c343b2a720741a016d720b255e75581a50e2bede61d53250484e18562a1d64 \
+2026-11-13T19:00:51.6946480Z     --hash=sha256:d63737426a048a27705a4eedb828669f4bc0873612a1b46b0b9fe892b2ebaaaf \
+2026-11-13T19:00:51.6947060Z     --hash=sha256:d6e081b466e88d4343adffe11aff0f02df34b5b9070b4b700053a0b7294c0be1 \
+2026-11-13T19:00:51.6947613Z     --hash=sha256:d923cec43316f0e6736b8298fd00abeaaf348a091c20e7296b3aebceecb63eca \
+2026-11-13T19:00:51.6948218Z     --hash=sha256:db599d03e7d60d15f2e0a11665c18bc52a88699fcab990fdf8cecd5be8ac801c \
+2026-11-13T19:00:51.6948823Z     --hash=sha256:de95648e0a6d46fa9929b956ed2c87c5dc9933d4d59945e6390e9d753c74e7c1 \
+2026-11-13T19:00:51.6949334Z     --hash=sha256:ea0714d2bccaf6d010c970e1d3ba2c9c2add79d2030aad2ef03167d788948276 \
+2026-11-13T19:00:51.6949890Z     --hash=sha256:ec416d5d2ae689e681f5727e328723f18d8b5dc8c903a146b7851dc5727aad8a \
+2026-11-13T19:00:51.6950405Z     --hash=sha256:ef8d5be90032261197ac388d945d8ff4f476c95880798a1911760af64ddfe71f \
+2026-11-13T19:00:51.6950942Z     --hash=sha256:f44dd4c5ab22df21206dd926c98381ebdbf5bfd696df37dd38ded2d23143fcb6 \
+2026-11-13T19:00:51.6951478Z     --hash=sha256:f9118a3f50de264b614861bb11814833a742138ac3c8e2e49a860b6977fb2704
+2026-11-13T19:00:51.6951889Z     # via -r requirements.in
+2026-11-13T19:00:51.6952207Z mypy-extensions==1.1.0 \
+2026-11-13T19:00:51.6952909Z     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505 \
+2026-11-13T19:00:51.6953420Z     --hash=sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558
+2026-11-13T19:00:51.6953846Z     # via mypy
+2026-11-13T19:00:51.6954186Z packaging==26.3 \
+2026-11-13T19:00:51.6954582Z     --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
+2026-11-13T19:00:51.6955099Z     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+2026-11-13T19:00:51.6955522Z     # via pytest
+2026-11-13T19:00:51.6955824Z pathspec==1.1.1 \
+2026-11-13T19:00:51.6956171Z     --hash=sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a \
+2026-11-13T19:00:51.6956695Z     --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
+2026-11-13T19:00:51.6957082Z     # via mypy
+2026-11-13T19:00:51.6957403Z pluggy==1.6.0 \
+2026-11-13T19:00:51.6957762Z     --hash=sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3 \
+2026-11-13T19:00:51.6958235Z     --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746
+2026-11-13T19:00:51.6958653Z     # via
+2026-11-13T19:00:51.6958945Z     #   pytest
+2026-11-13T19:00:51.6959214Z     #   pytest-cov
+2026-11-13T19:00:51.6959479Z pycparser==3.12 \
+2026-11-13T19:00:51.6959828Z     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e \
+2026-11-13T19:00:51.6960395Z     --hash=sha256:f03387877eab82ce01bbdfd0ba7252ee55a90b1c708d5129e2ce915475cf1db6
+2026-11-13T19:00:51.6960821Z     # via cffi
+2026-11-13T19:00:51.6961102Z pygments==2.20.0 \
+2026-11-13T19:00:51.6961458Z     --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f \
+2026-11-13T19:00:51.6961979Z     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
+2026-11-13T19:00:51.6962541Z     # via pytest
+2026-11-13T19:00:51.6962829Z pyjwt[crypto]==2.15.1 \
+2026-11-13T19:00:51.6963242Z     --hash=sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193 \
+2026-11-13T19:00:51.6963735Z     --hash=sha256:4f259e80cdfb6b3fc18a7de51fd1ef9ec79652f25019bae68975ca2468a34df8
+2026-11-13T19:00:51.6964127Z     # via
+2026-11-13T19:00:51.6964421Z     #   -r requirements.in
+2026-11-13T19:00:51.6964728Z     #   pyjwt
+2026-11-13T19:00:51.6965001Z pytest==9.2.0 \
+2026-11-13T19:00:51.6965360Z     --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \
+2026-11-13T19:00:51.6965851Z     --hash=sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b
+2026-11-13T19:00:51.6966286Z     # via
+2026-11-13T19:00:51.6966516Z     #   -r requirements.in
+2026-11-13T19:00:51.6966818Z     #   pytest-cov
+2026-11-13T19:00:51.6967074Z pytest-cov==7.1.0 \
+2026-11-13T19:00:51.6967489Z     --hash=sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2 \
+2026-11-13T19:00:51.6967989Z     --hash=sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678
+2026-11-13T19:00:51.6968368Z     # via -r requirements.in
+2026-11-13T19:00:51.6968669Z pyyaml==6.0.3 \
+2026-11-13T19:00:51.6969138Z     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
+2026-11-13T19:00:51.6969695Z     --hash=sha256:0150219816b6a1fa26fb4699fb7daa9caf09eb1999f3b70fb6e786805e80375a \
+2026-11-13T19:00:51.6970192Z     --hash=sha256:02893d100e99e03eda1c8fd5c441d8c60103fd175728e23e431db1b589cf5ab3 \
+2026-11-13T19:00:51.6970689Z     --hash=sha256:02ea2dfa234451bbb8772601d7b8e426c2bfa197136796224e50e35a78777956 \
+2026-11-13T19:00:51.6971264Z     --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6 \
+2026-11-13T19:00:51.6971777Z     --hash=sha256:10892704fc220243f5305762e276552a0395f7beb4dbf9b14ec8fd43b57f126c \
+2026-11-13T19:00:51.6972438Z     --hash=sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65 \
+2026-11-13T19:00:51.6972989Z     --hash=sha256:1d37d57ad971609cf3c53ba6a7e365e40660e3be0e5175fa9f2365a379d6095a \
+2026-11-13T19:00:51.6973512Z     --hash=sha256:1ebe39cb5fc479422b83de611d14e2c0d3bb2a18bbcb01f229ab3cfbd8fee7a0 \
+2026-11-13T19:00:51.6974058Z     --hash=sha256:214ed4befebe12df36bcc8bc2b64b396ca31be9304b8f59e25c11cf94a4c033b \
+2026-11-13T19:00:51.6974634Z     --hash=sha256:2283a07e2c21a2aa78d9c4442724ec1eb15f5e42a723b99cb3d822d48f5f7ad1 \
+2026-11-13T19:00:51.6975227Z     --hash=sha256:22ba7cfcad58ef3ecddc7ed1db3409af68d023b7f940da23c6c2a1890976eda6 \
+2026-11-13T19:00:51.6975749Z     --hash=sha256:27c0abcb4a5dac13684a37f76e701e054692a9b2d3064b70f5e4eb54810553d7 \
+2026-11-13T19:00:51.6976265Z     --hash=sha256:28c8d926f98f432f88adc23edf2e6d4921ac26fb084b028c733d01868d19007e \
+2026-11-13T19:00:51.6976823Z     --hash=sha256:2e71d11abed7344e42a8849600193d15b6def118602c4c176f748e4583246007 \
+2026-11-13T19:00:51.6977338Z     --hash=sha256:34d5fcd24b8445fadc33f9cf348c1047101756fd760b4dacb5c3e99755703310 \
+2026-11-13T19:00:51.6977876Z     --hash=sha256:37503bfbfc9d2c40b344d06b2199cf0e96e97957ab1c1b546fd4f87e53e5d3e4 \
+2026-11-13T19:00:51.6978416Z     --hash=sha256:3c5677e12444c15717b902a5798264fa7909e41153cdf9ef7ad571b704a63dd9 \
+2026-11-13T19:00:51.6978936Z     --hash=sha256:3ff07ec89bae51176c0549bc4c63aa6202991da2d9a6129d7aef7f1407d3f295 \
+2026-11-13T19:00:51.6979448Z     --hash=sha256:41715c910c881bc081f1e8872880d3c650acf13dfa8214bad49ed4cede7c34ea \
+2026-11-13T19:00:51.6979966Z     --hash=sha256:418cf3f2111bc80e0933b2cd8cd04f286338bb88bdc7bc8e6dd775ebde60b5e0 \
+2026-11-13T19:00:51.6980536Z     --hash=sha256:44edc647873928551a01e7a563d7452ccdebee747728c1080d881d68af7b997e \
+2026-11-13T19:00:51.6981048Z     --hash=sha256:4a2e8cebe2ff6ab7d1050ecd59c25d4c8bd7e6f400f5f82b96557ac0abafd0ac \
+2026-11-13T19:00:51.6981582Z     --hash=sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9 \
+2026-11-13T19:00:51.6982129Z     --hash=sha256:501a031947e3a9025ed4405a168e6ef5ae3126c59f90ce0cd6f2bfc477be31b7 \
+2026-11-13T19:00:51.6982902Z     --hash=sha256:5190d403f121660ce8d1d2c1bb2ef1bd05b5f68533fc5c2ea899bd15f4399b35 \
+2026-11-13T19:00:51.6983434Z     --hash=sha256:5498cd1645aa724a7c71c8f378eb29ebe23da2fc0d7a08071d89469bf1d2defb \
+2026-11-13T19:00:51.6983967Z     --hash=sha256:5cf4e27da7e3fbed4d6c3d8e797387aaad68102272f8f9752883bc32d61cb87b \
+2026-11-13T19:00:51.6984534Z     --hash=sha256:5e0b74767e5f8c593e8c9b5912019159ed0533c70051e9cce3e8b6aa699fcd69 \
+2026-11-13T19:00:51.6985060Z     --hash=sha256:5ed875a24292240029e4483f9d4a4b8a1ae08843b9c54f43fcc11e404532a8a5 \
+2026-11-13T19:00:51.6985570Z     --hash=sha256:5fcd34e47f6e0b794d17de1b4ff496c00986e1c83f7ab2fb8fcfe9616ff7477b \
+2026-11-13T19:00:51.6986131Z     --hash=sha256:5fdec68f91a0c6739b380c83b951e2c72ac0197ace422360e6d5a959d8d97b2c \
+2026-11-13T19:00:51.6986627Z     --hash=sha256:6344df0d5755a2c9a276d4473ae6b90647e216ab4757f8426893b5dd2ac3f369 \
+2026-11-13T19:00:51.6987158Z     --hash=sha256:64386e5e707d03a7e172c0701abfb7e10f0fb753ee1d773128192742712a98fd \
+2026-11-13T19:00:51.6987683Z     --hash=sha256:652cb6edd41e718550aad172851962662ff2681490a8a711af6a4d288dd96824 \
+2026-11-13T19:00:51.6988239Z     --hash=sha256:66291b10affd76d76f54fad28e22e51719ef9ba22b29e1d7d03d6777a9174198 \
+2026-11-13T19:00:51.6988824Z     --hash=sha256:66e1674c3ef6f541c35191caae2d429b967b99e02040f5ba928632d9a7f0f065 \
+2026-11-13T19:00:51.6989332Z     --hash=sha256:6adc77889b628398debc7b65c073bcb99c4a0237b248cacaf3fe8a557563ef6c \
+2026-11-13T19:00:51.6989940Z     --hash=sha256:79005a0d97d5ddabfeeea4cf676af11e647e41d81c9a7722a193022accdb6b7c \
+2026-11-13T19:00:51.6990454Z     --hash=sha256:7c6610def4f163542a622a73fb39f534f8c101d690126992300bf3207eab9764 \
+2026-11-13T19:00:51.6990983Z     --hash=sha256:7f047e29dcae44602496db43be01ad42fc6f1cc0d8cd6c83d342306c32270196 \
+2026-11-13T19:00:51.6991498Z     --hash=sha256:8098f252adfa6c80ab48096053f512f2321f0b998f98150cea9bd23d83e1467b \
+2026-11-13T19:00:51.6992043Z     --hash=sha256:850774a7879607d3a6f50d36d04f00ee69e7fc816450e5f7e58d7f17f1ae5c00 \
+2026-11-13T19:00:51.6992843Z     --hash=sha256:8d1fab6bb153a416f9aeb4b8763bc0f22a5586065f86f7664fc23339fc1c1fac \
+2026-11-13T19:00:51.6993380Z     --hash=sha256:8da9669d359f02c0b91ccc01cac4a67f16afec0dac22c2ad09f46bee0697eba8 \
+2026-11-13T19:00:51.6993957Z     --hash=sha256:8dc52c23056b9ddd46818a57b78404882310fb473d63f17b07d5c40421e47f8e \
+2026-11-13T19:00:51.6994529Z     --hash=sha256:9149cad251584d5fb4981be1ecde53a1ca46c891a79788c0df828d2f166bda28 \
+2026-11-13T19:00:51.6995065Z     --hash=sha256:93dda82c9c22deb0a405ea4dc5f2d0cda384168e466364dec6255b293923b2f3 \
+2026-11-13T19:00:51.6995614Z     --hash=sha256:96b533f0e99f6579b3d4d4995707cf36df9100d67e0c8303a0c55b27b5f99bc5 \
+2026-11-13T19:00:51.6996147Z     --hash=sha256:9c57bb8c96f6d1808c030b1687b9b5fb476abaa47f0db9c0101f5e9f394e97f4 \
+2026-11-13T19:00:51.6996698Z     --hash=sha256:9c7708761fccb9397fe64bbc0395abcae8c4bf7b0eac081e12b809bf47700d0b \
+2026-11-13T19:00:51.6997213Z     --hash=sha256:9f3bfb4965eb874431221a3ff3fdcddc7e74e3b07799e0e84ca4a0f867d449bf \
+2026-11-13T19:00:51.6997800Z     --hash=sha256:a33284e20b78bd4a18c8c2282d549d10bc8408a2a7ff57653c0cf0b9be0afce5 \
+2026-11-13T19:00:51.6998302Z     --hash=sha256:a80cb027f6b349846a3bf6d73b5e95e782175e52f22108cfa17876aaeff93702 \
+2026-11-13T19:00:51.6998794Z     --hash=sha256:b30236e45cf30d2b8e7b3e85881719e98507abed1011bf463a8fa23e9c3e98a8 \
+2026-11-13T19:00:51.6999342Z     --hash=sha256:b3bc83488de33889877a0f2543ade9f70c67d66d9ebb4ac959502e12de895788 \
+2026-11-13T19:00:51.6999882Z     --hash=sha256:b865addae83924361678b652338317d1bd7e79b1f4596f96b96c77a5a34b34da \
+2026-11-13T19:00:51.7000428Z     --hash=sha256:b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d \
+2026-11-13T19:00:51.7000939Z     --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+2026-11-13T19:00:51.7001484Z     --hash=sha256:bdb2c67c6c1390b63c6ff89f210c8fd09d9a1217a465701eac7316313c915e4c \
+2026-11-13T19:00:51.7002006Z     --hash=sha256:c1ff362665ae507275af2853520967820d9124984e0f7466736aea23d8611fba \
+2026-11-13T19:00:51.7002744Z     --hash=sha256:c2514fceb77bc5e7a2f7adfaa1feb2fb311607c9cb518dbc378688ec73d8292f \
+2026-11-13T19:00:51.7003303Z     --hash=sha256:c3355370a2c156cffb25e876646f149d5d68f5e0a3ce86a5084dd0b64a994917 \
+2026-11-13T19:00:51.7003861Z     --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+2026-11-13T19:00:51.7004375Z     --hash=sha256:d0eae10f8159e8fdad514efdc92d74fd8d682c933a6dd088030f3834bc8e6b26 \
+2026-11-13T19:00:51.7004912Z     --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f \
+2026-11-13T19:00:51.7005449Z     --hash=sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b \
+2026-11-13T19:00:51.7006021Z     --hash=sha256:eda16858a3cab07b80edaf74336ece1f986ba330fdb8ee0d6c0d68fe82bc96be \
+2026-11-13T19:00:51.7006551Z     --hash=sha256:ee2922902c45ae8ccada2c5b501ab86c36525b883eff4255313a253a3160861c \
+2026-11-13T19:00:51.7007055Z     --hash=sha256:efd7b85f94a6f21e4932043973a7ba2613b059c4a000551892ac9f1d11f5baf3 \
+2026-11-13T19:00:51.7007609Z     --hash=sha256:f7057c9a337546edc7973c0d3ba84ddcdf0daa14533c2065749c9075001090e6 \
+2026-11-13T19:00:51.7008150Z     --hash=sha256:fa160448684b4e94d80416c0fa4aac48967a969efe22931448d853ada8baf926 \
+2026-11-13T19:00:51.7008776Z     --hash=sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0
+2026-11-13T19:00:51.7009227Z     # via -r requirements.in
+2026-11-13T19:00:51.7009539Z ruff==0.17.4 \
+2026-11-13T19:00:51.7009907Z     --hash=sha256:0d1f4848fd2ec0499be4046db9b7dfcc952666885f00233cc7033515282556a8 \
+2026-11-13T19:00:51.7010481Z     --hash=sha256:13e781c3c5f663e7fba737eaaeb70dd943dd55171daf316afb25cd5268cfe0c7 \
+2026-11-13T19:00:51.7011097Z     --hash=sha256:181ae38a9a8fb94925bf7d0794327b48d7fd7f4b50cfd84c0e999cc09ef8d131 \
+2026-11-13T19:00:51.7011632Z     --hash=sha256:20e43d7a08e712e33067ba887e6574546c79bd4831596ce8f16803ac7ff9ad90 \
+2026-11-13T19:00:51.7012206Z     --hash=sha256:2b08c4ff98dc234f4a3871a3105353b922fa875ea1073ca31001eb8c06bb4d89 \
+2026-11-13T19:00:51.7012807Z     --hash=sha256:2cd025509b2e15721b426fc70fd946d71f43b3db3b08e946dfec2d696d911690 \
+2026-11-13T19:00:51.7013398Z     --hash=sha256:3971a78cba76298b284c8321e6d40d93045ed348bec5c369d85099efc97fb7cf \
+2026-11-13T19:00:51.7013908Z     --hash=sha256:49b77f7b3921669466882a4881168801bdb06ec2cd83fb936049016cf5fdece1 \
+2026-11-13T19:00:51.7014520Z     --hash=sha256:5f28cf0dd37cb172fa5a8d2e92e6ada3a9dbd0609f094ed24039929eef0b7524 \
+2026-11-13T19:00:51.7015110Z     --hash=sha256:6007e7f3a0e55b0fbdb947af69cf24c21b4928df6be8ef3e767c69b5ccccf496 \
+2026-11-13T19:00:51.7015679Z     --hash=sha256:67c5a894fc054cf41f75f7afa24815de5a74329d97634126c2a1015740ff4e8c \
+2026-11-13T19:00:51.7016177Z     --hash=sha256:6b21c771b296888e8a35c6f48555f4b44e4483f61675d6ed51810a5203469ce6 \
+2026-11-13T19:00:51.7016697Z     --hash=sha256:7e061dcc0933c7031a616ac8d66ac540309b2aa21ab558101a8f53e9ac7a1185 \
+2026-11-13T19:00:51.7017163Z     --hash=sha256:7ed2f416349944f908f9574215994602242b0836844eba48eec61473033afca0 \
+2026-11-13T19:00:51.7017666Z     --hash=sha256:8ea6e0017c785f7282092b11e46338e4ebed1b9e575ebf2e55a8a1eda968241a \
+2026-11-13T19:00:51.7018176Z     --hash=sha256:e3b84eb74f260d1c2dbd236fd9d4c011d4fdd0a52bdf8aea57a10e3a1b71fca5 \
+2026-11-13T19:00:51.7018718Z     --hash=sha256:f32d178b50e826e00f6c6c1be3f56333068acb9b67fe167143527fa9b81e890d \
+2026-11-13T19:00:51.7019214Z     --hash=sha256:f99e95a1515161138be3cbd1b06c06e739d8feb38ade35564556999fffc3686e
+2026-11-13T19:00:51.7019595Z     # via -r requirements.in
+2026-11-13T19:00:51.7019945Z types-pyyaml==6.0.12.20261103 \
+2026-11-13T19:00:51.7020359Z     --hash=sha256:444654c61f635dab82c092a511aa96a0ce31164810784b9a37314e3e56532ac8 \
+2026-11-13T19:00:51.7020843Z     --hash=sha256:7a1b5f837881dd35d5448b5f18275164f89f206185e31e8eae6e0b42607bc001
+2026-11-13T19:00:51.7021232Z     # via -r requirements.in
+2026-11-13T19:00:51.7021556Z typing-extensions==4.16.0 \
+2026-11-13T19:00:51.7021968Z     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8 \
+2026-11-13T19:00:51.7022618Z     --hash=sha256:dc983d19a509c94dba722ee6abd33940f7c05a89e243c47e907eb4db6f1a43e5
+2026-11-13T19:00:51.7023155Z     # via mypy
+2026-11-13T19:00:51.7474026Z ##[group]Run DavidAnson/markdownlint-cli2-action@696eb3f2509270d7b882d2aa68347bc676e7af34
+2026-11-13T19:00:51.7474543Z with:
+2026-11-13T19:00:51.7474790Z   globs: **/*.md
+2026-11-13T19:00:51.7475059Z   fix: false
+2026-11-13T19:00:51.7475306Z   separator: 
+
+2026-11-13T19:00:51.7475602Z env:
+2026-11-13T19:00:51.7475907Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:51.7476331Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+2026-11-13T19:00:51.7476757Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:51.7477186Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:51.7477573Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.16/x64
+2026-11-13T19:00:51.7477962Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.16/x64/lib
+2026-11-13T19:00:51.7478319Z ##[endgroup]
+2026-11-13T19:00:51.8685204Z markdownlint-cli2 v0.24.0 (markdownlint v0.42.0)
+2026-11-13T19:00:51.8686333Z Finding: **/*.md **/*.md !node_modules !.git !.claude/skills/icm-architect
+2026-11-13T19:00:51.9507860Z Linting: 695 files
+2026-11-13T19:00:57.2028847Z Summary: 0 issues in 0 files
+2026-11-13T19:00:57.2590291Z Post job cleanup.
+2026-11-13T19:00:57.3553960Z Cache hit occurred on the primary key setup-python-Linux-x64-26.04-Ubuntu-python-3.12.16-pip-85fbd452ab211eda4ba1be4aee9b53b3572300afba5e5bbf8a7bead27d13d387, not saving cache.
+2026-11-13T19:00:57.3652892Z Post job cleanup.
+2026-11-13T19:00:57.4379684Z [command]/usr/bin/git version
+2026-11-13T19:00:57.4412825Z git version 2.56.1
+2026-11-13T19:00:57.4438914Z Temporarily overriding HOME='/home/runner/work/_temp/3ba3d29d-2a0b-4fed-bb73-709b371cd16a' before making global git config changes
+2026-11-13T19:00:57.4440098Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T19:00:57.4441990Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/code-quality-atlas/code-quality-atlas
+2026-11-13T19:00:57.4468103Z Removing SSH command configuration
+2026-11-13T19:00:57.4473372Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T19:00:57.4500910Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T19:00:57.4710666Z Removing HTTP extra header
+2026-11-13T19:00:57.4719483Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T19:00:57.4740171Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T19:00:57.4929573Z Removing includeIf entries pointing to credentials config files
+2026-11-13T19:00:57.4934128Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T19:00:57.4958025Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T19:00:57.5253477Z Cleaning up orphan processes

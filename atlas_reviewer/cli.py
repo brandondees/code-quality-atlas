@@ -27,6 +27,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -226,6 +227,22 @@ from atlas_reviewer.runner import (
     run_disposable,
     runner_name,
     sweep,
+)
+from atlas_reviewer.snapshot import (
+    GhApiReader,
+    SnapshotFetchError,
+    SnapshotSpec,
+    collect_ci,
+    fetch_snapshot,
+    git_ancestors,
+    git_bundle,
+    git_cutoff,
+    git_diff,
+    git_diff_path_count,
+    git_ensure_commit,
+    resolve_commits,
+    select_before,
+    write_snapshot,
 )
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
@@ -2287,6 +2304,52 @@ def build_parser() -> argparse.ArgumentParser:
         help="UTC day YYYY-MM-DD (default: today)",
     )
     funding.set_defaults(handler=_cmd_funding_spend)
+    snap = sub.add_parser(
+        "snapshot-build",
+        help="build a recorded eval fixture at a PR's anchor head "
+        "(read-only GitHub reads; the build step's one network use)",
+    )
+    snap.add_argument("--repo", required=True, help="owner/name")
+    snap.add_argument("--pr", type=int, required=True, help="the pull request number")
+    snap.add_argument(
+        "--head-sha",
+        required=True,
+        help="the anchor head: the commit the recorded review reviewed",
+    )
+    snap.add_argument(
+        "--base-sha",
+        required=True,
+        help="the merge base the anchor's diff is against",
+    )
+    snap.add_argument(
+        "--branch",
+        required=True,
+        help="the PR's head branch name, the CI runs listing is read under",
+    )
+    snap.add_argument(
+        "--cutoff",
+        help="keep remarks posted strictly before this ISO-8601 instant "
+        "(default: the anchor commit's committer date)",
+    )
+    snap.add_argument(
+        "--body-file",
+        help="replace pull.json's body with this file's text, when GitHub's "
+        "current body is not the anchor-time one (e.g. #661's round-5 body)",
+    )
+    snap.add_argument(
+        "--max-logs",
+        type=int,
+        default=20,
+        help="how many job logs the fixture carries (failing jobs first)",
+    )
+    snap.add_argument("--out", required=True, help="the fixture directory to write")
+    snap.add_argument(
+        "--repo-root",
+        default=".",
+        help="the local checkout the git side reads (default: the working "
+        "directory; the anchor commits are fetched into it when absent)",
+    )
+    snap.set_defaults(handler=_cmd_snapshot_build)
     return parser
 
 
@@ -2498,6 +2561,85 @@ def _cmd_funding_spend(args: argparse.Namespace, run: _Run) -> int:
     for source, amount in groups:
         run.out.write(f"{source or '(unset)'} {format(amount, 'f')}\n")
     return EXIT_OK
+
+
+def _cmd_snapshot_build(args: argparse.Namespace, run: _Run) -> int:
+    """The read-only PR snapshot builder behind the parity anchors' eval
+    fixtures (the parity brief's S3): the one step allowed to touch the
+    network, reading GitHub through `gh api` and the local checkout's
+    git; the fixture it writes is committed and offline afterward. A
+    failed read or a failed git step is a boundary error naming it --
+    a fixture that silently lacks its PR, listings or trees would review
+    as something it is not."""
+    repo_root = Path(args.repo_root)
+    body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else None
+    for sha in (args.head_sha, args.base_sha):
+        git_ensure_commit(repo_root, sha)
+    reader = GhApiReader()
+    try:
+        # The default cutoff needs the anchor commit locally, which the
+        # ensure-commit fetch above may have brought in -- derive it
+        # here, inside the boundary conversion, never before the fetch.
+        cutoff = args.cutoff or git_cutoff(repo_root, args.head_sha)
+        spec = SnapshotSpec(
+            repo=args.repo,
+            pr_number=args.pr,
+            head_sha=args.head_sha,
+            base_sha=args.base_sha,
+            branch=args.branch,
+            cutoff=cutoff,
+            body=body,
+        )
+        data = fetch_snapshot(spec, reader)
+        commits, commits_source = resolve_commits(
+            repo_root, spec, data.commits_all, git_ancestors(repo_root, spec.head_sha)
+        )
+        issue_comments = select_before(data.issue_comments, cutoff, "created_at")
+        reviews = select_before(data.reviews, cutoff, "submitted_at")
+        review_comments = select_before(data.review_comments, cutoff, "created_at")
+        check_runs, workflow_runs, jobs, artifacts, logs = collect_ci(
+            spec, reader, commits, max_logs=args.max_logs
+        )
+        report = write_snapshot(
+            Path(args.out),
+            spec,
+            pull=data.pull,
+            diff=git_diff(repo_root, spec.base_sha, spec.head_sha),
+            diff_paths=git_diff_path_count(repo_root, spec.base_sha, spec.head_sha),
+            commits=commits,
+            commits_source=commits_source,
+            issue_comments=issue_comments,
+            reviews=reviews,
+            review_comments=review_comments,
+            check_runs=check_runs,
+            workflow_runs=workflow_runs,
+            jobs=jobs,
+            artifacts=artifacts,
+            logs=logs,
+            default_branch=data.default_branch,
+            review_md=data.review_md,
+            agents_md=data.agents_md,
+            trees={
+                "source.tar.gz": data.head_tree,
+                f"source-{spec.base_sha[:7]}.tar.gz": data.base_tree,
+            },
+            bundle=_history_bundle(repo_root, spec.head_sha),
+        )
+    except (subprocess.CalledProcessError, SnapshotFetchError) as exc:
+        raise BoundaryError(f"the snapshot build failed: {exc}") from exc
+    run.out.write(
+        f"snapshot written to {args.out}: {report.commits} commits, "
+        f"{report.remarks} remarks, {report.check_runs} check runs, "
+        f"{report.workflow_runs} workflow runs, {report.job_logs} job logs\n"
+    )
+    return EXIT_OK
+
+
+def _history_bundle(repo_root: Path, head_sha: str) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "history.bundle"
+        git_bundle(repo_root, head_sha, path)
+        return path.read_bytes()
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (

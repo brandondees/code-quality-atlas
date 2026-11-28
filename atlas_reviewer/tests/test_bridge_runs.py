@@ -3199,6 +3199,35 @@ def test_the_grounding_pass_names_a_missing_guard_interpreter(tmp_path):
     )
 
 
+def test_a_read_after_the_grounding_pass_restages_without_a_staged_pytest(tmp_path):
+    """The grounding pass executes PR code, so every later read re-stages
+    -- on a runner whose staging probe found no pytest-capable
+    interpreter (the shim alone is enough to run the pass), the re-stage
+    must rebuild exactly as the initial staging did and serve the read,
+    instead of the AssertionError the unconditional restage-script assert
+    crashed with (the rebase onto #871 exposed it; revert-check: the
+    unconditional assert dies here)."""
+    ran: list[object] = []
+    read: list[object] = []
+
+    def body(bridge):
+        plan = bridge.grounding_plan()
+        ran.extend(bridge.grounding(plan.commands, clock=FakeClock()))
+        read.append(bridge.call("read_file", {"rev": "HEAD", "path": "calc.py"}))
+        return "done"
+
+    bridge_run(
+        tmp_path,
+        body,
+        source=_grounding_source(),
+        pytest_candidates=(SYSTEM_PYTHON,),
+    )
+    assert any(r.ran for r in ran), "the pass must have executed a command"
+    (document,) = read
+    assert document.status is Status.OK
+    assert "def total" in document.content.text
+
+
 def test_the_grounding_pass_reports_a_failing_commands_hits(tmp_path):
     """A command whose run fails carries its captured output tail -- the
     hits the owning lens confirms, contextualizes or dismisses -- and a
@@ -3253,6 +3282,54 @@ def test_the_sweep_reports_what_no_test_imports(tmp_path):
     assert verdicts
     assert all(v.outcome == "inconclusive" for v in verdicts)
     assert all("no test file imports this module" in v.note for v in verdicts)
+
+
+def test_the_sweep_without_a_staged_pytest_is_inconclusive_by_name(tmp_path):
+    """A runner whose staging resolved no pytest-capable interpreter (and
+    no no-root guard) cannot start the sweep's scoped runs: every spec
+    comes back inconclusive with the named environment gap -- the same
+    verdict a `run_tests` or `mutate` call on that runner reports --
+    instead of the AssertionError the exec used to die on (revert-check:
+    the unguarded script build crashes the bridge here)."""
+    source = SourceTrees(
+        source_tarball({**SUITE, "clamp.py": SWEEP_MODULE}),
+        source_tarball({**SUITE, "clamp.py": SWEEP_MODULE}),
+        OLD,
+        HEAD,
+    )
+    sprites = FakeSprites(
+        rules=(
+            ReplyRule(
+                "atlas-git",
+                lambda _script: "atlas-git:/usr/bin/git\ngit version 2.43.0\n",
+            ),
+            ReplyRule(
+                "atlas-staged",
+                lambda _script: (
+                    f"atlas-staged:base:{'b' * 40}\natlas-staged:head:{'c' * 40}\n"
+                ),
+            ),
+        )
+    )
+    results = []
+
+    def body(bridge):
+        results.append(
+            bridge.sweep(bridge.sweep_plan(CALC_SWEEP_DIFF), clock=FakeClock())
+        )
+        results.append(bridge.call("run_tests", {}))
+        return "done"
+
+    report, *_ = bridge_run(tmp_path, body, source=source, sprites=sprites)
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    verdicts, run_tests = results
+    assert verdicts
+    assert all(v.outcome == "inconclusive" for v in verdicts)
+    assert all(
+        "no pytest-capable interpreter was staged for the runner" in v.note
+        for v in verdicts
+    )
+    assert run_tests.status is Status.UNAVAILABLE
 
 
 def _sweep_sprites(answer):

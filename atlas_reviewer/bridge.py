@@ -1613,7 +1613,13 @@ def restage_script(
     `read_file`/`grep` at MUTANT keep serving the mutation the record
     names. `stage_script`'s digest checks run first: a tarball rewritten
     in the upload-to-verify window stops the staging."""
-    assert staged.pytest is not None  # the caller refuses the call before this
+    # Only the mutation re-splice needs the pytest-capable interpreter,
+    # and a runner that carries one is guaranteed there by the mutate
+    # call's own gate. A plain re-stage -- what a read tool's `_exec`
+    # runs after the grounding pre-pass executed a command and made the
+    # bridge suspect (#871) -- has no such caller gate: the staging
+    # probe legitimately finds no pytest on the image, so the re-stage
+    #     must rebuild exactly as the initial staging did, without one.
     root = quote(staged.root)
     steps = [
         f"cd {root}",
@@ -1639,6 +1645,12 @@ def restage_script(
         "staged=$?",
     ]
     if mutation is not None:
+        # The mutate call's own gate guarantees a pytest-capable
+        # interpreter and the guard's interpreter for a recorded mutation:
+        # the re-splice runs the mutation script through both.
+        mutation_py = staged.pytest
+        assert mutation_py is not None
+        assert staged.shim_python is not None
         steps += [
             'if [ "$staged" = 0 ]; then',
             *stage_copy_steps(
@@ -1647,7 +1659,7 @@ def restage_script(
             (
                 f"  ( cd {quote(staged.scratch)}; exec timeout -k {KILL_AFTER_S} "
                 f"{MUTATE_EDIT_TIMEOUT_S} "
-                f"{staged.pytest.quoted} -I -c {quote(MUTATION_SCRIPT)} "
+                f"{mutation_py.quoted} -I -c {quote(MUTATION_SCRIPT)} "
                 f"{quote(mutation.path)} {mutation.line} "
                 f"{quote(mutation.operator)}"
                 f"{'' if mutation.operand is None else f' {mutation.operand}'}"
@@ -2330,6 +2342,24 @@ class Bridge:
         cached = self._sweep_cache.get(key)
         if cached is not None:
             return cached
+        if self.staged.pytest is None or self.staged.shim_python is None:
+            # No pytest-capable interpreter (and no no-root guard) was
+            # staged for this runner: the sweep's scoped runs cannot
+            # start, so every spec is inconclusive with the named
+            # environment gap -- the same verdict a `run_tests` or
+            # `mutate` call on this runner reports -- never the
+            # AssertionError the exec would otherwise die on.
+            return tuple(
+                SweepVerdict(
+                    spec,
+                    "inconclusive",
+                    note=(
+                        "no pytest-capable interpreter was staged for the "
+                        "runner, so the sweep could not run it"
+                    ),
+                )
+                for spec in specs
+            )
         contents = self._contents.get(Rev.HEAD, {})
         groups = sweep_groups(specs, contents)
         grouped: set[SweepSpec] = {spec for group in groups for spec in group.specs}

@@ -6714,6 +6714,60 @@ revert-mutant (the slice restored) kills its own test, verified. The
 helper-level test is reframed as the helper's own contract, complementary
 to the call-site pins. Offline only.
 
+## 2026-11-27 — the parity anchors' eval fixtures: a read-only snapshot builder and two committed offline snapshots (D97)
+
+The parity brief's fixtures slice: `atlas_reviewer/snapshot.py` behind a
+read-only `snapshot-build` CLI command builds a fixture at a PR's anchor
+head — the anchor's lineage commits (rebuilt from the commit objects
+when the branch rebased away), the remarks posted strictly before the
+anchor push, the CI at the retained commits with the jobs' logs where
+GitHub still serves them, the head and merge-base trees as the exact
+tarball bytes GitHub serves, the diff, and the self-contained
+`history.bundle` the staging's history fetch reads.
+Two committed fixtures, `atlas_reviewer/fixtures/pr640/` (#640 at
+`0fe45e5e`) and `pr661/` (#661 at the re-anchored round-5 head
+`28854775`, its body the parity key's reconstructed round-5 text), each
+with its own `FIXTURE.md` provenance and rebuild command. Brandon's
+2026-11-26 decisions recorded as D97: the prior Claude Code rounds
+reach the eval only through the PR conversation (no `rounds.jsonl`
+synthesis), and setup reads today's default-branch `REVIEW.md`/
+`AGENTS.md`, which the fixture root carries. The stage-0 check runs
+offline: `eval-run --lenses owners` over each committed fixture with the
+scripted reviewer completes with complete coverage and writes the
+eval-parity run file. Met on the way: `Bridge.sweep` crashed on
+`sweep_script`'s pytest assert for a runner with no pytest-capable
+interpreter; it now returns every spec inconclusive with the named
+environment gap, the same verdict `run_tests`/`mutate` report there.
+
+**Round-1 review fixes on #865:** the default cutoff is the anchor
+commit's committer date converted to UTC in GitHub's `...Z` shape — a
+non-UTC committer offset no longer compares lexicographically against
+the remarks' timestamps (which could keep post-anchor remarks or drop
+real ones); the bundle step's own `atlas-history` ref is deleted after
+`bundle create`, so the builder leaves the operator's refs exactly as
+it found them; a remark timestamp that is present but null reads as
+missing (kept, like a pending review's); and the build's log order is
+failing-first wherever the failure ran, the anchor head's own failing
+job included. Each carries its revert-check test in
+`test_snapshot.py`.
+
+**Round-1 review fix on #865 (the r1 report's Major and Nit):** the
+builder writes `history-base.txt` from the manifest's `base_sha` — the
+merged #860 loader loads a fixture's bundle only when both files are
+present, so the committed anchors were staging no history and reading
+green on the named gap — and both fixtures are rebuilt with it. The
+stage-0 proof is now end to end: a test loads both fixtures through
+`fixture_history` (either file missing pinned as the None gap), and an
+`eval-run` test spies on the staging's `upload_history_bundle` /
+`history_fetch_script` to show the committed bundle bytes reach the
+runner with the manifest's merge base, the same run over a base-less
+fixture recording no upload. The bundle step's ref handling saves and
+restores a pre-existing `refs/heads/atlas-history` instead of deleting
+unconditionally, and the builder strips the volatile nested head/base
+repository objects so a rebuild stays byte-stable. The fixture docs and
+D97 no longer claim the loader is future work — it is in this tree and
+the fixtures load through it.
+
 ## 2026-11-27 — the grounding pre-pass: the repo's declared CI tooling runs before any lens (the harness gap audit's blocker 4, slice S2)
 
 The protocol's step 4.3 had no counterpart in the agentic path: ruff and
@@ -6830,3 +6884,33 @@ delimited part and its remainder a connector suffix (`s`, `ing`,
 `check`, `checker`, `er`), so `typecheck`, `tests`, `test_unit` and
 `test:unit` still classify. The script-family docstring names the match
 it actually does. Offline only.
+
+**Fix found by the rebase onto #871 (the grounding pre-pass):** a read
+tool's re-stage after the grounding pass executed a command crashed on
+`restage_script`'s unconditional `staged.pytest is not None` assert on
+a runner whose staging probe found no pytest — the grounding pass needs
+only the no-root guard's interpreter, but it makes the bridge suspect,
+and the next `diff_file`'s rename-map re-stage is a path no caller gate
+covered before #871 existed. The re-stage now asserts the interpreter
+only where it is used (the mutation re-splice, whose call gate
+guarantees it) and rebuilds exactly as the initial staging does
+otherwise; `test_a_read_after_the_grounding_pass_restages_without_a_staged_pytest`
+pins the read-after-grounding flow on a pytest-less runner.
+
+**The CodeRabbit round on the rebased branch (five fixes and a doc
+alignment, recorded as a D97 update):** the replayed body a
+`--body-file` override carries is stripped of its file's leading
+provenance comment (it named the graded finding); the setup spec's
+`review_setup_files:` line's files are deliberately not recorded (the
+replayed setup phase would run the spec's install against a real
+package index — a live PyPI fetch inside the offline stage-0, and a
+failed runner on every CI-shaped host — so the deviation is documented
+in the fixtures' FIXTURE.md instead); the cutoff comparison
+normalizes any ISO-8601 cutoff to UTC's `...Z` shape before the
+lexicographic compare; the default cutoff is derived after the
+ensure-commit fetch, inside the boundary conversion; every git
+subprocess the builder and its tests run strips the
+repository-location environment overrides; and the private-name
+guard's exemption is narrowed to the two `history.bundle` files with
+its docstring stating that scope. The rebase onto #871 also exposed a
+main bug the re-stage fix above records.

@@ -21,6 +21,26 @@ Originally scoped to `docs/self-hosted-runners.md` alone -- widened
 (2026-09-15, #394 follow-up) to scan the whole tracked tree after an audit
 found the same strings surviving in `ci.yml`, `test_vendor_skills.py`, and
 `session-log.md`, none of which the narrower guard covered.
+
+Recorded anchor snapshots are the one further exemption (2026-11-27, the
+parity fixtures under `atlas_reviewer/fixtures/pr640/` and `pr661/`):
+frozen, provenance-documented snapshots of specific commits that are
+already public in this repo's own git history -- both anchor heads are
+fetchable from origin by SHA, so the strings they carry add no exposure
+the history does not already have -- and whose content must not be
+re-genericized, because a snapshot that differs from the anchor it
+records would falsify the eval the fixture exists for. The exemption
+covers exactly the two files named in `_RECORDED_SNAPSHOTS` -- each
+fixture's `history.bundle`, whose compressed git objects carry the
+anchor era's own copies of these strings; every other file in those
+directories is scanned and passes (the trees ship as GitHub's tarball
+bytes, which do not contain the strings, and the fixtures' JSON, logs
+and prose are clean). The rebuild source is the public anchor (``gh
+api`` reads plus ``git bundle`` of public commits), never the private
+canonical, so the regression this guard exists to catch -- a fresh
+verbatim re-copy -- cannot come through this path; a rebuild's bundle is
+byte-identical to the committed one, so the exemption cannot grow on its
+own. A new fixture needs its own entry here, deliberate each time.
 """
 
 import subprocess
@@ -48,6 +68,14 @@ _PRIVATE_STRINGS = (
     "runner-2604",
     "actions-runner-mbp",
     "/home/dees",
+)
+
+# The recorded anchor snapshots' tracked paths (see this file's docstring):
+# frozen public-history content, exempt from the scan, each added
+# deliberately.
+_RECORDED_SNAPSHOTS = (
+    "atlas_reviewer/fixtures/pr640/history.bundle",
+    "atlas_reviewer/fixtures/pr661/history.bundle",
 )
 
 
@@ -80,6 +108,12 @@ def test_no_known_private_strings_in_tracked_tree():
             # place these strings appear in the tree.
             continue
         relative_path = path.relative_to(ROOT).as_posix()
+        if relative_path.startswith(_RECORDED_SNAPSHOTS):
+            # The recorded snapshot's history bundle is frozen
+            # public-history content (see this file's docstring); it is
+            # exempt, not genericized. Every other file in the snapshot
+            # directories is scanned below like any other tracked file.
+            continue
         try:
             data = path.read_bytes()
         except OSError:
