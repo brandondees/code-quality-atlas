@@ -620,6 +620,15 @@ def stage_copy_steps(root: str, git: str, scratch: str, head: str) -> tuple[str,
         # an empty head tree must stage and collect nothing, not fail
         # the copy build on a chmod of a path that was never made.
         f"mkdir -p {quote(scratch)} && chmod -R a+rwX {quote(scratch)}",
+        # The copy is a work tree of the staged repository: the `.git`
+        # file points at the bridge root's repo.git, so a test the copy
+        # runs that shells git (`git archive`, `git log`) resolves
+        # against the staged history instead of failing in a
+        # non-repository. The validation run found the asymmetry: the
+        # bash tool's copy carried this line and the sweep's copy did
+        # not, so the anchor's repository test failed inside the sweep's
+        # copy and every mutant read "baseline did not pass".
+        f'echo "gitdir: {quote(root)}/repo.git" > {quote(scratch)}/.git',
     )
 
 
