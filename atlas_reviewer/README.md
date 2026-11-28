@@ -1072,7 +1072,10 @@ human reader, never for the replayed reviewer; the body text and its
 citations are kept whole), and the diff, the self-contained
 `history.bundle` and its `history-base.txt` (the merge base the merged
 loader's contract reads) coming from the local checkout — with the
-committed fixture offline afterward. The
+committed fixture offline afterward. The replayed setup phase's install
+is what stages pytest for the anchors (D98), and the offline run stages
+the eval's own interpreter for the setup and the pytest probe
+(`eval-run --staged-python`). The
 committed fixtures load through the eval path's own `fixture_history`
 loader, and the stage-0 test proves the eval run stages that history.
 The snapshot

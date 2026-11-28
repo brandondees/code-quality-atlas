@@ -663,7 +663,10 @@ def test_the_setup_phase_uploads_the_declared_files_before_the_commands():
     uploads = [c for c in api.calls if c[0] == "exec" and "requirements.txt" in c[2]]
     assert len(uploads) == 1
     script = uploads[0][2]
-    assert "cat > /tmp/atlas-neutral/requirements.txt" in script
+    # The neutral directory is the run's own (the runner name suffixes
+    # it): concurrent local runners do not race the setup files'
+    # uploads on one shared path.
+    assert f"cat > /tmp/atlas-neutral-{NAME}/requirements.txt" in script
     command_execs = [c for c in api.calls if c[0] == "exec" and SETUP_ECHO[-1] in c[2]]
     assert len(command_execs) == 1
     # The upload exec sits between the interpreter resolution and the
@@ -690,4 +693,6 @@ def test_a_nested_setup_file_gets_its_parent_directory_created():
         c for c in api.calls if c[0] == "exec" and "requirements/dev.txt" in c[2]
     ]
     assert len(uploads) == 1
-    assert "mkdir -p /tmp/atlas-neutral/requirements" in uploads[0][2], uploads[0][2]
+    assert f"mkdir -p /tmp/atlas-neutral-{NAME}/requirements" in uploads[0][2], uploads[
+        0
+    ][2]
