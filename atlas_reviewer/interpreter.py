@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 SHIM_PATH = "/.sprite/bin/python3"
@@ -71,32 +72,60 @@ class TrustedPython:
         return shlex.quote(self.path)
 
 
-def resolve_script() -> str:
+def resolve_script(
+    neutral_dir: str = NEUTRAL_DIR, candidates: str | None = None
+) -> str:
     """Runs each candidate's own version query from an empty directory,
     each bounded on its own so one hung interpreter cannot stop the rest
-    being found. Nothing from the PR exists yet when this runs."""
+    being found. Nothing from the PR exists yet when this runs. The
+    candidate glob is the image's trusted shapes by default; a caller
+    that names its own interpreters (the eval run's staged interpreter,
+    D98) passes its own glob, and `choose_python` accepts those paths by
+    the same controller-named rule the bridge's pytest probe extends to
+    its own callers' literal candidates."""
     query = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
+    words = (
+        candidates
+        if candidates is not None
+        else f"{PYENV_VERSIONS}/*/bin/python3 {SYSTEM_PYTHON}"
+    )
     return (
-        f"mkdir -p {NEUTRAL_DIR} && cd {NEUTRAL_DIR} && "
-        f"for p in {PYENV_VERSIONS}/*/bin/python3 {SYSTEM_PYTHON}; do "
+        f"mkdir -p {shlex.quote(neutral_dir)} && "
+        f"cd {shlex.quote(neutral_dir)} && "
+        f"for p in {words}; do "
         f'if [ -x "$p" ] && '
         f"v=$({bounded(f'"$p" -I -c "{query}"', CANDIDATE_BOUND_S)} 2>/dev/null); "
         f'then echo "{PYTHON_TAG}:$p:$v"; fi; done'
     )
 
 
-def choose_python(text: str) -> TrustedPython | None:
+def choose_python(text: str, named: Sequence[str] = ()) -> TrustedPython | None:
     """The newest pyenv-installed interpreter, else the system one. Only
-    paths of exactly those two shapes are accepted from the guest's answer."""
+    paths of exactly those two shapes are accepted from the guest's
+    answer, plus the literal candidates the caller itself named (the eval
+    run's staged interpreter, D98) -- a controller-named path is the same
+    trust the bridge's pytest probe extends to its own callers' literal
+    candidates."""
+    named_set = frozenset(named)
     candidates = [
         (path, (int(a), int(b), int(c)))
         for path, a, b, c in _CANDIDATE_RE.findall(text)
-        if trusted_path(path)
+        if trusted_path(path) or path in named_set
     ]
     pyenv = sorted((c for c in candidates if c[0] != SYSTEM_PYTHON), key=_newest)
     system = [c for c in candidates if c[0] == SYSTEM_PYTHON]
     chosen = [*pyenv, *system][:1]
     return next((TrustedPython(p, ".".join(map(str, v))) for p, v in chosen), None)
+
+
+def candidates_glob(candidates: Sequence[str] | None) -> str | None:
+    """The shell word-list the resolve loop iterates: the caller's named
+    interpreters, each quoted (they are controller-named paths, and the
+    quoting keeps a path with spaces from splitting into two words), or
+    None to probe the image's trusted shapes."""
+    if candidates is None:
+        return None
+    return " ".join(shlex.quote(c) for c in candidates)
 
 
 def trusted_path(path: str) -> bool:

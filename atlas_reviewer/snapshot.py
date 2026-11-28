@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Protocol
 
 from atlas_reviewer.ports import Json
+from atlas_reviewer.repo_config import SETUP_FILES_LINE, _setup_files
 
 # The log-download order and bounds mirror the review path's ingest caps
 # (`gather.IngestConfig`): failing jobs first, then the anchor run's,
@@ -206,6 +207,7 @@ def write_snapshot(
     default_branch: str,
     review_md: bytes,
     agents_md: bytes,
+    setup_files: dict[str, bytes],
     diff_paths: int,
     commits_source: str,
     trees: dict[str, bytes],
@@ -281,6 +283,13 @@ def write_snapshot(
     _write_json(out / "compare.json", {"merge_base_commit": {"sha": spec.base_sha}})
     (out / "REVIEW.md").write_bytes(review_md)
     (out / "agents-md.txt").write_bytes(agents_md)
+    # The default-branch files the setup spec's `review_setup_files:`
+    # line declares (D98): the replayed setup phase fetches each from
+    # the fixture root exactly as a live review fetches it from the
+    # default branch, so its install -- the pip install that stages
+    # pytest -- runs for real.
+    for name, data in setup_files.items():
+        (out / name).write_bytes(data)
     (out / "history.bundle").write_bytes(bundle)
     # The merged loader's contract (`history_source.fixture_history`):
     # the bundle loads only when `history-base.txt` sits beside it, so
@@ -360,8 +369,25 @@ class FetchedSnapshot:
     default_branch: str
     review_md: bytes
     agents_md: bytes
+    setup_files: dict[str, bytes]
     head_tree: bytes
     base_tree: bytes
+
+
+def _declared_setup_files(review_md: bytes) -> tuple[str, ...]:
+    """The file names the default-branch `REVIEW.md`'s `review_setup_files:`
+    line declares, parsed with the review's own grammar
+    (`repo_config.SETUP_FILES_LINE` and `_setup_files`): the setup phase
+    the replayed review runs fetches each of these from the default
+    branch, so the builder records them too -- without them the replayed
+    setup has no pytest (the validation run's blocker 1). No parseable
+    line, or an unusable value, records nothing: the review drops the
+    setup phase the same way."""
+    for line in review_md.decode("utf-8", errors="replace").splitlines():
+        match = SETUP_FILES_LINE.match(line)
+        if match:
+            return _setup_files(match.group(1)) or ()
+    return ()
 
 
 def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapshot:
@@ -371,11 +397,9 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
     today's default-branch REVIEW.md), not the anchor-time one; the two
     trees come as the exact tarball bytes GitHub serves for those
     revisions, which is what a live review's `get_tarball` fetches. The
-    setup spec's `review_setup_files:` line's files are deliberately not
-    recorded: the replayed setup phase would run the spec's install
-    against a real package index, which the offline stage-0 contract
-    cannot carry; the replay names the gap instead, and the fixture's
-    FIXTURE.md documents the deviation."""
+    setup spec's `review_setup_files:` line's files are recorded too
+    (D98): the replayed setup phase installs what they carry, which is
+    what stages pytest for the anchors."""
     pull = reader.get(f"repos/{spec.repo}/pulls/{spec.pr_number}")
     commits_all = reader.items(f"repos/{spec.repo}/pulls/{spec.pr_number}/commits")
     issue_comments = reader.items(f"repos/{spec.repo}/issues/{spec.pr_number}/comments")
@@ -388,6 +412,18 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
         f"repos/{spec.repo}/contents/REVIEW.md?ref={default_branch}",
         accept=_RAW_ACCEPT,
     )
+    setup_files: dict[str, bytes] = {}
+    for name in _declared_setup_files(review_md):
+        try:
+            setup_files[name] = reader.raw(
+                f"repos/{spec.repo}/contents/{name}?ref={default_branch}",
+                accept=_RAW_ACCEPT,
+            )
+        except SnapshotFetchError:
+            # A declared file the default branch cannot serve is the gap
+            # the review itself names at replay time; the fixture simply
+            # does not carry it.
+            continue
     return FetchedSnapshot(
         pull=pull,
         commits_all=commits_all,
@@ -396,6 +432,7 @@ def fetch_snapshot(spec: SnapshotSpec, reader: SnapshotReader) -> FetchedSnapsho
         review_comments=review_comments,
         default_branch=default_branch,
         review_md=review_md,
+        setup_files=setup_files,
         agents_md=reader.raw(
             f"repos/{spec.repo}/contents/AGENTS.md?ref={default_branch}",
             accept=_RAW_ACCEPT,

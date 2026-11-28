@@ -3468,6 +3468,12 @@ def run_bridge(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     pytest_candidates: Sequence[str] = PYTEST_CANDIDATES,
+    # The interpreters the lifecycle's own resolution probes when the
+    # caller names them (the eval run's staged interpreter, D98); None
+    # probes the image's trusted shapes. When given it also names the
+    # staging probe's pytest candidates, so the setup phase's interpreter
+    # and the staged pytest are the same one.
+    python_candidates: Sequence[str] | None = None,
     approvals: RunApprovals | None = None,
     setup: SetupSpec | None = None,
     env: Mapping[str, str] | None = None,
@@ -3511,7 +3517,7 @@ def run_bridge(
             trees,
             root,
             unpack,
-            pytest_candidates,
+            pytest_candidates if python_candidates is None else python_candidates,
             history_bundle=history_bundle,
             history_base=history_base,
         )
@@ -3551,6 +3557,7 @@ def run_bridge(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
         create_retries=create_retries, create_gate=create_gate, setup=setup,
+        python_candidates=python_candidates,
     )  # fmt: skip
 
 

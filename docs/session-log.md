@@ -6914,3 +6914,27 @@ repository-location environment overrides; and the private-name
 guard's exemption is narrowed to the two `history.bundle` files with
 its docstring stating that scope. The rebase onto #871 also exposed a
 main bug the re-stage fix above records.
+
+## 2026-11-28 — the eval fixtures' setup stages pytest: the declared setup files recorded, and the offline run's staged interpreter (D98)
+
+The validation run's stage-0 found the anchors' eval path with no pytest:
+the fixtures deliberately carried no `requirements.txt` (D97's
+not-recorded call), so the replayed setup phase had nothing to install
+and run_tests, mutate, the sweep and the grounding all came back
+unavailable. D98 reverses that call: the builder records the
+default-branch files the setup spec's `review_setup_files:` line
+declares (parsed with the review's own grammar), both anchors are
+rebuilt with `requirements.txt`, and the replayed setup phase's pip
+install runs for real — the pip install that stages pytest. The offline
+run's staged interpreter is the eval's own (`eval-run --staged-python`,
+defaulting to the interpreter running the eval; dry-run only — a live
+run refuses the flag), threaded as the lifecycle's `python_candidates`
+and the staging probe's pytest candidates, because a validation host
+without a pyenv resolves the system python, whose pip cannot install.
+The eval e2e asserts, from the events, that the declared setup ran with
+exit 0 and that the staged runner carries that interpreter — the test
+the brief required, which fails if fixture setup would leave no pytest.
+The e2e tests run serial lenses with the mutant sweep disabled (the
+existing `ATLAS_SWEEP_LENSES` knob) and the grounding pre-pass live, so
+each costs about two minutes now that the fixture's setup and the
+grounding run for real.

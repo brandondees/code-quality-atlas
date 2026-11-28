@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -324,6 +325,7 @@ def _write(tmp_path: Path, spec: SnapshotSpec, **overrides) -> object:
         "default_branch": "main",
         "review_md": b"setup spec",
         "agents_md": b"guidelines",
+        "setup_files": {"requirements.txt": b"declared deps"},
         "diff_paths": 1,
         "commits_source": "github-listing",
         "trees": {
@@ -352,7 +354,7 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
         "issue-comments.json", "reviews.json", "review-comments.json",
         "check-runs.json", "workflow-runs.json", "jobs-5.json",
         "artifacts-5.json", "job-log-7.txt", "repository.json",
-        "compare.json", "REVIEW.md", "agents-md.txt",
+        "compare.json", "REVIEW.md", "agents-md.txt", "requirements.txt",
         "source.tar.gz", "source-bbbbbbb.tar.gz",
         "history.bundle", "history-base.txt", "snapshot.json",
     ):  # fmt: skip
@@ -378,6 +380,7 @@ def test_write_snapshot_writes_the_documented_fixture_shape(tmp_path):
     assert (tmp_path / "fx" / "history.bundle").read_bytes() == b"bundle"
     # The loader's contract: the merge base rides beside the bundle.
     assert (tmp_path / "fx" / "history-base.txt").read_text().strip() == spec.base_sha
+    assert (tmp_path / "fx" / "requirements.txt").read_bytes() == b"declared deps"
     assert (tmp_path / "fx" / "source.tar.gz").read_bytes() == b"head tarball"
     assert (tmp_path / "fx" / "source-bbbbbbb.tar.gz").read_bytes() == b"base tarball"
     manifest = json.loads((tmp_path / "fx" / "snapshot.json").read_text())
@@ -607,34 +610,54 @@ def test_the_snapshot_build_command_writes_the_fixture_offline(tmp_path, monkeyp
 
 # --- the stage-0 runs: the real driver over the committed anchors ---
 def _eval_run(
-    tmp_path: Path, fixture_dir: Path, run_file: Path, *, state: str = "state"
+    tmp_path: Path,
+    fixture_dir: Path,
+    run_file: Path,
+    *,
+    state: str = "state",
+    monkeypatch: pytest.MonkeyPatch | None = None,
+    events: Path | None = None,
 ) -> tuple[int, str]:
+    """The stage-0 driver over one committed anchor, with the runner's
+    mutant sweep disabled (`ATLAS_SWEEP_LENSES` is read from the process
+    environment, and the anchors' sweep -- now that pytest is staged --
+    runs the anchor's real test suites for minutes) and the eval's own
+    interpreter staged for the fixture's declared setup."""
+    if monkeypatch is not None:
+        monkeypatch.setenv("ATLAS_SWEEP_LENSES", "")
+    argv = [
+        "--state-dir",
+        str(tmp_path / state),
+        "eval-run",
+        "--fixture",
+        str(fixture_dir),
+        "--lenses",
+        "owners",
+        "--lens-script",
+        str(SAMPLE_SCENARIOS / "approve.json"),
+        "--staged-python",
+        sys.executable,
+        # Serial lenses: the sweep's and grounding's shared memos then
+        # make each pass run once per review, and the offline e2e stays
+        # deterministic (the pool's concurrency is a live-path shape).
+        "--pool-size",
+        "1",
+        "--out",
+        str(tmp_path / "draft.md"),
+        "--run-file",
+        str(run_file),
+    ]
+    if events is not None:
+        argv += ["--events", str(events)]
     out, err = io.StringIO(), io.StringIO()
-    code = cli.main(
-        [
-            "--state-dir",
-            str(tmp_path / state),
-            "eval-run",
-            "--fixture",
-            str(fixture_dir),
-            "--lenses",
-            "owners",
-            "--lens-script",
-            str(SAMPLE_SCENARIOS / "approve.json"),
-            "--out",
-            str(tmp_path / "draft.md"),
-            "--run-file",
-            str(run_file),
-        ],
-        env={},
-        out=out,
-        err=err,
-    )
+    code = cli.main(argv, env={}, out=out, err=err)
     return code, err.getvalue()
 
 
 @pytest.mark.parametrize("fixture_dir", [PR640, PR661])
-def test_the_anchor_fixture_runs_offline_through_eval_run(tmp_path, fixture_dir):
+def test_the_anchor_fixture_runs_offline_through_eval_run(
+    tmp_path, fixture_dir, monkeypatch
+):
     """The offline stage-0 (the parity brief's slice E criterion): the
     real `eval-run` over the committed anchor, the scripted reviewer
     standing in for the model, the in-memory runner standing in for the
@@ -643,8 +666,35 @@ def test_the_anchor_fixture_runs_offline_through_eval_run(tmp_path, fixture_dir)
     `pytest --co` collection probe ran against the anchor's own tree on
     the way."""
     run_file = tmp_path / f"{fixture_dir.name}-run.json"
-    code, err = _eval_run(tmp_path, fixture_dir, run_file)
+    events = tmp_path / f"{fixture_dir.name}-events.jsonl"
+    code, err = _eval_run(
+        tmp_path, fixture_dir, run_file, monkeypatch=monkeypatch, events=events
+    )
     assert code == cli.EXIT_OK, err
+    # The required pin (the validation run's blocker 1): the fixture's
+    # declared setup ran for real -- the pip install that stages pytest
+    # -- and the staged runner carries that interpreter. A fixture whose
+    # setup would leave no pytest fails here: no setup command runs, or
+    # the staged event names no interpreter.
+    recorded = [json.loads(line) for line in events.read_text().splitlines()]
+    setup_runs = [
+        d
+        for d in recorded
+        if d.get("phase") == "setup" and d.get("step") == "setup command 1"
+    ]
+    assert setup_runs, "the fixture's declared setup never ran"
+    assert all(d["exit_status"] == 0 for d in setup_runs), recorded
+    staged = [
+        d
+        for d in recorded
+        if d.get("phase") == "bridge staging" and d.get("step") == "staged"
+    ]
+    assert staged, "no runner staged"
+    assert all(
+        d["pytest"] == sys.executable
+        for d in staged
+        if isinstance(d.get("pytest"), str)
+    ), [d.get("pytest") for d in staged]
     payload = json.loads(run_file.read_text())
     assert payload["coverage_complete"] is True
     assert payload["lenses_not_run"] == [] and payload["lenses_failed"] == []
@@ -739,7 +789,9 @@ def test_the_eval_path_stages_the_fixtures_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(bridge_staging, "upload_history_bundle", upload)
     monkeypatch.setattr(bridge_staging, "history_fetch_script", fetch_script)
-    code, err = _eval_run(tmp_path, PR640, tmp_path / "run.json")
+    code, err = _eval_run(
+        tmp_path, PR640, tmp_path / "run.json", monkeypatch=monkeypatch
+    )
     assert code == cli.EXIT_OK, err
     assert recorded["bundle"] == (PR640 / "history.bundle").read_bytes()
     assert recorded["base"] == BASE_640
@@ -753,6 +805,12 @@ def test_the_eval_path_stages_the_fixtures_history(tmp_path, monkeypatch):
         ignore=shutil.ignore_patterns("history-base.txt"),
     )
     recorded.clear()
-    code, err = _eval_run(tmp_path, stripped, tmp_path / "run2.json", state="state-2")
+    code, err = _eval_run(
+        tmp_path,
+        stripped,
+        tmp_path / "run2.json",
+        state="state-2",
+        monkeypatch=monkeypatch,
+    )
     assert code == cli.EXIT_OK, err
     assert recorded == {}

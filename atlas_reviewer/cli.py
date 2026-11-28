@@ -1396,6 +1396,11 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     operator_ceiling_max=ceiling_max,
                     run_proposals=proposals,
                     setup=setup,
+                    python_candidates=(
+                        (args.staged_python,)
+                        if getattr(args, "staged_python", None)
+                        else None
+                    ),
                     history=history,
                     history_source=history_source,
                     pr_body=pr_text,
@@ -2213,6 +2218,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--tool-log",
         help="log every tool result as the model saw it, rendered and capped, to this JSONL file",
     )
+    evr.add_argument(
+        "--staged-python",
+        help=(
+            "the interpreter the staged runner probes for its setup phase "
+            "and its pytest (D98): the eval's own interpreter by default, "
+            "so the fixture's declared setup -- the pip install that "
+            "stages pytest -- runs with a pip that can drive it"
+        ),
+    )
     evr.set_defaults(handler=_cmd_eval_run)
     swp = sub.add_parser(
         "sweep", help="destroy runners a crashed review left in the ledger"
@@ -2619,6 +2633,7 @@ def _cmd_snapshot_build(args: argparse.Namespace, run: _Run) -> int:
             default_branch=data.default_branch,
             review_md=data.review_md,
             agents_md=data.agents_md,
+            setup_files=data.setup_files,
             trees={
                 "source.tar.gz": data.head_tree,
                 f"source-{spec.base_sha[:7]}.tar.gz": data.base_tree,
@@ -2918,6 +2933,21 @@ def _cmd_eval_run(args: argparse.Namespace, run: _Run) -> int:
     args.round_log = str(state_rounds)
     if not args.allow_live_inference:
         args.dry_run = True
+    else:
+        # The staged interpreter is a dry-run seam (D98): the live path's
+        # runners are real Sprites whose interpreters are resolved by the
+        # image's own trusted-shape probe, never by a caller's flag.
+        if args.staged_python:
+            raise UsageError(
+                "--staged-python is a dry-run fixture; a live run's "
+                "interpreters are the image's own"
+            )
+    if args.dry_run and not args.staged_python:
+        # The decision's default (D98): the staged runner probes the
+        # eval's own interpreter -- the one running this command -- so
+        # the fixture's declared setup (the pip install that stages
+        # pytest) runs with a pip that can drive it.
+        args.staged_python = sys.executable
     code = _cmd_agentic_review(args, run)
     _write_eval_run_file(args, run)
     return code

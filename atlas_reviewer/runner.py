@@ -89,6 +89,7 @@ from atlas_reviewer.interpreter import (
     DiagnosticSpec,
     TrustedPython,
     bounded,
+    candidates_glob,
     choose_python,
     diagnostics_after_unpack,
     diagnostics_before_unpack,
@@ -437,6 +438,16 @@ class _Run:
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_gate: threading.Semaphore | None = None
     setup: SetupSpec | None = None
+    # The interpreters the lifecycle's own resolution probes, when the
+    # caller names them (the eval run's staged interpreter, D98); None
+    # probes the image's trusted shapes.
+    python_candidates: Sequence[str] | None = None
+    # The run's own neutral directory. A live Sprite's filesystem is its
+    # own, so the shared default is private there; the local runner's
+    # concurrent runners share the host's, where a shared directory races
+    # the setup files' uploads (two `cat >`s on one path) -- so the run's
+    # is derived from its name.
+    neutral_dir: str = NEUTRAL_DIR
 
 
 @dataclass(frozen=True)
@@ -778,13 +789,15 @@ def _disposable(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
+    python_candidates: Sequence[str] | None = None,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(
         api, name, deadline, telemetry, first_frame_s,
         create_retries=create_retries, create_gate=create_gate,
-        setup=setup,
+        setup=setup, python_candidates=python_candidates,
+        neutral_dir=f"{NEUTRAL_DIR}-{name}",
     )  # fmt: skip
     destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
@@ -872,6 +885,7 @@ def run_session(
     create_retries: int = DEFAULT_CREATE_RETRIES,
     create_gate: threading.Semaphore | None = None,
     setup: SetupSpec | None = None,
+    python_candidates: Sequence[str] | None = None,
 ) -> RunnerReport:
     """`body` on a fresh disposable runner with the same lifecycle as a
     review: recorded in the ledger, provisioned deny-all and verified,
@@ -888,7 +902,7 @@ def run_session(
         deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
         create_retries=create_retries, create_gate=create_gate,
-        setup=setup,
+        setup=setup, python_candidates=python_candidates,
     )  # fmt: skip
 
 
@@ -1286,7 +1300,9 @@ def _require_deny_all(policy: Json) -> None:
         )
 
 
-def setup_command_script(command: Sequence[str], python: TrustedPython) -> str:
+def setup_command_script(
+    command: Sequence[str], python: TrustedPython, neutral_dir: str = NEUTRAL_DIR
+) -> str:
     """One setup command as the runner runs it (issue #819, D95): from the
     neutral directory -- empty of the PR, which is not uploaded yet, and
     otherwise holding only the setup spec's own declared default-branch
@@ -1301,7 +1317,7 @@ def setup_command_script(command: Sequence[str], python: TrustedPython) -> str:
         for token in command
     ]
     return (
-        f"mkdir -p {shlex.quote(NEUTRAL_DIR)} && cd {shlex.quote(NEUTRAL_DIR)} && "
+        f"mkdir -p {shlex.quote(neutral_dir)} && cd {shlex.quote(neutral_dir)} && "
         + bounded(" ".join(argv), SETUP_BOUND_S)
     )
 
@@ -1354,17 +1370,21 @@ def _setup_phase(run: _Run) -> None:
         _upload(
             run,
             data,
-            f"{NEUTRAL_DIR}/{name}",
+            f"{run.neutral_dir}/{name}",
             purpose,
-            parents=f"{NEUTRAL_DIR}/{parents}" if parents else None,
+            parents=f"{run.neutral_dir}/{parents}" if parents else None,
         )
     for n, command in enumerate(spec.commands, start=1):
         purpose = f"setup command {n}"
         run.deadline.check(purpose)
         code, text = _exec(
             run,
-            _Exec("setup", purpose, setup_command_script(command, python),
-                  budget_s=SETUP_BUDGET_S),
+            _Exec(
+                "setup",
+                purpose,
+                setup_command_script(command, python, run.neutral_dir),
+                budget_s=SETUP_BUDGET_S,
+            ),
         )  # fmt: skip
         run.telemetry.record(
             "setup", purpose,
@@ -1531,14 +1551,20 @@ def _resolve_python(run: _Run) -> Resolved:
     code, text = _exec(
         run,
         _Exec(
-            "interpreter", "resolve python", resolve_script(), budget_s=PROBE_BUDGET_S
+            "interpreter",
+            "resolve python",
+            resolve_script(
+                neutral_dir=run.neutral_dir,
+                candidates=candidates_glob(run.python_candidates),
+            ),
+            budget_s=PROBE_BUDGET_S,
         ),
     )
     if code != 0:
         return ExecFailed(
             "interpreter resolution", code, guest_text(text, GUEST_TAIL_CHARS)
         )
-    return choose_python(text)
+    return choose_python(text, run.python_candidates or ())
 
 
 def _python_fields(python: Resolved) -> Fields:

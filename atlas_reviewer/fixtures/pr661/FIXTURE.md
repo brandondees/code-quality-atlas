@@ -52,14 +52,14 @@ involves — everything here is committed and the runs over it are offline.
   setup uses today's default-branch `REVIEW.md`, which carries the setup
   spec), not the anchor-time copies; the anchor-time copies ride in the
   trees, where the merge-base config read takes them. The setup spec's
-  `review_setup_files:` line declares `requirements.txt`, and that file
-  is deliberately **not** recorded: the replayed setup phase would run
-  the spec's install against a real package index, which the offline
-  stage-0 contract cannot carry — the replay names the gap (the
-  declared file is not served by the fixture's default branch) and no
-  setup phase runs, the same named shape a fixture without the file
-  produces; a production run on the live default branch does install
-  it, and that fidelity gap is this fixture's recorded cost.
+  `review_setup_files:` line declares `requirements.txt`, and the
+  fixture records it from the default branch at build time (D98): the
+  replayed setup phase fetches it from the fixture root exactly as a
+  live review fetches it from the default branch, and its install —
+  the pip install that stages pytest — runs for real. The offline run
+  stages the eval's own interpreter for the setup and the pytest probe
+  (`eval-run --staged-python`, D98).
+
 
 ## The body
 
